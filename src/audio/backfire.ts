@@ -21,16 +21,26 @@ import { REF_SPEED, engineTone } from './dsp';
 
 /** Shape of the effect. Volume lives in `AUDIO.backfireVolume`; these are the timings. */
 export const BACKFIRE = {
-  /** Engine note (0..1) below which the crackle stays quiet: this one wants the limiter. */
-  MIN_RPM01: 0.62,
+  /**
+   * Engine note (0..1) below which the crackle stays quiet. Set high on purpose: this one
+   * wants the last of the rev range, not merely a raised note, so the crackle stays something
+   * you have to hold the car at rather than something any old part-throttle earns.
+   */
+  MIN_RPM01: 0.78,
   /** Speed fraction below which a crawling car never pops, whatever the fake gearbox says. */
   MIN_SPEED_FRAC: 0.18,
   /** Speed fraction at which the exhaust is fully heat-soaked and lift-off bangs are loudest. */
   HOT_SPEED_FRAC: 0.45,
   /** Throttle drop within one frame that counts as a snap lift-off. */
   LIFT_DROP: 0.3,
-  /** Cracks queued by one lift-off. */
-  LIFT_BANGS: 3,
+  /**
+   * How long a lift-off burst runs, as weights for one, two and three cracks. A triple is the
+   * showpiece and stays rare on purpose: fired off every lift it stops reading as an event and
+   * starts sounding like a stutter, and it is the single cracks either side that make it land.
+   */
+  LIFT_BANG_WEIGHTS: [0.46, 0.42, 0.12],
+  /** Longest burst one lift-off can queue. Matches the length of `LIFT_BANG_WEIGHTS`. */
+  LIFT_BANGS_MAX: 3,
   /** Nominal gap (s) between the cracks of a lift-off burst; jittered per hit. */
   LIFT_SPACING: 0.085,
   /** Each crack in a burst is this much quieter than the one before. */
@@ -47,6 +57,16 @@ export const BACKFIRE = {
   /** Hard floor (s) between any two bangs, so they never machine-gun. */
   MIN_INTERVAL: 0.07,
 } as const;
+
+/** Draw a burst length from `LIFT_BANG_WEIGHTS`: mostly one or two cracks, rarely three. */
+function pickLiftBangs(): number {
+  let r = Math.random();
+  for (let i = 0; i < BACKFIRE.LIFT_BANG_WEIGHTS.length - 1; i++) {
+    r -= BACKFIRE.LIFT_BANG_WEIGHTS[i];
+    if (r < 0) return i + 1;
+  }
+  return BACKFIRE.LIFT_BANG_WEIGHTS.length;
+}
 
 export interface BackfireTrigger {
   /**
@@ -90,7 +110,7 @@ export function createBackfireTrigger(): BackfireTrigger {
       // Speed carries this one — revs only decide how angry it is.
       const liftHeat = speedHeat * (0.65 + 0.35 * rpmHeat);
       if (liftHeat > 0 && drop > BACKFIRE.LIFT_DROP) {
-        pending = BACKFIRE.LIFT_BANGS;
+        pending = pickLiftBangs();
         pendingStrength = 0.55 + 0.45 * liftHeat;
         nextIn = 0;
       }

@@ -119,7 +119,8 @@ describe('backfire trigger', () => {
     const trigger = createBackfireTrigger();
     drive(trigger, 30, REDLINE_SPEED, 1);
     const bangs = drive(trigger, 90, REDLINE_SPEED, 0);
-    expect(bangs).toHaveLength(BACKFIRE.LIFT_BANGS);
+    expect(bangs.length).toBeGreaterThanOrEqual(1);
+    expect(bangs.length).toBeLessThanOrEqual(BACKFIRE.LIFT_BANGS_MAX);
     for (const s of bangs) expect(s).toBeLessThanOrEqual(1);
     for (let i = 1; i < bangs.length; i++) expect(bangs[i]).toBeLessThan(bangs[i - 1]);
   });
@@ -130,7 +131,22 @@ describe('backfire trigger', () => {
     expect(engineTone(speed / REF_SPEED, AUDIO.gearBounds).rpm01).toBeLessThan(BACKFIRE.MIN_RPM01);
     const trigger = createBackfireTrigger();
     drive(trigger, 30, speed, 1);
-    expect(drive(trigger, 90, speed, 0)).toHaveLength(BACKFIRE.LIFT_BANGS);
+    expect(drive(trigger, 90, speed, 0).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps lift-off bursts short, with the odd triple', () => {
+    const lengths: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      const trigger = createBackfireTrigger();
+      drive(trigger, 30, REDLINE_SPEED, 1);
+      lengths.push(drive(trigger, 90, REDLINE_SPEED, 0).length);
+    }
+    const share = (n: number) => lengths.filter((l) => l === n).length / lengths.length;
+    expect(Math.max(...lengths)).toBeLessThanOrEqual(BACKFIRE.LIFT_BANGS_MAX);
+    expect(Math.min(...lengths)).toBeGreaterThanOrEqual(1);
+    // Singles and doubles carry the effect; triples are the rare punctuation.
+    expect(share(1) + share(2)).toBeGreaterThan(0.75);
+    expect(share(3)).toBeLessThan(0.25);
   });
 
   it('bangs harder off a hot exhaust than a barely-warm one', () => {
