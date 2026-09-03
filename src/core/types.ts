@@ -34,6 +34,8 @@ export interface PlayerCommand {
   fire: boolean;
   /** Restart. Edge-triggered: true for exactly one simulation tick per key press. */
   restart: boolean;
+  /** Toggle cruise mode. Edge-triggered: true for exactly one tick per key press. */
+  cruise: boolean;
 }
 
 export interface VehicleState {
@@ -132,6 +134,29 @@ export interface TargetState {
   rewarded: boolean;
 }
 
+/** One in-flight "pass" of a single target: the player is inside the near-miss radius of it. */
+export interface NearMissPass {
+  /** True while the player is inside the scoring radius of this target. */
+  active: boolean;
+  /** Closest centre-to-centre approach so far during the current pass (m). */
+  minDist: number;
+  /** Player speed at that closest approach (m/s). Not the peak: the pass is what counts. */
+  speedAtClosest: number;
+  /** True once the two cars have touched, which voids the pass. */
+  touched: boolean;
+  /** True once this pass has been awarded, so leaving the radius cannot pay a second time. */
+  scored: boolean;
+}
+
+export interface NearMissState {
+  /** One slot per target, indexed by target id. Pre-allocated; never grows during play. */
+  passes: NearMissPass[];
+  /** Near misses scored this session. */
+  count: number;
+  /** Best single near miss this session. */
+  best: number;
+}
+
 export interface EconomyState {
   money: number;
   destroyed: number;
@@ -148,6 +173,7 @@ export type GameEvent =
   | { type: 'lightningFired'; targetId: number; fromX: number; fromZ: number; toX: number; toZ: number }
   | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' }
   | { type: 'targetDestroyed'; targetId: number; x: number; z: number; reward: number }
+  | { type: 'nearMiss'; targetId: number; x: number; z: number; points: number; quality: number }
   | { type: 'collision'; x: number; z: number; impact: number }
   | { type: 'restart' };
 
@@ -160,6 +186,7 @@ export interface GameState {
   nitro: NitroState;
   lightning: LightningState;
   targets: TargetState[];
+  nearMiss: NearMissState;
   economy: EconomyState;
   events: GameEvent[];
 }
@@ -189,6 +216,8 @@ export interface ArenaLayout {
   targetSpawns: SpawnPoint[];
   /** Optional patrol loops. Each target follows the loop with the same index, when present. */
   targetPatrols: Array<Array<{ x: number; z: number }>>;
+  /** Closed scenic loop along road centrelines, driven by cruise mode (`src/sim/cruise.ts`). */
+  cruiseRoute: Array<{ x: number; z: number }>;
   colliders: ObstacleBox[];
 }
 
@@ -206,6 +235,8 @@ export interface HudSnapshot {
   chain: number;
   money: number;
   destroyed: number;
+  /** Near misses scored this session. */
+  nearMisses: number;
   targetsRemaining: number;
   targetsTotal: number;
   targetAcquired: boolean;
@@ -219,4 +250,25 @@ export interface HudSnapshot {
   chainWindow: number;
   /** True while nitro is actually refilling this frame. */
   nitroRecharging: boolean;
+  /** True while cruise mode is driving the car. */
+  cruising: boolean;
 }
+
+/**
+ * The theme song, reduced to four independent 0..1 levels. Produced by `src/audio/theme.ts`
+ * and consumed by the environment, which wires each one to a different family of lights so
+ * the city reacts to the song in layers instead of flashing as a single block.
+ */
+export interface MusicBands {
+  /** Kick and sub energy. Snaps up on a hit and hangs; the punch in the scene. */
+  bass: number;
+  /** Snare, chords and vocal body. Rises and falls slowly — a swell behind the kick. */
+  mid: number;
+  /** Hats and shimmer. On and off within a frame or two; reads as a tick. */
+  high: number;
+  /** Overall loudness, followed over seconds. Rises through a chorus, sags in a breakdown. */
+  energy: number;
+}
+
+/** All bands at rest. Used wherever music is unavailable or not wired up. */
+export const SILENT_MUSIC: MusicBands = { bass: 0, mid: 0, high: 0, energy: 0 };

@@ -14,7 +14,7 @@ import {
 import { createLightningArc, BOLT_FROM_Y, BOLT_TO_Y } from './lightningArc';
 import { createSparkFx } from './sparks';
 import { createShockRings } from './explosion';
-import { createScorePopups } from './scorePopup';
+import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS } from './scorePopup';
 
 /**
  * Pooled visual effects. Everything here is pre-allocated at creation; nothing allocates
@@ -25,8 +25,12 @@ import { createScorePopups } from './scorePopup';
  *   from the rear wheels while drifting, lay skid marks, and drive the nitro exhaust.
  * - `lightning(fromX, fromZ, toX, toZ)` on a `lightningFired` event: a cyan/blue-white arc
  *   that clearly connects the car to the target for ~0.4 s.
+ * - `backfire(strength)` when the exhaust pops: a flame spit at the tailpipes, in step with
+ *   the bang from the audio layer (both are driven by the same trigger in `game.ts`).
  * - `explosion(x, z)` on `targetDestroyed`: stylized burst (sparks, flash, short-lived debris).
  * - `scorePopup(x, z, amount)` on `targetDestroyed`: a floating "+X" over the wreck.
+ * - `nearMissPopup(x, z, amount)` on `nearMiss`: the same pop in cyan, captioned, over the car
+ *   that was just shaved. Shares the one popup pool with kills.
  * - `collision(x, z, impact)` on collisions: a few sparks.
  * - `reset()` on restart: hide every live effect.
  *
@@ -34,7 +38,9 @@ import { createScorePopups } from './scorePopup';
  * - 10 draw calls when absolutely everything is on screen at once, fewer when idle
  *   (each pool hides itself when empty): tire smoke, skid marks, nitro flames, nitro trail,
  *   bolt core, bolt glow, bolt branches, shock rings, sparks, flashes; plus one per live
- *   score popup (5 slots, all hidden when nothing was scored recently).
+ *   score popup (5 slots, all hidden when nothing was scored recently). Kills and near misses
+ *   share that one pool, so a flurry of passes can evict the oldest pop early - deliberate,
+ *   since five numbers alive at once is already past what anyone reads at speed.
  * - ~2.6k triangles worst case (points are two triangles each).
  * - No allocation in `setCarPose`, `update` or any of the event entry points.
  */
@@ -48,8 +54,18 @@ export interface EffectsSystem {
   setCarPose(pose: CarPose, vehicle: VehicleState, drifting: boolean, nitro: number, frameDt: number): void;
   lightning(fromX: number, fromZ: number, toX: number, toZ: number): void;
   explosion(x: number, z: number): void;
-  /** Floating "+X" reward number over a kill. */
+  /**
+   * Flame out of the tailpipes for one exhaust pop (`strength` 0..1). Call after
+   * `setCarPose` in the same frame — it fires from the tip positions that set.
+   */
+  backfire(strength: number): void;
+  /** Floating acid-green "+X" reward number over a kill. */
   scorePopup(x: number, z: number, amount: number): void;
+  /**
+   * Floating cyan "NEAR MISS +X" over the car that was just shaved. Fired at the closest
+   * approach, while that car is still alongside and on screen.
+   */
+  nearMissPopup(x: number, z: number, amount: number): void;
   collision(x: number, z: number, impact: number): void;
   update(frameDt: number, time: number): void;
   reset(): void;
@@ -63,6 +79,20 @@ const SLIP_FULL = 10;
 const MIN_SMOKE_SPEED = 2.5;
 /** Slip that counts as sliding even when the drift rules have not latched yet. */
 const SLIDE_LATERAL = 4;
+
+/**
+ * Backfire ignition colour: deep red-orange, hot enough to glow white in the additive core but
+ * with no green to wash it toward yellow. Deliberately unlike the nitro magenta and the
+ * lightning cyan, so a pop reads instantly as combustion.
+ */
+const BANG_R = 1;
+const BANG_G = 0.3;
+const BANG_B = 0.07;
+/**
+ * Embers thrown by a full-strength bang, split across the two tips. Deliberately sparse: a
+ * handful of tracers reads as a crisp pop, where a dense burst starts to look like a plume.
+ */
+const BANG_EMBERS = 5;
 
 export function createEffects(scene: THREE.Scene): EffectsSystem {
   const root = new THREE.Group();
@@ -80,6 +110,12 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
   const halfBase = VEHICLE.wheelbase / 2;
   const halfTrack = VEHICLE.trackWidth / 2;
+
+  // Last exhaust tips in world space, so `backfire` can detonate without its own pose argument.
+  let tipLeftX = 0;
+  let tipLeftZ = 0;
+  let tipRightX = 0;
+  let tipRightZ = 0;
 
   return {
     setCarPose(pose, vehicle, drifting, nitro, frameDt) {
@@ -113,15 +149,19 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       // Exhaust tips: car-local (+-x, y, +z is behind the nose).
       const tipZOffsetX = fx * EXHAUST_LOCAL_Z;
       const tipZOffsetZ = fz * EXHAUST_LOCAL_Z;
+      tipLeftX = pose.x - rx * EXHAUST_LOCAL_X - tipZOffsetX;
+      tipLeftZ = pose.z - rz * EXHAUST_LOCAL_X - tipZOffsetZ;
+      tipRightX = pose.x + rx * EXHAUST_LOCAL_X - tipZOffsetX;
+      tipRightZ = pose.z + rz * EXHAUST_LOCAL_X - tipZOffsetZ;
       nitroFx.set(
         frameDt,
         nitro,
-        pose.x - rx * EXHAUST_LOCAL_X - tipZOffsetX,
+        tipLeftX,
         EXHAUST_LOCAL_Y,
-        pose.z - rz * EXHAUST_LOCAL_X - tipZOffsetZ,
-        pose.x + rx * EXHAUST_LOCAL_X - tipZOffsetX,
+        tipLeftZ,
+        tipRightX,
         EXHAUST_LOCAL_Y,
-        pose.z + rz * EXHAUST_LOCAL_X - tipZOffsetZ,
+        tipRightZ,
         fx,
         fz,
         vehicle.vx,
@@ -154,8 +194,31 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       }
     },
 
+    backfire(strength) {
+      const s = clamp01(strength);
+      if (s <= 0) return;
+      // The tips themselves ignite red...
+      nitroFx.backfire(s);
+      // ...wrapped in a blast flash that expands and dies inside a tenth of a second, and a
+      // handful of embers that arc and burn out. Both come from the same pools the explosions
+      // use, so a bang looks like a small combustion event rather than a puff of exhaust.
+      const y = EXHAUST_LOCAL_Y;
+      const flashSize = 0.65 + 1.2 * s;
+      sparkFx.flash(tipLeftX, y, tipLeftZ, flashSize, 0.07 + 0.045 * s, BANG_R, BANG_G, BANG_B);
+      sparkFx.flash(tipRightX, y, tipRightZ, flashSize * 0.85, 0.065 + 0.04 * s, BANG_R, BANG_G, BANG_B);
+      const embers = Math.max(1, Math.round(BANG_EMBERS * s));
+      const speed = 4 + 5 * s;
+      const half = embers >> 1;
+      sparkFx.burst(tipLeftX, y, tipLeftZ, embers - half, speed, 0.2, 0.13, BANG_R, BANG_G, BANG_B);
+      sparkFx.burst(tipRightX, y, tipRightZ, half, speed, 0.2, 0.13, BANG_R, BANG_G, BANG_B);
+    },
+
     scorePopup(x, z, amount) {
-      popups.spawn(x, z, amount);
+      popups.spawn(x, z, amount, POPUP_KILL);
+    },
+
+    nearMissPopup(x, z, amount) {
+      popups.spawn(x, z, amount, POPUP_NEAR_MISS);
     },
 
     collision(x, z, impact) {

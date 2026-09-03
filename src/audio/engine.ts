@@ -1,7 +1,9 @@
 import type { AudioCore } from './core';
-import { AUDIO, VEHICLE, NITRO } from '../config/tuning';
+import { AUDIO } from '../config/tuning';
 import { clamp, clamp01, lerp } from '../core/math';
-import { engineTone } from './dsp';
+import { REF_SPEED, engineTone } from './dsp';
+import { fireBackfire } from './backfire';
+import { createTurboFlutterTrigger, fireTurboFlutter } from './turboFlutter';
 
 /** Live drive state the engine voice reads each frame. */
 export interface EngineInput {
@@ -19,12 +21,12 @@ export interface EngineVoice {
   update(dt: number, input: EngineInput): void;
   /** Fanfare when a nitro boost begins: a turbo spool + whoosh. */
   nitroWhoosh(): void;
+  /** One exhaust pop/bang at the given strength (0..1). Driven by `createBackfireTrigger`. */
+  backfire(strength: number): void;
   /** Snap back to idle (on restart). */
   reset(): void;
   dispose(): void;
 }
-
-const REF_SPEED = VEHICLE.maxSpeed + NITRO.boostMaxSpeedBonus;
 
 /** Cylinders and firing model. A four-stroke fires cyl/2 times per crank revolution. */
 const CYLINDERS = 4;
@@ -76,54 +78,6 @@ function bakeEngineCycle(ctx: AudioContext, bodyHz: number): AudioBuffer {
     for (let i = 0; i < len; i++) data[i] *= g;
   }
   return buffer;
-}
-
-/**
- * Turbo flutter / compressor surge — the iconic rally "stututu" when the throttle snaps shut and
- * the compressor churns against a closed throttle. Modeled as a burst of distinct, resonant
- * chuffs: each is a short noise pop rung through a high-Q bandpass (so it has a clear pitch),
- * fully gated to silence between pops so the ear hears separate "tu" hits rather than a buzz.
- * The chuffs get quieter, lower and slower as the surge runs out of pressure.
- *
- * Standalone (not closed over an engine) so it can be auditioned and unit-reasoned in isolation.
- */
-export function fireTurboFlutter(ctx: AudioContext, out: AudioNode, noise: AudioBuffer, strength: number): void {
-  const t0 = ctx.currentTime;
-  const src = ctx.createBufferSource();
-  src.buffer = noise;
-  const bp = ctx.createBiquadFilter();
-  bp.type = 'bandpass';
-  bp.Q.value = 9; // high Q -> each chuff rings at a clear pitch, reads as "tu" not "sh"
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, t0);
-
-  let t = t0;
-  let peak = Math.max(0.0004, AUDIO.turboFlutterVolume * (0.5 + 0.5 * strength));
-  let period = 0.055; // ~18 Hz: distinctly stuttered, not a buzz
-  let freq = 2600;
-  const chuffs = 7;
-  for (let i = 0; i < chuffs; i++) {
-    const attack = 0.003;
-    const ring = period * 0.55; // pop rings for ~half the period...
-    bp.frequency.setValueAtTime(freq, t);
-    // ...then a chirp down inside the pop for the "blby" character.
-    bp.frequency.exponentialRampToValueAtTime(freq * 0.72, t + ring);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + attack);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + ring);
-    g.gain.setValueAtTime(0.0001, t + period * 0.92); // hard gap of silence before the next hit
-    t += period;
-    peak *= 0.82; // fade out
-    period *= 1.12; // slow down
-    freq *= 0.92; // drop in pitch
-  }
-  src.connect(bp).connect(g).connect(out);
-  src.start(t0);
-  src.stop(t + 0.05);
-  src.onended = () => {
-    g.disconnect();
-    bp.disconnect();
-  };
 }
 
 /** Soft-clip curve (tanh) for exhaust/header rasp. More drive into it = more growl. */
@@ -217,8 +171,7 @@ export function createEngine(core: AudioCore): EngineVoice {
   combSrc.start();
   turbo.start();
 
-  let prevThrottle = 0;
-  let spool = 0;
+  const flutter = createTurboFlutterTrigger();
 
   function firingHzFor(rpm01: number): number {
     return lerp(AUDIO.engineIdleHz, AUDIO.engineRedlineHz, rpm01);
@@ -258,15 +211,20 @@ export function createEngine(core: AudioCore): EngineVoice {
       toneGain.gain.setTargetAtTime(AUDIO.engineVolume * (0.4 + 0.6 * load), t, 0.05);
       combGain.gain.setTargetAtTime(AUDIO.engineVolume * (0.06 + 0.35 * throttle * rpm01), t, 0.05);
 
-      // Turbo spool tracks rpm under load and lags realistically.
-      const spoolTarget = clamp01(rpm01 * (0.25 + 0.75 * throttle) + nitroBoost * 0.4);
-      spool = lerp(spool, spoolTarget, 1 - Math.exp(-6 * dt));
-      turbo.frequency.setTargetAtTime(lerp(700, 5400, spool), t, 0.06);
-      turboGain.gain.setTargetAtTime(AUDIO.turboVolume * spool * spool, t, 0.06);
+      // One boost model drives both the whine and the flutter, so they can never disagree about
+      // how spooled the car is. The surge fires only on a closed throttle with pressure behind
+      // it (see `audio/turboFlutter.ts`) — not on every lift, which is most of them.
+      const surge = flutter.tick(dt, input.speed, throttle, input.nitro);
+      if (surge > 0) fireTurboFlutter(ctx, master, noise, surge);
 
-      // Turbo flutter on a sharp lift-off while the turbo is spooled up.
-      if (prevThrottle - throttle > 0.35 && spool > 0.45) fireTurboFlutter(ctx, master, noise, spool);
-      prevThrottle = throttle;
+      // Whine: pitched by boost, coloured by the gear so upshifts still bend the note.
+      const spool = flutter.boost;
+      turbo.frequency.setTargetAtTime(lerp(700, 5400, spool * (0.55 + 0.45 * rpm01)), t, 0.06);
+      turboGain.gain.setTargetAtTime(AUDIO.turboVolume * spool * spool, t, 0.06);
+    },
+
+    backfire(strength) {
+      fireBackfire(ctx, master, noise, strength);
     },
 
     nitroWhoosh() {
@@ -294,8 +252,7 @@ export function createEngine(core: AudioCore): EngineVoice {
 
     reset() {
       const t = ctx.currentTime;
-      spool = 0;
-      prevThrottle = 0;
+      flutter.reset();
       const rate = firingHzFor(0.18) / REF_FIRING_HZ;
       bankA.playbackRate.setValueAtTime(rate, t);
       bankB.playbackRate.setValueAtTime(rate * 1.006, t);

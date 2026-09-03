@@ -122,6 +122,209 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
 
 ## Updates
 
+### 2026-09-03 20:25 — Near miss points (sim + hud + audio)
+
+- New rule: shaving past an electric car at speed without touching it pays money. `src/sim/nearMiss.ts`
+  owns it; `NEAR_MISS` in `tuning.ts` owns every number.
+- How a pass works: it opens when the player comes inside `radius` (4 m centre-to-centre) of an active
+  target and closes when they leave `exitRadius` (4.6 m, so skimming the edge cannot split one pass into
+  two awards). The pass keeps its closest approach and the speed the player was doing **at that moment**
+  (not the peak over the pass, so flooring it once the car is behind you does not pay). Touching the car
+  voids the pass — a near miss has to be a miss.
+- Closest approach is measured swept across the tick, not sampled at its end: at 50 m/s the car covers
+  0.8 m per step, so an end-of-tick sample would make a graze a matter of luck instead of skill.
+- Award: `10 + 40 * quality`, `quality = (closeness^1.5 * speed01^1.3)^1.35`, rounded, hard-clamped to
+  10..50. Closeness saturates 0.15 m off the collision proxies; speed saturates at 52 m/s, which is above
+  the un-boosted top speed. Measured: 3.5 m at 180 km/h = 14, 2.8 m = 31, 2.4 m = 48; 50 needs a graze
+  **and** nitro, and even 2.35 m at 216 km/h came back 46 in the live app. 6 m pays nothing.
+- Money flows through `applyRewards` like every other payout. `state.nearMiss` tracks count and best.
+- Paid at the APEX of the pass (the tick the gap reopens by `apexSlack`), not on the way out of the
+  radius. That is what makes the world-space pop possible: at the apex the shaved car is still
+  alongside and on screen, where by the exit radius it is metres behind the camera. A pass that never
+  shows an apex is still settled on the way out, and only leaving `exitRadius` re-arms it.
+- Feedback, three layers: a cyan captioned `NEAR MISS / +43` pop floating next to the car that was
+  just shaved (same pooled sprite as a kill pop — `scorePopup.ts` grew a `ScorePopupStyle`, so a kill
+  is a bare acid number and a pass is cyan and captioned, one pool, one animation, different raster);
+  a cyan `NEAR MISS +¥N` flash in the money column, drifting DOWN (kills rise) so the frequent
+  near-miss flash never covers the counters; a `near miss N` counter in the meta row; and a doppler
+  whoosh one-shot (`oneShots.nearMiss`) that gets louder, brighter and shorter with the quality.
+- Verification: 22 tests in `tests/nearMiss.test.ts` (scoring curve, swept distance, apex timing, pass
+  state machine, plus four end-to-end runs through the real `stepGame` and arena) and 2 more in
+  `tests/fx.test.ts` for the popup styles. Confirmed live in the in-app browser at
+  http://127.0.0.1:5173 — scripted passes at 2.4/2.8/3.5/6.0 m returned 48/31/14/0 points, money and
+  the `near miss` counter moved, the award fired 1.3 m past the target (i.e. at the apex), and the
+  `NEAR MISS +43` pop rendered in the world beside the passed car with the HUD flash below the money.
+  (The preview pane keeps `document.hidden` true, which freezes rAF; the loop was driven by patching
+  `requestAnimationFrame` onto `setTimeout` in the page for the duration of the test.)
+- Not mine, seen in the tree while working: `tests/vehicleVisual.test.ts` "keeps the wheel contract and
+  stays inside the budget" fails on a clean checkout too (draw calls 9 > 8), and `src/audio/tireScreech.ts`
+  has a `Float32Array<ArrayBufferLike>` typecheck error from a concurrent session. Neither is touched here.
+
+### 2026-09-03 20:45 — Nitro speed blur (fx)
+
+- **What**: a radial (zoom) motion blur that opens up from the edges of the frame while the boost
+  is lit, so the city tears past the car instead of merely moving faster. New
+  `src/render/post/speedBlur.ts`, tuned by a new `SPEED_BLUR` block in `config/tuning.ts` and
+  wired at the one place that used to call `renderer.render` (`game.ts`).
+- **It smears the finished frame, and grades nothing.** The scene still renders straight to the
+  canvas with its own tone mapping, additive blending and MSAA; the result is copied into a
+  `FramebufferTexture` and averaged along the radial direction. The first cut did the textbook
+  thing instead — scene into an HDR render target, tone mapped in the blur shader — and Juan
+  immediately called it: the colour tone of the objects changed and it looked clunky and
+  aggressive. Two causes, both real: Three turns tone mapping off when a scene renders into a
+  render target, so the neon blending **and** the multisample resolve happened in linear light
+  and were compressed afterwards, brightening every antialiased edge in the frame; and the pass
+  was tinting the streaks violet on top of that. The tint is gone and the HDR buffer is gone.
+- **Gated on boost *and* speed**: `speedBlurStrength(nitro, speed)` multiplies the already-eased
+  `nitroVisual` (the same 0..1 that drives the tailpipe flames and the camera FOV punch) by a
+  speed ramp from 18 to 37 m/s. Nitro held at a crawl does not blur — the effect sells speed, so
+  speed has to earn it — and because it rides `nitroVisual` it fades in and out with the flames.
+- **Readability first**: the smear is masked out of the middle of the frame (`centerClear`), so
+  the car, the road ahead and the locked target stay sharp. The HUD is DOM and is never touched.
+- **Cheap and optional**, per the performance rules: with the boost cold this is exactly the old
+  `renderer.render` call and no texture is allocated at all. Boosting costs one full-screen copy
+  and one full-screen triangle, 8 taps, +1 draw call. `renderer.info.autoReset` is turned off
+  around the second pass so the debug overlay keeps reporting the scene's own numbers.
+- Verification:
+  - **Grade fidelity, measured.** In the sharp middle the smear amount is exactly zero, so the
+    pass must reproduce the frame the game drew. Interleaved blur-off/blur-on captures (the scene
+    animates constantly, so drift is averaged out) over a centred disc: blur-on differs from
+    blur-off by mean signed RGB `[+0.02, -0.30, -0.35]` out of 255 and mean |Δ| 2.3, *less* than
+    two blur-off frames differ from each other (`[-0.13, -0.19, -0.45]`, mean |Δ| 3.7). No shift.
+    For reference the HDR version measured `[-1.3, +3.9, +4.5]` in the same sharp region.
+  - Headless A/B from the same spawn pose: `artifacts/blur-ab/a-no-nitro.png` (139 km/h, cold) vs
+    `artifacts/blur-ab/b-nitro.png` (206 km/h, boosting). Buildings streak, road and car sharp,
+    colours unchanged, no console errors.
+  - `npm run typecheck` clean, `npm test` 146 passed (4 new `speedBlurStrength` cases in
+    `tests/fx.test.ts`). Cost at 1600x900 headless: ~7.9 ms/frame cold vs ~8.6 ms boosting.
+- Not verified: how it feels on a real GPU with a human driving (the preview pane is hidden in
+  this session, which pauses rAF), and whether `maxShift` 0.05 / `centerClear` 0.26 hold up at
+  other aspect ratios. Both are one-line tuning.
+- Pre-existing and untouched: `tests/vehicleVisual.test.ts` fails its 8-draw-call budget with 9.
+
+### 2026-09-03 17:50 — Tire scrub rebuilt (audio)
+
+- The old scrub sounded like riffling a deck of cards, and the cause was literally in the code: an
+  **11 Hz amplitude tremolo** on broadband noise. ~11 Hz is about where the ear stops hearing a
+  texture and starts hearing separate events. Measured on the old voice, the amplitude envelope
+  had a single dominant spike at 11 Hz (depth 0.092, ~5x the next rate).
+- Rebuilt `src/audio/tireScreech.ts` as three layers off the one noise loop:
+  - **Scrub** (~220-520 Hz): the low roar of rubber tearing asphalt. The old "body" sat at
+    1300-2100 Hz, which is hiss — there was no weight anywhere in the effect.
+  - **Squeal**: noise through two bandpasses **in series** at the same frequency. Stacking them
+    rings hard enough that the noise turns pitched (a howl, not a "shhh") while keeping real
+    grain; a plain oscillator here sounds synthetic. Costs a lot of level, hence the big make-up
+    gains.
+  - **Partial** at a deliberately inharmonic 2.37x, because whole-number ratios sound musical.
+- Pitch now wanders on an **aperiodic random walk driven from the frame update**, not an LFO —
+  stick-slip in a real tire drifts continuously and never repeats on a clock. New envelope
+  spectrum is flat: strongest rate 4 Hz at depth 0.040, with no peak standing out.
+- New pure helper `squealHz(intensity, speedFrac)` in `dsp.ts` (speed raises the pitch only while
+  actually sliding, so it is multiplied by intensity rather than added), with 4 unit tests.
+- Level curve bent to `intensity^0.6`. A straight multiply left the most common state in play —
+  a latched low-angle drift, which `skidIntensity` pins at its 0.35 floor — nearly inaudible.
+- Verification: `npm run typecheck` clean, `npm run build` green (641 kB / 176 kB gzip);
+  `npm test` 88 of 89 passed (4 new; the one failure is pre-existing). Rendered offline against a
+  rebuild of the old voice for a like-for-like A/B — low-frequency content (below 800 Hz) went
+  from a flat 10-15% at every angle to 62% on a tidy slide / 26% on a big one, i.e. it now
+  changes character with angle instead of being hiss throughout. RMS: silent 0.0000 when
+  gripping, 0.0133 at the drift floor (old: 0.0139, so no regression in the common case), 0.109
+  at full slide (old: 0.049, +7 dB). Live in the in-app browser: a handbrake drift at 67 km/h ran
+  34 frames with peak lateral 11.1 m/s — past `LATERAL_FULL`, so the full squeal was exercised —
+  AudioContext `running`, no console errors.
+- Not verified by ear (see the rAF note below); `AUDIO.tireVolume` (0.32) is the mix knob if the
+  louder big-slide end sits too hot against the engine.
+
+### 2026-09-03 18:05 — Turbo flutter only when it is earned (audio)
+
+- Juan: the "stututu" was "almost always on", and a single one ran on for seconds. Both come from
+  the same place — the old trigger was `prevThrottle - throttle > 0.35 && spool > 0.45` inside
+  `engine.update`, i.e. a *rate of change of the pedal*. Arcade cornering is made of on/off
+  tapping, so nearly every release qualified, nothing stopped two bursts overlapping, and the
+  overlap is what reads as a continuous drone.
+- New `src/audio/turboFlutter.ts` holds both halves, the way `backfire.ts` does:
+  `createTurboFlutterTrigger()` (pure, allocation-free) and `fireTurboFlutter()` (the sound,
+  moved out of `engine.ts`).
+- The fix is to model the thing the sound is made of. `boost` is now a real state variable —
+  it builds only under load (`SPOOL_UP` 0.55 s), bleeds off the throttle (`BLEED` 0.3 s), and is
+  **vented by the flutter itself** down to `VENT_TO` (0.12). A surge needs all of: a snap drop
+  (`LIFT_DROP` 0.35), a genuinely *shut* plate (`CLOSED_THROTTLE` 0.15 — trailing off to half
+  throttle keeps the air flowing and stays silent), pressure behind it (`FIRE_BOOST` 0.45), and
+  `MIN_INTERVAL` 1.1 s since the last one. Strength is how far past `FIRE_BOOST` the boost got,
+  so a long pull into a corner sounds different from a short one.
+- Gated on road speed (`MIN_SPEED_FRAC` 0.08 → `FULL_SPEED_FRAC` 0.3), not the engine note, for
+  the same reason `backfire.ts` is: the fake gearbox sweeps past redline once per gear, so rpm
+  would make a surge a coincidence of when you happened to lift. First tuning pass used 0.12/0.4
+  with `FIRE_BOOST` 0.55 and measured **zero** flutters across 19 s of real driving — boost peaked
+  at 0.51 because it needed ~63 km/h *and* a long pull; the current numbers ask for ~41 km/h and
+  roughly a second on the gas.
+- Burst length is now a time budget, not a chuff count: `chuffTimes(strength)` lays out chuffs
+  until `MIN_BURST`..`MAX_BURST` (0.32 s → 0.85 s) is spent, so the burst is cut off at its
+  allotted time instead of running as long as its chuffs happen to take. Measured 4 chuffs /
+  0.24 s at the weak end, 9 / 0.73 s at full boost — under a second by construction, and a unit
+  test pins it below `MIN_INTERVAL` so two can never overlap into the drone Juan heard.
+- The same `boost` now drives the turbo whine, replacing the separate `spool` in `engine.ts` —
+  one model, so the whine and the flutter can never disagree about how spooled the car is. The
+  whine keeps a gear flavour by tinting its pitch with `rpm01`.
+- Verification: `npm run typecheck` clean, `npm run build` green (642 kB / 176 kB gzip);
+  `npm test` 110 of 111 passed (12 new flutter cases in `tests/audio.test.ts`; the one failure is
+  the pre-existing draw-call budget in `tests/vehicleVisual.test.ts`). `node scripts/qa-drive.mjs`
+  ran the whole loop with `noConsoleErrors` PASS. Live A/B in headless Chrome against the dev
+  server, running a shadow copy of the real module on the real per-frame speed/throttle: over the
+  same 17.7 s drive the old rule fired **9** times and the new one **4** — the three deliberate
+  long-pull lifts at 74 km/h (boost 0.93, s=0.88) and the nitro lift at 151 km/h (boost 0.96,
+  s=0.93), while a 12-tap chicane burst produced 12 closed-throttle lifts at boost 0.19-0.32 and
+  **none** of them fired. AudioContext `running`.
+- Not verified by ear (same rAF note as below). `AUDIO.turboFlutterVolume` (0.5) is the mix knob;
+  `FIRE_BOOST` is the one to move if it should be rarer or more eager, `MAX_BURST` if the
+  stututu should run longer.
+
+### 2026-09-03 17:20 — Exhaust pops and bangs (audio + fx)
+
+- Added `src/audio/backfire.ts`, holding both halves of the effect: `createBackfireTrigger()`, a
+  pure allocation-free trigger, and `fireBackfire()`, the sound. One trigger lives in `game.ts` and
+  feeds `audio.backfire(s)` and `effects.backfire(s)` on the same frame, so the bang and the flame
+  can never drift apart.
+- Two ways to make it bang, matching a real anti-lag tune. **Overrun**: the throttle snaps shut
+  (>0.3 in a frame) and three decaying cracks fire ~85 ms apart. **Crackle**: pinned near the
+  limiter, or on nitro, it pops sporadically. Tuned deliberately sparse — measured 2.6/s at
+  redline, 3.1/s on nitro, with a hard 70 ms floor between pops. An earlier pass ran at roughly
+  double that and the pops stopped reading as punctuation and became texture; same reasoning cut
+  the embers per bang from 9 to 5.
+- The overrun bang is gated on *road speed*, not the engine note. The fake gearbox sweeps past
+  redline once per gear, so gating the burst on rpm made it a coincidence of when you happened to
+  lift — measured in-game: zero bursts across several full-throttle runs. Speed is the better proxy
+  for how heat-soaked the pipes are; rpm now only sets how angry the bang is.
+- Sound is a **blast**: noise through a low resonant bandpass (~240 Hz) slammed into a shared hard
+  clipper, plus a 30 ms bright crack, a burning-off tail, and a clean sine sub that bypasses the
+  clipper so the thump keeps its weight. Filtering low *before* the distortion is the whole trick —
+  the first version highpassed broadband noise and sounded like tearing paper, because the ear
+  reads high-frequency noise as air rather than pressure. Measured: 2.7% of energy below 800 Hz
+  before, 63% after. Loudness comes from sustained low-mid energy, not a taller peak, since the
+  master limiter flattens peaks anyway. `AUDIO.backfireVolume` (0.9) is the mix knob; timings live
+  in `BACKFIRE` next to the code, as `SKID` does in `dsp.ts`.
+- Visual is a short-lived combustion event, not a puff. The two nitro flame billboards spike red
+  (`nitroExhaust.backfire()`, ~110 ms, tinted toward `1, 0.34, 0.1` so a bang never reads as more
+  boost), wrapped in a blast flash and embers from the **shared spark/flash pools** in `fx/index.ts`
+  — the same ones the explosions use, so gravity, shrink-as-they-burn and a fast fade come for
+  free and there are **no new draw calls**. The first pass put embers in the nitro trail pool,
+  which is buoyant and *grows* as it fades: correct for a boost plume, but it read as dust.
+  One pipe leads and the other answers, so a twin exit never flashes in lockstep.
+- Also hoisted `REF_SPEED` into `dsp.ts` so the engine voice and the trigger agree on redline.
+- Verification: `npm run typecheck` clean; `npm run build` green (640 kB / 176 kB gzip, +~23 kB);
+  `npm test` 84 of 85 passed (14 new: 8 trigger cases in `tests/audio.test.ts`, 6 real-three.js
+  flash/tint/decay cases in `tests/fx.test.ts`; the one failure is pre-existing). Live in the
+  in-app browser: crackles fire at gear tops (s≈0.33-0.40 at 60-64 km/h); a lift-off at 67 km/h
+  produced the burst 0.67 -> 0.48 -> 0.35 (ratio 0.72 = `LIFT_FALLOFF`); a frame frozen mid-pop at
+  139 km/h with nitro cold shows the lead tip at alpha 0.78 and full ignition red (1, 0.34, 0.1)
+  with both spark pools live — photographed from a close inspection camera. Audio rendered offline
+  through a copy of the real master+limiter bus: strong bang RMS 0.165 over its first 200 ms
+  (peak 0.545, 264 ms), mid 0.104, weak 0.060.
+- Note: `requestAnimationFrame` is throttled in the in-app browser pane, which freezes the game
+  loop (same limitation recorded in the 11:07 entry). Driving was verified by shimming rAF onto
+  timers from the console. `tests/vehicleVisual.test.ts` still fails its unrelated pre-existing
+  budget assertion (player car draw calls 9 > 8); confirmed failing on `HEAD` before this change.
+
 ### 2026-09-03 15:35 — Floating "+X" score pops on a kill (fx)
 
 - Added `src/render/fx/scorePopup.ts`: a pooled, shooter-style "+100" that punches in over the
@@ -181,6 +384,23 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
   (`src/audio/theme.ts`, wired as `theme` in `game.ts`). The two are independent (music vs SFX)
   and coexist; the combined tree typechecks, tests and builds green.
 
+### 2026-09-03 20:30 — Cruise mode (C)
+
+- `C` toggles an autopilot that drives the car around a scenic loop of the city at ~47 km/h, for
+  leaving the game running in the background. Any driving input (WASD, Space, Shift) hands control
+  straight back; `E` still fires, so the player can shoot from the passenger seat.
+- Architecture: cruise is a *command source*, not a simulation rule. `src/sim/cruise.ts` writes a
+  `PlayerCommand` exactly like the keyboard does and `src/game.ts` swaps between the two, so the car
+  keeps the same physics, collisions, drift detection, audio and FX. `stepGame` is untouched.
+- The route lives with the rest of the arena data (`CRUISE_ROUTE` in `src/world/arenaLayout.ts`,
+  surfaced as `ArenaLayout.cruiseRoute`): highway -> north street -> east avenue -> a weave through
+  the drift plaza -> JDM south street -> service alley -> home. All three zones, ~1 km, ~106 s a lap.
+- Tuning is in `CRUISE` (`src/config/tuning.ts`). HUD: a quiet `CRUISE` badge top-centre.
+- Verification: `tests/cruise.test.ts` drives a full lap through the real simulation with the real
+  colliders - 0 collisions, closest approach 2.97 m (the JDM alley), peak 44.3 km/h, never reverses.
+  `npm run typecheck` clean; 8 new tests green. In-browser: `C` engages, the badge shows, the car pulls away.
+- Note: `tests/vehicleVisual.test.ts` fails on the car draw-call budget (9 > 8) from another
+  session’s concurrent exhaust work; unrelated to cruise mode and left alone.
 ### 2026-09-03 09:05 — Session stopped by Juan; handoff written (lead)
 
 - What works: full loop in the browser (drive, handbrake drift, charge, lock, fire, destroy, pay,

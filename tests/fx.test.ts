@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import {
   QUAD_FLOATS,
   buildBoltPoints,
@@ -8,7 +9,19 @@ import {
   ringNext,
   writeQuad,
 } from '../src/render/fx/shapes';
-import { formatPoints, popupAlpha, popupRise, popupScale } from '../src/render/fx/scorePopup';
+import {
+  formatPoints,
+  hexToRgbTriplet,
+  popupAlpha,
+  popupRise,
+  popupScale,
+  POPUP_KILL,
+  POPUP_NEAR_MISS,
+} from '../src/render/fx/scorePopup';
+import { createNitroExhaust } from '../src/render/fx/nitroExhaust';
+import { speedBlurStrength } from '../src/render/post/speedBlur';
+import { SPEED_BLUR } from '../src/config/tuning';
+import type { FxTextures } from '../src/render/fx/sprites';
 
 describe('ring buffers', () => {
   it('wraps back to zero at capacity', () => {
@@ -112,6 +125,119 @@ describe('emission accumulator', () => {
   });
 });
 
+describe('nitro exhaust backfire', () => {
+  const FRAME = 1 / 60;
+
+  /** The real textures need a 2D canvas; the exhaust only ever hands them to a material. */
+  function stubTextures(): FxTextures {
+    return {
+      smoke: new THREE.Texture(),
+      flare: new THREE.Texture(),
+      spark: new THREE.Texture(),
+      flame: new THREE.Texture(),
+      dispose() {},
+    };
+  }
+
+  /** Build an exhaust with the tips parked at a known pose and the boost cold. */
+  function coldExhaust() {
+    const parent = new THREE.Group();
+    const exhaust = createNitroExhaust(parent, stubTextures());
+    exhaust.set(FRAME, 0, -0.5, 0.35, 2, 0.5, 0.35, 2, 0, 1, 0, 0);
+    exhaust.update(FRAME, 0);
+    return exhaust;
+  }
+
+  function alphas(exhaust: ReturnType<typeof createNitroExhaust>): [number, number] {
+    const a = exhaust.flames.geometry.getAttribute('aAlpha');
+    return [a.getX(0), a.getX(1)];
+  }
+
+  it('is fully dark with the boost cold and nothing popping', () => {
+    const exhaust = coldExhaust();
+    expect(exhaust.flames.visible).toBe(false);
+    expect(alphas(exhaust)).toEqual([0, 0]);
+    exhaust.dispose();
+  });
+
+  it('lights both tips unevenly on a pop, with no nitro', () => {
+    const exhaust = coldExhaust();
+    exhaust.backfire(1);
+    exhaust.update(FRAME, 0);
+
+    expect(exhaust.flames.visible).toBe(true);
+    const [left, right] = alphas(exhaust);
+    expect(Math.min(left, right)).toBeGreaterThan(0);
+    expect(Math.max(left, right)).toBeLessThanOrEqual(1);
+    // One pipe leads, the other answers — they must never flash in lockstep.
+    expect(left).not.toBeCloseTo(right, 3);
+    // A pop is combustion, not boost: it must not drip nitro trail particles.
+    expect(exhaust.trail.visible).toBe(false);
+    exhaust.dispose();
+  });
+
+  it('burns the tips red-orange, never nitro magenta', () => {
+    const exhaust = coldExhaust();
+    const colors = exhaust.flames.geometry.getAttribute('color');
+    // Neutral while idle, so the nitro flame keeps the sprite's own palette.
+    expect([colors.getX(0), colors.getY(0), colors.getZ(0)]).toEqual([1, 1, 1]);
+
+    exhaust.backfire(1);
+    exhaust.update(FRAME, 0);
+    // The lead tip: red held at full, green and blue pulled down out of the magenta.
+    const lead = alphas(exhaust)[0] > alphas(exhaust)[1] ? 0 : 1;
+    expect(colors.getX(lead)).toBeCloseTo(1, 5);
+    expect(colors.getY(lead)).toBeLessThan(0.5);
+    expect(colors.getZ(lead)).toBeLessThan(colors.getY(lead));
+    exhaust.dispose();
+  });
+
+  it('decays back to dark within a couple of hundred milliseconds', () => {
+    const exhaust = coldExhaust();
+    exhaust.backfire(1);
+    exhaust.update(FRAME, 0);
+    const peak = Math.max(...alphas(exhaust));
+
+    exhaust.update(4 * FRAME, 0.07);
+    const mid = Math.max(...alphas(exhaust));
+    expect(mid).toBeLessThan(peak);
+    expect(mid).toBeGreaterThan(0);
+
+    for (let i = 0; i < 20; i++) exhaust.update(FRAME, 0.1 + i * FRAME);
+    expect(alphas(exhaust)).toEqual([0, 0]);
+    expect(exhaust.flames.visible).toBe(false);
+    exhaust.dispose();
+  });
+
+  it('scales the flash with strength and ignores a zero-strength pop', () => {
+    const weak = coldExhaust();
+    weak.backfire(0.2);
+    weak.update(FRAME, 0);
+    const strong = coldExhaust();
+    strong.backfire(1);
+    strong.update(FRAME, 0);
+    expect(Math.max(...alphas(weak))).toBeLessThan(Math.max(...alphas(strong)));
+
+    const none = coldExhaust();
+    none.backfire(0);
+    none.update(FRAME, 0);
+    expect(none.flames.visible).toBe(false);
+    weak.dispose();
+    strong.dispose();
+    none.dispose();
+  });
+
+  it('clears a live flash on reset', () => {
+    const exhaust = coldExhaust();
+    exhaust.backfire(1);
+    exhaust.update(FRAME, 0);
+    exhaust.reset();
+    expect(alphas(exhaust)).toEqual([0, 0]);
+    expect(exhaust.flames.visible).toBe(false);
+    exhaust.dispose();
+  });
+});
+
 describe('score popups', () => {
   it('formats a reward as a signed integer label', () => {
     expect(formatPoints(100)).toBe('+100');
@@ -144,5 +270,48 @@ describe('score popups', () => {
       previous = y;
     }
     expect(popupRise(1)).toBeGreaterThan(1);
+  });
+
+  it('keeps a kill and a near miss visually unmistakable', () => {
+    // A kill is a bare acid number; a pass is cyan and captioned. Sharing the pool is fine,
+    // sharing a look is not.
+    expect(POPUP_KILL.caption).toBeUndefined();
+    expect(POPUP_NEAR_MISS.caption).toBe('NEAR MISS');
+    expect(POPUP_NEAR_MISS.accent).not.toBe(POPUP_KILL.accent);
+  });
+
+  it('turns a style accent into an rgb triplet for its glow', () => {
+    expect(hexToRgbTriplet('#4ff3ff')).toBe('79, 243, 255');
+    expect(hexToRgbTriplet('a8ff3e')).toBe('168, 255, 62');
+    expect(hexToRgbTriplet('#fff')).toBe('255, 255, 255');
+  });
+});
+
+describe('nitro speed blur strength', () => {
+  it('stays off with the boost cold, however fast the car is going', () => {
+    expect(speedBlurStrength(0, 50)).toBe(0);
+  });
+
+  it('stays off while boosting below the speed threshold', () => {
+    expect(speedBlurStrength(1, SPEED_BLUR.speedStart)).toBe(0);
+    expect(speedBlurStrength(1, 0)).toBe(0);
+    expect(speedBlurStrength(1, -20)).toBe(0);
+  });
+
+  it('ramps in with speed and saturates at 1', () => {
+    const mid = (SPEED_BLUR.speedStart + SPEED_BLUR.speedFull) / 2;
+    expect(speedBlurStrength(1, mid)).toBeCloseTo(0.5, 5);
+    expect(speedBlurStrength(1, SPEED_BLUR.speedFull)).toBe(1);
+    expect(speedBlurStrength(1, SPEED_BLUR.speedFull * 3)).toBe(1);
+  });
+
+  it('scales with the eased boost intensity, so it fades in and out with the flames', () => {
+    expect(speedBlurStrength(0.5, SPEED_BLUR.speedFull)).toBeCloseTo(0.5, 5);
+    let previous = -1;
+    for (let i = 0; i <= 10; i++) {
+      const s = speedBlurStrength(i / 10, SPEED_BLUR.speedFull);
+      expect(s).toBeGreaterThanOrEqual(previous);
+      previous = s;
+    }
   });
 });

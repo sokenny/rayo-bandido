@@ -35,6 +35,7 @@ Open http://127.0.0.1:5173. Append `?debug=1` to start with the performance over
 | Shift | Nitro (recharges gradually while driving) |
 | E or left click | Fire lightning at the nearest electric car in the forward cone |
 | R | Instant restart |
+| C | Cruise mode: the car drives itself around the city at a relaxed pace. Any driving input hands control back |
 | F3 or ` | Toggle the debug overlay (FPS, draw calls, triangles) |
 
 ## Loop

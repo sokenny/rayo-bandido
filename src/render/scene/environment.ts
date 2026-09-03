@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ArenaLayout } from '../../core/types';
+import { SILENT_MUSIC, type ArenaLayout, type MusicBands } from '../../core/types';
 import { RENDER, THEME } from '../../config/tuning';
 import { PAL } from './env/palette';
 import { createBuilders } from './env/builders';
@@ -28,7 +28,7 @@ import type { MeshBuilder } from './env/meshBuilder';
  * - All lighting is baked into emissive textures and unlit neon. One hemisphere light and one
  *   directional light do the rest; there are no point lights and no shadow maps.
  * - Textures are drawn procedurally into small canvases at start-up. Nothing is loaded.
- * - `update()` only nudges three material colours and two texture offsets. No allocation.
+ * - `update()` only nudges a handful of material colours and two texture offsets. No allocation.
  *
  * THE THREE ZONES (docs/VISUAL_DIRECTION.md)
  * - Corporate highway, west: 20 m of clean asphalt, guardrails, cold white towers, neon route
@@ -42,10 +42,11 @@ export interface EnvironmentVisual {
   root: THREE.Group;
   /**
    * Called once per render frame for cheap animation (blinking signs, holograms).
-   * `beat` (0..1) is the theme song's kick/bass energy; it subtly lifts the lights and neon so
-   * the arena breathes with the music. Pass 0 (the default) for no music-reactive movement.
+   * `music` carries the theme song's four levels; each drives a different family of lights, so
+   * the city reacts in layers rather than as one block — see the wiring in `update` below.
+   * Omit it (or pass `SILENT_MUSIC`) for a still scene.
    */
-  update(frameDt: number, time: number, beat?: number): void;
+  update(frameDt: number, time: number, music?: MusicBands): void;
   dispose(): void;
 }
 
@@ -227,43 +228,53 @@ export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): Envi
 
   return {
     root,
-    update(frameDt: number, time: number, beat = 0) {
-      // Music-reactive lift. Small, positive-only nudges so the scene brightens on a kick and
-      // eases back — never darker than its resting state, never a strobe.
-      const lightLift = 1 + THEME.lightDepth * beat;
+    update(frameDt: number, time: number, music: MusicBands = SILENT_MUSIC) {
+      // Music-reactive lift, in three layers that deliberately do NOT move together. Every
+      // term is positive-only, so the scene brightens off its resting state and eases back —
+      // never darker than it was built, never a strobe.
+
+      // SLOWEST — the two scene lights ride the song's overall loudness, which is followed
+      // over seconds. The ambient level swells through a chorus instead of ticking per hit.
+      const lightLift = 1 + THEME.lightDepth * music.energy;
       hemi.intensity = hemiBase * lightLift;
       key.intensity = keyBase * lightLift;
-      // The emissive city is what actually lights this world, so it reacts hardest to the beat.
-      // `neonBeat` is a >=1 brightness multiplier that spikes on a kick and settles back to 1.
-      const neonBeat = 1 + THEME.neonDepth * beat;
-      const facadeLift = 1 + THEME.neonDepth * 0.6 * beat;
+
+      // MIDS — the big emissive surfaces. Wide and late: whole building faces breathe with the
+      // chords and the snare, arriving just behind the kick and letting go slowly.
+      const facadeLift = 1 + THEME.facadeDepth * music.mid;
       corpMat.emissiveIntensity = corpBase * facadeLift;
       urbanMat.emissiveIntensity = urbanBase * facadeLift;
       jdmMat.emissiveIntensity = jdmBase * facadeLift;
 
-      // The bulk of the neon (all the static signs, tubes and window glow) flashes on the kick.
-      neonMat.color.setScalar(neonBeat);
-      // Breathing neon: signs and gate bars. The slow sine breath, scaled up on the beat.
-      neonPulseMat.color.setScalar((0.68 + 0.32 * Math.sin(time * 1.7)) * neonBeat);
-      // Stuttering neon: broken alley tubes and aircraft beacons on the towers.
-      // Deliberately lazy: a slow slot and a shallow dip, so broken tubes breathe rather than
-      // strobe. Fast stutter is the fastest way to make a night scene feel busy.
+      // BASS — the main neon mass (static signs, tubes, window strips) is what actually lights
+      // this world, so it takes the kick: a hard punch that hangs for about half a second.
+      neonMat.color.setScalar(1 + THEME.neonDepth * music.bass);
+
+      // MIDS — breathing neon: vertical signs, gate bars, hanging tubes. Its own slow sine
+      // breath, scaled by the mid swell, so it drifts against the bass instead of with it.
+      neonPulseMat.color.setScalar((0.68 + 0.32 * Math.sin(time * 1.7)) * (1 + THEME.signDepth * music.mid));
+
+      // HIGHS — stuttering neon: broken alley tubes and aircraft beacons on the towers. The
+      // slot-based stutter stays lazy (fast stutter is the quickest way to make a night scene
+      // feel busy); the hats just tick it brighter, in and out inside a couple of frames.
       const slot = Math.floor(time * 2.2);
       if (slot !== flickerSlot) {
         flickerSlot = slot;
         const h = Math.abs(Math.sin(slot * 12.9898) * 43758.5453) % 1;
         flickerValue = h < 0.1 ? 0.45 : h < 0.2 ? 0.75 : 1;
       }
-      neonFlickerMat.color.setScalar(flickerValue * neonBeat);
-      // Wet reflections and light pools: a gentle shimmer in opacity, and the additive glow
-      // itself blooms brighter on the beat (via colour, so it isn't clamped by the opacity cap).
-      glowMat.opacity = 0.86 + 0.1 * Math.sin(time * 0.8);
-      glowMat.color.setScalar(1 + THEME.neonDepth * 0.8 * beat);
+      neonFlickerMat.color.setScalar(flickerValue * (1 + THEME.flickerDepth * music.high));
+
+      // Wet reflections and light pools: a gentle shimmer in opacity with a hi-hat tick on top,
+      // while the additive glow blooms on the kick with the neon it belongs to (via colour, so
+      // it is not clamped by the opacity cap).
+      glowMat.opacity = Math.min(1, 0.86 + 0.1 * Math.sin(time * 0.8) + 0.06 * music.high);
+      glowMat.color.setScalar(1 + THEME.glowDepth * music.bass);
       // Holographic billboards scroll in opposite directions.
       billTexA.offset.y = (billTexA.offset.y + frameDt * 0.035) % 1;
       billTexB.offset.y = (billTexB.offset.y - frameDt * 0.026 + 1) % 1;
-      // The plaza WANTED board strobes subtly and lifts on the beat.
-      wantedBoard.update(time, beat);
+      // The plaza WANTED board strobes subtly and swells on the mids.
+      wantedBoard.update(time, music.mid);
     },
     dispose() {
       wantedBoard.dispose();

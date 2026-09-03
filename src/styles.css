@@ -156,6 +156,15 @@ body {
   white-space: nowrap;
 }
 
+/* A near miss is not a kill: same column, cyan instead of acid, so the two read apart. */
+.rb-reward--near {
+  top: 22px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--rb-cyan);
+  text-shadow: 0 0 12px rgba(79, 243, 255, 0.55);
+}
+
 /* -------------------------------------------- centre: lock reticle + banner */
 
 .rb-reticle {
@@ -201,6 +210,58 @@ body {
   letter-spacing: 0.34em;
   color: var(--rb-text);
   text-shadow: 0 0 16px rgba(155, 92, 255, 0.55);
+}
+
+/* ------------------------------------------------ top centre: cruise mode */
+
+/* Deliberately quiet: cruise mode is meant to be left running, so its badge sits above
+   the scene as a small steady marker instead of another thing asking to be looked at. */
+.rb-cruise {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid var(--rb-hairline);
+  border-radius: 2px;
+  background: var(--rb-panel);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  color: var(--rb-dim);
+  opacity: 0;
+  transition: opacity 320ms ease, transform 320ms ease;
+}
+
+.rb-cruise.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  color: var(--rb-text);
+}
+
+.rb-cruise__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rb-cyan);
+  box-shadow: 0 0 8px var(--rb-cyan);
+}
+
+.rb-cruise.is-on .rb-cruise__dot {
+  animation: rb-cruise-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes rb-cruise-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* ------------------------------------------------- bottom corners: gauges */

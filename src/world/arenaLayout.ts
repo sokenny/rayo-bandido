@@ -162,6 +162,34 @@ const PATROLS: Array<Array<{ x: number; z: number }>> = [
   ],
 ];
 
+/**
+ * Cruise mode's scenic loop (C). Every waypoint sits on a road centreline or inside the plaza,
+ * and every leg between two of them runs along one road, so an autopilot that drives straight
+ * at the next waypoint never leaves the asphalt.
+ *
+ * The tour takes in all three zones: north up the corporate highway, east along the urban
+ * north street, down the east avenue into the drift plaza for a slow weave, south to the JDM
+ * street, up the service alley, then back down the east avenue and home along the south street.
+ * The cross and the south street are each driven twice, in opposite directions - it is a city
+ * loop, not a race line.
+ */
+export const CRUISE_ROUTE: ReadonlyArray<{ x: number; z: number }> = [
+  { x: -90, z: 91 },   //  0 south-west corner, on the highway
+  { x: -90, z: -91 },  //  1 north up the corporate highway
+  { x: 90, z: -91 },   //  2 east along the urban north street
+  { x: 90, z: 0 },     //  3 south down the east avenue
+  { x: 16, z: 0 },     //  4 west along the central cross, into the plaza
+  { x: 0, z: -16 },    //  5 plaza weave
+  { x: -16, z: 0 },    //  6 plaza weave
+  { x: 0, z: 16 },     //  7 plaza weave
+  { x: 0, z: 91 },     //  8 south down the cross to the JDM street
+  { x: 55, z: 91 },    //  9 east along the south street to the alley mouth
+  { x: 55, z: 20 },    // 10 north up the JDM service alley
+  { x: 55, z: 0 },     // 11 onto the central cross
+  { x: 90, z: 0 },     // 12 east to the avenue
+  { x: 90, z: 91 },    // 13 south-east corner, then home along the south street
+];
+
 /** Headings point along the first patrol leg. heading 0 faces -Z, PI/2 faces +X. */
 const SPAWN_HEADINGS = [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0, Math.PI / 2];
 
@@ -179,6 +207,7 @@ export function createArenaLayout(): ArenaLayout {
     playerSpawn: { x: -90, z: 95, heading: 0 },
     targetSpawns,
     targetPatrols: PATROLS.map((loop) => loop.map((p) => ({ x: p.x, z: p.z }))),
+    cruiseRoute: CRUISE_ROUTE.map((p) => ({ x: p.x, z: p.z })),
     colliders,
   };
 }

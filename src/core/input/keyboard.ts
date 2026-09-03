@@ -1,11 +1,11 @@
 import type { PlayerCommand } from '../types';
 
 /**
- * Keyboard input -> PlayerCommand. Edge-triggered actions (fire, restart) are latched
+ * Keyboard input -> PlayerCommand. Edge-triggered actions (fire, restart, cruise) are latched
  * between polls so a short tap is never lost, and cleared after `poll()` reads them once.
  *
  * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
- * E or mouse click fires lightning, R restarts.
+ * E or mouse click fires lightning, R restarts, C toggles cruise mode.
  */
 export interface InputSource {
   /** Fill `out` with the current command. Edge-triggered flags are consumed. */
@@ -14,13 +14,14 @@ export interface InputSource {
 }
 
 export function createPlayerCommand(): PlayerCommand {
-  return { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, fire: false, restart: false };
+  return { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, fire: false, restart: false, cruise: false };
 }
 
 export function createKeyboardInput(target: Window | HTMLElement = window): InputSource {
   const down = new Set<string>();
   let fireLatched = false;
   let restartLatched = false;
+  let cruiseLatched = false;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) {
@@ -30,6 +31,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
     down.add(e.code);
     if (e.code === 'KeyE') fireLatched = true;
     if (e.code === 'KeyR') restartLatched = true;
+    if (e.code === 'KeyC') cruiseLatched = true;
     if (isGameKey(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -60,8 +62,10 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.nitro = down.has('ShiftLeft') || down.has('ShiftRight');
       out.fire = fireLatched;
       out.restart = restartLatched;
+      out.cruise = cruiseLatched;
       fireLatched = false;
       restartLatched = false;
+      cruiseLatched = false;
     },
     dispose() {
       target.removeEventListener('keydown', onKeyDown as EventListener);
@@ -87,6 +91,7 @@ function isGameKey(code: string): boolean {
     case 'ShiftRight':
     case 'KeyE':
     case 'KeyR':
+    case 'KeyC':
       return true;
     default:
       return false;

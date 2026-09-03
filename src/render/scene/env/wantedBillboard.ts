@@ -213,8 +213,8 @@ function makeWantedTexture(): WantedTexture {
 
 export interface WantedBillboard {
   group: THREE.Group;
-  /** Subtle strobe. `time` is seconds, `beat` (0..1) lifts it on the music. */
-  update(time: number, beat: number): void;
+  /** Subtle strobe. `time` is seconds, `swell` (0..1) is the mid band, which lifts it. */
+  update(time: number, swell: number): void;
   dispose(): void;
 }
 
@@ -307,8 +307,8 @@ export function createWantedBillboard(): WantedBillboard {
 
   return {
     group,
-    update(time, beat) {
-      // Slow breath plus an occasional dropped-frame stutter, lifted a little on the beat.
+    update(time, swell) {
+      // Slow breath plus an occasional dropped-frame stutter, lifted a little on the mids.
       const breath = 0.86 + 0.1 * Math.sin(time * 2.1);
       const slot = Math.floor(time * 7);
       if (slot !== flickerSlot) {
@@ -316,7 +316,7 @@ export function createWantedBillboard(): WantedBillboard {
         const h = Math.abs(Math.sin(slot * 12.9898) * 43758.5453) % 1;
         flickerValue = h < 0.06 ? 0.45 : h < 0.12 ? 0.78 : 1;
       }
-      const lift = 1 + 0.25 * beat;
+      const lift = 1 + 0.25 * swell;
       const level = breath * flickerValue * lift;
       panelMat.color.setScalar(Math.min(1.25, level));
       haloMat.opacity = 0.12 * level;

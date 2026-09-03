@@ -46,6 +46,7 @@ const CONTROLS = [
   ['SHIFT', 'nitro'],
   ['E', 'lightning'],
   ['R', 'restart'],
+  ['C', 'cruise'],
   ['F3', 'debug'],
 ];
 
@@ -82,12 +83,14 @@ export function createHud(root: HTMLElement): Hud {
     `<div class="rb-money">` +
     `<div class="rb-money__value"><span class="rb-money__yen">¥</span><span class="rb-money__digits">0</span></div>` +
     `<div class="rb-money__meta"><span class="rb-money__destroyed">destroyed 0</span>` +
+    `<span class="rb-money__near">near miss 0</span>` +
     `<span class="rb-money__remaining">targets left 0</span></div>` +
     `<div class="rb-money__flashes"><span class="rb-reward"></span><span class="rb-reward"></span>` +
     `<span class="rb-reward"></span></div>` +
     `</div>` +
     `<div class="rb-reticle">${RETICLE_ICON}<span class="rb-reticle__label">TARGET LOCKED</span></div>` +
     `<div class="rb-banner">RESTART</div>` +
+    `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-stack rb-stack--left">` +
     `<div class="rb-driftline">` +
     `<div class="rb-drift"><span class="rb-drift__label">DRIFT</span>` +
@@ -117,10 +120,12 @@ export function createHud(root: HTMLElement): Hud {
   const moneyValueEl = pick<HTMLElement>(hud, '.rb-money__value');
   const moneyDigitsEl = pick<HTMLElement>(hud, '.rb-money__digits');
   const destroyedEl = pick<HTMLElement>(hud, '.rb-money__destroyed');
+  const nearEl = pick<HTMLElement>(hud, '.rb-money__near');
   const remainingEl = pick<HTMLElement>(hud, '.rb-money__remaining');
   const rewardEls = Array.from(hud.querySelectorAll<HTMLElement>('.rb-reward'));
   const reticleEl = pick<HTMLElement>(hud, '.rb-reticle');
   const bannerEl = pick<HTMLElement>(hud, '.rb-banner');
+  const cruiseEl = pick<HTMLElement>(hud, '.rb-cruise');
   const driftEl = pick<HTMLElement>(hud, '.rb-drift');
   const driftTimeEl = pick<HTMLElement>(hud, '.rb-drift__time');
   const chainEl = pick<HTMLElement>(hud, '.rb-chain');
@@ -136,6 +141,7 @@ export function createHud(root: HTMLElement): Hud {
   let shownSpeed = -1;
   let shownMoney = -1;
   let shownDestroyed = -1;
+  let shownNearMisses = -1;
   let shownRemaining = -1;
   let shownTotal = -1;
   let shownDriftTenths = -1;
@@ -146,6 +152,7 @@ export function createHud(root: HTMLElement): Hud {
   let ready = false;
   let reversing = false;
   let controlsVisible = true;
+  let cruising = false;
   let controlsUntil = CONTROLS_INTRO;
   let rewardIndex = 0;
   let lastDriveHint = -DRIVE_HINT_EVERY;
@@ -179,6 +186,11 @@ export function createHud(root: HTMLElement): Hud {
     update(s) {
       // A restart rewinds sim time; drop stale throttles so hints work again.
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
+
+      if (s.cruising !== cruising) {
+        cruising = s.cruising;
+        cruiseEl.classList.toggle('is-on', s.cruising);
+      }
 
       const showControls = s.time < controlsUntil;
       if (showControls !== controlsVisible) {
@@ -257,6 +269,10 @@ export function createHud(root: HTMLElement): Hud {
         shownDestroyed = s.destroyed;
         destroyedEl.textContent = `destroyed ${s.destroyed}`;
       }
+      if (s.nearMisses !== shownNearMisses) {
+        shownNearMisses = s.nearMisses;
+        nearEl.textContent = `near miss ${s.nearMisses}`;
+      }
       if (s.targetsRemaining !== shownRemaining || s.targetsTotal !== shownTotal) {
         shownRemaining = s.targetsRemaining;
         shownTotal = s.targetsTotal;
@@ -265,11 +281,32 @@ export function createHud(root: HTMLElement): Hud {
     },
 
     onEvent(e) {
-      if (e.type === 'targetDestroyed') {
+      if (e.type === 'nearMiss') {
+        // Shares the money flash column with kill rewards, but cyan, labelled, and drifting
+        // DOWN instead of up: passes are frequent, and rising past the counters the way a
+        // kill does would keep covering them.
+        const el = rewardEls[rewardIndex % rewardEls.length];
+        rewardIndex++;
+        if (el) {
+          el.textContent = `NEAR MISS +¥${formatMoney(e.points)}`;
+          el.classList.add('rb-reward--near');
+          play(
+            el,
+            [
+              { opacity: 0, transform: 'translateY(-4px)' },
+              { opacity: 1, transform: 'translateY(2px)', offset: 0.15 },
+              { opacity: 1, transform: 'translateY(10px)', offset: 0.65 },
+              { opacity: 0, transform: 'translateY(20px)' },
+            ],
+            1100,
+          );
+        }
+      } else if (e.type === 'targetDestroyed') {
         const el = rewardEls[rewardIndex % rewardEls.length];
         rewardIndex++;
         if (el) {
           el.textContent = `+¥${formatMoney(e.reward)}`;
+          el.classList.remove('rb-reward--near');
           play(
             el,
             [

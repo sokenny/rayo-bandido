@@ -6,6 +6,11 @@ export interface OneShots {
   lightning(): void;
   /** An electric car losing power and going out of service: a descending spin-down + fizzle. */
   shutdown(): void;
+  /**
+   * The doppler whoosh of shaving past a car. `quality` 0..1 (how good the pass was) makes it
+   * louder, brighter and snappier, so a paint-scraping pass sounds different from a wide one.
+   */
+  nearMiss(quality: number): void;
 }
 
 /**
@@ -97,6 +102,18 @@ export function createOneShots(core: AudioCore): OneShots {
       playNoise(t, t + 0.07, 'highpass', 1800, 1800, 0.7, 0.7 * v, 0.002);
       // Sizzle tail: crackling electricity dying off.
       playNoise(t + 0.01, t + 0.34, 'bandpass', 3600, 2400, 6, 0.32 * v, 0.01);
+    },
+
+    nearMiss(quality) {
+      const q = quality < 0 ? 0 : quality > 1 ? 1 : quality;
+      const t = ctx.currentTime;
+      const v = AUDIO.nearMissVolume * (0.55 + 0.45 * q);
+      // The pass itself: a band of air sweeping down past the ear. A closer, faster pass
+      // starts brighter and gets through quicker, which is what sells the speed.
+      const dur = 0.34 - 0.1 * q;
+      playNoise(t, t + dur, 'bandpass', 1500 + 1900 * q, 320, 1.6, 0.85 * v, 0.05 + 0.05 * (1 - q));
+      // Body: the low pressure wave under the whoosh, only on a genuinely close pass.
+      if (q > 0.25) playOsc('sine', t + 0.02, t + 0.24, 150, 60, 0.35 * v * q, 0.05);
     },
 
     shutdown() {

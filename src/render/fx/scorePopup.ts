@@ -31,6 +31,11 @@ const CANVAS_W = 512;
 const CANVAS_H = 128;
 const FONT_MAX_PX = 92;
 const TEXT_ASPECT = CANVAS_W / CANVAS_H;
+/** Number size when a caption shares the canvas with it, and where each line sits. */
+const FONT_MAX_PX_CAPTIONED = 78;
+const CAPTION_PX = 24;
+const CAPTION_Y = 27;
+const CAPTIONED_NUMBER_Y = 85;
 
 /** Pop-in overshoot: the number briefly overshoots its size, which reads as impact. */
 const POP_IN = 0.1;
@@ -42,6 +47,45 @@ const HOLD = 0.55;
 
 /** The reward colour, matching the HUD money flash (`--rb-acid`) rather than lightning cyan. */
 const ACID = '#a8ff3e';
+/** The near-miss colour, matching the cyan the HUD uses for a pass. */
+const CYAN = '#4ff3ff';
+
+/**
+ * What a pop looks like. Two exist, and they are deliberately unmistakable at a glance: a kill
+ * is a bare acid-green number over a wreck, a near miss is a cyan number under a small caption.
+ * Same pool, same animation — only the raster differs.
+ */
+export interface ScorePopupStyle {
+  /** Base colour of the number, and of the glow behind its dark casing. */
+  accent: string;
+  /** Mid stop of the vertical gradient on the number. Sits between white and `accent`. */
+  midTone: string;
+  /** Small line above the number, or undefined for a bare number. */
+  caption?: string;
+  /**
+   * Size multiplier on the whole sprite. A captioned style gives up canvas height to its
+   * caption, so it needs a nudge to land its number at the same world size as a bare one.
+   */
+  scale?: number;
+}
+
+/** A destroyed target: acid green, no caption, the largest the canvas allows. */
+export const POPUP_KILL: ScorePopupStyle = { accent: ACID, midTone: '#e8ffb4' };
+
+/** A car shaved at speed: cyan, captioned, so it never reads as a kill. */
+export const POPUP_NEAR_MISS: ScorePopupStyle = {
+  accent: CYAN,
+  midTone: '#c2f7ff',
+  caption: 'NEAR MISS',
+  scale: 1.16,
+};
+
+/** `#4ff3ff` -> `79, 243, 255`, for building the `rgba()` glow of a style. */
+export function hexToRgbTriplet(hex: string): string {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.replace(/./g, (c) => c + c) : h, 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
 
 /** `+1500` style label for a reward amount. Non-finite or negative amounts collapse to `+0`. */
 export function formatPoints(amount: number): string {
@@ -70,7 +114,7 @@ export function popupRise(k: number): number {
 }
 
 export interface ScorePopups {
-  spawn(x: number, z: number, amount: number): void;
+  spawn(x: number, z: number, amount: number, style?: ScorePopupStyle): void;
   update(dt: number): void;
   reset(): void;
   dispose(): void;
@@ -84,31 +128,35 @@ interface Slot {
   timer: number;
   x: number;
   z: number;
+  /** Size multiplier of the style this slot was spawned with. */
+  scale: number;
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, text: string): void {
+function drawLabel(ctx: CanvasRenderingContext2D, text: string, style: ScorePopupStyle): void {
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // Shrink to fit rather than clipping, so an unexpectedly large reward still reads.
-  let px = FONT_MAX_PX;
+  const cx = CANVAS_W / 2;
+  const glow = `rgba(${hexToRgbTriplet(style.accent)}, 0.85)`;
   const font = (size: number) => `italic 800 ${size}px system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
+
+  // Shrink to fit rather than clipping, so an unexpectedly large reward still reads. A caption
+  // takes the top of the canvas, so the number starts smaller when one is present.
+  let px = style.caption ? FONT_MAX_PX_CAPTIONED : FONT_MAX_PX;
   ctx.font = font(px);
   const maxWidth = CANVAS_W - 48;
   while (px > 24 && ctx.measureText(text).width > maxWidth) {
     px -= 6;
     ctx.font = font(px);
   }
-
-  const cx = CANVAS_W / 2;
-  const cy = CANVAS_H / 2;
+  const cy = style.caption ? CAPTIONED_NUMBER_Y : CANVAS_H / 2;
 
   // Dark casing first: the number has to survive over neon signs and over the explosion.
   ctx.lineJoin = 'round';
   ctx.strokeStyle = 'rgba(4, 8, 16, 0.94)';
   ctx.lineWidth = px * 0.2;
-  ctx.shadowColor = 'rgba(168, 255, 62, 0.85)';
+  ctx.shadowColor = glow;
   ctx.shadowBlur = px * 0.5;
   ctx.strokeText(text, cx, cy);
   ctx.shadowBlur = 0;
@@ -116,10 +164,23 @@ function drawLabel(ctx: CanvasRenderingContext2D, text: string): void {
 
   const gradient = ctx.createLinearGradient(0, cy - px * 0.55, 0, cy + px * 0.55);
   gradient.addColorStop(0, '#ffffff');
-  gradient.addColorStop(0.45, '#e8ffb4');
-  gradient.addColorStop(1, ACID);
+  gradient.addColorStop(0.45, style.midTone);
+  gradient.addColorStop(1, style.accent);
   ctx.fillStyle = gradient;
   ctx.fillText(text, cx, cy);
+
+  if (!style.caption) return;
+  ctx.font = `800 ${CAPTION_PX}px system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
+  ctx.lineWidth = CAPTION_PX * 0.42;
+  ctx.strokeStyle = 'rgba(4, 8, 16, 0.94)';
+  const spaced = style.caption.split('').join(' ');
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = CAPTION_PX * 0.7;
+  ctx.strokeText(spaced, cx, CAPTION_Y);
+  ctx.shadowBlur = 0;
+  ctx.strokeText(spaced, cx, CAPTION_Y);
+  ctx.fillStyle = style.accent;
+  ctx.fillText(spaced, cx, CAPTION_Y);
 }
 
 export function createScorePopups(parent: THREE.Object3D): ScorePopups {
@@ -159,6 +220,7 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
       timer: 0,
       x: 0,
       z: 0,
+      scale: 1,
     });
   }
 
@@ -170,17 +232,18 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
   }
 
   return {
-    spawn(x, z, amount) {
+    spawn(x, z, amount, style = POPUP_KILL) {
       const slot = slots[head];
       head = ringNext(head, SCORE_POPUP_SLOTS);
       if (slot.ctx) {
-        drawLabel(slot.ctx, formatPoints(amount));
+        drawLabel(slot.ctx, formatPoints(amount), style);
         slot.texture.needsUpdate = true;
       }
       slot.timer = LIFE;
       slot.x = x + (Math.random() - 0.5) * 2 * SCATTER;
       slot.z = z + (Math.random() - 0.5) * 2 * SCATTER;
-      const scale = popupScale(0);
+      slot.scale = style.scale ?? 1;
+      const scale = popupScale(0) * slot.scale;
       slot.sprite.position.set(slot.x, START_Y, slot.z);
       slot.sprite.scale.set(TEXT_HEIGHT * TEXT_ASPECT * scale, TEXT_HEIGHT * scale, 1);
       slot.material.opacity = popupAlpha(0);
@@ -198,7 +261,7 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
         }
         slot.timer = next;
         const k = 1 - next / LIFE;
-        const scale = popupScale(k);
+        const scale = popupScale(k) * slot.scale;
         slot.sprite.position.set(slot.x, START_Y + popupRise(k), slot.z);
         slot.sprite.scale.set(TEXT_HEIGHT * TEXT_ASPECT * scale, TEXT_HEIGHT * scale, 1);
         slot.material.opacity = popupAlpha(k);

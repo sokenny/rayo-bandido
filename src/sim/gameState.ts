@@ -15,6 +15,7 @@ import { stepDrift } from './drift';
 import { stepNitro } from './nitro';
 import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
+import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyRewards } from './economy';
 
 /**
@@ -72,6 +73,7 @@ export function createInitialGameState(layout: ArenaLayout): GameState {
     nitro: createNitroState(),
     lightning: createLightningState(),
     targets: createTargets(layout),
+    nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
     events: [],
   };
@@ -87,6 +89,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   state.nitro = createNitroState();
   state.lightning = createLightningState();
   resetTargets(state.targets, layout);
+  resetNearMissState(state.nearMiss);
   state.economy = createEconomyState();
   state.events.length = 0;
 }
@@ -108,6 +111,7 @@ export function stepGame(state: GameState, cmd: PlayerCommand, layout: ArenaLayo
   stepDrift(state.drift, state.vehicle, dt, state.events);
   stepTargets(state.targets, layout, state.time, dt);
   resolveTargetCollisions(state.vehicle, state.targets, state.events);
+  stepNearMiss(state.nearMiss, state.vehicle, state.targets, state.events);
   stepLightning(state.lightning, state.vehicle, state.targets, state.drift, cmd, state.time, dt, state.events);
   applyRewards(state.economy, state.targets, state.events);
 }

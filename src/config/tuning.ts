@@ -208,6 +208,55 @@ export const TARGETS = {
   },
 };
 
+/**
+ * Near miss: points for shaving past an electric car at speed without touching it.
+ *
+ * A pass is tracked from the moment the player enters `radius` of an active target and is
+ * scored when they leave again (`exitRadius`, a little wider so skimming the edge cannot
+ * flicker two passes out of one). The award is driven by the two things the player controls:
+ * how close they got and how fast they were going. Touching the car voids the pass entirely -
+ * a near miss has to be a miss.
+ *
+ * `contactDist` is the centre distance at which the collision proxies already overlap, so
+ * closeness is measured over the ~1.8 m of clearance that actually exists between "touching"
+ * and "not a near miss any more".
+ */
+export const NEAR_MISS = {
+  /** Centre distance at which a pass starts being tracked (m). */
+  radius: 4,
+  /** Centre distance at which a pass is considered over (m). Wider than `radius`, for hysteresis. */
+  exitRadius: 4.6,
+  /** Centre distance at which the two collision proxies touch (m). Below this it is a bump. */
+  contactDist: VEHICLE.collisionRadius + TARGETS.knock.radius,
+  /**
+   * Clearance (m) above `contactDist` at which closeness is already full. A hair of margin,
+   * so the ceiling is reachable at all instead of sitting one rounding step out of reach.
+   */
+  grazeClearance: 0.15,
+  /** Slack above `contactDist` treated as contact, so a resolved bump never scores. */
+  contactSlack: 0.02,
+  /**
+   * Metres the gap has to reopen past the closest approach before the pass is called done and
+   * paid. Small, so the award lands while the car is still alongside and on screen, but above
+   * the per-tick jitter of two cars running parallel.
+   */
+  apexSlack: 0.05,
+  /** Minimum speed for a pass to score at all (m/s). ~65 km/h. */
+  minSpeed: 18,
+  /** Speed at which the speed factor saturates (m/s). Above the un-boosted top speed on purpose. */
+  fullSpeed: 52,
+  /** Award floor for any qualifying pass. */
+  minPoints: 10,
+  /** Award ceiling. Only a paint-scraping pass on nitro gets here. */
+  maxPoints: 50,
+  /** Exponent on closeness. >1 = the last half metre is worth far more than the first. */
+  closenessCurve: 1.5,
+  /** Exponent on the speed factor. */
+  speedCurve: 1.3,
+  /** Exponent on the combined quality. Pushes the ceiling out of reach of a merely good pass. */
+  qualityCurve: 1.35,
+};
+
 export const CAMERA = {
   /** Base vertical FOV in degrees. */
   fov: 60,
@@ -258,6 +307,29 @@ export const CAMERA = {
   shakeDecay: 6,
 };
 
+/**
+ * Nitro speed blur (see `src/render/post/speedBlur.ts`). A radial smear that opens from the
+ * edges of the frame while the boost is lit and the car is actually moving, so the world tears
+ * past instead of just going faster. Postprocessing stays optional and cheap: nothing is
+ * allocated and no extra pass runs until the first boost.
+ */
+export const SPEED_BLUR = {
+  /** Forward speed at which the blur starts to appear while boosting (m/s). ~65 km/h. */
+  speedStart: 18,
+  /** Forward speed at which it reaches full strength (m/s). ~135 km/h. */
+  speedFull: 37,
+  /**
+   * Total radial smear at full strength, as a fraction of the frame, at the very edge of the
+   * screen. Small on purpose: past ~0.08 the neon turns into mush rather than streaks.
+   */
+  maxShift: 0.05,
+  /**
+   * Radius (0 = center of the frame, 1 = top/bottom edge) inside which the image stays sharp.
+   * The car, the road ahead and the target being aimed at all live in here — readability first.
+   */
+  centerClear: 0.26,
+};
+
 export const RENDER = {
   maxPixelRatio: 1.5,
   /**
@@ -284,14 +356,25 @@ export const AUDIO = {
   turboVolume: 0.07,
   /** Turbo flutter ("stututu") level on throttle lift. Its own knob so it cuts through the engine. */
   turboFlutterVolume: 0.5,
-  /** Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke. */
-  tireVolume: 0.32,
+  /**
+   * Exhaust backfire ("pops and bangs") level. Short and heavily clipped, so it is meant to sit
+   * hot and push the master limiter — that momentary duck of the engine is part of the impact.
+   */
+  backfireVolume: 0.9,
+  /**
+   * Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke.
+   * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
+   * there and not from this knob — raising this only makes a slide loud.
+   */
+  tireVolume: 0.26,
   /** Per-car electric hover hum level. Deliberately near-silent. */
   humVolume: 0.05,
   /** Lightning zap one-shot level. */
   lightningVolume: 0.55,
   /** Electric-vehicle-out-of-service (power-down) one-shot level. */
   shutdownVolume: 0.5,
+  /** Near-miss whoosh level. Scaled down further by how good the pass was. */
+  nearMissVolume: 0.45,
   /** Nitro spool whoosh level. */
   nitroVolume: 0.4,
   /**
@@ -313,9 +396,17 @@ export const AUDIO = {
 };
 
 /**
- * Background theme song + beat-reactive lighting. The track loops quietly under the game and
- * its low-frequency (kick/bass) energy is tapped to gently pulse the arena lights. Everything
- * here is deliberately understated: the song sets the mood, it does not run the light show.
+ * Background theme song + music-reactive lighting. The track loops quietly under the game and
+ * its spectrum is split into three bands, each with its own envelope, so different families of
+ * lights move to different parts of the song instead of all flashing together:
+ *
+ *   bass   kick and sub          punchy, hangs on the hit   -> the main neon mass, halos
+ *   mid    snare, chords, body   late and wide, a swell     -> facades, breathing signs, board
+ *   high   hats and shimmer      in and out in a frame      -> stutter tubes, roof beacons
+ *
+ * plus a very slow loudness follower (`energy`) that moves at the scale of bars, not hits, and
+ * drives only the two scene lights. Everything here is deliberately understated: the song sets
+ * the mood, it does not run the light show.
  */
 export const THEME = {
   /** Path (served from public/) of the looping theme track. */
@@ -325,23 +416,81 @@ export const THEME = {
   /** Seconds to fade the track in when it first starts, so it does not stab in. */
   fadeInSeconds: 2.5,
   /**
-   * Beat sensitivity. The raw bass energy above its rolling average is divided by this to get
-   * a 0..1 pulse; smaller = twitchier, larger = calmer. Tuned so ordinary bass sits low and
-   * only kicks push toward 1.
+   * The three analysis bands. Each is measured independently: the mean level in its frequency
+   * window is compared to its own rolling baseline, the excess divided by `gain` to get 0..1,
+   * then smoothed with its own attack/release. The envelopes are what give each group of lights
+   * its own pacing — bass snaps and hangs, mid arrives late and lingers, high ticks.
+   *
+   * `loHz`/`hiHz` are real frequencies; the analyser maps them to bins from the live sample
+   * rate, so the split survives a 48 kHz device. `baselineRate` is how fast the band forgets
+   * (per frame): slow enough to average over a bar, fast enough to track a section change.
    */
-  beatGain: 28,
-  /** How fast the beat value rises toward a new peak (0..1 per frame-ish). High = snappy hits. */
-  beatAttack: 0.7,
-  /** How fast the beat value falls between hits. Low = a slow, breathing decay. */
-  beatRelease: 0.12,
+  bands: {
+    /** Kick and sub. Snaps up, decays over ~half a second. */
+    bass: { loHz: 40, hiHz: 190, gain: 26, attack: 0.72, release: 0.1, baselineRate: 0.05 },
+    /** Snare, chords, vocal body. Rises slowly and lets go slowly: a swell behind the kick. */
+    mid: { loHz: 260, hiHz: 1800, gain: 20, attack: 0.2, release: 0.045, baselineRate: 0.04 },
+    /** Hats, rides, transients. Nearly instant both ways, so it reads as a tick, not a pulse. */
+    high: { loHz: 2600, hiHz: 9000, gain: 15, attack: 0.9, release: 0.34, baselineRate: 0.09 },
+  },
+  /** Mean bin level (0..255) across the mix treated as `energy` 1.0. */
+  energyFull: 96,
+  /** How fast `energy` rises toward a louder section (per frame). Seconds, not beats. */
+  energyRise: 0.01,
+  /** How fast `energy` sags in a quiet section. Slower than the rise, so it holds a chorus. */
+  energyFall: 0.004,
   /**
-   * How far the beat is allowed to move the scene lights, as a fraction of each light's base
-   * value. 0.35 means a full-strength kick brightens a light by ~35%.
+   * How far `energy` is allowed to move the two scene lights, as a fraction of their base
+   * value. This is the slowest thing in the scene: the arena gets brighter through a chorus.
    */
-  lightDepth: 0.35,
+  lightDepth: 0.3,
   /**
-   * How hard the beat drives the emissive neon — the signs, window grids and glow that actually
-   * light this world. This is the one you feel: the whole city flashes brighter on a kick.
+   * How hard the bass drives the main neon mass — the static tubes, strips and window glow
+   * that light most of this world. This is the one you feel: the city thumps on the kick.
    */
   neonDepth: 0.6,
+  /** How hard the bass blooms the additive halos and wet light pools under the neon. */
+  glowDepth: 0.5,
+  /** How hard the mids lift the emissive facades. Slow and wide — whole buildings breathe. */
+  facadeDepth: 0.4,
+  /** How hard the mids lift the breathing signs (vertical signs, gate bars, hanging tubes). */
+  signDepth: 0.55,
+  /** How hard the highs tick the stutter neon: broken alley tubes and roof beacons. */
+  flickerDepth: 0.45,
+};
+
+/**
+ * Cruise mode (C): the car drives itself around `ArenaLayout.cruiseRoute` at a relaxed pace
+ * so the game can be left running as a scene. Tuned to look like driving, not like a rail:
+ * it lifts off before a corner, leans into it and picks the speed back up on the exit.
+ */
+export const CRUISE = {
+  /** Cruising speed on a straight (m/s). ~47 km/h. */
+  speed: 13,
+  /** Speed carried through a full corner or the plaza weave (m/s). ~25 km/h. */
+  cornerSpeed: 7,
+  /** Distance at which the next waypoint is selected (m). Also how early a corner is cut. */
+  arriveRadius: 7,
+  /** Distance over which the car eases off before the corner at the next waypoint (m). */
+  cornerLookahead: 26,
+  /** Turn angle at a waypoint that calls for the full slowdown (rad). 90 degrees. */
+  cornerFullTurn: Math.PI / 2,
+  /** Heading error that on its own calls for the full slowdown (rad). ~50 degrees. */
+  errorSlowdown: 0.9,
+  /** Steering input per radian of heading error. */
+  steerGain: 1.6,
+  /** Steering input subtracted per rad/s of yaw rate. Damps the weave on a long straight. */
+  yawDamping: 0.35,
+  /** Speed error tolerated before touching throttle or brake (m/s). Lets the car coast. */
+  speedDeadband: 0.4,
+  /** Throttle applied per m/s of missing speed. */
+  throttleGain: 0.35,
+  /** Brake applied per m/s of excess speed. Gentle: the corner is anticipated, not braked into. */
+  brakeGain: 0.45,
+  /** Speed below which the car counts as stopped for the stuck guard (m/s). */
+  stuckSpeed: 0.6,
+  /** Seconds at a standstill before the car backs out of whatever it is against. */
+  stuckTime: 1.2,
+  /** Seconds spent reversing on opposite lock when the stuck guard fires. */
+  reverseTime: 1,
 };

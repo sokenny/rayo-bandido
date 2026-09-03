@@ -5,9 +5,16 @@
  */
 
 import { clamp, clamp01, rightX, rightZ } from '../core/math';
+import { NITRO, VEHICLE } from '../config/tuning';
 
 /** Idle floor for the engine note (0..1), so a stopped engine still has a low rumble. */
 export const IDLE_RPM01 = 0.18;
+
+/**
+ * Speed (m/s) that maps to a speed fraction of 1: flat out with nitro lit. Everything that
+ * turns speed into a gearbox position divides by this, so they all agree on where redline is.
+ */
+export const REF_SPEED = VEHICLE.maxSpeed + NITRO.boostMaxSpeedBonus;
 
 /**
  * Fake automatic gearbox. Maps a speed fraction (|speed| / maxSpeed, may exceed 1 under nitro)
@@ -60,6 +67,20 @@ export function skidIntensity(lateralSpeed: number, speed: number, drifting: boo
   let i = clamp01((lateral - SKID.LATERAL_START) / (SKID.LATERAL_FULL - SKID.LATERAL_START));
   if (drifting && i < SKID.DRIFT_FLOOR) i = SKID.DRIFT_FLOOR;
   return i;
+}
+
+/**
+ * Fundamental (Hz) of the tire squeal for a given slide intensity and speed fraction.
+ *
+ * Squeal is a stick-slip oscillation: the tread grabs, stretches, releases, and repeats. It runs
+ * faster as the rubber is worked harder, so the pitch climbs with both slide angle and road
+ * speed — but speed only counts when the tire is actually sliding, which is why it is multiplied
+ * by intensity rather than added. The range is kept inside roughly 700-1500 Hz, where real tire
+ * squeal lives; going higher reads as a whistle rather than rubber.
+ */
+export function squealHz(intensity: number, speedFrac: number): number {
+  const i = clamp01(intensity);
+  return 700 + 520 * i + 300 * clamp01(speedFrac) * i;
 }
 
 /**

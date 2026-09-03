@@ -342,7 +342,9 @@ function tryFacade(
   const bandLen = width * (0.5 + rng() * 0.35);
   const bx = faceX + dx * 0.25;
   const bz = faceZ + dz * 0.25;
-  const t = rng() < 0.72 ? b.neon : b.neonPulse;
+  // Split roughly half and half between the bass-driven mass and the mid-driven breathers,
+  // so both bands have visible signage on every street rather than one dominating.
+  const t = rng() < 0.55 ? b.neon : b.neonPulse;
   t.color(c, 1);
   if (dx !== 0) t.tube(bx, bandY, cz - bandLen / 2, bx, bandY, cz + bandLen / 2, 0.3);
   else t.tube(cx - bandLen / 2, bandY, bz, cx + bandLen / 2, bandY, bz, 0.3);

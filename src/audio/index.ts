@@ -22,6 +22,8 @@ export interface SkidInput {
  *   car's hover hum, spatialized to the listener.
  * - `onEvent(ev)` for every `GameEvent`: fires one-shots (lightning zap, nitro whoosh, and the
  *   electric-car power-down when a target is destroyed).
+ * - `backfire(strength)` whenever the exhaust pops. The caller owns the trigger (see
+ *   `audio/backfire.ts`) so the bang and the flame at the tailpipes land on the same frame.
  * - `reset()` on restart.
  *
  * Browsers block audio until a user gesture, so the context stays suspended until the first
@@ -36,6 +38,8 @@ export interface AudioSystem {
     skid: SkidInput,
   ): void;
   onEvent(ev: GameEvent): void;
+  /** One exhaust pop/bang (0..1), fired from `createBackfireTrigger` in the composition root. */
+  backfire(strength: number): void;
   reset(): void;
   setMuted(muted: boolean): void;
   /** AudioContext state for QA/automation: 'suspended' | 'running' | 'closed' | 'unavailable'. */
@@ -47,6 +51,7 @@ export interface AudioSystem {
 const SILENT: AudioSystem = {
   update() {},
   onEvent() {},
+  backfire() {},
   reset() {},
   setMuted() {},
   status: () => 'unavailable',
@@ -87,6 +92,9 @@ export function createAudio(targetCount: number): AudioSystem {
         case 'targetDestroyed':
           oneShots.shutdown();
           break;
+        case 'nearMiss':
+          oneShots.nearMiss(ev.quality);
+          break;
         case 'nitroStart':
           engine.nitroWhoosh();
           break;
@@ -98,6 +106,10 @@ export function createAudio(targetCount: number): AudioSystem {
         default:
           break;
       }
+    },
+
+    backfire(strength) {
+      engine.backfire(strength);
     },
 
     reset() {
