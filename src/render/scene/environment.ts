@@ -1,0 +1,281 @@
+import * as THREE from 'three';
+import type { ArenaLayout } from '../../core/types';
+import { RENDER, THEME } from '../../config/tuning';
+import { PAL } from './env/palette';
+import { createBuilders } from './env/builders';
+import { buildCity } from './env/cityBuilder';
+import { buildProps } from './env/propsBuilder';
+import { createWantedBillboard } from './env/wantedBillboard';
+import {
+  makeAsphaltTexture,
+  makeBillboardTexture,
+  makeEnvTexture,
+  makeGlowTexture,
+  makeSignAtlas,
+  makeSkyTexture,
+  makeWindowTexture,
+} from './env/textures';
+import type { MeshBuilder } from './env/meshBuilder';
+
+/**
+ * The Rayo Bandido arena: a compact nocturnal block of city built entirely from the rectangles
+ * in `src/world/arenaLayout.ts`, so what you can see and what you can crash into are the same
+ * data. This module also owns the scene background, fog and the only two lights in the game.
+ *
+ * HOW IT STAYS CHEAP
+ * - Everything is merged into fifteen BufferGeometries, one per material: fifteen draw calls
+ *   for the whole city (see `env/builders.ts`).
+ * - All lighting is baked into emissive textures and unlit neon. One hemisphere light and one
+ *   directional light do the rest; there are no point lights and no shadow maps.
+ * - Textures are drawn procedurally into small canvases at start-up. Nothing is loaded.
+ * - `update()` only nudges three material colours and two texture offsets. No allocation.
+ *
+ * THE THREE ZONES (docs/VISUAL_DIRECTION.md)
+ * - Corporate highway, west: 20 m of clean asphalt, guardrails, cold white towers, neon route
+ *   gates and a holographic billboard. This is the long straight the player spawns on.
+ * - Urban streets, north and centre: modular mid-rise with emissive window grids, cyan and
+ *   magenta kanji signs, overhead cables and a 50 x 50 m plaza to drift in.
+ * - JDM alley, south-east: low garages in acid green, containers, drums, pipes, AC units,
+ *   graffiti panels and a 10 m service alley you can cut through.
+ */
+export interface EnvironmentVisual {
+  root: THREE.Group;
+  /**
+   * Called once per render frame for cheap animation (blinking signs, holograms).
+   * `beat` (0..1) is the theme song's kick/bass energy; it subtly lifts the lights and neon so
+   * the arena breathes with the music. Pass 0 (the default) for no music-reactive movement.
+   */
+  update(frameDt: number, time: number, beat?: number): void;
+  dispose(): void;
+}
+
+export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): EnvironmentVisual {
+  const root = new THREE.Group();
+  root.name = 'environment';
+  scene.add(root);
+
+  /* ---------------------------------------------------------------- atmosphere + light */
+
+  const skyTex = makeSkyTexture();
+  const envTex = makeEnvTexture();
+  scene.background = skyTex;
+  scene.backgroundIntensity = 1;
+  scene.environment = envTex;
+  // Enough to give the wet asphalt a sheen and to keep the blue in the shadows.
+  scene.environmentIntensity = 0.95;
+  // The haze starts close and closes fast: distance should dissolve into blue, not into black.
+  scene.fog = new THREE.Fog(PAL.fog, RENDER.fogNear, RENDER.fogFar);
+
+  // Deep teal sky bounce over a blue-grey ground bounce. This is the "not pitch dark" light:
+  // it never goes to black underneath anything, so shadowed geometry still reads as blue.
+  const hemi = new THREE.HemisphereLight(0x5aa0d4, 0x2a3f50, 2.5);
+  root.add(hemi);
+  // A single cold key from high north-west; no shadows, they are not worth the frame time.
+  const key = new THREE.DirectionalLight(0x8fb8e8, 0.5);
+  key.position.set(-70, 110, -50);
+  root.add(key);
+
+  /* ---------------------------------------------------------------- textures */
+
+  const asphaltTex = makeAsphaltTexture(PAL.asphalt, 7);
+  // Fewer, larger, softer windows. A tower should read as a couple of glowing bands seen
+  // through haze, not as a hundred individual pixels fighting each other for attention.
+  const winCorp = makeWindowTexture({
+    facade: PAL.facadeCorp,
+    lights: [PAL.winCold, PAL.winCyan, PAL.winCold],
+    cols: 5,
+    rows: 5,
+    lit: 0.2,
+    seed: 11,
+  });
+  const winUrban = makeWindowTexture({
+    facade: PAL.facadeUrban,
+    lights: [PAL.winWarm, PAL.winCyan, PAL.winCold],
+    cols: 4,
+    rows: 4,
+    lit: 0.26,
+    seed: 23,
+  });
+  const winJdm = makeWindowTexture({
+    facade: PAL.facadeJdm,
+    lights: [PAL.winWarm, PAL.winCyan],
+    cols: 4,
+    rows: 3,
+    lit: 0.18,
+    seed: 37,
+  });
+  const signTex = makeSignAtlas();
+  const glowTex = makeGlowTexture();
+  const billTexA = makeBillboardTexture(0);
+  const billTexB = makeBillboardTexture(1);
+  const textures = [skyTex, envTex, asphaltTex, winCorp, winUrban, winJdm, signTex, glowTex, billTexA, billTexB];
+
+  /* ---------------------------------------------------------------- materials */
+
+  const facade = (map: THREE.Texture, intensity: number): THREE.MeshStandardMaterial =>
+    new THREE.MeshStandardMaterial({
+      map,
+      emissive: 0xffffff,
+      emissiveMap: map,
+      emissiveIntensity: intensity,
+      roughness: 0.82,
+      metalness: 0.08,
+    });
+
+  const roadMat = new THREE.MeshStandardMaterial({
+    map: asphaltTex,
+    vertexColors: true,
+    // Wetter than before: a low roughness smears the sky and the neon into long reflections,
+    // which is what carries the mood in the reference instead of individual light sources.
+    roughness: 0.24,
+    metalness: 0.5,
+  });
+  const laneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04 });
+  const corpMat = facade(winCorp, 0.85);
+  const urbanMat = facade(winUrban, 0.9);
+  const jdmMat = facade(winJdm, 0.75);
+  const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+  const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
+  const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  const neonPulseMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  const neonFlickerMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: glowTex,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+    // `fog` is left at its default (on) on purpose: far-off halos take the haze colour and
+    // sink into the horizon instead of punching through it as bright specks.
+    fog: true,
+  });
+  const signMat = new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false });
+  const billMatA = new THREE.MeshBasicMaterial({ map: billTexA, toneMapped: false });
+  const billMatB = new THREE.MeshBasicMaterial({ map: billTexB, toneMapped: false });
+  const materials = [
+    roadMat,
+    laneMat,
+    concreteMat,
+    corpMat,
+    urbanMat,
+    jdmMat,
+    roofMat,
+    propsMat,
+    neonMat,
+    neonPulseMat,
+    neonFlickerMat,
+    glowMat,
+    signMat,
+    billMatA,
+    billMatB,
+  ];
+
+  /* ---------------------------------------------------------------- geometry */
+
+  const b = createBuilders();
+  buildCity(b, layout.bounds);
+  buildProps(b);
+
+  const geometries: THREE.BufferGeometry[] = [];
+  const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
+    if (builder.empty) return;
+    const geo = builder.build();
+    geometries.push(geo);
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.name = name;
+    mesh.renderOrder = order;
+    // Each mesh spans the whole arena, so a frustum test can never reject one.
+    mesh.frustumCulled = false;
+    root.add(mesh);
+  };
+
+  add(b.concrete, concreteMat, 'env-concrete');
+  add(b.road, roadMat, 'env-road');
+  add(b.lane, laneMat, 'env-lanes');
+  add(b.corp, corpMat, 'env-facade-corporate');
+  add(b.urban, urbanMat, 'env-facade-urban');
+  add(b.jdm, jdmMat, 'env-facade-jdm');
+  add(b.roof, roofMat, 'env-roofs');
+  add(b.props, propsMat, 'env-props');
+  add(b.signs, signMat, 'env-signs', 1);
+  add(b.billA, billMatA, 'env-billboard-a', 1);
+  add(b.billB, billMatB, 'env-billboard-b', 1);
+  add(b.neon, neonMat, 'env-neon', 1);
+  add(b.neonPulse, neonPulseMat, 'env-neon-pulse', 1);
+  add(b.neonFlicker, neonFlickerMat, 'env-neon-flicker', 1);
+  add(b.glow, glowMat, 'env-glow', 2);
+
+  /* ------------------------------------------------- wanted billboard (plaza) */
+
+  const wantedBoard = createWantedBillboard();
+  root.add(wantedBoard.group);
+
+  /* ---------------------------------------------------------------- animation */
+
+  let flickerSlot = -1;
+  let flickerValue = 1;
+
+  // Base levels the beat modulates around, captured so the music never drifts them.
+  const hemiBase = hemi.intensity;
+  const keyBase = key.intensity;
+  const corpBase = corpMat.emissiveIntensity;
+  const urbanBase = urbanMat.emissiveIntensity;
+  const jdmBase = jdmMat.emissiveIntensity;
+
+  return {
+    root,
+    update(frameDt: number, time: number, beat = 0) {
+      // Music-reactive lift. Small, positive-only nudges so the scene brightens on a kick and
+      // eases back — never darker than its resting state, never a strobe.
+      const lightLift = 1 + THEME.lightDepth * beat;
+      hemi.intensity = hemiBase * lightLift;
+      key.intensity = keyBase * lightLift;
+      // The emissive city is what actually lights this world, so it reacts hardest to the beat.
+      // `neonBeat` is a >=1 brightness multiplier that spikes on a kick and settles back to 1.
+      const neonBeat = 1 + THEME.neonDepth * beat;
+      const facadeLift = 1 + THEME.neonDepth * 0.6 * beat;
+      corpMat.emissiveIntensity = corpBase * facadeLift;
+      urbanMat.emissiveIntensity = urbanBase * facadeLift;
+      jdmMat.emissiveIntensity = jdmBase * facadeLift;
+
+      // The bulk of the neon (all the static signs, tubes and window glow) flashes on the kick.
+      neonMat.color.setScalar(neonBeat);
+      // Breathing neon: signs and gate bars. The slow sine breath, scaled up on the beat.
+      neonPulseMat.color.setScalar((0.68 + 0.32 * Math.sin(time * 1.7)) * neonBeat);
+      // Stuttering neon: broken alley tubes and aircraft beacons on the towers.
+      // Deliberately lazy: a slow slot and a shallow dip, so broken tubes breathe rather than
+      // strobe. Fast stutter is the fastest way to make a night scene feel busy.
+      const slot = Math.floor(time * 2.2);
+      if (slot !== flickerSlot) {
+        flickerSlot = slot;
+        const h = Math.abs(Math.sin(slot * 12.9898) * 43758.5453) % 1;
+        flickerValue = h < 0.1 ? 0.45 : h < 0.2 ? 0.75 : 1;
+      }
+      neonFlickerMat.color.setScalar(flickerValue * neonBeat);
+      // Wet reflections and light pools: a gentle shimmer in opacity, and the additive glow
+      // itself blooms brighter on the beat (via colour, so it isn't clamped by the opacity cap).
+      glowMat.opacity = 0.86 + 0.1 * Math.sin(time * 0.8);
+      glowMat.color.setScalar(1 + THEME.neonDepth * 0.8 * beat);
+      // Holographic billboards scroll in opposite directions.
+      billTexA.offset.y = (billTexA.offset.y + frameDt * 0.035) % 1;
+      billTexB.offset.y = (billTexB.offset.y - frameDt * 0.026 + 1) % 1;
+      // The plaza WANTED board strobes subtly and lifts on the beat.
+      wantedBoard.update(time, beat);
+    },
+    dispose() {
+      wantedBoard.dispose();
+      scene.remove(root);
+      if (scene.background === skyTex) scene.background = null;
+      if (scene.environment === envTex) scene.environment = null;
+      scene.fog = null;
+      for (const g of geometries) g.dispose();
+      for (const m of materials) m.dispose();
+      for (const t of textures) t.dispose();
+      hemi.dispose();
+      key.dispose();
+    },
+  };
+}

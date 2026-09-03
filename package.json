@@ -1,0 +1,27 @@
+{
+  "name": "rayo-bandido",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Rayo Bandido - browser arcade drift game (JDM x cyberpunk) built with Three.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "qa": "node scripts/qa-drive.mjs",
+    "qa:headed": "node scripts/qa-drive.mjs --headed"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "puppeteer-core": "^23.11.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.4"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "url": "http://127.0.0.1:5173/?debug=1",
+  "executablePath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "headed": false,
+  "checks": {
+    "spawnFullNitro": true,
+    "spawnZeroCharge": true,
+    "atLeastThreeTargets": true,
+    "accelerates": true,
+    "noChargeWithoutDrift": true,
+    "driftActivates": true,
+    "chargeFromDrift": true,
+    "nitroDrains": true,
+    "nitroBoostsSpeed": true,
+    "nitroRecharges": false,
+    "targetAvailable": true,
+    "chargeGrantedForQa": true,
+    "targetAcquiredInCone": true,
+    "fireConsumesCharge": true,
+    "moneyIncreases": true,
+    "destroyedIncrements": true,
+    "noDuplicateReward": true,
+    "restartResets": true,
+    "responsiveAfterStress": true,
+    "noConsoleErrors": true
+  },
+  "metrics": {
+    "maxSlipDeg": 81.46248370102553,
+    "chargeAfterDrift": 12.832586589832236,
+    "nitroAfterBoost": 94.39999999999998,
+    "nitroAfterRecharge": 57.99999999999983,
+    "stressSeconds": 14.833333333333636,
+    "fpsAfterStress": 325.80451728962424,
+    "fpsDrivingAvg": 325.9564675287087,
+    "fpsDrivingMin": 233.83314617874356,
+    "frameMsDriving": 3.313888888888885,
+    "drawCalls": 30,
+    "triangles": 17288,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+    "gpu": "ANGLE (Intel, Intel(R) Graphics (0x00007D67) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  "screenshots": [
+    "artifacts\\01-spawn.png",
+    "artifacts\\02-driving.png",
+    "artifacts\\03-drift.png",
+    "artifacts\\04-nitro.png",
+    "artifacts\\05-lightning.png",
+    "artifacts\\06-destroyed.png",
+    "artifacts\\07-restart.png",
+    "artifacts\\08-stress.png"
+  ],
+  "consoleErrors": []
+}
