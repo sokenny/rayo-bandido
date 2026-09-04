@@ -40,6 +40,8 @@ import type { MeshBuilder } from './env/meshBuilder';
  */
 export interface EnvironmentVisual {
   root: THREE.Group;
+  /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
+  ready: Promise<void>;
   /**
    * Called once per render frame for cheap animation (blinking signs, holograms).
    * `music` carries the theme song's four levels; each drives a different family of lights, so
@@ -228,6 +230,7 @@ export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): Envi
 
   return {
     root,
+    ready: wantedBoard.ready,
     update(frameDt: number, time: number, music: MusicBands = SILENT_MUSIC) {
       // Music-reactive lift, in three layers that deliberately do NOT move together. Every
       // term is positive-only, so the scene brightens off its resting state and eases back —

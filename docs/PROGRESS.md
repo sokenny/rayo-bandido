@@ -122,6 +122,55 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
 
 ## Updates
 
+### 2026-09-04 12:30 — Performance audit: loading screen, GPU warm-up, resolution governor, perf probe
+
+- **Root cause of the early-frame glitches.** Three compiles a material's shader the first time an
+  object using it is drawn, and most effects start hidden. So the first drift (smoke, skid marks),
+  the first boost (flames, trail, speed blur) and the first shot (bolt, sparks, rings, score pop)
+  each stalled for a compile; the sign atlas, sky cubemap and environment PMREM were built on the
+  first frame; and the WANTED board re-rasterized its 1024 px canvas and re-uploaded it a moment
+  after start when the portrait image arrived. Measured with the new probe on the previous commit:
+  19 programs at start, 27 after the first shot, worst frame 33 ms during the first lightning.
+- **Fix: loading screen + warm-up.** `index.html` carries a static loading screen (inline CSS,
+  compositor-animated shimmer, so it paints before the bundle arrives and keeps moving while the
+  city is built). `src/main.ts` boots in stages: build (`createGame`), `warmUp` (compile every
+  material including hidden ones via `renderer.compileAsync`, wait for the portrait, one render with
+  every object forced visible to upload buffers/textures and build the cubemaps, warm the speed-blur
+  pass), then `start`. `src/render/warmup.ts`, `src/ui/loadingScreen.ts`. The billboard now draws
+  its panel exactly once (`wantedBillboard.ready`, 2.5 s timeout).
+- **Resolution governor** (`src/render/adaptiveResolution.ts`, `RENDER.*` in tuning, 11 tests):
+  render scale starts at `min(dpr, 1.5)` and steps down x0.85 (floor 0.7) when the display drops
+  frames on the GPU for 1.5 s; steps back up with measured headroom; ignores CPU-bound frames,
+  hitches and the second after any change. `?scale=` pins it; `__rb.scale()` reads/sets it.
+- **Measurement foundation.** `src/core/loop.ts` times sim and render per frame;
+  `src/render/gpuTimer.ts` reads real GPU frame time via `EXT_disjoint_timer_query_webgl2`; the
+  debug overlay shows `cpu sim/render`, `gpu`, program count and render scale. `npm run perf`
+  (`scripts/perf-probe.mjs`) records startup long tasks and `performance.measure` stages, the worst
+  frame while each effect first appears, programs compiled per phase and CPU/GPU ms; `--headed`
+  for vsync-limited numbers, `--url` for the production build. `.claude/launch.json` gained a
+  `rayo-bandido-preview` config.
+- **Results** (Intel integrated graphics, Chrome 152, 1600x900; headless is capped at 240 Hz so
+  averages are headroom, worst frames and program counts are the comparison):
+
+  | | Before | After |
+  | --- | --- | --- |
+  | Programs compiled during play (after the first frame) | 8 (19 -> 27) | 0 (28 at start) |
+  | Worst frame, first lightning shot | 33.3 / 16.7 ms | 8.3 / 8.4 ms |
+  | Worst frame, first drift | 8.3 ms | 4.4 ms |
+  | Worst frame over the whole scripted session | 33.3 ms | 12.5 ms (idle, right after the fade) |
+  | Main-thread work before the first playable frame | 940 ms cold / 241 ms warm, on screen | 555-621 ms cold / 192 ms warm, behind the loading screen |
+  | Steady state, production build | - | cpu 0.3 ms + gpu 2.4 ms per frame at scale 1.0, 28-48 draws, 16.5-17.3k tris |
+
+  Start-up breakdown (prod, cold): renderer/context 175 ms, environment 54 ms, audio 45 ms,
+  compile 218 ms, warm render 99 ms. All of it now happens under the loading screen.
+- **QA script**: waits for `__rb.ready()`, and `accelerates` judges the fastest sample (the
+  240-tick throttle ends exactly at the last sample). `driftActivates`, `chargeFromDrift` and
+  `nitroRecharges` fail on this commit and on the previous one alike: the scripted drift inputs
+  predate the current vehicle tuning (max slip 1.7 deg). Left for the drift hand-feel pass.
+- Verification: `npm run typecheck`, `npm test` (165 passed), `npm run build`, `npm run perf`
+  on dev and on the preview build (2 runs each), `npm run perf:headed`, `npm run qa`; loading
+  screen and game checked in the in-app browser with no console errors.
+
 ### 2026-09-03 20:25 — Near miss points (sim + hud + audio)
 
 - New rule: shaving past an electric car at speed without touching it pays money. `src/sim/nearMiss.ts`

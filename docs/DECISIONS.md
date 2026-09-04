@@ -38,6 +38,8 @@ These values may be tuned without asking Juan. Keep them centralized.
 | Nitro recharge | Recharge while moving and not boosting; no recharge while stationary |
 | Auto-aim cone | Approximately 35° either side of forward direction |
 | Auto-aim range | Approximately 45 world meters |
+| Render scale | Starts at `min(devicePixelRatio, 1.5)`; the resolution governor may step it down to 0.7 (x0.85 per notch) while frames are dropped on the GPU, and back up with headroom. `?scale=` pins it |
+| Start-up | Loading screen until every shader is compiled and every texture uploaded (`warmUp` in `src/game.ts`); the WANTED portrait is waited for up to 2.5 s so the board is drawn once |
 | Target reward | 100 currency units |
 | Arena | Compact loop or several connected city blocks |
 | Targets | At least 3 simultaneously available electric vehicles |

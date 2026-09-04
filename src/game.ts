@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createArenaLayout } from './world/arenaLayout';
 import type { GameEvent, GameState, HudSnapshot, PlayerCommand } from './core/types';
-import { SIM_STEP, CAMERA, LIGHTNING, NITRO } from './config/tuning';
+import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
 import { createGameLoop, type GameLoop } from './core/loop';
 import { createKeyboardInput, createPlayerCommand } from './core/input/keyboard';
 import { createInitialGameState, stepGame } from './sim/gameState';
@@ -14,8 +14,12 @@ import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarV
 import { createChaseCamera, type CameraPose } from './render/camera/chaseCamera';
 import { createEffects } from './render/fx';
 import { interpolateVehicle, syncCar, syncTargets, type InterpolatedPose } from './render/sync';
+import { createGpuTimer } from './render/gpuTimer';
+import { createResolutionGovernor } from './render/adaptiveResolution';
+import { compileScene, warmRender } from './render/warmup';
 import { createHud } from './ui/hud';
-import { createDebugOverlay } from './ui/debugOverlay';
+import { createDebugOverlay, type DebugFrameInput } from './ui/debugOverlay';
+import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
 import { createAudio } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
@@ -24,8 +28,18 @@ import { msToKmh } from './core/math';
 /**
  * Composition root. Wires input -> simulation -> presentation without letting any of
  * those layers know about each other. Exposes `window.__rb` for browser automation/QA.
+ *
+ * START-UP (see `src/main.ts`): `createGame` builds everything synchronously, `warmUp` then
+ * pays every one-time GPU cost behind the loading screen (shader compiles, texture uploads,
+ * the environment cubemaps), and only then does `start` begin the frame loop. Each stage is
+ * bracketed with `performance.mark/measure` so `npm run perf` can report where the time went.
  */
 export interface Game {
+  /**
+   * Compile every shader and upload every buffer before the first visible frame. Optional
+   * but strongly recommended: without it the first drift, boost and shot each hitch.
+   */
+  warmUp(loading?: LoadingScreen): Promise<void>;
   start(): void;
   stop(): void;
   dispose(): void;
@@ -33,17 +47,37 @@ export interface Game {
   readonly loop: GameLoop;
 }
 
+/** `performance.measure` wrapper: start a mark and return a function that closes it. */
+function measure(name: string): () => void {
+  const startMark = `rb:${name}:start`;
+  performance.mark(startMark);
+  return () => {
+    performance.measure(`rb:${name}`, startMark);
+  };
+}
+
 export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debugRoot: HTMLElement): Game {
+  const endTotal = measure('create');
+  const params = new URLSearchParams(location.search);
+
   const layout = createArenaLayout();
   const state = createInitialGameState(layout);
   const command: PlayerCommand = createPlayerCommand();
   const input = createKeyboardInput(window);
 
+  let end = measure('renderer');
   const renderer = createRenderer(canvas);
+  end();
   // Nitro speed blur. Transparent when the boost is cold: it just calls renderer.render().
   const speedBlur = createSpeedBlur(renderer);
+  const gpuTimer = createGpuTimer(renderer);
   const scene = new THREE.Scene();
+
+  end = measure('environment');
   const environment = createEnvironment(scene, layout);
+  end();
+
+  end = measure('vehicles');
   const car = createCarVisual();
   scene.add(car.root);
   const targetVisuals: ElectricCarVisual[] = [];
@@ -52,16 +86,58 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     scene.add(vis.root);
     targetVisuals.push(vis);
   }
+  end();
+
   const chase = createChaseCamera(window.innerWidth / window.innerHeight);
+
+  end = measure('effects');
   const effects = createEffects(scene);
+  end();
+
+  end = measure('audio');
   const audio = createAudio(state.targets.length);
-  const hud = createHud(hudRoot);
-  const debug = createDebugOverlay(debugRoot, new URLSearchParams(location.search).has('debug'));
   // Background theme song. Loops quietly and feeds a per-band music signal to the arena
   // lighting, so bass, mids and highs each drive a different family of lights.
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
   theme.arm(window);
+  end();
+
+  end = measure('hud');
+  const hud = createHud(hudRoot);
+  const debug = createDebugOverlay(debugRoot, params.has('debug'));
+  end();
+
+  /* ------------------------------------------------------------ render scale */
+
+  // Starts where `createRenderer` put it; the governor only ever moves it from there.
+  const startRatio = renderer.getPixelRatio();
+  const governor = createResolutionGovernor({
+    startRatio,
+    minRatio: Math.min(startRatio, RENDER.minPixelRatio),
+    stepFactor: RENDER.resolutionStep,
+    downMs: RENDER.resolutionDownMs,
+    upMs: RENDER.resolutionUpMs,
+    gpuUpMs: RENDER.resolutionGpuUpMs,
+    gpuIdleMs: RENDER.resolutionGpuIdleMs,
+    downWindowSeconds: RENDER.resolutionDownWindow,
+    upWindowSeconds: RENDER.resolutionUpWindow,
+    settleSeconds: RENDER.resolutionSettle,
+    hitchMs: RENDER.resolutionHitchMs,
+    enabled: RENDER.adaptiveResolution,
+  });
+
+  function applyPixelRatio(ratio: number): void {
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
+
+  // `?scale=1` pins the render scale for A/B testing and screenshots.
+  const scaleParam = Number(params.get('scale'));
+  if (scaleParam > 0) {
+    governor.set(scaleParam, true);
+    applyPixelRatio(governor.ratio);
+  }
 
   const pose: InterpolatedPose = { x: 0, z: 0, heading: 0 };
   const cameraPose: CameraPose = { x: 0, z: 0, heading: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false };
@@ -88,9 +164,11 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     nitroRecharging: false,
     cruising: false,
   };
+  const debugInput: DebugFrameInput = { simMs: 0, renderMs: 0, gpuMs: -1, pixelRatio: startRatio, governor: governor.status };
   let lastNitroAmount = state.nitro.amount;
   let nitroVisual = 0;
   let simTime = 0;
+  let ready = false;
   // Exhaust pops. One trigger feeds both the bang and the flame so they land on the same frame.
   const backfire = createBackfireTrigger();
 
@@ -181,6 +259,12 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   }
 
   function render(alpha: number, frameDt: number): void {
+    // Last frame's main-thread cost; this frame's is not known until it ends.
+    const stats = loop.stats;
+    const gpuMs = gpuTimer.available ? gpuTimer.ms : -1;
+    const next = governor.update(frameDt * 1000, stats.simMs + stats.renderMs, gpuMs);
+    if (next !== null) applyPixelRatio(next);
+
     const v = state.vehicle;
     nitroVisual += ((state.nitro.active ? 1 : 0) - nitroVisual) * Math.min(1, frameDt * 8);
     fillCameraPose(alpha);
@@ -239,14 +323,22 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     lastNitroAmount = state.nitro.amount;
     hud.update(snapshot);
 
+    gpuTimer.begin();
     speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed));
-    debug.update(frameDt, renderer);
+    gpuTimer.end();
+
+    debugInput.simMs = stats.simMs;
+    debugInput.renderMs = stats.renderMs;
+    debugInput.gpuMs = gpuMs;
+    debugInput.pixelRatio = renderer.getPixelRatio();
+    debugInput.governor = governor.status;
+    debug.update(frameDt, renderer, debugInput);
   }
 
   const loop = createGameLoop({ simulate, render }, SIM_STEP);
 
   function onResize(): void {
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    applyPixelRatio(governor.ratio);
     chase.resize(window.innerWidth / window.innerHeight);
   }
   window.addEventListener('resize', onResize);
@@ -254,10 +346,31 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   // Initial camera placement.
   fillCameraPose(1);
   chase.snap(cameraPose);
+  endTotal();
 
   const game: Game = {
     state,
     loop,
+    async warmUp(loading) {
+      const target = { renderer, scene, camera: chase.camera };
+      loading?.set('COMPILING SHADERS', 0.5);
+      await loading?.paint();
+      let endStage = measure('compile');
+      await compileScene(target);
+      endStage();
+
+      loading?.set('WARMING UP', 0.8);
+      await loading?.paint();
+      endStage = measure('portrait');
+      await environment.ready;
+      endStage();
+      endStage = measure('warm-render');
+      warmRender(target);
+      speedBlur.warm();
+      endStage();
+      loading?.set('READY', 1);
+      ready = true;
+    },
     start() {
       loop.start();
     },
@@ -278,6 +391,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       car.dispose();
       environment.dispose();
       speedBlur.dispose();
+      gpuTimer.dispose();
       renderer.dispose();
     },
   };
@@ -292,6 +406,18 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     scene,
     audio,
     theme,
+    /** True once the warm-up has finished and the loop may run without first-use hitches. */
+    ready() {
+      return ready && loop.running;
+    },
+    /** Render scale controls: read with no argument, pin with one. */
+    scale(ratio?: number) {
+      if (ratio !== undefined) {
+        governor.set(ratio, true);
+        applyPixelRatio(governor.ratio);
+      }
+      return { ratio: renderer.getPixelRatio(), status: governor.status };
+    },
     /** Override the keyboard for one or more ticks (used by browser automation). */
     inject(partial: Partial<PlayerCommand>, ticks = 1) {
       injectQueue.push({ partial, ticks });

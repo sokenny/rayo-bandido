@@ -368,6 +368,29 @@ export const SPEED_BLUR = {
 export const RENDER = {
   maxPixelRatio: 1.5,
   /**
+   * Resolution governor (`src/render/adaptiveResolution.ts`). The render scale starts at
+   * `min(devicePixelRatio, maxPixelRatio)` and steps down by `resolutionStep` whenever the
+   * display is dropping frames for `resolutionDownWindow` seconds, never below
+   * `minPixelRatio`. It climbs back one notch at a time once there is measured headroom.
+   * `?scale=1` locks a scale for testing; `adaptiveResolution: false` turns it off.
+   */
+  adaptiveResolution: true,
+  minPixelRatio: 0.7,
+  resolutionStep: 0.85,
+  /** Average frame interval (ms) that counts as dropping frames under 60 Hz vsync. */
+  resolutionDownMs: 18.5,
+  /** Average frame interval (ms) that proves a high-refresh display has headroom. */
+  resolutionUpMs: 11,
+  /** GPU ms per frame that leave enough room to step the scale up one notch. */
+  resolutionGpuUpMs: 9,
+  /** GPU ms per frame under which the GPU is clearly not what is stalling. */
+  resolutionGpuIdleMs: 8,
+  resolutionDownWindow: 1.5,
+  resolutionUpWindow: 6,
+  resolutionSettle: 1.0,
+  /** Frames longer than this are hitches (compile, GC, tab switch), not load. */
+  resolutionHitchMs: 66,
+  /**
    * The haze is the mood. It starts early and closes fast so the skyline is always read
    * through blue air; anything past `fogFar` is pure fog colour, which is a lifted blue-teal,
    * never black.

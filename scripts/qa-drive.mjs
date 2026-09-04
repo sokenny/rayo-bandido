@@ -67,6 +67,8 @@ try {
 
   await page.goto(url, { waitUntil: 'load', timeout: 30000 });
   await page.waitForFunction(() => typeof window.__rb !== 'undefined', { timeout: 15000 });
+  // The loading screen warms the GPU before the loop starts; drive only once it is running.
+  await page.waitForFunction(() => !window.__rb.ready || window.__rb.ready(), { timeout: 30000 });
   await page.click('#game-canvas').catch(() => {});
   await sleep(800);
 
@@ -129,7 +131,9 @@ try {
     samples.push(await read());
   }
   const driving = samples[samples.length - 1];
-  results.checks.accelerates = driving.speedKmh > 60;
+  // The 240 injected ticks end at 4.0 s of sim time, right around the last sample; judge the
+  // acceleration on the fastest sample rather than on whichever side of the cut-off it lands.
+  results.checks.accelerates = Math.max(...samples.map((s) => s.speedKmh)) > 60;
   results.checks.noChargeWithoutDrift = driving.charge === 0;
   await shot('02-driving.png');
 

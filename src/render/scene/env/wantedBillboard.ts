@@ -206,17 +206,28 @@ function makeWantedTexture(): WantedTexture {
   const texture = new THREE.CanvasTexture(cv);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
-  redraw(null);
+  // Not drawn here: `createWantedBillboard` draws it exactly once, when it knows whether the
+  // portrait loaded. Drawing a fallback now and again on load would rasterize this 1024 px
+  // glow-heavy panel twice and re-upload it mid-game.
 
   return { texture, redraw };
 }
 
 export interface WantedBillboard {
   group: THREE.Group;
+  /**
+   * Resolves once the panel texture has been drawn: after the portrait loaded, every candidate
+   * failed, or `PORTRAIT_TIMEOUT_MS` passed. The loading screen waits on this so the board
+   * never re-rasterizes during play on a normal connection.
+   */
+  ready: Promise<void>;
   /** Subtle strobe. `time` is seconds, `swell` (0..1) is the mid band, which lifts it. */
   update(time: number, swell: number): void;
   dispose(): void;
 }
+
+/** How long start-up waits for the portrait before drawing the procedural fallback. */
+const PORTRAIT_TIMEOUT_MS = 2500;
 
 export function createWantedBillboard(): WantedBillboard {
   const group = new THREE.Group();
@@ -290,23 +301,40 @@ export function createWantedBillboard(): WantedBillboard {
   group.add(pool);
   disposables.push(poolGeo, poolMat);
 
-  // Load the real portrait if present, trying each format in turn; otherwise the procedural
-  // fallback stays. A failed load just advances to the next candidate.
+  // Load the real portrait if present, trying each format in turn. The panel is drawn once,
+  // as soon as the outcome is known: with the portrait, or with the procedural fallback when
+  // every candidate failed or the wait ran out. A portrait that arrives after the fallback
+  // (very slow connection) still gets composited in; that is the only case that redraws.
   const img = new Image();
   let urlIndex = 0;
-  const tryNextPortrait = (): void => {
-    if (urlIndex >= PORTRAIT_URLS.length) return;
+  let drawn = false;
+  let timeout = 0;
+  const tryNextPortrait = (): boolean => {
+    if (urlIndex >= PORTRAIT_URLS.length) return false;
     img.src = PORTRAIT_URLS[urlIndex++];
+    return true;
   };
-  img.onload = () => wanted.redraw(img);
-  img.onerror = tryNextPortrait;
-  tryNextPortrait();
+  const ready = new Promise<void>((resolve) => {
+    const finish = (portrait: HTMLImageElement | null): void => {
+      window.clearTimeout(timeout);
+      if (!drawn || portrait) wanted.redraw(portrait);
+      drawn = true;
+      resolve();
+    };
+    img.onload = () => finish(img);
+    img.onerror = () => {
+      if (!tryNextPortrait()) finish(null);
+    };
+    timeout = window.setTimeout(() => finish(null), PORTRAIT_TIMEOUT_MS);
+    tryNextPortrait();
+  });
 
   let flickerSlot = -1;
   let flickerValue = 1;
 
   return {
     group,
+    ready,
     update(time, swell) {
       // Slow breath plus an occasional dropped-frame stutter, lifted a little on the mids.
       const breath = 0.86 + 0.1 * Math.sin(time * 2.1);
@@ -323,6 +351,7 @@ export function createWantedBillboard(): WantedBillboard {
       poolMat.opacity = 0.09 * level;
     },
     dispose() {
+      window.clearTimeout(timeout);
       img.onload = null;
       img.onerror = null;
       for (const d of disposables) d.dispose();

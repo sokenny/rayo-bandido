@@ -32,6 +32,12 @@ export interface SpeedBlur {
    * copy nor the blur pass happens.
    */
   render(scene: THREE.Scene, camera: THREE.Camera, strength: number): void;
+  /**
+   * Pay the pass's one-time costs now (behind the loading screen): allocate the frame texture
+   * at the current drawing-buffer size and compile the blur shader, so the first boost does
+   * not hitch. Draws the blur at zero strength over whatever is on the canvas.
+   */
+  warm(): void;
   dispose(): void;
 }
 
@@ -158,23 +164,30 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     return texture;
   }
 
+  function blurPass(strength: number): void {
+    renderer.getDrawingBufferSize(size);
+    const texture = ensureFrame(size.x, size.y);
+    renderer.copyFramebufferToTexture(texture);
+
+    uniforms.uStrength.value = Math.min(strength, 1);
+    uniforms.uAspect.value = size.y > 0 ? size.x / size.y : 1;
+    // Keep the scene's own draw calls and triangles in `renderer.info` for the debug overlay:
+    // the blur pass adds to them instead of resetting them.
+    renderer.info.autoReset = false;
+    renderer.render(quadScene, quadCamera);
+    renderer.info.autoReset = true;
+  }
+
   return {
     render(scene, camera, strength) {
       // The scene always draws to the canvas exactly as it did before this pass existed.
       renderer.render(scene, camera);
       if (!(strength > MIN_STRENGTH)) return;
+      blurPass(strength);
+    },
 
-      renderer.getDrawingBufferSize(size);
-      const texture = ensureFrame(size.x, size.y);
-      renderer.copyFramebufferToTexture(texture);
-
-      uniforms.uStrength.value = Math.min(strength, 1);
-      uniforms.uAspect.value = size.y > 0 ? size.x / size.y : 1;
-      // Keep the scene's own draw calls and triangles in `renderer.info` for the debug overlay:
-      // the blur pass adds to them instead of resetting them.
-      renderer.info.autoReset = false;
-      renderer.render(quadScene, quadCamera);
-      renderer.info.autoReset = true;
+    warm() {
+      blurPass(0);
     },
 
     dispose() {

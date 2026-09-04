@@ -14,7 +14,8 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Append `?debug=1` to start with the performance overlay open.
+Open http://127.0.0.1:5173. Append `?debug=1` to start with the performance overlay open, and
+`?scale=1` (any 0.7-1.5) to pin the render scale instead of letting the resolution governor pick it.
 
 | Command | Purpose |
 | --- | --- |
@@ -24,6 +25,23 @@ Open http://127.0.0.1:5173. Append `?debug=1` to start with the performance over
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Vitest unit tests for the gameplay rules |
 | `npm run qa` | Automated browser drive: drives, drifts, fires, saves screenshots + metrics to `artifacts/` (needs the dev server running and Chrome or Edge installed) |
+| `npm run perf` | Performance probe: startup breakdown, worst frame while each effect appears for the first time, shaders compiled per phase, CPU/GPU ms per frame. Writes `artifacts/perf.json`. `npm run perf:headed` for vsync-limited numbers. Pass `--url http://127.0.0.1:4173/?debug=1` to probe the production build |
+
+## Performance
+
+Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md`. The foundations:
+
+- **Loading screen + warm-up** (`src/render/warmup.ts`): every shader is compiled and every texture
+  and buffer uploaded behind the loading screen, including the effects that start hidden. Nothing
+  compiles mid-play, so the first drift, boost and shot do not hitch. `npm run perf` proves it:
+  `programs` must not grow after the `idle` phase.
+- **Resolution governor** (`src/render/adaptiveResolution.ts`): the render scale starts at
+  `min(devicePixelRatio, 1.5)` and steps down while the display is dropping frames on the GPU, then
+  back up with measured headroom. It never reacts to CPU-bound frames or one-off hitches.
+- **Debug overlay** (F3): FPS, avg/worst frame, `cpu sim/render` ms, `gpu` ms from a timer query,
+  draw calls, triangles, program count, render scale. If `prog` rises during play, something
+  compiled a shader mid-game; fix it in the warm-up.
+- **Budgets**: ~30-50 draw calls, ~17k triangles, no per-frame allocation in sim, FX or HUD.
 
 ## Controls
 

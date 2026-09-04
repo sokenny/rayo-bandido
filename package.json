@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "qa": "node scripts/qa-drive.mjs",
-    "qa:headed": "node scripts/qa-drive.mjs --headed"
+    "qa:headed": "node scripts/qa-drive.mjs --headed",
+    "perf": "node scripts/perf-probe.mjs",
+    "perf:headed": "node scripts/perf-probe.mjs --headed"
   },
   "dependencies": {
     "three": "^0.170.0"
