@@ -174,3 +174,46 @@ describe('grip', () => {
     expect(v.speed).toBeCloseTo(0, 6);
   });
 });
+
+describe('body load signals', () => {
+  it('reports lateral acceleration toward the inside of the turn and matches v * yawRate', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 4);
+    cmd.steer = 0.5;
+    run(v, cmd, 1.5);
+
+    // Steering right: the tyres push the body toward its right (+), and in a settled turn
+    // that force is the centripetal one.
+    expect(v.yawRate).toBeGreaterThan(0);
+    expect(v.latAccel).toBeGreaterThan(2);
+    expect(v.latAccel).toBeCloseTo(v.speed * v.yawRate, 0);
+    expect(Math.abs(v.latAccel)).toBeLessThanOrEqual(VEHICLE.maxLatAccel + 0.5);
+
+    cmd.steer = -0.5;
+    run(v, cmd, 1.5);
+    expect(v.latAccel).toBeLessThan(-2);
+  });
+
+  it('reports braking as negative longitudinal acceleration and throttle as positive', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 3);
+    expect(v.longAccel).toBeGreaterThan(1);
+
+    cmd.throttle = 0;
+    cmd.brake = 1;
+    run(v, cmd, 0.5);
+    expect(v.longAccel).toBeLessThan(-VEHICLE.brakeDecel * 0.5);
+  });
+
+  it('leaves both signals at zero when the car is parked', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    run(v, cmd, 1);
+    expect(v.latAccel).toBe(0);
+    expect(v.longAccel).toBe(0);
+  });
+});

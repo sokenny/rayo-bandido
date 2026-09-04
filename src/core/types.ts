@@ -57,6 +57,14 @@ export interface VehicleState {
   lateralSpeed: number;
   /** Signed slip angle in radians between heading and velocity direction (0 when not moving). */
   slipAngle: number;
+  /**
+   * Acceleration felt by the body along its right axis (m/s^2), i.e. the lateral tyre force
+   * per unit mass. Positive = pushed toward the car's right (what a right-hand turn produces).
+   * Presentation-only signal: `src/render/scene/bodyAttitude.ts` turns it into body roll.
+   */
+  latAccel: number;
+  /** Acceleration along the forward axis (m/s^2) over the last tick, collisions included. */
+  longAccel: number;
   /** Current front wheel steering angle in radians (visual + physics). */
   steerAngle: number;
   /** Accumulated wheel rotation in radians for visuals. Wrapped to avoid unbounded growth. */

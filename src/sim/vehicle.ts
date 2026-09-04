@@ -28,6 +28,8 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
   v.prevHeading = v.heading;
   v.collided = false;
   v.collisionImpact = 0;
+  // Kept so step 6 can report the accelerations the body felt (see `latAccel`/`longAccel`).
+  const speedLastTick = v.speed;
 
   // --- 1. Body-frame velocity (re-derived so collision impulses are honoured). ---------
   const fx0 = forwardX(v.heading);
@@ -170,12 +172,18 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
   v.heading = wrapAngle(v.heading + yaw * dt);
 
   // --- 6. Lateral velocity: inertia keeps it in world space, grip bleeds it off. --------
+  // Rotating the body leaves the velocity pointing where it was, which shows up as lateral
+  // velocity; the grip term is the tyre force that pulls it back. That force is the only
+  // real lateral acceleration the body feels, so it is what `latAccel` reports.
   lateral -= speed * yaw * dt;
   const latAbs = lateral < 0 ? -lateral : lateral;
+  let latAccel = 0;
   if (latAbs > 1e-6) {
+    const latSign = lateral > 0 ? 1 : -1;
     const gripAccel = Math.min(latAbs * grip, latCap);
     const dv = Math.min(latAbs, gripAccel * dt);
-    lateral -= lateral > 0 ? dv : -dv;
+    lateral -= latSign * dv;
+    latAccel = (-latSign * dv) / dt;
   }
 
   // --- 7. Recompose and integrate. ------------------------------------------------------
@@ -191,6 +199,10 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
   v.speed = speed;
   v.lateralSpeed = lateral;
   v.slipAngle = Math.abs(speed) > VEHICLE.movingThreshold ? Math.atan2(lateral, Math.abs(speed)) : 0;
+  v.latAccel = latAccel;
+  // Measured against the previous tick's speed, so a collision impulse (applied after the
+  // last tick) reads as the hard deceleration it is.
+  v.longAccel = (speed - speedLastTick) / dt;
   if (!cmd.handbrake) v.wheelSpin = wrapAngle(v.wheelSpin + (speed / VEHICLE.wheelRadius) * dt);
   v.throttleApplied = nitroActive ? Math.max(throttle, VEHICLE.nitroIdleThrottle) : throttle;
   v.brakeApplied = brake;

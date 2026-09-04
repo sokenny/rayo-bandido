@@ -44,7 +44,8 @@ describe('player car visual', () => {
 
       const budget = measure(car.root);
       expect(budget.triangles).toBeLessThan(8000);
-      expect(budget.drawCalls).toBeLessThanOrEqual(8);
+      // body, glass, heads, tails, reverse, exhaust glow, ground pool, rocker glow, wheels.
+      expect(budget.drawCalls).toBeLessThanOrEqual(9);
     } finally {
       car.dispose();
     }
@@ -76,6 +77,79 @@ describe('player car visual', () => {
       expect(position.y).toBeCloseTo(VEHICLE.wheelRadius, 6);
       expect(position.x).toBeLessThan(0);
       expect(matrix.elements[0]).not.toBeCloseTo(1, 3);
+    } finally {
+      car.dispose();
+    }
+  });
+});
+
+describe('player car body roll', () => {
+  const settle = (car: ReturnType<typeof createCarVisual>, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) car.update(1 / 60, i / 60);
+  };
+
+  it('leans onto the outside of a turn, dives under braking and keeps the wheels planted', () => {
+    const car = createCarVisual();
+    try {
+      const wheelY = car.wheels.map((w) => w.steer.getWorldPosition(new THREE.Vector3()).y);
+
+      // Cornering right pushes the body toward +X, so it leans onto its left side (+Z rot).
+      car.setBodyAccel(VEHICLE.maxLatAccel, 0);
+      settle(car, 1);
+      const roll = car.chassis.rotation.z;
+      expect(roll).toBeGreaterThan(0.02);
+      expect(roll).toBeLessThan(0.08); // subtle: a stiff drift car, not a wallowing sedan
+      expect(Math.abs(car.chassis.rotation.x)).toBeLessThan(1e-3);
+
+      car.setBodyAccel(-VEHICLE.maxLatAccel, 0);
+      settle(car, 1);
+      expect(car.chassis.rotation.z).toBeCloseTo(-roll, 4);
+
+      // Braking drops the nose (nose is at -Z, so a negative rotation about X).
+      car.setBodyAccel(0, -VEHICLE.brakeDecel);
+      settle(car, 1);
+      expect(car.chassis.rotation.x).toBeLessThan(-0.01);
+      car.setBodyAccel(0, VEHICLE.engineAccel);
+      settle(car, 1);
+      expect(car.chassis.rotation.x).toBeGreaterThan(0);
+
+      // The wheels are not sprung: they stay exactly where they were.
+      for (let i = 0; i < car.wheels.length; i++) {
+        expect(car.wheels[i].steer.getWorldPosition(new THREE.Vector3()).y).toBeCloseTo(wheelY[i], 6);
+      }
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('bounds a collision-sized spike and returns to level on reset', () => {
+    const car = createCarVisual();
+    try {
+      car.setBodyAccel(-4000, -9000);
+      settle(car, 2);
+      // Overshoot is allowed, running away is not.
+      expect(Math.abs(car.chassis.rotation.z)).toBeLessThan(0.09);
+      expect(Math.abs(car.chassis.rotation.x)).toBeLessThan(0.07);
+
+      car.resetBody();
+      expect(car.chassis.rotation.z).toBe(0);
+      expect(car.chassis.rotation.x).toBe(0);
+      car.update(1 / 60, 0);
+      expect(car.chassis.rotation.z).toBe(0);
+      expect(car.chassis.rotation.x).toBe(0);
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('survives a long stalled frame without exploding', () => {
+    const car = createCarVisual();
+    try {
+      car.setBodyAccel(VEHICLE.maxLatAccel, -VEHICLE.brakeDecel);
+      car.update(0.5, 0.5);
+      expect(Number.isFinite(car.chassis.rotation.z)).toBe(true);
+      expect(Math.abs(car.chassis.rotation.z)).toBeLessThan(0.09);
+      expect(Math.abs(car.chassis.rotation.x)).toBeLessThan(0.07);
     } finally {
       car.dispose();
     }

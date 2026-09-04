@@ -139,6 +139,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       case 'restart':
         effects.reset();
         backfire.reset();
+        car.resetBody();
         // The car is back at the spawn: pick up the route from there.
         if (cruising) cruiseControl.reset(state.vehicle);
         interpolateVehicle(state.vehicle, 1, pose);
@@ -188,6 +189,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     car.setCharge(state.lightning.charge / LIGHTNING.capacity);
     car.setBrakeLights(v.brakeApplied > 0 && v.speed > 0.5);
     car.setReverseLights(v.speed < -0.5);
+    car.setBodyAccel(v.latAccel, v.longAccel);
     car.update(frameDt, simTime);
     syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);

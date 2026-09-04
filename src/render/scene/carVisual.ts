@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VEHICLE } from '../../config/tuning';
 import { applyLengthwiseUVs, box, glowPool, loft, mergeParts, part, partRGBA, wheelArch } from './vehicles/geometryKit';
+import { createBodyAttitude } from './bodyAttitude';
 import { createLiveryTexture } from './vehicles/livery';
 import { buildWheelGeometry } from './vehicles/wheel';
 
@@ -10,6 +11,9 @@ import { buildWheelGeometry } from './vehicles/wheel';
  * CONTRACT
  * - `root` origin is on the ground at the center of the wheelbase. The nose points toward
  *   local -Z. `src/render/sync.ts` sets `root.position` and `root.rotation.y`.
+ * - Everything that rides on the springs (bodywork, glass, lights, exhaust and rocker glow)
+ *   lives under `chassis`, which rolls and pitches about the root origin. The wheels and the
+ *   ground light pool stay on `root` so they keep their contact with the road.
  * - `wheels` are ordered [front-left, front-right, rear-left, rear-right]. Sync rotates
  *   `steer.rotation.y` (front wheels only) and `spin.rotation.x` (all wheels).
  * - Wheel radius is `VEHICLE.wheelRadius`; wheel centers sit at y = wheelRadius.
@@ -20,16 +24,25 @@ import { buildWheelGeometry } from './vehicles/wheel';
  *   drives are transform carriers; `update()` bakes `steer.matrix * spin.matrix` into the
  *   instance matrices, so `update()` must run every frame after `syncCar()` (`src/game.ts`
  *   already does).
- * - Eight draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
- *   underglow, wheels.
+ * - Nine draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
+ *   ground light pool, underglow, wheels. The chassis group costs nothing extra.
  */
 export interface CarVisual {
   root: THREE.Group;
+  /** Sprung mass: the bodywork, which leans and dives relative to the planted wheels. */
+  chassis: THREE.Group;
   wheels: Array<{ steer: THREE.Object3D; spin: THREE.Object3D }>;
   /** 0..1 magenta/violet exhaust + boost glow. */
   setNitro(intensity: number): void;
   /** 0..1 cyan underglow / electric charge glow. */
   setCharge(level: number): void;
+  /**
+   * Accelerations the body is under this frame (m/s^2, car local frame): `VehicleState`'s
+   * `latAccel` and `longAccel`. Drives body roll and dive/squat; `update()` integrates it.
+   */
+  setBodyAccel(latAccel: number, longAccel: number): void;
+  /** Settle the body back to level immediately (respawn). */
+  resetBody(): void;
   setBrakeLights(on: boolean): void;
   setReverseLights(on: boolean): void;
   /** Per-frame animation hook (flicker, arcs). */
@@ -217,6 +230,13 @@ export function createCarVisual(): CarVisual {
   root.name = 'player-car';
   const disposables: Array<{ dispose(): void }> = [];
 
+  /* Sprung mass. Rolls and pitches about the root origin, which puts the roll centre at
+   * road level — right for a car this low, and it keeps the skirts clear of the tarmac. */
+  const chassis = new THREE.Group();
+  chassis.name = 'player-car-chassis';
+  root.add(chassis);
+  const attitude = createBodyAttitude();
+
   /* ----------------------------------------------------------------- body */
   const livery = createLiveryTexture();
   if (livery) disposables.push(livery);
@@ -233,7 +253,7 @@ export function createCarVisual(): CarVisual {
   const bodyGeo = buildBodyGeometry();
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.name = 'player-car-body';
-  root.add(body);
+  chassis.add(body);
   disposables.push(bodyGeo, bodyMat);
 
   /* ---------------------------------------------------------------- glass */
@@ -264,7 +284,7 @@ export function createCarVisual(): CarVisual {
   });
   const glass = new THREE.Mesh(glassGeo, glassMat);
   glass.name = 'player-car-glass';
-  root.add(glass);
+  chassis.add(glass);
   disposables.push(glassGeo, glassMat);
 
   /* ----------------------------------------------------------- head lights */
@@ -287,7 +307,7 @@ export function createCarVisual(): CarVisual {
     roughness: 0.2,
   });
   const head = new THREE.Mesh(headGeo, headMat);
-  root.add(head);
+  chassis.add(head);
   disposables.push(headGeo, headMat);
 
   /* ----------------------------------------------------------- tail lights */
@@ -309,7 +329,7 @@ export function createCarVisual(): CarVisual {
     roughness: 0.3,
   });
   const tail = new THREE.Mesh(tailGeo, tailMat);
-  root.add(tail);
+  chassis.add(tail);
   disposables.push(tailGeo, tailMat);
 
   /* -------------------------------------------------------- reverse lights */
@@ -328,7 +348,7 @@ export function createCarVisual(): CarVisual {
     roughness: 0.4,
   });
   const reverse = new THREE.Mesh(reverseGeo, reverseMat);
-  root.add(reverse);
+  chassis.add(reverse);
   disposables.push(reverseGeo, reverseMat);
 
   /* ---------------------------------------------------------- exhaust glow */
@@ -349,7 +369,7 @@ export function createCarVisual(): CarVisual {
   });
   const exhaustGlow = new THREE.Mesh(exhaustGeo, exhaustMat);
   exhaustGlow.renderOrder = 3;
-  root.add(exhaustGlow);
+  chassis.add(exhaustGlow);
   disposables.push(exhaustGeo, exhaustMat);
 
   /* ------------------------------------------ underglow: ground light spill */
@@ -396,7 +416,7 @@ export function createCarVisual(): CarVisual {
   const glow = new THREE.Mesh(glowGeo, glowMat);
   glow.name = 'player-car-underglow';
   glow.renderOrder = 2;
-  root.add(glow);
+  chassis.add(glow);
   disposables.push(glowGeo, glowMat);
 
   /* ---------------------------------------------------------------- wheels */
@@ -466,6 +486,7 @@ export function createCarVisual(): CarVisual {
 
   return {
     root,
+    chassis,
     wheels,
     setNitro(intensity) {
       nitro = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
@@ -475,6 +496,13 @@ export function createCarVisual(): CarVisual {
       charge = level < 0 ? 0 : level > 1 ? 1 : level;
       refreshUnderglow();
     },
+    setBodyAccel(latAccel, longAccel) {
+      attitude.setAccel(latAccel, longAccel);
+    },
+    resetBody() {
+      attitude.reset();
+      chassis.rotation.set(0, 0, 0);
+    },
     setBrakeLights(on) {
       braking = on;
       refreshLights();
@@ -483,7 +511,10 @@ export function createCarVisual(): CarVisual {
       reversing = on;
       refreshLights();
     },
-    update(_frameDt, time) {
+    update(frameDt, time) {
+      attitude.update(frameDt);
+      chassis.rotation.z = attitude.roll;
+      chassis.rotation.x = attitude.pitch;
       syncWheelInstances();
       if (charge > 0.6) {
         const t = time * 26;

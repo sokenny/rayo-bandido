@@ -124,6 +124,41 @@ export const VEHICLE = {
   wheelRadius: 0.33,
 };
 
+/**
+ * Body attitude on the springs: roll in corners, dive under braking, squat on power.
+ *
+ * PRESENTATION ONLY — the simulation never reads this block. `src/render/scene/bodyAttitude.ts`
+ * runs a spring-damper per axis, driven by `VehicleState.latAccel` / `.longAccel`, and
+ * `carVisual` applies the result to the chassis group while the wheels stay planted.
+ *
+ * The car is a low, stiffly sprung drift build, so the angles are small on purpose: the point
+ * is a readable weight transfer, not a wallowing sedan. Keep the limits where they are —
+ * they are what stops the side skirts from sinking into the road on a collision spike.
+ */
+export const BODY = {
+  /** Roll per m/s^2 of lateral acceleration (rad). ~3 deg at `VEHICLE.maxLatAccel`. */
+  rollPerLatAccel: 0.0033,
+  /** Lateral acceleration above which roll stops growing (m/s^2). */
+  latAccelClamp: 22,
+  /** Hard cap on the roll target (rad). ~3.4 deg. */
+  rollLimit: 0.06,
+  /** Roll spring frequency (rad/s). Higher = stiffer, settles sooner. */
+  rollFrequency: 11,
+  /** Roll damping ratio. Under 1 leaves a small overshoot — that is the inertia cue. */
+  rollDamping: 0.62,
+  /** Pitch per m/s^2 of longitudinal acceleration (rad). ~1.7 deg under full braking. */
+  pitchPerLongAccel: 0.0011,
+  /** Longitudinal acceleration clamp (m/s^2). A collision dumps far more than this in a tick. */
+  longAccelClamp: 40,
+  /** Hard cap on the pitch target (rad). ~2.6 deg. */
+  pitchLimit: 0.045,
+  /** Pitch spring frequency (rad/s). Pitch is stiffer than roll on this car. */
+  pitchFrequency: 13,
+  pitchDamping: 0.7,
+  /** Largest sub-step the spring integrator takes (s). Long frames are split, not skipped. */
+  maxStepDt: 1 / 120,
+};
+
 export const DRIFT = {
   /** Minimum speed for a valid drift (m/s). 25 km/h. */
   minSpeed: 25 / 3.6,

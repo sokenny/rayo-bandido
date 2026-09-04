@@ -37,6 +37,8 @@ export function createVehicleState(x: number, z: number, heading: number): Vehic
     speed: 0,
     lateralSpeed: 0,
     slipAngle: 0,
+    latAccel: 0,
+    longAccel: 0,
     steerAngle: 0,
     wheelSpin: 0,
     throttleApplied: 0,
