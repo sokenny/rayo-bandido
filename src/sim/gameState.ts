@@ -6,11 +6,13 @@ import type {
   LightningState,
   NitroState,
   PlayerCommand,
+  RivalCar,
   VehicleState,
 } from '../core/types';
 import { NITRO } from '../config/tuning';
 import { stepVehicle } from './vehicle';
 import { resolveCollisions, resolveTargetCollisions } from './collision';
+import { resolveRivalCollisions } from './rivalCollision';
 import { stepDrift } from './drift';
 import { stepNitro } from './nitro';
 import { stepLightning } from './lightning';
@@ -106,7 +108,35 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
  */
 const HOLD: PlayerCommand = { throttle: 0, brake: 0, steer: 0, handbrake: true, nitro: false, fire: false, restart: false, cruise: false };
 
-export function stepGame(state: GameState, cmd: PlayerCommand, layout: ArenaLayout, dt: number): void {
+/** What a multiplayer race adds to a tick. Absent in single player. */
+export interface StepOptions {
+  /** The other players' cars, already interpolated onto this instant by `src/net/rivals.ts`. */
+  rivals?: readonly RivalCar[] | null;
+  /**
+   * Whether destroyed electric cars come back on this client's own clock. False for a
+   * client that does not own the traffic: the host's report brings a car back, so the two
+   * copies never disagree about whether it is there.
+   */
+  respawnTraffic?: boolean;
+}
+
+/**
+ * One simulation tick.
+ *
+ * `options.rivals` is the other players' cars in a multiplayer race; it is null in single
+ * player. They are resolved right after the world collision and before the electric cars,
+ * so the order a tick sees is: walls first (they never move), then the other humans, then
+ * traffic, then the rules. Everything else is unchanged by their presence.
+ */
+export function stepGame(
+  state: GameState,
+  cmd: PlayerCommand,
+  layout: ArenaLayout,
+  dt: number,
+  options: StepOptions | null = null,
+): void {
+  const rivals = options?.rivals ?? null;
+  const respawnTraffic = options?.respawnTraffic ?? true;
   state.events.length = 0;
   if (cmd.restart) {
     resetGameState(state, layout);
@@ -129,8 +159,9 @@ export function stepGame(state: GameState, cmd: PlayerCommand, layout: ArenaLayo
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt);
   resolveCollisions(state.vehicle, layout, state.events);
+  if (rivals) resolveRivalCollisions(state.vehicle, rivals, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);
-  stepTargets(state.targets, layout, state.time, dt);
+  stepTargets(state.targets, layout, state.time, dt, respawnTraffic);
   resolveTargetCollisions(state.vehicle, state.targets, state.events);
   stepNearMiss(state.nearMiss, state.vehicle, state.targets, state.events);
   stepLightning(state.lightning, state.vehicle, state.targets, state.drift, input, state.time, dt, state.events);

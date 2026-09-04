@@ -1,0 +1,30 @@
+# What NOT to ship to Elastic Beanstalk.
+#
+# The deployment bundle is the server plus the already-built client: `dist/` is committed to
+# the bundle even though git ignores it, because the environment installs production
+# dependencies only (`vite` and `typescript` are devDependencies, so the instance cannot build
+# the client itself — `npm run build` runs here before every deploy).
+#
+# The presence of this file also switches the EB CLI from "deploy what git tracks" to "deploy
+# what is on disk", which is what lets an ignored `dist/` travel at all.
+
+node_modules/
+.git/
+
+# Client sources and tooling — the instance serves the build, never compiles it.
+#
+# The leading slashes matter: a bare `index.html` would match at every depth and take
+# `dist/index.html` with it, leaving the server with assets but no entry document.
+src/
+tests/
+scripts/
+docs/
+.vite/
+artifacts/
+/index.html
+/vite.config.*
+/tsconfig.json
+/vitest.config.*
+
+*.log
+.DS_Store

@@ -3,9 +3,14 @@ import { createArenaWorld } from './world/arenaWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot } from './core/types';
 import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
+import { createTrafficSync } from './sim/traffic';
+import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
+import { createNameTags, type NameTags } from './render/nameTags';
+import { createStandings, rankStandings, type Standings, type StandingsRow } from './ui/standings';
+import type { CarPublish, NetSession } from './net/session';
 import { createGameLoop, type GameLoop } from './core/loop';
 import { createKeyboardInput, createPlayerCommand } from './core/input/keyboard';
-import { createInitialGameState, stepGame } from './sim/gameState';
+import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
 import { createRenderer } from './render/renderer';
 import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
@@ -26,6 +31,7 @@ import { createThemeAudio } from './audio/theme';
 import { createAudio } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
 import { msToKmh } from './core/math';
+import { slotCss } from './core/playerColors';
 
 /**
  * Composition root. Wires input -> simulation -> presentation without letting any of
@@ -49,6 +55,18 @@ export interface Game {
   readonly loop: GameLoop;
 }
 
+/**
+ * Multiplayer, if this is a networked race. Absent in single player, and every use of it
+ * below is guarded: the game runs exactly as it did before multiplayer existed when it is
+ * null, which is what keeps one code path for both.
+ */
+export interface GameOptions {
+  net?: NetSession | null;
+}
+
+/** Metres past the last gate a multiplayer respawn puts the car (see `respawnAtLastGate`). */
+const RESPAWN_AHEAD = 6;
+
 /** `performance.measure` wrapper: start a mark and return a function that closes it. */
 function measure(name: string): () => void {
   const startMark = `rb:${name}:start`;
@@ -58,7 +76,13 @@ function measure(name: string): () => void {
   };
 }
 
-export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debugRoot: HTMLElement, mode: GameMode = 'test'): Game {
+export function createGame(
+  canvas: HTMLCanvasElement,
+  hudRoot: HTMLElement,
+  debugRoot: HTMLElement,
+  mode: GameMode = 'test',
+  options: GameOptions = {},
+): Game {
   const endTotal = measure('create');
   const params = new URLSearchParams(location.search);
 
@@ -66,6 +90,20 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   // layout (colliders, spawns, patrols, the race course) and the renderer a plan (the art).
   const world = mode === 'race' ? createRaceWorld() : createArenaWorld();
   const layout = world.layout;
+
+  /* ------------------------------------------------------------- multiplayer */
+
+  const net = options.net ?? null;
+  const match = net?.match ?? null;
+  // The grid slot the server gave us becomes the spawn, so the whole rest of the game — the
+  // initial state, the restart, the camera snap — needs to know nothing about multiplayer.
+  if (match && layout.race && layout.race.grid.length > 0) {
+    const slot = layout.race.grid[match.slot % layout.race.grid.length];
+    layout.playerSpawn = { x: slot.x, z: slot.z, heading: slot.heading };
+  }
+  /** True for the client that owns the electric-car traffic for this match. */
+  const ownsTraffic = !!net && net.isHost;
+
   const state = createInitialGameState(layout);
   const command: PlayerCommand = createPlayerCommand();
   const input = createKeyboardInput(window);
@@ -83,13 +121,23 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   end();
 
   end = measure('vehicles');
-  const car = createCarVisual();
+  // In a match the car wears its grid slot's colour, the colour every other screen draws it in.
+  const car = createCarVisual(match ? { slot: match.slot } : {});
   scene.add(car.root);
   const targetVisuals: ElectricCarVisual[] = [];
   for (let i = 0; i < state.targets.length; i++) {
     const vis = createElectricCarVisual(i);
     scene.add(vis.root);
     targetVisuals.push(vis);
+  }
+  // One car per rival, in grid order, added now so the warm-up compiles them too — a rival
+  // appearing in your mirrors must not be the frame that compiles its shader.
+  const rivals = net ? net.rivals : [];
+  const rivalVisuals: RivalCarVisual[] = [];
+  for (let i = 0; i < rivals.length; i++) {
+    const vis = createRivalCarVisual(rivals[i].slot);
+    scene.add(vis.root);
+    rivalVisuals.push(vis);
   }
   end();
 
@@ -109,9 +157,13 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   end();
 
   end = measure('hud');
-  const hud = createHud(hudRoot, mode);
-  const minimap = createMinimap(hudRoot, layout.minimap, layout.race);
+  const hud = createHud(hudRoot, mode, !!match);
+  const minimap = createMinimap(hudRoot, layout.minimap, layout.race, match ? slotCss(match.slot) : undefined);
   const debug = createDebugOverlay(debugRoot, params.has('debug'));
+  // Live classification and floating names, only when there is a field to classify.
+  const lapLength = layout.race ? layout.race.path.length : 0;
+  const standings: Standings | null = match ? createStandings(hudRoot, lapLength, rivals.length + 1) : null;
+  const nameTags: NameTags | null = rivals.length > 0 ? createNameTags(hudRoot, rivals) : null;
   end();
 
   /* ------------------------------------------------------------ render scale */
@@ -217,6 +269,140 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     return cmd.throttle > 0 || cmd.brake > 0 || cmd.steer !== 0 || cmd.handbrake || cmd.nitro;
   }
 
+  /* ------------------------------------------------------------- multiplayer */
+
+  const trafficSync = net ? createTrafficSync(state.targets.length) : null;
+  /** The newest traffic report from the host, folded in on the next tick, and when it was taken. */
+  let pendingTraffic: readonly number[] | null = null;
+  let pendingTrafficAt = 0;
+  /** Kills other players claim, applied by the host on the next tick. */
+  const pendingHits: number[] = [];
+  /** Shoves other players report, applied by the host on the next tick. */
+  const pendingBumps: Array<{ target: number; kx: number; kz: number; at: number }> = [];
+  /** Scratch list for `trafficSync.apply`; reused so a report never allocates. */
+  const newlyDestroyed: number[] = [];
+  /** What `stepGame` needs to know about the match. One object, never reallocated. */
+  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic };
+  /**
+   * How long a non-host keeps its own kill after the host's reports stop agreeing with it.
+   * A round trip plus a couple of traffic intervals covers any connection worth racing on.
+   */
+  const KILL_HOLD_SECONDS = 1.5;
+  /** Same for a shove, sized to the connection: a round trip plus two traffic intervals. */
+  const bumpHoldSeconds = (): number => Math.min(0.9, Math.max(0.35, Math.max(0, net?.rtt ?? 0) / 1000 + 0.25));
+  const netCleanup: Array<() => void> = [];
+  if (net) {
+    netCleanup.push(
+      net.onTraffic((data, at) => {
+        pendingTraffic = data;
+        pendingTrafficAt = at;
+      }),
+    );
+    netCleanup.push(
+      net.onHit((targetId) => {
+        if (ownsTraffic) pendingHits.push(targetId);
+      }),
+    );
+    netCleanup.push(
+      net.onBump((bump) => {
+        if (ownsTraffic) pendingBumps.push(bump);
+      }),
+    );
+  }
+
+  // One long-lived object handed to the session every tick; it is read and dropped, never kept.
+  const publish: CarPublish = {
+    vehicle: state.vehicle,
+    drifting: false,
+    nitro: false,
+    charge: 0,
+    race: state.race,
+    lapTime: 0,
+    money: 0,
+  };
+  /** The flag is reported once; a re-crossing after the finish must not report it again. */
+  let reportedFinish = false;
+
+  /**
+   * Classification rows, allocated once. `standingsRows` keeps the fixed order the rows were
+   * built in — index 0 is the local player, then one per rival — because that is what says
+   * which row belongs to whom. `standingsOrder` holds the same objects and is what gets
+   * sorted, so ranking never destroys the mapping it was read through.
+   */
+  const standingsRows: StandingsRow[] = [];
+  const standingsOrder: StandingsRow[] = [];
+  if (match) {
+    standingsRows.push({
+      name: net?.self?.name ?? 'YOU',
+      slot: match.slot,
+      progress: 0,
+      gap: 0,
+      self: true,
+      finished: false,
+      finishTime: -1,
+    });
+    for (const rival of rivals) {
+      standingsRows.push({
+        name: rival.name,
+        slot: rival.slot,
+        progress: 0,
+        gap: 0,
+        self: false,
+        finished: false,
+        finishTime: -1,
+      });
+    }
+    standingsOrder.push(...standingsRows);
+  }
+
+  /** Re-read every car's race progress, rank the field and work out the gaps. */
+  function updateStandings(): void {
+    if (standingsRows.length === 0) return;
+    const race = state.race;
+    const mine = standingsRows[0];
+    mine.progress = race ? race.progress : 0;
+    mine.finished = !!race && race.phase === 'finished';
+    mine.finishTime = race ? race.finishTime : -1;
+    for (let i = 0; i < rivals.length; i++) {
+      const row = standingsRows[i + 1];
+      const rival = rivals[i];
+      row.progress = rival.progress;
+      row.finished = rival.finishTime >= 0;
+      row.finishTime = rival.finishTime;
+    }
+    rankStandings(standingsOrder, lapLength);
+  }
+
+  /**
+   * Multiplayer respawn (R). A full restart would put this client back on the grid while
+   * everyone else kept racing, so in a match R is repurposed rather than removed: it is a
+   * rescue from a wall, not a new attempt. The car reappears just past the last gate it
+   * cleared, pointing down the lap, with the race clock still running.
+   */
+  function respawnAtLastGate(): void {
+    const race = state.race;
+    const course = layout.race;
+    if (!race || !course || course.gates.length === 0) return;
+    const gate = course.gates[(race.nextGate - 1 + course.gates.length) % course.gates.length];
+    const v = state.vehicle;
+    // Past the gate rather than on it, so driving away cannot re-trigger the crossing.
+    v.x = v.prevX = (gate.ax + gate.bx) / 2 + gate.fx * RESPAWN_AHEAD;
+    v.z = v.prevZ = (gate.az + gate.bz) / 2 + gate.fz * RESPAWN_AHEAD;
+    v.heading = v.prevHeading = Math.atan2(gate.fx, -gate.fz);
+    v.vx = 0;
+    v.vz = 0;
+    v.speed = 0;
+    v.lateralSpeed = 0;
+    v.yawRate = 0;
+    v.slipAngle = 0;
+    v.steerAngle = 0;
+    car.resetBody();
+    effects.reset();
+    backfire.reset();
+    fillCameraPose(1);
+    chase.snap(cameraPose);
+  }
+
   function handleEvent(ev: GameEvent): void {
     hud.onEvent(ev);
     audio.onEvent(ev);
@@ -228,6 +414,18 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       case 'targetDestroyed':
         effects.explosion(ev.x, ev.z);
         if (ev.reward > 0) effects.scorePopup(ev.x, ev.z, ev.reward);
+        // The kill happened here, but the host is the one everybody believes about traffic:
+        // tell the host, and do not let its next few reports bring the car back meanwhile.
+        if (net && trafficSync && !ownsTraffic) {
+          trafficSync.claimKill(ev.targetId, state.time, KILL_HOLD_SECONDS);
+          net.reportHit(ev.targetId);
+        }
+        break;
+      case 'raceFinish':
+        if (net && !reportedFinish) {
+          reportedFinish = true;
+          net.reportFinish(ev.total, ev.bestLap);
+        }
         break;
       case 'nearMiss':
         effects.nearMissPopup(ev.x, ev.z, ev.points);
@@ -235,6 +433,13 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       case 'collision':
         effects.collision(ev.x, ev.z, ev.impact);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
+        // Shoved an electric car: the shove is real here now, and the host is asked to
+        // repeat it so it is real everywhere. Same hold as a kill, so the host's reports do
+        // not slide the car back onto the bonnet before its own copy of the shove lands.
+        if (net && trafficSync && !ownsTraffic && ev.targetId !== undefined) {
+          trafficSync.claimBump(ev.targetId, state.time, bumpHoldSeconds());
+          net.reportBump(ev.targetId, ev.knockX ?? 0, ev.knockZ ?? 0);
+        }
         break;
       case 'restart':
         effects.reset();
@@ -267,6 +472,38 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
 
   function simulate(dt: number): void {
     input.poll(command);
+
+    if (net && trafficSync) {
+      // Rivals first: everything after this — collision, the camera, the standings — should
+      // see the same instant of them.
+      net.update(dt);
+      if (command.restart) {
+        // R is a rescue in a match, never a restart. See `respawnAtLastGate`.
+        command.restart = false;
+        respawnAtLastGate();
+      }
+      if (pendingTraffic) {
+        newlyDestroyed.length = 0;
+        trafficSync.apply(state.targets, pendingTraffic, pendingTrafficAt, state.time, newlyDestroyed);
+        pendingTraffic = null;
+        for (let i = 0; i < newlyDestroyed.length; i++) {
+          const t = state.targets[newlyDestroyed[i]];
+          effects.explosion(t.x, t.z);
+        }
+      }
+      while (ownsTraffic && pendingHits.length > 0) {
+        const id = pendingHits.shift() as number;
+        if (trafficSync.destroy(state.targets, id, state.time)) {
+          const t = state.targets[id];
+          effects.explosion(t.x, t.z);
+        }
+      }
+      while (ownsTraffic && pendingBumps.length > 0) {
+        const bump = pendingBumps.shift() as { target: number; kx: number; kz: number; at: number };
+        trafficSync.bump(state.targets, bump.target, bump.kx, bump.kz, (net.serverNow() - bump.at) / 1000);
+      }
+    }
+
     if (command.cruise) setCruise(!cruising);
     if (cruising) {
       const driving = isDriving(command);
@@ -274,10 +511,31 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       if (driving && cruiseArmed) setCruise(false);
       else cruiseControl.step(state.vehicle, command, dt);
     }
-    stepGame(state, command, layout, dt);
+    stepGame(state, command, layout, dt, net ? stepOptions : null);
     simTime = state.time;
     const events = state.events;
     for (let i = 0; i < events.length; i++) handleEvent(events[i]);
+
+    if (net && trafficSync) {
+      // The host publishes the traffic it owns; everyone else eases theirs onto it, and
+      // remembers where it stands so the next report can be compared with the right instant.
+      if (ownsTraffic) {
+        net.publishTraffic(state.targets);
+      } else {
+        trafficSync.correct(state.targets, dt);
+        trafficSync.record(state.targets, net.serverNow());
+      }
+
+      // `resetGameState` swaps these objects out, so they are re-read rather than captured.
+      publish.vehicle = state.vehicle;
+      publish.race = state.race;
+      publish.drifting = state.drift.active;
+      publish.nitro = state.nitro.active;
+      publish.charge = state.lightning.charge / LIGHTNING.capacity;
+      publish.lapTime = state.race && state.race.phase === 'racing' ? state.time - state.race.lapStart : 0;
+      publish.money = state.economy.money;
+      net.publishCar(publish);
+    }
   }
 
   function render(alpha: number, frameDt: number): void {
@@ -299,6 +557,14 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     car.update(frameDt, simTime);
     syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
+    // Rivals carry their own interpolation (on the network clock), so unlike everything else
+    // here they are not blended by `alpha` — they are re-placed for this very frame instead,
+    // which is what keeps them moving every frame on a display faster than the simulation.
+    if (net) net.interpolateRivals(frameDt);
+    for (let i = 0; i < rivalVisuals.length; i++) {
+      rivalVisuals[i].sync(rivals[i]);
+      rivalVisuals[i].update(frameDt, simTime);
+    }
     effects.setCarPose(pose, v, state.drift.active, nitroVisual, frameDt);
     effects.update(frameDt, simTime);
     theme.update(frameDt);
@@ -358,7 +624,12 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       raceSnapshot.lapFraction = race.progress - Math.floor(race.progress);
     }
     hud.update(snapshot);
-    minimap.update(pose.x, pose.z, pose.heading, state.targets);
+    minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
+    if (standings) {
+      updateStandings();
+      standings.update(standingsOrder);
+    }
+    if (nameTags) nameTags.update(chase.camera, rivals);
 
     gpuTimer.begin();
     speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed));
@@ -412,6 +683,13 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       // Starting without `warmUp` (the `?nowarm` A/B) is a deliberate cold start: the game is
       // as ready as it is going to get, so automation must not wait any longer.
       ready = true;
+      // In a match the countdown is the server's, not ours: it is however long is left until
+      // the instant the server picked for GO, so every grid launches together however long
+      // each client took to get here.
+      if (net && state.race) {
+        const remaining = net.countdownSeconds();
+        if (remaining >= 0) state.race.countdown = remaining;
+      }
       loop.start();
     },
     stop() {
@@ -420,15 +698,21 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     dispose() {
       loop.stop();
       window.removeEventListener('resize', onResize);
+      for (const off of netCleanup) off();
+      netCleanup.length = 0;
       input.dispose();
       theme.dispose();
       hud.dispose();
       minimap.dispose();
+      standings?.dispose();
+      nameTags?.dispose();
       debug.dispose();
       audio.dispose();
       effects.dispose();
       for (const t of targetVisuals) t.dispose();
       disposeElectricCarResources();
+      for (const r of rivalVisuals) r.dispose();
+      disposeRivalCarResources();
       car.dispose();
       environment.dispose();
       speedBlur.dispose();
@@ -443,6 +727,13 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     state,
     layout,
     command,
+    /** Multiplayer, for automation: the rival cars as this client currently sees them. */
+    multiplayer: !!net,
+    rivals,
+    /** Grid slot and paint of the local car, and the paint of each rival, for the colour QA. */
+    selfSlot: match ? match.slot : null,
+    selfColour: car.paint,
+    rivalColours: rivals.map((r) => ({ id: r.id, slot: r.slot, colour: slotCss(r.slot) })),
     metrics: debug.metrics,
     renderer,
     scene,

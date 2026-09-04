@@ -8,20 +8,28 @@
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "start": "node server/index.mjs",
+    "serve": "node server/index.mjs",
+    "host": "npm run build && node server/index.mjs",
+    "dev:mp": "node scripts/dev-mp.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "qa": "node scripts/qa-drive.mjs",
     "qa:headed": "node scripts/qa-drive.mjs --headed",
+    "qa:mp": "node scripts/qa-mp.mjs",
+    "qa:mp:lag": "node scripts/qa-mp.mjs --lag 80 --jitter 20 --chaos",
     "perf": "node scripts/perf-probe.mjs",
     "perf:headed": "node scripts/perf-probe.mjs --headed",
     "perf:check": "npm run build && node scripts/perf-probe.mjs --check"
   },
   "dependencies": {
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
+    "@types/ws": "^8.18.1",
     "puppeteer-core": "^23.11.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.0",

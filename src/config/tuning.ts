@@ -244,6 +244,32 @@ export const TARGETS = {
 };
 
 /**
+ * Contact between two PLAYERS' cars in a multiplayer race (`src/sim/rivalCollision.ts`).
+ *
+ * Separate from `TARGETS.knock` because the situation is not the same. An electric car is a
+ * local object this client may shove around; a rival is being driven by somebody else's
+ * machine and cannot be moved from here at all. Each client can only move its own car, and
+ * both do it at the same time — which is why `separate` is a little over half the overlap
+ * rather than all of it. Any more and a door-to-door pass flings both cars apart; any less
+ * and they sink into each other before the two corrections add up.
+ */
+export const RIVALS = {
+  /** Collision proxy radius of a rival (m). Same circle the local car uses on itself. */
+  radius: 1.1,
+  /** Share of the overlap this client resolves by moving its own car. */
+  separate: 0.62,
+  /** Fraction of the closing speed kept after a bump. Below `TARGETS.knock.playerRetain`:
+   *  hitting a car that is fighting back costs more than shoving traffic aside. */
+  retain: 0.6,
+  /** Push back out of the contact, as a fraction of the closing speed. */
+  bounce: 0.3,
+  /** Sideways rub: fraction of the along-the-contact speed kept while scraping. */
+  slide: 0.94,
+  /** Minimum closing speed that registers a bump event for sparks and camera shake (m/s). */
+  minImpact: 1.4,
+};
+
+/**
  * Near miss: points for shaving past an electric car at speed without touching it.
  *
  * A pass is tracked from the moment the player enters `radius` of an active target and is

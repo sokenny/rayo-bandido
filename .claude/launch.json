@@ -20,6 +20,12 @@
       "port": 5175
     },
     {
+      "name": "rayo-bandido-dev-5176",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5176", "--strictPort"],
+      "port": 5176
+    },
+    {
       "name": "rayo-bandido-preview",
       "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
       "runtimeArgs": ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],

@@ -6,12 +6,19 @@
 2. Drift, lightning and nitro must form one understandable gameplay loop.
 3. Stable performance is more important than graphical fidelity.
 4. Visual identity is exactly JDM × cyberpunk, approximately 50/50.
-5. The first deliverable is single-player; future multiplayer compatibility is architectural only.
+5. Multiplayer must never cost single player anything: no input latency, no prediction, and
+   nothing on the wire that the local car waits for.
 
 ## Scope control
 
-- Build only the day-one vertical slice described in `docs/MVP_SPEC.md`.
-- Do not add accounts, backend, multiplayer, open world, garage UI, story, police AI or multiple playable cars.
+- Build only the day-one vertical slice described in `docs/MVP_SPEC.md`, plus the race circuit
+  and the multiplayer racing on it (both delivered after the day-one session — see
+  `docs/PROGRESS.md`).
+- Do not add accounts, an open world, garage UI, story, police AI or multiple playable cars.
+- Multiplayer is rooms of up to four cars on the circuit — a player opens a room and hands out
+  its code — and the server is a relay: no game rules, no physics and no knowledge of the track
+  live in `server/`. Keep it that way. A room is chosen once, at `hello`, and never changes for
+  the life of a socket; nothing below the handshake carries a room id.
 - Money is a visible counter. A modification shop is later work.
 - Use placeholders when an asset would block the complete gameplay loop.
 
@@ -27,6 +34,11 @@
 - Dispose Three.js geometries, materials and textures when replaced.
 - Do not introduce a framework or abstraction without immediate MVP value.
 - Keep the main branch runnable after integration checkpoints.
+- Networking lives behind `src/net/session.ts`. Nothing outside `src/net/` may import a socket,
+  and `createGame` with no session must behave exactly as it did before multiplayer existed.
+- `src/net/protocol.ts` is the wire contract; `server/protocol.mjs` repeats it because the
+  server is plain JavaScript. Change one and change the other — `tests/protocol.test.ts` fails
+  if they drift.
 
 ## Performance rules
 

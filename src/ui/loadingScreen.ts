@@ -15,9 +15,14 @@ export interface LoadingScreen {
   set(status: string, progress?: number): void;
   /** Resolve after the browser has painted the latest status, so long work starts after it shows. */
   paint(): Promise<void>;
-  /** Fade the screen out and remove it. Resolves when it is gone. */
+  /**
+   * Bring the screen back over the game. Used between multiplayer races, where the circuit is
+   * rebuilt for each match and the wait deserves the same screen as the first one.
+   */
+  show(status?: string): void;
+  /** Fade the screen out. Resolves once it is gone. */
   hide(): Promise<void>;
-  /** True after `hide()` has been called. */
+  /** True after `hide()` has been called and before the next `show()`. */
   readonly hidden: boolean;
 }
 
@@ -68,13 +73,30 @@ export function createLoadingScreen(root: HTMLElement | null): LoadingScreen {
       }
     },
     paint: nextPaint,
+    show(status) {
+      hidden = false;
+      lastStatus = '';
+      lastProgress = -1;
+      if (!root) return;
+      root.classList.remove('is-gone');
+      root.classList.remove('is-done');
+      if (barEl) barEl.style.transform = 'scaleX(0)';
+      if (statusEl && status) {
+        lastStatus = status;
+        statusEl.textContent = status;
+      }
+    },
     async hide() {
       if (hidden) return;
       hidden = true;
       if (!root) return;
+      // Faded and inert rather than removed (`#loading-root.is-done` also drops pointer
+      // events), so a multiplayer session can bring it back for the next race. Once the fade
+      // is over it is taken out of the layout entirely — otherwise the progress bar's
+      // shimmer animation would keep the compositor busy for the rest of the session.
       root.classList.add('is-done');
       await new Promise<void>((resolve) => setTimeout(resolve, FADE_MS));
-      root.remove();
+      if (hidden) root.classList.add('is-gone');
     },
   };
 }

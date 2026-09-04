@@ -107,9 +107,14 @@ Real vsync-limited numbers on the in-app browser are still to be recorded (pendi
 | Presentation | `src/render/**` | Renderer, environment, car proxy, electric cars, chase camera, pooled FX, `sync.ts` (only place mapping heading to Three rotation) |
 | UI | `src/ui/*`, `src/styles.css` | DOM only, reads `HudSnapshot` and `GameEvent`s |
 | Composition | `src/game.ts`, `src/main.ts` | Wires layers, exposes `window.__rb` |
+| Networking | `src/net/*` | The socket, the server clock, the room, and rival interpolation. Nothing outside `src/net/` imports a socket |
+| Match server | `server/*` | Plain JavaScript under Node: HTTP for `dist/` plus the `/ws` room, on one port. No physics, no rules, no knowledge of the circuit |
 
-Multiplayer readiness: `PlayerCommand` is a serializable intent, `GameState` is plain data, rules live
-in `src/sim`, rendering and UI only read state. No networking exists or is stubbed.
+Multiplayer (delivered 2026-09-04): `PlayerCommand` is a serializable intent, `GameState` is plain
+data, rules live in `src/sim`, and rendering and UI only read state — which is what made the
+networked race a layer that could be added beside the game rather than through it. `createGame`
+with no session behaves exactly as it did before. See the Multiplayer section in `README.md` and
+the decisions table in `docs/DECISIONS.md`.
 
 ## Known risks
 
@@ -556,3 +561,160 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
 
 - Vite + TS + Three skeleton, fixed-step loop, rules in `src/sim` with 12 tests, placeholder visuals,
   QA automation script, browser launch verified.
+
+## Multiplayer (2026-09-04)
+
+Up to four cars race the Bandido Loop over one shared link. `npm run host` builds the game and
+starts one Node process that serves both `dist/` and the match socket on port 8080, so
+`ngrok http 8080` produces a single URL that is the game *and* the server: the client connects
+back to whatever origin it was loaded from and needs no configuration. Full description in
+`README.md`; the reasoning behind each choice is in `docs/DECISIONS.md`.
+
+Answered by Juan before the work started: cars are solid and trade paint, lightning stays pointed
+at the electric cars, and the pass covers the circuit only.
+
+### Shape
+
+- **Client-authoritative cars.** Each browser simulates its own car and publishes it 20 Hz; the
+  server relays and owns the clock. Single player's feel is untouched — that was the point.
+  It is cheatable by design, which is documented at the top of `src/net/protocol.ts`.
+- **The server owns the start.** It waits for every client's `loaded`, picks one instant for GO
+  and sends it in server time; each client's countdown is however long is left. Clients estimate
+  the server clock from the lowest-latency ping/pong seen recently.
+- **Rivals** are drawn 110 ms in the past between two real samples, extrapolated up to 250 ms
+  when a packet is late, and dropped after 3 s of silence.
+- **Contact** is resolved by each client on its own car only, 62% of the overlap each, so the two
+  halves add up. The two screens do not agree exactly on a hard hit; that is written down.
+- **Traffic** belongs to the host client, published 10 Hz, folded in elsewhere as a correction
+  over ~150 ms. Keeps `server/` a relay with no game code in it.
+
+### 2026-09-04 evening — QA pass: traffic, rival motion, colours (protocol 2)
+
+Juan reported after the AWS deploy: traffic "goes a bit crazy and leaves the map", cars feel
+clunky, and every player sees themselves as the violet car but rivals in slot colours. A new
+two-browser probe (`npm run qa:mp`, `scripts/qa-mp.mjs`: private match server, two headless
+Chromes, an optional latency relay, a `--chaos` mode that rams traffic and fires lightning)
+reproduced all three with numbers, then confirmed the fixes.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Rival car stutters | Snapshot rows were stamped with the fan-out time, not the arrival time, so a sample sent twice looked like a stop-then-jump; rivals were also only re-placed per sim tick, so at 120–240 Hz they moved one frame in four | Server stamps each row `at` arrival; receiver drops repeats; rivals re-interpolated every rendered frame (`interpolateRivals`) |
+| Non-host traffic trails the host and wobbles | Reports compared with the local copy *now*, so latency became a permanent pull backwards; patrol index never synced, so a corrected car steered for a stale waypoint | Half a second of local history; reports compared at their own timestamp; patrol index and knock velocity on the wire (`TRAFFIC_STRIDE` 7); non-hosts do not respawn locally |
+| Electric cars leave the circuit | A punt at speed gave a car up to 95 m/s with nothing but the arena bounds to stop it | Shoved cars are pushed out of walls and buildings (`pushOutOfWorld`, shared with the player car) |
+| Kills and shoves flicker on the non-host | The host's next report, sent before it knew, resurrected the car or slid it back | Local holds (`claimKill`, `claimBump`) until the host agrees; new `bump` message so the host repeats the shove, fast-forwarded by the transit time |
+| Colours differ per screen | Own car always wore the livery | Own car painted in slot colour with the rival's marker strips; minimap arrow in slot colour |
+
+Numbers from the probe, guest screen through an 80 ms + 20 ms jitter relay, 24 s, chaos on:
+
+| Metric | Before (no chaos, 80 ms) | After (chaos, 80 ms) |
+| --- | --- | --- |
+| Traffic position error, host vs guest, mean / p95 | 0.51 m / 0.60 m (constant trail) | 0.07 m / 0.12 m |
+| Patrol index out of step by 2+ | up to 3 cars | 0 |
+| Rival frames with no movement (of ~4,000) | 2,703 | 35 |
+| Per-frame speed jump of the rival, mean | 23.4 m/s | 10.2 m/s (includes one teleport by the chaos ram) |
+| Destroyed/alive flicker | not measured | 0 on both screens |
+| Cars off the circuit or in a building | 0 | 0 |
+| Same colour on both screens | no | yes |
+
+At zero latency the rival went from 2,601 stalled frames to 0. Suite: 265 tests in 18 files
+(12 new). `npm run perf:check` still passes on the single-player circuit, whose car and traffic
+are unchanged.
+
+**Needs redeploying**: the protocol version is now 2, so the EB instance must be updated
+(`npm run build` then `eb deploy rayo-bandido-prod`) or every page will be refused at `hello`.
+
+### Verified
+
+| What | How |
+| --- | --- |
+| Room, protocol, match lifecycle, snapshot fan-out (arrival stamps), traffic + hit + bump relay, classification, clock | `tests/matchServer.test.ts` — 19 tests against a real `node server/index.mjs` on a real port, driven by real WebSocket clients |
+| Contact, interpolation (repeat samples, per-frame re-placement), traffic reconciliation (history alignment, patrol sync, kill/shove holds, host-side bump), shoved traffic vs walls, classification order, colours | `tests/multiplayer.test.ts` — 43 tests, no socket needed |
+| Two browsers over a lossy-ish link | `npm run qa:mp:lag` — see the QA pass above |
+| Client and server protocol copies agree | `tests/protocol.test.ts` |
+| Two browsers, whole loop | Lobby → race → flag → results → race again, twice, in two windows. Standings agreed on both screens; traffic agreed within 0.8 m; a staged overlap at 0.4 m separated to 2.62 m |
+
+Suite: 252 tests in 18 files. `npm run perf:check` still passes on the single-player circuit
+(28 programs, no mid-play compiles, worst frame 12.6 ms, 48 draws).
+
+### Budget with a field
+
+Measured in the in-app browser on the circuit, two cars: **42 draw calls, 38,236 triangles**. A
+rival is five draw calls (body, glass, tails, colour marker, wheels) against the player car's
+nine — it drops the head lights, reverse lamps, exhaust flame and ground pool, none of which read
+on a car you are looking at from behind. A full four-car grid therefore lands near **52 draws**,
+inside the gate's 60. The gate itself still probes single player, so it does not cover this;
+re-measure by hand if the rival car gains any parts.
+
+### Known gaps
+
+- Nobody has raced it against a real person over a real tunnel yet — only two windows on one
+  machine, where latency is ~1 ms. The interpolation and clock code is written for real latency
+  but has not met any.
+- A player who quits mid-race is only classified when the socket closes; there is no "retire"
+  message, so a tab that hangs without closing holds the results until the 60 s grace after the
+  first finisher.
+- The Test city stays single player, by decision.
+- Audio does not react to rivals at all: no engine note, no tyre noise, no impact from another
+  player's car.
+
+### 2026-09-04 night — Rooms: create your own server (protocol 3)
+
+Juan: "let me click VERSUS and create my own server, so only the people I want are in it."
+Until now one process was one room, and whoever connected first hosted the only race there was.
+
+`server/rooms.mjs` is now a registry of rooms, each one an unchanged `server/room.mjs`. A socket
+names its room in `hello` and stays in it for life, so nothing below the handshake carries a room
+id and the 20 Hz traffic is byte-for-byte what it was. A room has a four-character code from an
+alphabet without I, O, 0 or 1, a label, and a public/private flag; it is reaped two minutes after
+the last player leaves, so a reload does not lose the code. `GET /rooms` lists the public ones
+over plain HTTP, because the browse screen has to read it before there is any socket.
+
+`?mp=1` now opens **the room browser** (`src/ui/rooms.ts`): make a room, type a code, or click a
+public one. `?mp=1&room=CODE` goes straight in and is what the lobby's COPY button hands out;
+`?mp=1&create=1` opens one directly; `?mp=1&room=CODE&create=1` joins or re-opens that code,
+which is how `scripts/qa-mp.mjs` gets two browsers into one room without reading either screen.
+The address bar is rewritten with the real code once the server answers. The lobby header shows
+`LABEL · CODE · PRIVATE|PUBLIC`, and ESC there now goes back to the rooms rather than the menu.
+
+**Verified in two browsers** against a match server on a spare port: created a private room
+(`JUAN CREW · YG56 · PRIVATE`), joined it by link and by typed code, both clients raced from the
+same START; a public room showed up in a third browser's list while the private one did not,
+with the private room's two players nowhere in the JSON; a code nobody hosts is refused with
+"NO ROOM CALLED ZZZZ". Suite: 276 tests in 18 files (11 new — five for the registry over a real
+socket, six for code and label handling).
+
+Deployed to `rayo-bandido-prod` (sa-east-1) as `app-5bb9-260904_191542738994` and checked on the
+live host: `/rooms` served, a room created through the real page over the deployed socket, and it
+appeared in the public list from outside. The environment's Yellow health predates this and is an
+IAM one — enhanced health cannot assume `aws-elasticbeanstalk-service-role`; the instance itself
+reports ok with 100% 2xx.
+
+**Follow-up the same night**: Juan asked for **LIST IT PUBLICLY to be ticked by default**, so a
+new room is public unless the host unticks it (`&listed=0` is the URL form; the browse screen now
+always writes the parameter rather than relying on the default, and `scripts/qa-mp.mjs` pins
+`listed=0`). Reasoning is in `docs/DECISIONS.md` — an always-empty list makes multiplayer look
+dead, and privacy stays one click away with the lobby header saying PRIVATE or PUBLIC.
+
+### 2026-09-04 night — Interface skin: hazard yellow
+
+Juan on the menus: "too naive, dull, kind of childish", with a brief for a trashier, darker
+cyberpunk look — the night-highway palette, slashed lettering, hacked-terminal components. The
+scene, the car and the circuit were explicitly out of scope and were not touched.
+
+`src/styles.css` was rewritten as a skin rather than patched. Hazard yellow leads the chrome and
+red is the alarm; the game's cyan, magenta, acid and violet keep their meanings so nothing in the
+scene had to move. Type is two roles only — a condensed display stack for anything shouted, a
+monospace stack for anything the machine says — both system fonts, since the game still has to
+run offline. Every surface shares one notched corner, a 1px outline and a stroke along the cut.
+
+Screens: the **main menu** (`src/ui/mainMenu.ts`) is now a numbered list beside a mode dossier
+that carries the WANTED poster cropped to the driver and a spec table; the **room browser** and
+the **lobby** wear the same wordmark, stamp, panel heads and status line through a new
+`src/ui/chrome.ts`; the **HUD**, the **race readout**, the live **classification**, the finish
+panel, the WRONG WAY tape and the **loading screen** follow the same skin. Every `data-role`
+hook `scripts/qa-mp.mjs` drives is unchanged, and so is every class the HUD writes per frame.
+
+**Verified in the browser** on the dev server at 1000x660 and at 375x812: main menu with each of
+the three modes selected, room browser, a created room's lobby, the classification panel, the
+in-game HUD in race mode, the finish panel, the wrong-way banner, the countdown, the live
+standings and the loading screen. Suite: 276 tests in 18 files, all passing; `tsc --noEmit` clean.

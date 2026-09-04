@@ -4,3 +4,8 @@ dist
 *.log
 .DS_Store
 artifacts
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml

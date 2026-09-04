@@ -3,6 +3,7 @@ import { VEHICLE } from '../../config/tuning';
 import { applyLengthwiseUVs, box, glowPool, loft, mergeParts, part, partRGBA, wheelArch } from './vehicles/geometryKit';
 import { createBodyAttitude } from './bodyAttitude';
 import { createLiveryTexture } from './vehicles/livery';
+import { slotColor, slotCss } from '../../core/playerColors';
 import { buildWheelGeometry } from './vehicles/wheel';
 
 /**
@@ -27,7 +28,18 @@ import { buildWheelGeometry } from './vehicles/wheel';
  * - Nine draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
  *   ground light pool, underglow, wheels. The chassis group costs nothing extra.
  */
+export interface CarVisualOptions {
+  /**
+   * Grid slot in a multiplayer race. Given, the car is painted in that slot's colour with the
+   * same marker strips a rival wears (`rivalCarVisual.ts`), so the player is the same colour
+   * on their own screen as on everybody else's. Absent, it wears the single-player livery.
+   */
+  slot?: number;
+}
+
 export interface CarVisual {
+  /** What the body is painted: `'livery'` for the single-player paint, or the CSS hex of a slot colour. */
+  readonly paint: string;
   root: THREE.Group;
   /** Sprung mass: the bodywork, which leans and dives relative to the planted wheels. */
   chassis: THREE.Group;
@@ -91,7 +103,14 @@ function glowDisc(radius: number, segments: number): THREE.BufferGeometry {
   return geo;
 }
 
-function buildBodyGeometry(): THREE.BufferGeometry {
+/**
+ * The bodywork, merged into one geometry.
+ *
+ * Exported because the rival cars in a multiplayer race are the same car in somebody else's
+ * colours (`src/render/scene/rivalCarVisual.ts`) and build this once to share between them.
+ * The player's own car keeps its own copy: it is the only one that needs the livery map.
+ */
+export function buildBodyGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
   // Main hull: wide low nose, long hood, rising beltline, tucked tail.
@@ -225,10 +244,77 @@ function buildBodyGeometry(): THREE.BufferGeometry {
   return merged;
 }
 
-export function createCarVisual(): CarVisual {
+/** Windscreen, rear screen and side glass. Shared with the rival cars, like the bodywork. */
+/**
+ * Rocker strips, a slim roof bar and a rear strip, all white so a per-car tint can colour
+ * them: the marker that names a player's colour from any angle. Worn by every car in a
+ * multiplayer race, the player's own included.
+ */
+export function buildMarkerGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const sign of [-1, 1]) {
+    const rocker = box(0.03, 0.05, 1.9);
+    rocker.translate(sign * 0.995, 0.13, 0);
+    parts.push(partRGBA(rocker, 0xffffff, 1));
+  }
+  // A slim bar across the roof: the one part of a car ahead of you that is never occluded.
+  const roof = box(0.9, 0.05, 0.12);
+  roof.translate(0, 1.35, 0.3);
+  parts.push(partRGBA(roof, 0xffffff, 1));
+  const rear = box(1.44, 0.04, 0.02);
+  rear.translate(0, 0.17, 2.13);
+  parts.push(partRGBA(rear, 0xffffff, 1));
+  return mergeParts(parts);
+}
+
+/**
+ * The body paint of a car in slot colour `colour`: dark enough to stay a night-time car,
+ * saturated enough to name across the circuit. One formula for the player and the rivals.
+ */
+export function tintBody(material: THREE.MeshStandardMaterial, colour: THREE.Color): void {
+  material.color.copy(colour).multiplyScalar(0.42);
+  material.emissive.copy(colour).multiplyScalar(0.06);
+}
+
+export function buildGlassGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const windshield = box(1.2, 0.02, 0.78);
+  windshield.rotateX(-0.564);
+  windshield.translate(0, 1.1, -0.41);
+  parts.push(part(windshield, 0xffffff));
+  const rearGlass = box(1.16, 0.02, 1.0);
+  rearGlass.rotateX(0.377);
+  rearGlass.translate(0, 1.137, 1.107);
+  parts.push(part(rearGlass, 0xffffff));
+  for (const sign of [-1, 1]) {
+    const side = box(0.02, 0.4, 0.68);
+    side.rotateZ(sign * 0.26);
+    side.translate(sign * 0.7, 1.07, 0.3);
+    parts.push(part(side, 0xffffff));
+  }
+  return mergeParts(parts);
+}
+
+/** Tail light clusters. Shared with the rival cars: the view of a rival is usually this one. */
+export function buildTailGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const sign of [-1, 1]) {
+    const outer = box(0.32, 0.16, 0.08);
+    outer.translate(sign * 0.52, 0.61, 2.12);
+    parts.push(part(outer, 0xffffff));
+    const inner = box(0.18, 0.11, 0.06);
+    inner.translate(sign * 0.29, 0.61, 2.11);
+    parts.push(part(inner, 0xffffff));
+  }
+  return mergeParts(parts);
+}
+
+export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   const root = new THREE.Group();
   root.name = 'player-car';
   const disposables: Array<{ dispose(): void }> = [];
+  const slot = options.slot;
+  const slotTint = slot !== undefined ? new THREE.Color(slotColor(slot)) : null;
 
   /* Sprung mass. Rolls and pitches about the root origin, which puts the roll centre at
    * road level — right for a car this low, and it keeps the skirts clear of the tarmac. */
@@ -238,7 +324,9 @@ export function createCarVisual(): CarVisual {
   const attitude = createBodyAttitude();
 
   /* ----------------------------------------------------------------- body */
-  const livery = createLiveryTexture();
+  // In a match the livery gives way to the slot colour: a rival is told apart by colour
+  // alone, and the player has to be that same colour to themselves.
+  const livery = slotTint ? null : createLiveryTexture();
   if (livery) disposables.push(livery);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: livery ? 0xffffff : 0x141834,
@@ -250,29 +338,34 @@ export function createCarVisual(): CarVisual {
     roughness: 0.38,
     metalness: 0.28,
   });
+  if (slotTint) tintBody(bodyMat, slotTint);
   const bodyGeo = buildBodyGeometry();
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.name = 'player-car-body';
   chassis.add(body);
   disposables.push(bodyGeo, bodyMat);
 
-  /* ---------------------------------------------------------------- glass */
-  const glassParts: THREE.BufferGeometry[] = [];
-  const windshield = box(1.2, 0.02, 0.78);
-  windshield.rotateX(-0.564);
-  windshield.translate(0, 1.1, -0.41);
-  glassParts.push(part(windshield, 0xffffff));
-  const rearGlass = box(1.16, 0.02, 1.0);
-  rearGlass.rotateX(0.377);
-  rearGlass.translate(0, 1.137, 1.107);
-  glassParts.push(part(rearGlass, 0xffffff));
-  for (const sign of [-1, 1]) {
-    const side = box(0.02, 0.4, 0.68);
-    side.rotateZ(sign * 0.26);
-    side.translate(sign * 0.7, 1.07, 0.3);
-    glassParts.push(part(side, 0xffffff));
+  /* --------------------------------------------------------------- marker */
+  if (slotTint) {
+    const markerGeo = buildMarkerGeometry();
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: slotTint,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    const marker = new THREE.Mesh(markerGeo, markerMat);
+    marker.name = 'player-car-marker';
+    marker.renderOrder = 2;
+    chassis.add(marker);
+    disposables.push(markerGeo, markerMat);
   }
-  const glassGeo = mergeParts(glassParts);
+
+  /* ---------------------------------------------------------------- glass */
+  const glassGeo = buildGlassGeometry();
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x0b1c26,
     roughness: 0.06,
@@ -311,16 +404,7 @@ export function createCarVisual(): CarVisual {
   disposables.push(headGeo, headMat);
 
   /* ----------------------------------------------------------- tail lights */
-  const tailParts: THREE.BufferGeometry[] = [];
-  for (const sign of [-1, 1]) {
-    const outer = box(0.32, 0.16, 0.08);
-    outer.translate(sign * 0.52, 0.61, 2.12);
-    tailParts.push(part(outer, 0xffffff));
-    const inner = box(0.18, 0.11, 0.06);
-    inner.translate(sign * 0.29, 0.61, 2.11);
-    tailParts.push(part(inner, 0xffffff));
-  }
-  const tailGeo = mergeParts(tailParts);
+  const tailGeo = buildTailGeometry();
   const tailMat = new THREE.MeshStandardMaterial({
     color: 0x180205,
     emissive: 0xff1a2e,
@@ -488,6 +572,7 @@ export function createCarVisual(): CarVisual {
     root,
     chassis,
     wheels,
+    paint: slot !== undefined ? slotCss(slot) : 'livery',
     setNitro(intensity) {
       nitro = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
       refreshLights();

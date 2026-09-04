@@ -1,5 +1,6 @@
-import type { MinimapData, RaceCourse, TargetState } from '../core/types';
+import type { MinimapData, RaceCourse, RivalCar, TargetState } from '../core/types';
 import { MINIMAP } from '../config/tuning';
+import { slotCss } from '../core/playerColors';
 
 /**
  * Minimap: a north-up picture of the drivable roads with the player, the electric cars and,
@@ -10,7 +11,14 @@ import { MINIMAP } from '../config/tuning';
  * Performance contract: no per-frame allocation, one 2D canvas of `MINIMAP.size` CSS pixels.
  */
 export interface Minimap {
-  update(playerX: number, playerZ: number, heading: number, targets: readonly TargetState[]): void;
+  /** `rivals` is empty outside a multiplayer race; each one is drawn in its slot colour. */
+  update(
+    playerX: number,
+    playerZ: number,
+    heading: number,
+    targets: readonly TargetState[],
+    rivals?: readonly RivalCar[],
+  ): void;
   dispose(): void;
 }
 
@@ -20,7 +28,11 @@ export interface MinimapPose {
   heading: number;
 }
 
-export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCourse | null): Minimap {
+/**
+ * `selfColour` is the player's own arrow: cyan alone, their slot colour in a match, so the
+ * map says the same thing about them as every other screen does.
+ */
+export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCourse | null, selfColour = '#4ff3ff'): Minimap {
   const size = MINIMAP.size;
   const pad = MINIMAP.padding;
   const dpr = Math.min(2, typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
@@ -56,7 +68,7 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const dotR = 2.2 * dpr;
 
   return {
-    update(playerX, playerZ, heading, targets) {
+    update(playerX, playerZ, heading, targets, rivals) {
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(base, 0, 0);
@@ -71,14 +83,28 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
         ctx.fill();
       }
 
-      // Player: cyan arrow. Heading 0 faces -Z, which is up on the map; positive = clockwise.
+      // Rivals: a slightly bigger dot in each player's own colour, so a glance at the map
+      // says who is where. Drawn under the player arrow, which always stays on top.
+      if (rivals) {
+        for (let i = 0; i < rivals.length; i++) {
+          const r = rivals[i];
+          if (!r.present) continue;
+          ctx.fillStyle = slotCss(r.slot);
+          ctx.beginPath();
+          ctx.arc(px(r.x), pz(r.z), dotR * 1.35, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Player: an arrow in their own colour. Heading 0 faces -Z, which is up on the map;
+      // positive = clockwise.
       const cx = px(playerX);
       const cz = pz(playerZ);
       ctx.save();
       ctx.translate(cx, cz);
       ctx.rotate(heading);
-      ctx.fillStyle = '#4ff3ff';
-      ctx.shadowColor = 'rgba(79, 243, 255, 0.9)';
+      ctx.fillStyle = selfColour;
+      ctx.shadowColor = selfColour;
       ctx.shadowBlur = 6 * dpr;
       ctx.beginPath();
       ctx.moveTo(0, -5.5 * dpr);

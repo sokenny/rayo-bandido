@@ -82,14 +82,17 @@ function formatMoney(value: number): string {
   return out;
 }
 
-export function createHud(root: HTMLElement, mode: GameMode = 'test'): Hud {
+export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplayer = false): Hud {
   root.innerHTML = '';
 
   const hud = document.createElement('div');
   hud.className = `rb-hud${mode === 'race' ? ' is-race' : ''}`;
+  // R restarts on your own; in a match it cannot, because the race belongs to everybody — it
+  // puts the car back on the road at the last gate instead, with the clock still running.
+  const controls = multiplayer ? CONTROLS.map(([key, action]) => (key === 'R' ? [key, 'rescue'] : [key, action])) : CONTROLS;
   hud.innerHTML =
     `<div class="rb-controls">` +
-    CONTROLS.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('') +
+    controls.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('') +
     `</div>` +
     `<div class="rb-money">` +
     `<div class="rb-money__value"><span class="rb-money__yen">¥</span><span class="rb-money__digits">0</span></div>` +

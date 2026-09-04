@@ -1,6 +1,16 @@
 import type { ArenaLayout, GameEvent, TargetState, VehicleState } from '../core/types';
 import { TARGETS, VEHICLE } from '../config/tuning';
 
+/** The part of a moving thing that world collision needs: a circle with a velocity. */
+export interface CircleBody {
+  x: number;
+  z: number;
+  prevX: number;
+  prevZ: number;
+  vx: number;
+  vz: number;
+}
+
 /**
  * Collision of the car (a circle) against the world: axis-aligned boxes (buildings, the test
  * city's barriers) and wall segments (the circuit's guardrails and alley walls). Pushes the
@@ -8,7 +18,29 @@ import { TARGETS, VEHICLE } from '../config/tuning';
  * Deliberately simple and forgiving: arcade feel over accuracy.
  */
 export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: GameEvent[]): void {
-  const r = VEHICLE.collisionRadius;
+  const impact = pushOutOfWorld(v, VEHICLE.collisionRadius, layout, VEHICLE.restitution, VEHICLE.collisionSlide);
+
+  if (impact > 0.5) {
+    v.collided = true;
+    v.collisionImpact = impact;
+    // Re-derive longitudinal/lateral speeds after the impulse.
+    const fx = Math.sin(v.heading);
+    const fz = -Math.cos(v.heading);
+    const rx = Math.cos(v.heading);
+    const rz = Math.sin(v.heading);
+    v.speed = v.vx * fx + v.vz * fz;
+    v.lateralSpeed = v.vx * rx + v.vz * rz;
+    events.push({ type: 'collision', x: v.x, z: v.z, impact });
+  }
+}
+
+/**
+ * Push a circle of radius `r` out of every box, wall and the arena bounds, bouncing its
+ * velocity off whatever it hit with `restitution` and keeping `slide` of the tangential
+ * part. Returns the hardest impact (m/s into a surface), 0 for none. Shared by the player's
+ * car and by an electric car that has been shoved: neither may pass through a guardrail.
+ */
+export function pushOutOfWorld(v: CircleBody, r: number, layout: ArenaLayout, restitution: number, slide: number): number {
   let impact = 0;
   const boxes = layout.colliders;
   for (let i = 0; i < boxes.length; i++) {
@@ -59,8 +91,8 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
       // Remove the normal component (with a little bounce), keep most of the tangential.
       const tx = -nz;
       const tz = nx;
-      const vt = (v.vx * tx + v.vz * tz) * VEHICLE.collisionSlide;
-      const bounce = -vn * VEHICLE.restitution;
+      const vt = (v.vx * tx + v.vz * tz) * slide;
+      const bounce = -vn * restitution;
       v.vx = tx * vt + nx * bounce;
       v.vz = tz * vt + nz * bounce;
     }
@@ -105,8 +137,8 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
       impact = Math.max(impact, -vn);
       const tx = -nz;
       const tz = nx;
-      const vt = (v.vx * tx + v.vz * tz) * VEHICLE.collisionSlide;
-      const bounce = -vn * VEHICLE.restitution;
+      const vt = (v.vx * tx + v.vz * tz) * slide;
+      const bounce = -vn * restitution;
       v.vx = tx * vt + nx * bounce;
       v.vz = tz * vt + nz * bounce;
     }
@@ -129,18 +161,7 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
     if (v.vz > 0) v.vz = 0;
   }
 
-  if (impact > 0.5) {
-    v.collided = true;
-    v.collisionImpact = impact;
-    // Re-derive longitudinal/lateral speeds after the impulse.
-    const fx = Math.sin(v.heading);
-    const fz = -Math.cos(v.heading);
-    const rx = Math.cos(v.heading);
-    const rz = Math.sin(v.heading);
-    v.speed = v.vx * fx + v.vz * fz;
-    v.lateralSpeed = v.vx * rx + v.vz * rz;
-    events.push({ type: 'collision', x: v.x, z: v.z, impact });
-  }
+  return impact;
 }
 
 /**
@@ -190,8 +211,10 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
     if (approach <= 0) continue;
 
     // Fling the target along the contact normal, a bit harder than pure momentum.
-    t.vx += nx * approach * k.transfer;
-    t.vz += nz * approach * k.transfer;
+    const knockX = nx * approach * k.transfer;
+    const knockZ = nz * approach * k.transfer;
+    t.vx += knockX;
+    t.vz += knockZ;
 
     // The player keeps most of their into-the-car speed, so it feels like a shove.
     const loss = approach * (1 - k.playerRetain);
@@ -200,7 +223,8 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
 
     if (approach > k.minImpact) {
       bumped = true;
-      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, z: (v.z + t.z) * 0.5, impact: approach });
+      // The event names the car and the knock, so a multiplayer client can tell the host.
+      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ });
     }
   }
 

@@ -219,6 +219,54 @@ export interface RaceState {
   shortcut: number;
 }
 
+/**
+ * Another player's car, as this client currently believes it to be.
+ *
+ * Plain data like everything else here, and deliberately shaped like the parts of
+ * `VehicleState` that a rival needs rather than the whole thing: a rival is never simulated
+ * locally, only received. `src/net/rivals.ts` fills these in by interpolating the snapshots
+ * from the match server; `src/sim/rivalCollision.ts` reads them so the local car can bump
+ * into one, and the renderer, minimap and standings read them too.
+ *
+ * The pose is already a render-ready position (interpolation happens on the network clock,
+ * not the simulation clock), so unlike `VehicleState` there is no `prev` pose to blend from.
+ */
+export interface RivalCar {
+  /** Server-assigned player id. Stable for as long as that player stays connected. */
+  id: string;
+  name: string;
+  /** Grid slot, which also picks the car's colour. */
+  slot: number;
+  /** False while no recent state has arrived: the car is not drawn and cannot be hit. */
+  present: boolean;
+  x: number;
+  z: number;
+  heading: number;
+  /** World velocity (m/s). Used to extrapolate and to work out a bump. */
+  vx: number;
+  vz: number;
+  /** Signed longitudinal speed (m/s). */
+  speed: number;
+  steerAngle: number;
+  /** Integrated locally from `speed`; never sent. */
+  wheelSpin: number;
+  latAccel: number;
+  longAccel: number;
+  drifting: boolean;
+  nitro: boolean;
+  braking: boolean;
+  reversing: boolean;
+  /** Lightning charge 0..1, for the underglow. */
+  charge: number;
+  /** Race standing, as last reported by that player. */
+  lap: number;
+  progress: number;
+  lapTime: number;
+  bestLap: number;
+  finishTime: number;
+  money: number;
+}
+
 /** Discrete happenings for presentation and audio. Cleared at the start of every tick. */
 export type GameEvent =
   | { type: 'driftStart' }
@@ -229,7 +277,16 @@ export type GameEvent =
   | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' }
   | { type: 'targetDestroyed'; targetId: number; x: number; z: number; reward: number }
   | { type: 'nearMiss'; targetId: number; x: number; z: number; points: number; quality: number }
-  | { type: 'collision'; x: number; z: number; impact: number }
+  | {
+      type: 'collision';
+      x: number;
+      z: number;
+      impact: number;
+      /** Set when the other party was an electric car: its id and the knock velocity it was given. */
+      targetId?: number;
+      knockX?: number;
+      knockZ?: number;
+    }
   | { type: 'restart' }
   | { type: 'raceCountdown'; seconds: number }
   | { type: 'raceStart' }

@@ -1,12 +1,22 @@
 import type { ArenaLayout, TargetState } from '../core/types';
 import { TARGETS } from '../config/tuning';
 import { wrapAngle } from '../core/math';
+import { pushOutOfWorld } from './collision';
 
 /**
  * Electric-car targets. Each target starts at a spawn point and optionally patrols a loop
  * of waypoints at a slow, uniform speed. Destroyed targets respawn after `respawnDelay`
  * so the loop never runs dry, but a reward is paid only once per destruction.
+ *
+ * A shoved car (`TARGETS.knock`) coasts along the shove and is stopped by the same walls
+ * and buildings that stop the player: the patrol lane never meets a wall, but a bump at
+ * speed used to send a car straight through the guardrail and out of the circuit.
  */
+
+/** A shoved electric car loses this much of its into-the-wall speed on contact. */
+const WALL_RESTITUTION = 0.25;
+/** ...and keeps this much of its along-the-wall speed. */
+const WALL_SLIDE = 0.7;
 export function createTargets(layout: ArenaLayout): TargetState[] {
   const list: TargetState[] = [];
   for (let i = 0; i < layout.targetSpawns.length; i++) {
@@ -51,14 +61,18 @@ function respawnTarget(t: TargetState, layout: ArenaLayout): void {
   t.rewarded = false;
 }
 
-export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: number, dt: number): void {
+/**
+ * Advance every target by `dt`. `respawn` false leaves destroyed cars destroyed: a
+ * multiplayer client that does not own the traffic lets the host's reports bring them back.
+ */
+export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: number, dt: number, respawn = true): void {
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
     t.prevX = t.x;
     t.prevZ = t.z;
     t.prevHeading = t.heading;
     if (t.status !== 'active') {
-      if (TARGETS.respawnDelay >= 0 && t.hitTime >= 0 && time - t.hitTime >= TARGETS.respawnDelay) {
+      if (respawn && TARGETS.respawnDelay >= 0 && t.hitTime >= 0 && time - t.hitTime >= TARGETS.respawnDelay) {
         respawnTarget(t, layout);
       }
       continue;
@@ -75,11 +89,9 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
         t.vx = 0;
         t.vz = 0;
       }
-      const bb = layout.bounds;
-      if (t.x < bb.minX) { t.x = bb.minX; if (t.vx < 0) t.vx = 0; }
-      else if (t.x > bb.maxX) { t.x = bb.maxX; if (t.vx > 0) t.vx = 0; }
-      if (t.z < bb.minZ) { t.z = bb.minZ; if (t.vz < 0) t.vz = 0; }
-      else if (t.z > bb.maxZ) { t.z = bb.maxZ; if (t.vz > 0) t.vz = 0; }
+      // Walls, buildings and the arena edge. Only while shoved: the patrol lane is clear of
+      // them all, so an unbumped car never pays for this.
+      pushOutOfWorld(t, TARGETS.knock.radius, layout, WALL_RESTITUTION, WALL_SLIDE);
     }
 
     const patrol = layout.targetPatrols[t.id];
