@@ -11,6 +11,8 @@ export interface OneShots {
    * louder, brighter and snappier, so a paint-scraping pass sounds different from a wide one.
    */
   nearMiss(quality: number): void;
+  /** Race countdown tick; `go` is the longer, higher note on the lights going out. */
+  countdown(go: boolean): void;
 }
 
 /**
@@ -114,6 +116,18 @@ export function createOneShots(core: AudioCore): OneShots {
       playNoise(t, t + dur, 'bandpass', 1500 + 1900 * q, 320, 1.6, 0.85 * v, 0.05 + 0.05 * (1 - q));
       // Body: the low pressure wave under the whoosh, only on a genuinely close pass.
       if (q > 0.25) playOsc('sine', t + 0.02, t + 0.24, 150, 60, 0.35 * v * q, 0.05);
+    },
+
+    countdown(go) {
+      const t = ctx.currentTime;
+      const v = AUDIO.countdownVolume;
+      if (go) {
+        // Two stacked tones, a fifth apart, held: the lights are out.
+        playOsc('square', t, t + 0.62, 1046, 1046, 0.5 * v, 0.006, 3200);
+        playOsc('square', t, t + 0.62, 1568, 1568, 0.3 * v, 0.006, 4200);
+      } else {
+        playOsc('square', t, t + 0.19, 784, 784, 0.55 * v, 0.006, 2600);
+      }
     },
 
     shutdown() {

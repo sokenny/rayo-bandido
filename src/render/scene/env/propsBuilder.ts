@@ -1,22 +1,23 @@
-import { ARENA_BARRIERS, ARENA_BLOCKS, ARENA_ROADS } from '../../../world/arenaLayout';
+import type { GateDef, ZoneId } from '../../../world/cityPlan';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { groundGlow, halo, isRoad, isSolid, padY, type EnvBuilders } from './builders';
+import { groundGlow, halo, type EnvBuilders } from './builders';
 import { signCell } from './textures';
-import { zoneAt } from './cityBuilder';
 
 /**
  * Everything that dresses the streets: guardrails, street lights, the neon route gates from
- * the wet-road reference, holographic billboards and the JDM garage clutter.
+ * the wet-road reference, holographic billboards and the JDM garage clutter. All of it placed
+ * from the plan (`b.plan`), so the test arena and the circuit share every prop.
  *
  * House rule: a prop may only exist where `isSolid()` is true, i.e. inside a collider the
  * simulation already knows about. That single test is what keeps art and collision honest -
- * the player can never drive through a container or clip a lamp post.
+ * the player can never drive through a container or clip a lamp post. (The circuit's track
+ * builder places its own lamps just outside the guardrails, which the car cannot reach.)
  */
 export function buildProps(b: EnvBuilders): void {
   const rng = makeRng(0x7a1ce);
   buildRouteMarkers(b);
-  buildPlazaPylons(b);
+  buildPylons(b);
   buildBarriers(b, rng);
   buildStreetLights(b, rng);
   buildGates(b);
@@ -34,7 +35,8 @@ export function buildProps(b: EnvBuilders): void {
 function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
   const SQUARE = [0, 1, 3, 6, 8, 9, 11, 14];
   const TALL = [13, 4, 7, 5];
-  for (const blk of ARENA_BLOCKS) {
+  const isRoad = b.plan.isRoad;
+  for (const blk of b.plan.blocks) {
     walkLedge(blk, 3.5, 11, (x, z, dx, dz) => {
       if (!isRoad(x + dx * 7, z + dz * 7) && !isRoad(x + dx * 11, z + dz * 11)) return;
       // Rare on purpose. A few blades read as a street; one on every ledge reads as clutter.
@@ -66,36 +68,38 @@ function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
 
 /* ------------------------------------------------------------------ guardrails */
 
-/** Continuous low neon line along the inner face of the perimeter, marking the circuit. */
+/** Continuous low neon line along the inner face of the perimeter band, marking the edge of the world. */
 function buildRouteMarkers(b: EnvBuilders): void {
+  const bounds = b.plan.bounds;
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cz = (bounds.minZ + bounds.maxZ) / 2;
+  const colors = [PAL.neonBlue, PAL.neonPink, PAL.neonCyan, PAL.neonMagenta];
   const y = 1.15;
-  b.neon.color(PAL.neonCyan, 0.85);
-  b.neon.tube(-100, y, -100, -100, y, 100, 0.22);
-  groundGlow(b, -96, 0, 16, 200, PAL.neonCyan, 0.06);
-  b.neon.color(PAL.neonBlue, 0.8);
-  b.neon.tube(-100, y, -100, 100, y, -100, 0.22);
-  groundGlow(b, 0, -96, 200, 16, PAL.neonBlue, 0.05);
-  b.neon.color(PAL.neonMagenta, 0.75);
-  b.neon.tube(100, y, -100, 100, y, 100, 0.22);
-  groundGlow(b, 96, 0, 16, 200, PAL.neonMagenta, 0.05);
-  b.neon.color(PAL.neonPink, 0.7);
-  b.neon.tube(-100, y, 100, 100, y, 100, 0.22);
-  groundGlow(b, 0, 96, 200, 16, PAL.neonPink, 0.05);
+  b.plan.walls.forEach((wall, i) => {
+    const horizontal = wall.maxX - wall.minX > wall.maxZ - wall.minZ;
+    const c = colors[i % colors.length];
+    b.neon.color(c, 0.8);
+    if (horizontal) {
+      const inner = (wall.minZ + wall.maxZ) / 2 < cz ? wall.maxZ : wall.minZ;
+      const glowZ = inner + ((wall.minZ + wall.maxZ) / 2 < cz ? 4 : -4);
+      b.neon.tube(wall.minX + 12, y, inner, wall.maxX - 12, y, inner, 0.22);
+      groundGlow(b, (wall.minX + wall.maxX) / 2, glowZ, wall.maxX - wall.minX - 24, 16, c, 0.05);
+    } else {
+      const inner = (wall.minX + wall.maxX) / 2 < cx ? wall.maxX : wall.minX;
+      const glowX = inner + ((wall.minX + wall.maxX) / 2 < cx ? 4 : -4);
+      b.neon.tube(inner, y, wall.minZ, inner, y, wall.maxZ, 0.22);
+      groundGlow(b, glowX, (wall.minZ + wall.maxZ) / 2, 16, wall.maxZ - wall.minZ, c, 0.06);
+    }
+  });
 }
 
 /**
- * Four tall light columns on the block corners that frame the drift plaza. They stand inside
- * the block colliders, so the square itself stays completely empty to slide around in.
+ * Tall light columns (the test arena frames its drift plaza with four). They stand inside the
+ * block colliders, so the square itself stays completely empty to slide around in.
  */
-function buildPlazaPylons(b: EnvBuilders): void {
-  const corners: Array<[number, number, number]> = [
-    [-15.4, -32.4, PAL.neonCyan],
-    [15.4, -32.4, PAL.neonCyan],
-    [-15.4, 32.4, PAL.neonMagenta],
-    [15.4, 32.4, PAL.neonMagenta],
-  ];
-  for (const [x, z, c] of corners) {
-    if (!isSolid(x, z, 0.6)) continue;
+function buildPylons(b: EnvBuilders): void {
+  for (const { x, z, color: c } of b.plan.pylons) {
+    if (!b.plan.isSolid(x, z, 0.6)) continue;
     const h = 15;
     b.props.color(PAL.metalDark, 0.9);
     b.props.box(x, 0.22 + h / 2, z, 1, h, 1);
@@ -110,7 +114,7 @@ function buildPlazaPylons(b: EnvBuilders): void {
 }
 
 function buildBarriers(b: EnvBuilders, rng: () => number): void {
-  for (const bar of ARENA_BARRIERS) {
+  for (const bar of b.plan.barriers) {
     const along = bar.maxZ - bar.minZ > bar.maxX - bar.minX;
     const min = along ? bar.minZ : bar.minX;
     const max = along ? bar.maxZ : bar.maxX;
@@ -149,22 +153,57 @@ function buildBarriers(b: EnvBuilders, rng: () => number): void {
  * Street lamps are the one place the two families sit side by side, so they stay strictly
  * cold-with-an-occasional-rose. No third hue ever enters the street through a lamp head.
  */
-function lampColor(zone: string, rng: () => number): number {
+export function lampColor(zone: ZoneId, rng: () => number): number {
   if (zone === 'corporate') return rng() < 0.8 ? PAL.winCold : PAL.neonCyan;
   if (zone === 'jdm') return rng() < 0.6 ? PAL.winWarm : PAL.neonPink;
   return rng() < 0.65 ? PAL.winCold : PAL.winWarm;
 }
 
+/**
+ * One lamp post at (x, z) standing on ground height `y0`, with its arm reaching `arm` metres
+ * in the unit direction (dx, dz) toward the road. The spill lands `spill` metres out.
+ */
+export function lampPost(
+  b: EnvBuilders,
+  x: number,
+  z: number,
+  y0: number,
+  dx: number,
+  dz: number,
+  arm: number,
+  poleH: number,
+  color: number,
+  spill: number,
+): void {
+  const alongX = Math.abs(dx) > Math.abs(dz);
+  b.props.color(PAL.metalDark, 0.8);
+  b.props.box(x, y0 + poleH / 2, z, 0.24, poleH, 0.24);
+  const hx = x + dx * arm;
+  const hz = z + dz * arm;
+  const hy = y0 + poleH;
+  b.props.color(PAL.metalDark, 0.7);
+  b.props.tube(x, hy - 0.2, z, hx, hy - 0.2, hz, 0.16);
+  b.neon.color(color, 1);
+  // Lamp head is elongated along the arm; its halo faces down the street at the driver.
+  b.neon.box(hx, hy - 0.45, hz, alongX ? 1.5 : 0.6, 0.22, alongX ? 0.6 : 1.5);
+  // The arm is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
+  halo(b, hx, hy - 0.5, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2);
+  // The spill always lands on the asphalt, whatever the pole ended up standing on.
+  groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, 0.14);
+}
+
 function buildStreetLights(b: EnvBuilders, rng: () => number): void {
-  for (const road of ARENA_ROADS) {
+  const isSolid = b.plan.isSolid;
+  for (const road of b.plan.roads) {
     if (road.axis === 'open') continue;
     const along = road.axis === 'z';
     const min = along ? road.minZ : road.minX;
     const max = along ? road.maxZ : road.maxX;
     const lo = along ? road.minX : road.minZ;
     const hi = along ? road.maxX : road.maxZ;
+    const alley = road.lanes === 0;
     // Sparser than a real street would be: each pool of light should be its own event.
-    const step = road.tag === 'alley-jdm' ? 22 : 38;
+    const step = alley ? 22 : 38;
     for (let t = min + 8; t < max - 8; t += step) {
       for (const side of [-1, 1]) {
         const edge = side < 0 ? lo : hi;
@@ -175,28 +214,15 @@ function buildStreetLights(b: EnvBuilders, rng: () => number): void {
         const ax = along ? edge + side * off : t;
         const az = along ? t : edge + side * off;
         if (!isSolid(ax, az, 0.5)) continue;
-        const zone = zoneAt(ax, az);
+        const zone = b.plan.zoneAt(ax, az);
         const c = lampColor(zone, rng);
-        const y0 = padY(ax, az);
-        const poleH = road.tag === 'alley-jdm' ? 4.4 : 7.4;
+        const y0 = b.plan.padY(ax, az);
+        const poleH = alley ? 4.4 : 7.4;
         // The arm reaches over the kerb, but never grows silly on a deep sidewalk.
-        const arm = road.tag === 'alley-jdm' ? 0.9 : Math.min(off + 2.2, 5.2);
-        b.props.color(PAL.metalDark, 0.8);
-        b.props.box(ax, y0 + poleH / 2, az, 0.24, poleH, 0.24);
-        const hx = along ? ax - side * arm : ax;
-        const hz = along ? az : az - side * arm;
-        const hy = y0 + poleH;
-        b.props.color(PAL.metalDark, 0.7);
-        if (along) b.props.box((ax + hx) / 2, hy - 0.2, az, arm, 0.16, 0.16);
-        else b.props.box(ax, hy - 0.2, (az + hz) / 2, 0.16, 0.16, arm);
-        b.neon.color(c, 1);
-        // Lamp head is elongated along the arm; its halo faces down the street at the driver.
-        b.neon.box(hx, hy - 0.45, hz, along ? 1.5 : 0.6, 0.22, along ? 0.6 : 1.5);
-        halo(b, hx, hy - 0.5, hz, 6, 4, along ? 0 : Math.PI / 2, c, 0.2);
-        // The spill always lands on the asphalt, whatever the pole ended up standing on.
-        const gx = along ? edge - side * 5 : t;
-        const gz = along ? t : edge - side * 5;
-        groundGlow(b, gx, gz, along ? 30 : 20, along ? 20 : 30, c, 0.14);
+        const arm = alley ? 0.9 : Math.min(off + 2.2, 5.2);
+        const dx = along ? -side : 0;
+        const dz = along ? 0 : -side;
+        lampPost(b, ax, az, y0, dx, dz, arm, poleH, c, off + 5);
       }
     }
   }
@@ -204,90 +230,56 @@ function buildStreetLights(b: EnvBuilders, rng: () => number): void {
 
 /* ------------------------------------------------------------------ neon route gates */
 
-interface GateDef {
-  /** Gate spans along this axis between a and b, sitting at `cross` on the other axis. */
-  axis: 'x' | 'z';
-  a: number;
-  b: number;
-  cross: number;
-  height: number;
-  left: number;
-  right: number;
+export function buildGate(b: EnvBuilders, g: GateDef): void {
+  const ends: Array<[number, number]> = [
+    [g.x0, g.z0],
+    [g.x1, g.z1],
+  ];
+  const colors = [g.left, g.right];
+  let dx = g.x1 - g.x0;
+  let dz = g.z1 - g.z0;
+  const span = Math.hypot(dx, dz) || 1;
+  dx /= span;
+  dz /= span;
+  // The gate spans the road, so its halos face along the road: the span's normal.
+  const faceRot = Math.atan2(-dz, dx);
+  for (let i = 0; i < 2; i++) {
+    const [x, z] = ends[i];
+    if (!g.trusted && !b.plan.isSolid(x, z, 0.2)) continue;
+    const c = colors[i];
+    // Structural pylon.
+    b.props.color(PAL.metalDark, 0.9);
+    b.props.box(x, g.height / 2, z, 0.9, g.height, 0.9);
+    // Angled neon slashes, straight from the wet-road reference.
+    const inward = i === 0 ? 1 : -1;
+    const ox = dx * inward;
+    const oz = dz * inward;
+    b.neonPulse.color(c, 1);
+    b.neonPulse.tube(x + ox * 0.6, 2.2, z + oz * 0.6, x + ox * 3.4, g.height - 1.4, z + oz * 3.4, 0.34);
+    b.neon.color(c, 0.9);
+    b.neon.tube(x + ox * 1.9, 1.6, z + oz * 1.9, x + ox * 4.6, g.height - 3.2, z + oz * 4.6, 0.26);
+    b.neon.color(i === 0 ? g.right : g.left, 0.9);
+    b.neon.tube(x - ox * 0.15, 3.4, z - oz * 0.15, x - ox * 0.15, g.height - 0.6, z - oz * 0.15, 0.3);
+    halo(b, x + ox * 2, g.height / 2, z + oz * 2, 11, g.height * 1.3, faceRot, c, 0.16);
+    groundGlow(b, x + ox * 5, z + oz * 5, 24, 24, c, 0.15);
+  }
+  // Top beam.
+  const mx = (g.x0 + g.x1) / 2;
+  const mz = (g.z0 + g.z1) / 2;
+  b.props.color(PAL.metalDark, 0.8);
+  b.props.orientedBox(mx, mz, dx, dz, span, 0.8, g.height - 0.8, g.height);
+  b.neonPulse.color(g.left, 1);
+  b.neonPulse.tube(g.x0, g.height - 1, g.z0, g.x1, g.height - 1, g.z1, 0.2);
 }
 
-const GATES: GateDef[] = [
-  // Corporate highway, north and south approaches.
-  { axis: 'x', a: -100.8, b: -78.7, cross: -55, height: 11.5, left: PAL.neonCyan, right: PAL.neonBlue },
-  { axis: 'x', a: -100.8, b: -78.7, cross: 55, height: 11.5, left: PAL.neonCyan, right: PAL.neonMagenta },
-  // Urban north street.
-  { axis: 'z', a: -100.8, b: -76, cross: -45, height: 10.5, left: PAL.neonMagenta, right: PAL.neonCyan },
-  // East avenue, entering the JDM half.
-  { axis: 'x', a: 100.8, b: 78.7, cross: 40, height: 10.5, left: PAL.neonPink, right: PAL.neonMagenta },
-  // The garage alley.
-  { axis: 'x', a: 49.4, b: 60.6, cross: 40, height: 7.5, left: PAL.neonMagenta, right: PAL.neonCyan },
-];
-
 function buildGates(b: EnvBuilders): void {
-  for (const g of GATES) {
-    const px = (t: number): number => (g.axis === 'x' ? t : g.cross);
-    const pz = (t: number): number => (g.axis === 'x' ? g.cross : t);
-    const ends = [g.a, g.b];
-    const colors = [g.left, g.right];
-    for (let i = 0; i < 2; i++) {
-      const t = ends[i];
-      const x = px(t);
-      const z = pz(t);
-      if (!isSolid(x, z, 0.2)) continue;
-      const c = colors[i];
-      // Structural pylon.
-      b.props.color(PAL.metalDark, 0.9);
-      b.props.box(x, g.height / 2, z, 0.9, g.height, 0.9);
-      // Angled neon slashes, straight from the wet-road reference.
-      const inward = Math.sign(ends[1 - i] - t);
-      const ox = g.axis === 'x' ? inward : 0;
-      const oz = g.axis === 'x' ? 0 : inward;
-      b.neonPulse.color(c, 1);
-      b.neonPulse.tube(x + ox * 0.6, 2.2, z + oz * 0.6, x + ox * 3.4, g.height - 1.4, z + oz * 3.4, 0.34);
-      b.neon.color(c, 0.9);
-      b.neon.tube(x + ox * 1.9, 1.6, z + oz * 1.9, x + ox * 4.6, g.height - 3.2, z + oz * 4.6, 0.26);
-      b.neon.color(i === 0 ? g.right : g.left, 0.9);
-      b.neon.tube(x - ox * 0.15, 3.4, z - oz * 0.15, x - ox * 0.15, g.height - 0.6, z - oz * 0.15, 0.3);
-      halo(b, x + ox * 2, g.height / 2, z + oz * 2, 11, g.height * 1.3, g.axis === 'x' ? 0 : Math.PI / 2, c, 0.16);
-      groundGlow(b, x + ox * 5, z + oz * 5, g.axis === 'x' ? 28 : 20, g.axis === 'x' ? 20 : 28, c, 0.15);
-    }
-    // Top beam.
-    const mid = (g.a + g.b) / 2;
-    const span = Math.abs(g.b - g.a);
-    b.props.color(PAL.metalDark, 0.8);
-    b.props.box(px(mid), g.height - 0.4, pz(mid), g.axis === 'x' ? span : 0.8, 0.8, g.axis === 'x' ? 0.8 : span);
-    b.neonPulse.color(g.left, 1);
-    if (g.axis === 'x') b.neonPulse.tube(g.a, g.height - 1, g.cross, g.b, g.height - 1, g.cross, 0.2);
-    else b.neonPulse.tube(g.cross, g.height - 1, g.a, g.cross, g.height - 1, g.b, 0.2);
-  }
+  for (const g of b.plan.gates) buildGate(b, g);
 }
 
 /* ------------------------------------------------------------------ billboards */
 
-interface BillboardDef {
-  variant: 0 | 1;
-  x: number;
-  y: number;
-  z: number;
-  w: number;
-  h: number;
-  rotY: number;
-  color: number;
-}
-
-const BILLBOARDS: BillboardDef[] = [
-  { variant: 0, x: -100.6, y: 27, z: -22, w: 30, h: 17, rotY: Math.PI / 2, color: PAL.neonCyan },
-  { variant: 0, x: 26, y: 24, z: -100.6, w: 26, h: 15, rotY: 0, color: PAL.neonCyan },
-  { variant: 1, x: 100.6, y: 25, z: -34, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonMagenta },
-  { variant: 1, x: -26, y: 21, z: 100.6, w: 24, h: 14, rotY: Math.PI, color: PAL.neonMagenta },
-];
-
 function buildBillboards(b: EnvBuilders): void {
-  for (const d of BILLBOARDS) {
+  for (const d of b.plan.billboards) {
     const target = d.variant === 0 ? b.billA : b.billB;
     target.panel(d.x, d.y, d.z, d.w, d.h, d.rotY);
     // Frame + masts.
@@ -326,13 +318,8 @@ function buildBillboards(b: EnvBuilders): void {
 
 /** Overhead cables strung between facing blocks, as in the approved reference. */
 function buildCables(b: EnvBuilders, rng: () => number): void {
-  // Anchors sit just inside the facing blocks so every cable has something to hang from.
-  const runs: Array<[number, number, number, number]> = [];
-  for (let z = -70; z <= -34; z += 9) runs.push([-14.6, z, 14.6, z]);
-  for (let x = -70; x <= -34; x += 9) runs.push([x, -14.6, x, 14.6]);
-  for (let z = 20; z <= 74; z += 9) runs.push([49.4, z, 60.6, z]);
-  for (let x = 34; x <= 72; x += 9) runs.push([x, 76.6, x, 100.6]);
-  for (const [x0, z0, x1, z1] of runs) {
+  const isSolid = b.plan.isSolid;
+  for (const [x0, z0, x1, z1] of b.plan.cableRuns) {
     if (!isSolid(x0, z0, 0.2) || !isSolid(x1, z1, 0.2)) continue;
     const y = 8 + rng() * 2.5;
     const sag = 0.8 + rng() * 0.9;
@@ -378,7 +365,9 @@ function walkLedge(
 const CONTAINER_COLORS = [PAL.rust, 0x27384f, 0x3a2f46, 0x4a2a3a, 0x2d3a48];
 
 function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
-  for (const blk of ARENA_BLOCKS) {
+  const isRoad = b.plan.isRoad;
+  const padY = b.plan.padY;
+  for (const blk of b.plan.blocks) {
     walkLedge(blk, 1.4, 7, (x, z, dx, dz, along) => {
       // Only dress ledges that actually face a street.
       if (!isRoad(x + dx * 6, z + dz * 6)) return;

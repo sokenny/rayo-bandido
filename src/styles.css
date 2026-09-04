@@ -682,3 +682,348 @@ body {
   letter-spacing: 0.02em;
   white-space: pre;
 }
+
+/* ------------------------------------------------------------ main menu */
+
+#menu-root {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.rb-menu {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: auto;
+  background: radial-gradient(120% 90% at 50% 100%, #12083a 0%, #070a14 60%);
+  -webkit-font-smoothing: antialiased;
+  transition: opacity 240ms ease;
+}
+
+.rb-menu.is-leaving {
+  opacity: 0;
+}
+
+.rb-menu__title {
+  font-size: clamp(24px, 4.6vw, 44px);
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  line-height: 1;
+  background: linear-gradient(90deg, var(--rb-cyan), var(--rb-magenta));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 16px rgba(79, 243, 255, 0.35));
+}
+
+.rb-menu__sub {
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  color: rgba(230, 240, 255, 0.5);
+  margin-top: -6px;
+}
+
+.rb-menu__cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 26px;
+  padding: 0 20px;
+}
+
+.rb-menu__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: min(250px, 80vw);
+  padding: 18px 20px 16px;
+  border: 1px solid var(--rb-hairline);
+  border-radius: 3px;
+  background: var(--rb-panel);
+  color: var(--rb-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.rb-menu__card.is-selected {
+  border-color: rgba(79, 243, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(79, 243, 255, 0.35), 0 0 28px rgba(79, 243, 255, 0.22);
+  background: rgba(10, 20, 40, 0.7);
+  transform: translateY(-3px);
+}
+
+.rb-menu__card[data-mode='race'].is-selected {
+  border-color: rgba(255, 61, 240, 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 61, 240, 0.35), 0 0 28px rgba(255, 61, 240, 0.22);
+}
+
+.rb-menu__kicker {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--rb-cyan);
+}
+
+.rb-menu__card[data-mode='race'] .rb-menu__kicker {
+  color: var(--rb-magenta);
+}
+
+.rb-menu__name {
+  font-size: 26px;
+  font-weight: 300;
+  letter-spacing: 0.22em;
+}
+
+.rb-menu__desc {
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--rb-dim);
+}
+
+.rb-menu__hint {
+  margin-top: 22px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--rb-dim);
+}
+
+.rb-menu__hint b {
+  color: var(--rb-text);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ minimap */
+
+.rb-minimap {
+  position: absolute;
+  top: 92px;
+  right: 26px;
+  padding: 4px;
+  border: 1px solid var(--rb-hairline);
+  border-radius: 2px;
+  background: var(--rb-panel);
+  pointer-events: none;
+}
+
+.rb-minimap canvas {
+  display: block;
+}
+
+/* ------------------------------------------------------------ race readout */
+
+.rb-race {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 16px 7px;
+  border: 1px solid var(--rb-hairline);
+  border-radius: 2px;
+  background: var(--rb-panel);
+  white-space: nowrap;
+}
+
+.rb-hud.is-race .rb-race {
+  display: flex;
+}
+
+/* In race mode the cruise badge steps down below the readout. */
+.rb-hud.is-race .rb-cruise {
+  top: 108px;
+}
+
+.rb-race__lap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.26em;
+  color: var(--rb-dim);
+}
+
+.rb-race__lap-value {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--rb-text);
+}
+
+.rb-race__time {
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: 0.06em;
+  color: var(--rb-cyan-hot);
+  text-shadow: 0 0 14px rgba(79, 243, 255, 0.45);
+  will-change: transform;
+}
+
+.rb-race.is-finished .rb-race__time {
+  color: var(--rb-violet-hot);
+  text-shadow: 0 0 14px rgba(255, 61, 240, 0.45);
+}
+
+.rb-race__laps {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--rb-dim);
+}
+
+.rb-race__split {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  opacity: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--rb-cyan);
+  text-shadow: 0 0 10px rgba(79, 243, 255, 0.45);
+}
+
+.rb-countdown {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  font-size: 128px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--rb-cyan-hot);
+  text-shadow: 0 0 28px rgba(79, 243, 255, 0.6), 0 0 60px rgba(79, 243, 255, 0.3);
+  will-change: transform, opacity;
+}
+
+.rb-countdown.is-go {
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: var(--rb-acid);
+  text-shadow: 0 0 28px rgba(168, 255, 62, 0.6), 0 0 60px rgba(168, 255, 62, 0.3);
+}
+
+.rb-wrongway {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 61, 240, 0.6);
+  border-radius: 2px;
+  background: var(--rb-panel);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--rb-magenta);
+  text-shadow: 0 0 12px rgba(255, 61, 240, 0.6);
+  transition: opacity 200ms ease;
+}
+
+.rb-wrongway.is-on {
+  opacity: 1;
+  animation: rb-blink 0.9s ease-in-out infinite;
+}
+
+.rb-results {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 36px 20px;
+  border: 1px solid rgba(255, 61, 240, 0.5);
+  border-radius: 3px;
+  background: rgba(6, 10, 20, 0.72);
+  box-shadow: 0 0 40px rgba(255, 61, 240, 0.18);
+}
+
+.rb-results.is-on {
+  display: flex;
+}
+
+.rb-results__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--rb-magenta);
+  text-shadow: 0 0 12px rgba(255, 61, 240, 0.6);
+}
+
+.rb-results__time {
+  font-size: 54px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--rb-text);
+  text-shadow: 0 0 20px rgba(79, 243, 255, 0.45);
+}
+
+.rb-results__meta {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--rb-dim);
+}
+
+.rb-results__keys {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--rb-dim);
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-minimap {
+    top: 80px;
+    transform: scale(0.75);
+    transform-origin: 100% 0;
+  }
+
+  .rb-countdown {
+    font-size: 84px;
+  }
+}
+
+/* Narrow windows: the race readout steps below the controls card and the money block. */
+@media (max-width: 1180px) {
+  .rb-race {
+    top: 62px;
+  }
+
+  .rb-hud.is-race .rb-cruise {
+    top: 154px;
+  }
+}

@@ -6,7 +6,8 @@
  * `window.__rb.inject` automation hook, saves screenshots into artifacts/ and writes
  * artifacts/qa-metrics.json with FPS, draw calls, triangles and the gameplay checks.
  *
- * Usage:  node scripts/qa-drive.mjs [--url http://127.0.0.1:5173/] [--headed] [--out artifacts]
+ * Usage:  node scripts/qa-drive.mjs [--url http://127.0.0.1:5173/?mode=test] [--headed] [--out artifacts]
+ * The URL needs a `mode` (test | race); without one the game shows the main menu and waits.
  * Requires the dev server (npm run dev) or preview server to be running.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -18,7 +19,7 @@ const getArg = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
-const url = getArg('--url', 'http://127.0.0.1:5173/?debug=1');
+const url = getArg('--url', 'http://127.0.0.1:5173/?debug=1&mode=test');
 const outDir = getArg('--out', 'artifacts');
 const headed = args.includes('--headed');
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { createArenaLayout } from './world/arenaLayout';
-import type { GameEvent, GameState, HudSnapshot, PlayerCommand } from './core/types';
+import { createArenaWorld } from './world/arenaWorld';
+import { createRaceWorld } from './world/raceWorld';
+import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot } from './core/types';
 import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
 import { createGameLoop, type GameLoop } from './core/loop';
 import { createKeyboardInput, createPlayerCommand } from './core/input/keyboard';
@@ -18,6 +19,7 @@ import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
 import { compileScene, warmRender } from './render/warmup';
 import { createHud } from './ui/hud';
+import { createMinimap } from './ui/minimap';
 import { createDebugOverlay, type DebugFrameInput } from './ui/debugOverlay';
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
@@ -56,11 +58,14 @@ function measure(name: string): () => void {
   };
 }
 
-export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debugRoot: HTMLElement): Game {
+export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debugRoot: HTMLElement, mode: GameMode = 'test'): Game {
   const endTotal = measure('create');
   const params = new URLSearchParams(location.search);
 
-  const layout = createArenaLayout();
+  // The world: the free-roam test city or the racing circuit. Both give the simulation a
+  // layout (colliders, spawns, patrols, the race course) and the renderer a plan (the art).
+  const world = mode === 'race' ? createRaceWorld() : createArenaWorld();
+  const layout = world.layout;
   const state = createInitialGameState(layout);
   const command: PlayerCommand = createPlayerCommand();
   const input = createKeyboardInput(window);
@@ -74,7 +79,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   const scene = new THREE.Scene();
 
   end = measure('environment');
-  const environment = createEnvironment(scene, layout);
+  const environment = createEnvironment(scene, world.plan);
   end();
 
   end = measure('vehicles');
@@ -104,7 +109,8 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
   end();
 
   end = measure('hud');
-  const hud = createHud(hudRoot);
+  const hud = createHud(hudRoot, mode);
+  const minimap = createMinimap(hudRoot, layout.minimap, layout.race);
   const debug = createDebugOverlay(debugRoot, params.has('debug'));
   end();
 
@@ -163,7 +169,23 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     chainWindow: 0,
     nitroRecharging: false,
     cruising: false,
+    mode,
+    race: null,
   };
+  const raceSnapshot: RaceHudSnapshot = {
+    phase: 'countdown',
+    countdown: 0,
+    lap: 1,
+    laps: 1,
+    elapsed: 0,
+    lapTime: 0,
+    lastLap: -1,
+    bestLap: -1,
+    finishTime: -1,
+    wrongWay: false,
+    lapFraction: 0,
+  };
+  if (state.race) snapshot.race = raceSnapshot;
   const debugInput: DebugFrameInput = { simMs: 0, renderMs: 0, gpuMs: -1, pixelRatio: startRatio, governor: governor.status };
   let lastNitroAmount = state.nitro.amount;
   let nitroVisual = 0;
@@ -321,7 +343,22 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
     snapshot.nitroRecharging = !state.nitro.active && state.nitro.amount > lastNitroAmount + 1e-6;
     snapshot.cruising = cruising;
     lastNitroAmount = state.nitro.amount;
+    const race = state.race;
+    if (race) {
+      raceSnapshot.phase = race.phase;
+      raceSnapshot.countdown = race.countdown;
+      raceSnapshot.lap = race.lap;
+      raceSnapshot.laps = race.laps;
+      raceSnapshot.elapsed = race.elapsed;
+      raceSnapshot.lapTime = race.phase === 'racing' ? simTime - race.lapStart : race.phase === 'finished' ? race.lastLap : 0;
+      raceSnapshot.lastLap = race.lastLap;
+      raceSnapshot.bestLap = race.bestLap;
+      raceSnapshot.finishTime = race.finishTime;
+      raceSnapshot.wrongWay = race.wrongWay;
+      raceSnapshot.lapFraction = race.progress - Math.floor(race.progress);
+    }
     hud.update(snapshot);
+    minimap.update(pose.x, pose.z, pose.heading, state.targets);
 
     gpuTimer.begin();
     speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed));
@@ -372,6 +409,9 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       ready = true;
     },
     start() {
+      // Starting without `warmUp` (the `?nowarm` A/B) is a deliberate cold start: the game is
+      // as ready as it is going to get, so automation must not wait any longer.
+      ready = true;
       loop.start();
     },
     stop() {
@@ -383,6 +423,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       input.dispose();
       theme.dispose();
       hud.dispose();
+      minimap.dispose();
       debug.dispose();
       audio.dispose();
       effects.dispose();
@@ -398,6 +439,7 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
 
   // Automation / QA hook. Not part of gameplay.
   (window as unknown as { __rb: unknown }).__rb = {
+    mode,
     state,
     layout,
     command,
@@ -436,6 +478,26 @@ export function createGame(canvas: HTMLCanvasElement, hudRoot: HTMLElement, debu
       let n = 0;
       for (const q of injectQueue) n += q.ticks;
       return n;
+    },
+    /**
+     * Advance the simulation `ticks` fixed steps and render one frame, independent of the
+     * animation loop. For automation in throttled/background tabs and deterministic scripts.
+     */
+    step(ticks = 1) {
+      for (let i = 0; i < ticks; i++) simulate(SIM_STEP);
+      render(1, SIM_STEP);
+      return state.time;
+    },
+    /** Put the car at a pose (heading in radians, 0 = north) at rest, and snap the camera to it. */
+    teleport(x: number, z: number, heading: number) {
+      const v = state.vehicle;
+      v.x = v.prevX = x;
+      v.z = v.prevZ = z;
+      v.heading = v.prevHeading = heading;
+      v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
+      if (cruising) cruiseControl.reset(v);
+      fillCameraPose(1);
+      chase.snap(cameraPose);
     },
   };
   const injectQueue: Array<{ partial: Partial<PlayerCommand>; ticks: number }> = [];

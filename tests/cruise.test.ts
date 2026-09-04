@@ -3,7 +3,7 @@ import { createArenaLayout } from '../src/world/arenaLayout';
 import { createCruiseController, nearestRouteTarget } from '../src/sim/cruise';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { createInitialGameState, stepGame } from '../src/sim/gameState';
-import { isRoad } from '../src/render/scene/env/builders';
+import { createArenaWorld } from '../src/world/arenaWorld';
 import { CRUISE, SIM_STEP, VEHICLE } from '../src/config/tuning';
 import { msToKmh } from '../src/core/math';
 import type { ObstacleBox } from '../src/core/types';
@@ -16,6 +16,7 @@ import type { ObstacleBox } from '../src/core/types';
 
 const layout = createArenaLayout();
 const route = layout.cruiseRoute;
+const { isRoad } = createArenaWorld().plan;
 
 function distanceToBox(b: ObstacleBox, x: number, z: number): number {
   const dx = Math.max(b.minX - x, 0, x - b.maxX);

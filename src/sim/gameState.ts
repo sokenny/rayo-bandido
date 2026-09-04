@@ -17,6 +17,7 @@ import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyRewards } from './economy';
+import { createRaceState, resetRaceState, stepRace } from './race';
 
 /**
  * Simulation orchestrator. Pure data in, pure data out; no Three.js, no DOM.
@@ -77,6 +78,7 @@ export function createInitialGameState(layout: ArenaLayout): GameState {
     targets: createTargets(layout),
     nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
+    race: layout.race ? createRaceState(layout.race) : null,
     events: [],
   };
 }
@@ -93,8 +95,16 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   resetTargets(state.targets, layout);
   resetNearMissState(state.nearMiss);
   state.economy = createEconomyState();
+  if (state.race && layout.race) resetRaceState(state.race, layout.race);
   state.events.length = 0;
 }
+
+/**
+ * The command applied while a race countdown holds the car on the grid: handbrake on, no
+ * throttle. Steering and fire are copied from the player's command so the wheels turn and
+ * the lightning still works. One long-lived object, never allocated per tick.
+ */
+const HOLD: PlayerCommand = { throttle: 0, brake: 0, steer: 0, handbrake: true, nitro: false, fire: false, restart: false, cruise: false };
 
 export function stepGame(state: GameState, cmd: PlayerCommand, layout: ArenaLayout, dt: number): void {
   state.events.length = 0;
@@ -107,13 +117,23 @@ export function stepGame(state: GameState, cmd: PlayerCommand, layout: ArenaLayo
   state.tick++;
   state.economy.lastReward = 0;
 
-  stepNitro(state.nitro, state.vehicle, cmd, dt, state.events);
-  stepVehicle(state.vehicle, cmd, state.nitro.active, dt);
+  // Race countdown: the car is held on the grid until GO.
+  const race = state.race;
+  let input = cmd;
+  if (race && race.phase === 'countdown') {
+    HOLD.steer = cmd.steer;
+    HOLD.fire = cmd.fire;
+    input = HOLD;
+  }
+
+  stepNitro(state.nitro, state.vehicle, input, dt, state.events);
+  stepVehicle(state.vehicle, input, state.nitro.active, dt);
   resolveCollisions(state.vehicle, layout, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);
   stepTargets(state.targets, layout, state.time, dt);
   resolveTargetCollisions(state.vehicle, state.targets, state.events);
   stepNearMiss(state.nearMiss, state.vehicle, state.targets, state.events);
-  stepLightning(state.lightning, state.vehicle, state.targets, state.drift, cmd, state.time, dt, state.events);
+  stepLightning(state.lightning, state.vehicle, state.targets, state.drift, input, state.time, dt, state.events);
   applyRewards(state.economy, state.targets, state.events);
+  if (race && layout.race) stepRace(race, layout.race, state.vehicle, state.time, dt, state.events);
 }

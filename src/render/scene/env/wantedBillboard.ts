@@ -229,14 +229,17 @@ export interface WantedBillboard {
 /** How long start-up waits for the portrait before drawing the procedural fallback. */
 const PORTRAIT_TIMEOUT_MS = 2500;
 
-export function createWantedBillboard(): WantedBillboard {
+export function createWantedBillboard(pose: { x: number; z: number; rotY: number }): WantedBillboard {
   const group = new THREE.Group();
   group.name = 'wanted-billboard';
+  // The board is built facing +Z around its own origin and then placed: in the test city on
+  // the north edge of the plaza looking south into the square (masts on the blocks either
+  // side), on the circuit at the end of the start straight looking down it.
+  group.position.set(pose.x, 0, pose.z);
+  group.rotation.y = pose.rotY;
 
-  // North edge of the plaza (plaza spans z -25..25), lifted well above head height and facing
-  // south (+Z) into the square. Masts land on the solid blocks at x = +/-16, z = -31.
   const cx = 0;
-  const cz = -30;
+  const cz = 0;
   const panelW = 28;
   const panelH = 15.4;
   const panelY = 16.5;

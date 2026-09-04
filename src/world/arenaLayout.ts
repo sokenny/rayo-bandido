@@ -1,4 +1,7 @@
 import type { ArenaLayout, ObstacleBox } from '../core/types';
+import type { BarrierRect, BlockRect, RoadRect, WallRect } from './cityPlan';
+
+export type { BarrierRect, BlockRect, RoadRect, WallRect, ZoneId, Rect } from './cityPlan';
 
 /**
  * Arena layout data. Pure data, no Three.js. Consumed by the simulation (collision, spawns)
@@ -26,31 +29,6 @@ import type { ArenaLayout, ObstacleBox } from '../core/types';
  * - Clutter props (containers, pipes, AC units, signs) are placed *inside* a block or wall
  *   footprint, so they never need a collider of their own.
  */
-
-export type ZoneId = 'corporate' | 'urban' | 'jdm';
-
-export interface Rect {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-}
-
-export interface RoadRect extends Rect {
-  tag: string;
-  /** 'z' runs north-south, 'x' runs east-west, 'open' is the plaza (no lane markings). */
-  axis: 'x' | 'z' | 'open';
-  /** Number of painted lanes; 0 for the plaza and the alley. */
-  lanes: number;
-  zone: ZoneId;
-}
-
-export interface BlockRect extends Rect {
-  tag: string;
-  zone: ZoneId;
-  /** Rough height band for the renderer: 1 = low industrial, 2 = mid-rise, 3 = tower. */
-  massing: 1 | 2 | 3;
-}
 
 const HALF = 120;
 /** Outer edge of the road ring. Everything beyond is wall band + skyline. */
@@ -93,7 +71,7 @@ export const ARENA_BLOCKS: readonly BlockRect[] = [
 ];
 
 /** Perimeter band: a 12 m thick frame just outside the ring road. */
-export const ARENA_WALLS: readonly (Rect & { tag: string })[] = [
+export const ARENA_WALLS: readonly WallRect[] = [
   { tag: 'wall-n', minX: -112, maxX: 112, minZ: -112, maxZ: -RING },
   { tag: 'wall-s', minX: -112, maxX: 112, minZ: RING, maxZ: 112 },
   { tag: 'wall-w', minX: -112, maxX: -RING, minZ: -RING, maxZ: RING },
@@ -104,7 +82,7 @@ export const ARENA_WALLS: readonly (Rect & { tag: string })[] = [
  * Free-standing barrier runs on the highway shoulder (the only clutter that is not already
  * inside a block or wall footprint, so it carries its own collider).
  */
-export const ARENA_BARRIERS: readonly (Rect & { tag: string; zone: ZoneId })[] = [
+export const ARENA_BARRIERS: readonly BarrierRect[] = [
   { tag: 'bar-hw-n', minX: -80, maxX: -77.5, minZ: -80, maxZ: -12, zone: 'corporate' },
   { tag: 'bar-hw-s', minX: -80, maxX: -77.5, minZ: 12, maxZ: 80, zone: 'corporate' },
   { tag: 'bar-av-n', minX: 77.5, maxX: 80, minZ: -80, maxZ: -12, zone: 'urban' },
@@ -209,5 +187,12 @@ export function createArenaLayout(): ArenaLayout {
     targetPatrols: PATROLS.map((loop) => loop.map((p) => ({ x: p.x, z: p.z }))),
     cruiseRoute: CRUISE_ROUTE.map((p) => ({ x: p.x, z: p.z })),
     colliders,
+    walls: [],
+    race: null,
+    minimap: {
+      bounds: { minX: -RING, maxX: RING, minZ: -RING, maxZ: RING },
+      rects: ARENA_ROADS.map((r) => ({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ })),
+      ribbons: [],
+    },
   };
 }

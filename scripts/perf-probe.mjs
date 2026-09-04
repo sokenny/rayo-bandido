@@ -13,14 +13,23 @@
  * Every frame from the very first `requestAnimationFrame` is recorded via a hook installed
  * before the game script runs, so the startup frames are not missed.
  *
- * Usage:  node scripts/perf-probe.mjs [--url http://127.0.0.1:5173/] [--headed] [--out artifacts/perf.json]
+ * Usage:  node scripts/perf-probe.mjs [--mode test|race] [--url http://127.0.0.1:5173/?mode=test] [--headed] [--out artifacts/perf.json]
  * Requires the dev server (npm run dev) or the preview server (npm run preview) to be running.
+ *
+ * PERF GATE:  node scripts/perf-probe.mjs --check [--runs 2]   (or `npm run perf:check`)
+ * Probes the production build (starts `vite preview` itself if nothing answers on 4173) and
+ * fails on regressions that do not depend on how fast the machine is - see `CHECKS` below:
+ * a shader compiled mid-play, a frame over 33 ms while an effect first appears, the draw-call
+ * and triangle budgets, main-thread cost per frame, console errors. Deterministic checks
+ * (program count, budgets, errors) must hold in every run; timing checks only fail when they
+ * fail in every run, so a one-off OS hiccup cannot fail the gate on its own.
  *
  * Headless Chrome is not vsync-limited, so absolute averages are headroom, not the shipped
  * frame rate. The numbers to compare between runs are the worst frames and the long tasks.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { spawn } from 'node:child_process';
 import puppeteer from 'puppeteer-core';
 
 const args = process.argv.slice(2);
@@ -28,10 +37,33 @@ const getArg = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
-const url = getArg('--url', 'http://127.0.0.1:5173/?debug=1');
-const outFile = getArg('--out', 'artifacts/perf.json');
+const check = args.includes('--check');
+const mode = getArg('--mode', 'test');
+const url = getArg('--url', check ? `http://127.0.0.1:4173/?debug=1&mode=${mode}` : `http://127.0.0.1:5173/?debug=1&mode=${mode}`);
+const outFile = getArg('--out', check ? 'artifacts/perf-check.json' : 'artifacts/perf.json');
 const headed = args.includes('--headed');
-const runs = Number(getArg('--runs', '1'));
+const runs = Number(getArg('--runs', check ? '2' : '1'));
+
+/**
+ * The perf gate. Every threshold here is an invariant of the game, not of the machine: headless
+ * Chrome is not vsync-limited and integrated GPUs differ, so absolute FPS is deliberately not
+ * one of them. If a threshold has to move, say why in docs/PROGRESS.md.
+ */
+const CHECKS = {
+  /** Phases after `idle` must compile nothing: the warm-up owns every shader. Deterministic. */
+  noMidPlayCompiles: true,
+  /** Worst frame allowed while an effect appears for the first time or during steady play (ms). */
+  maxFrameMs: 33,
+  /** AGENTS.md budgets. Deterministic. */
+  maxDrawCalls: 60,
+  maxTriangles: 200_000,
+  /** Main-thread ms per frame (sim + render JS) in steady play. Generous: the target is ~1 ms. */
+  maxCpuMs: 4,
+  /** Total main-thread blocking before the first playable frame (ms). */
+  maxStartupLongTaskMs: 1500,
+  /** Phases the frame-time check applies to. */
+  playPhases: ['drive', 'drift', 'nitro', 'lightning', 'restart', 'steady'],
+};
 
 const candidates = [
   process.env.RB_BROWSER,
@@ -262,6 +294,39 @@ async function probeOnce(browser, runIndex) {
   return result;
 }
 
+/** In check mode, serve the production build ourselves when nothing answers at `url`. */
+async function reachable(target) {
+  try {
+    const res = await fetch(target, { signal: AbortSignal.timeout(1500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+let previewServer = null;
+if (check && !(await reachable(url))) {
+  if (!existsSync('dist/index.html')) {
+    console.error('perf gate: dist/ is missing. Run `npm run build` first (or use `npm run perf:check`).');
+    process.exit(2);
+  }
+  const port = new URL(url).port || '4173';
+  console.log(`starting vite preview on port ${port} for the perf gate`);
+  previewServer = spawn(
+    process.execPath,
+    ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', port, '--strictPort'],
+    { stdio: 'ignore' },
+  );
+  const deadline = Date.now() + 20000;
+  while (!(await reachable(url))) {
+    if (Date.now() > deadline || previewServer.exitCode !== null) {
+      console.error('perf gate: the preview server did not come up.');
+      process.exit(2);
+    }
+    await sleep(250);
+  }
+}
+
 const browser = await puppeteer.launch({
   executablePath,
   headless: headed ? false : 'new',
@@ -285,11 +350,62 @@ try {
   await browser.close();
 }
 
+if (previewServer) previewServer.kill();
+
+/** Evaluate the gate for one run. Returns { hard, soft }: deterministic and timing failures. */
+function evaluate(r) {
+  const hard = [];
+  const soft = [];
+  if (r.consoleErrors.length) hard.push(`console errors: ${r.consoleErrors.join(' | ')}`);
+  for (const [name, p] of Object.entries(r.phases)) {
+    if (name !== 'idle' && CHECKS.noMidPlayCompiles && p.newPrograms > 0) {
+      hard.push(`${name}: ${p.newPrograms} shader program(s) compiled mid-play (${p.programsBefore} -> ${p.programsAfter})`);
+    }
+    if (p.drawCalls > CHECKS.maxDrawCalls) hard.push(`${name}: ${p.drawCalls} draw calls > ${CHECKS.maxDrawCalls}`);
+    if (p.triangles > CHECKS.maxTriangles) hard.push(`${name}: ${p.triangles} triangles > ${CHECKS.maxTriangles}`);
+    if (CHECKS.playPhases.includes(name) && p.worstMs > CHECKS.maxFrameMs) {
+      soft.push(`${name}: worst frame ${p.worstMs} ms > ${CHECKS.maxFrameMs} ms`);
+    }
+  }
+  const steady = r.phases.steady;
+  if (steady && steady.simMs + steady.renderMs > CHECKS.maxCpuMs) {
+    soft.push(`steady: cpu ${steady.simMs} + ${steady.renderMs} ms > ${CHECKS.maxCpuMs} ms per frame`);
+  }
+  if (r.startup.longTaskTotalMs > CHECKS.maxStartupLongTaskMs) {
+    soft.push(`startup: ${r.startup.longTaskTotalMs} ms of long tasks > ${CHECKS.maxStartupLongTaskMs} ms`);
+  }
+  return { hard, soft };
+}
+
+let gate = null;
+if (check) {
+  const verdicts = results.map(evaluate);
+  const label = (v, i, list) => list.map((m) => `run ${i + 1}: ${m}`);
+  const hard = verdicts.flatMap((v, i) => label(v, i, v.hard));
+  const softEveryRun = verdicts.every((v) => v.soft.length > 0);
+  const softAll = verdicts.flatMap((v, i) => label(v, i, v.soft));
+  const soft = softEveryRun ? softAll : [];
+  const flaky = softEveryRun ? [] : softAll;
+  gate = { passed: hard.length === 0 && soft.length === 0, hard, soft, flaky, checks: CHECKS };
+  console.log('\nperf gate');
+  for (const m of hard) console.log(`  FAIL  ${m}`);
+  for (const m of soft) console.log(`  FAIL  ${m}`);
+  for (const m of flaky) console.log(`  warn  ${m} (did not repeat in every run; not counted)`);
+  if (gate.passed) {
+    const worst = results.reduce((a, r) => Math.max(a, ...Object.values(r.phases).map((p) => p.worstMs)), 0);
+    console.log(
+      `  PASS  no mid-play shader compiles, worst frame ${worst} ms <= ${CHECKS.maxFrameMs} ms, ` +
+        `draws <= ${CHECKS.maxDrawCalls}, tris <= ${CHECKS.maxTriangles}, cpu <= ${CHECKS.maxCpuMs} ms, no console errors`,
+    );
+  }
+}
+
 mkdirSync(dirname(outFile), { recursive: true });
-writeFileSync(outFile, JSON.stringify({ url, executablePath, headed, results }, null, 2));
+writeFileSync(outFile, JSON.stringify({ url, executablePath, headed, results, gate }, null, 2));
 console.log(`\nwrote ${outFile}`);
 const errors = results.flatMap((r) => r.consoleErrors);
-if (errors.length) {
+if (errors.length && !check) {
   console.log('console errors:', errors);
   process.exitCode = 1;
 }
+if (gate && !gate.passed) process.exitCode = 1;

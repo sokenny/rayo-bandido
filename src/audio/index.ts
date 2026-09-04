@@ -98,6 +98,12 @@ export function createAudio(targetCount: number): AudioSystem {
         case 'nitroStart':
           engine.nitroWhoosh();
           break;
+        case 'raceCountdown':
+          oneShots.countdown(false);
+          break;
+        case 'raceStart':
+          oneShots.countdown(true);
+          break;
         case 'restart':
           engine.reset();
           tires.reset();

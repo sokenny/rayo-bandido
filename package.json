@@ -14,7 +14,8 @@
     "qa": "node scripts/qa-drive.mjs",
     "qa:headed": "node scripts/qa-drive.mjs --headed",
     "perf": "node scripts/perf-probe.mjs",
-    "perf:headed": "node scripts/perf-probe.mjs --headed"
+    "perf:headed": "node scripts/perf-probe.mjs --headed",
+    "perf:check": "npm run build && node scripts/perf-probe.mjs --check"
   },
   "dependencies": {
     "three": "^0.170.0"

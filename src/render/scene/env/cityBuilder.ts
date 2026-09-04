@@ -1,51 +1,38 @@
-import {
-  ARENA_BLOCKS,
-  ARENA_ROADS,
-  ARENA_WALLS,
-  type BlockRect,
-  type RoadRect,
-  type ZoneId,
-} from '../../../world/arenaLayout';
+import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan';
 import { PAL, ZONE_ACCENT } from './palette';
 import { makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
-import { groundGlow, halo, isRoad, type EnvBuilders } from './builders';
+import { groundGlow, halo, type EnvBuilders } from './builders';
 import { signCell } from './textures';
 
 /**
- * Streets, sidewalks, blocks and skyline, all derived from the rectangles in
- * `src/world/arenaLayout.ts`. Nothing here invents geometry the simulation does not know
- * about: buildings live strictly inside their collider, roads live strictly outside every one.
+ * Streets, sidewalks, blocks and skyline, all derived from the rectangles in the plan
+ * (`b.plan`). Nothing here invents geometry the simulation does not know about: buildings
+ * live strictly inside their collider, roads live strictly outside every one.
  */
 
 /** Metres covered by one asphalt texture tile. */
-const ROAD_TILE = 8;
+export const ROAD_TILE = 8;
 /** Metres covered by one facade texture tile (horizontally / vertically). */
 const FACADE_TILE_W = 12;
 const FACADE_TILE_H = 10;
 /** Sidewalk ledge kept between the collider edge and the nearest wall. */
 const SIDEWALK = 3.4;
 
-export function zoneAt(x: number, z: number): ZoneId {
-  if (x < -30) return 'corporate';
-  if (z > 30) return 'jdm';
-  return 'urban';
-}
-
-function facadeBuilder(b: EnvBuilders, zone: ZoneId): MeshBuilder {
+export function facadeBuilder(b: EnvBuilders, zone: ZoneId): MeshBuilder {
   return zone === 'corporate' ? b.corp : zone === 'jdm' ? b.jdm : b.urban;
 }
 
-function accent(zone: ZoneId, rng: () => number): number {
+export function accent(zone: ZoneId, rng: () => number): number {
   const list = ZONE_ACCENT[zone];
   return list[Math.floor(rng() * list.length)];
 }
 
-export function buildCity(b: EnvBuilders, bounds: Rect2): void {
+export function buildCity(b: EnvBuilders): void {
   const rng = makeRng(0x5a1d0);
-  buildGround(b, bounds);
+  buildGround(b, b.plan.bounds);
   buildRoads(b);
   buildRoadPaint(b, rng);
-  for (const blk of ARENA_BLOCKS) buildBlock(b, blk, rng);
+  for (const blk of b.plan.blocks) buildBlock(b, blk, rng);
   buildPerimeter(b, rng);
   buildSkyline(b, rng);
 }
@@ -58,10 +45,15 @@ function buildGround(b: EnvBuilders, bounds: Rect2): void {
   b.concrete.planeY((bounds.minX + bounds.maxX) / 2, -0.04, (bounds.minZ + bounds.maxZ) / 2, size, size);
 }
 
+/** Asphalt tint per zone: cold and clean on the highway, a touch of rose in the old town. */
+export function roadTint(zone: ZoneId): number {
+  return zone === 'jdm' ? 0xe8dcea : zone === 'corporate' ? 0xf2f7ff : 0xe6eefb;
+}
+
 function buildRoads(b: EnvBuilders): void {
   // The plaza is laid first so the open intersection stays one uncut slab; the rest of the
   // network is then cut against everything already placed, which removes all coplanar overlap.
-  const ordered = [...ARENA_ROADS].sort((a, c) => (a.tag === 'plaza' ? -1 : c.tag === 'plaza' ? 1 : 0));
+  const ordered = [...b.plan.roads].sort((a, c) => (a.axis === 'open' ? -1 : c.axis === 'open' ? 1 : 0));
   const placed: Rect2[] = [];
   for (const road of ordered) {
     let pieces: Rect2[] = [road];
@@ -76,11 +68,11 @@ function buildRoads(b: EnvBuilders): void {
       if (pieces.length === 0) break;
     }
     placed.push(road);
-    const tint = road.zone === 'jdm' ? 0xe8dcea : road.zone === 'corporate' ? 0xf2f7ff : 0xe6eefb;
+    const tint = roadTint(road.zone);
     for (const p of pieces) {
       const w = p.maxX - p.minX;
       const d = p.maxZ - p.minZ;
-      b.road.color(tint, road.tag === 'alley-jdm' ? 0.72 : 1);
+      b.road.color(tint, road.lanes === 0 && road.axis !== 'open' ? 0.72 : 1);
       b.road.planeY(
         (p.minX + p.maxX) / 2,
         0,
@@ -98,16 +90,17 @@ function buildRoads(b: EnvBuilders): void {
 }
 
 /** True when the point is inside a road other than `self` (i.e. an intersection). */
-function inCrossing(self: RoadRect, x: number, z: number): boolean {
-  for (const r of ARENA_ROADS) {
+function inCrossing(b: EnvBuilders, self: RoadRect, x: number, z: number): boolean {
+  for (const r of b.plan.roads) {
     if (r === self || r.lanes === 0) continue;
     if (x > r.minX - 1 && x < r.maxX + 1 && z > r.minZ - 1 && z < r.maxZ + 1) return true;
   }
   // The plaza swallows all markings.
-  return x > -27 && x < 27 && z > -27 && z < 27;
+  const p = b.plan.plaza;
+  return p !== null && x > p.minX - 2 && x < p.maxX + 2 && z > p.minZ - 2 && z < p.maxZ + 2;
 }
 
-const PAINT_Y = 0.014;
+export const PAINT_Y = 0.014;
 
 function paintSegment(
   b: EnvBuilders,
@@ -129,14 +122,14 @@ function paintSegment(
     const c = t + dashLen / 2;
     const x = along ? cross : c;
     const z = along ? c : cross;
-    if (inCrossing(road, x, z)) continue;
+    if (inCrossing(b, road, x, z)) continue;
     if (along) b.lane.planeY(x, PAINT_Y, z, width, dashLen);
     else b.lane.planeY(x, PAINT_Y, z, dashLen, width);
   }
 }
 
 function buildRoadPaint(b: EnvBuilders, rng: () => number): void {
-  for (const road of ARENA_ROADS) {
+  for (const road of b.plan.roads) {
     if (road.lanes === 0 || road.axis === 'open') continue;
     const half = (road.axis === 'z' ? road.maxX - road.minX : road.maxZ - road.minZ) / 2;
     const worn = road.zone === 'jdm';
@@ -152,13 +145,16 @@ function buildRoadPaint(b: EnvBuilders, rng: () => number): void {
     paintSegment(b, road, -half / 2, 0.2, white, bright, 3.2, 5);
     paintSegment(b, road, half / 2, 0.2, white, bright, 3.2, 5);
   }
-  buildPlazaPaint(b, rng);
+  if (b.plan.plaza) buildPlazaPaint(b, b.plan.plaza, rng);
 }
 
 /** The drift plaza gets a painted ring and corner hatching instead of lanes. */
-function buildPlazaPaint(b: EnvBuilders, rng: () => number): void {
+function buildPlazaPaint(b: EnvBuilders, plaza: Rect, rng: () => number): void {
+  const cx = (plaza.minX + plaza.maxX) / 2;
+  const cz = (plaza.minZ + plaza.maxZ) / 2;
+  const half = Math.min(plaza.maxX - plaza.minX, plaza.maxZ - plaza.minZ) / 2;
   const segments = 56;
-  const r = 19.5;
+  const r = half * 0.78;
   const w = 0.35;
   b.lane.color(PAL.laneWhite, 0.8);
   for (let i = 0; i < segments; i++) {
@@ -170,23 +166,23 @@ function buildPlazaPaint(b: EnvBuilders, rng: () => number): void {
     const c1 = Math.cos(a1);
     const s1 = Math.sin(a1);
     b.lane.quad(
-      c0 * (r - w), PAINT_Y, s0 * (r - w),
-      c1 * (r - w), PAINT_Y, s1 * (r - w),
-      c1 * (r + w), PAINT_Y, s1 * (r + w),
-      c0 * (r + w), PAINT_Y, s0 * (r + w),
+      cx + c0 * (r - w), PAINT_Y, cz + s0 * (r - w),
+      cx + c1 * (r - w), PAINT_Y, cz + s1 * (r - w),
+      cx + c1 * (r + w), PAINT_Y, cz + s1 * (r + w),
+      cx + c0 * (r + w), PAINT_Y, cz + s0 * (r + w),
     );
   }
   // Bold corner brackets: they frame the open square and give the eye something to aim at.
-  const e = 23.2;
+  const e = half * 0.928;
   for (let q = 0; q < 4; q++) {
     const sx = q % 2 === 0 ? 1 : -1;
     const sz = q < 2 ? 1 : -1;
     b.lane.color(PAL.laneCenter, 0.8 + rng() * 0.2);
-    b.lane.planeY(sx * (e - 5.5), PAINT_Y, sz * e, 11, 0.55);
-    b.lane.planeY(sx * e, PAINT_Y, sz * (e - 5.5), 0.55, 11);
+    b.lane.planeY(cx + sx * (e - 5.5), PAINT_Y, cz + sz * e, 11, 0.55);
+    b.lane.planeY(cx + sx * e, PAINT_Y, cz + sz * (e - 5.5), 0.55, 11);
   }
   // Faint neon rim so the plaza reads at night without lighting it up like a stage.
-  groundGlow(b, 0, 0, 70, 70, PAL.neonCyan, 0.07, 0.018);
+  groundGlow(b, cx, cz, half * 2.8, half * 2.8, PAL.neonCyan, 0.07, 0.018);
 }
 
 /* ------------------------------------------------------------------ city blocks */
@@ -225,6 +221,7 @@ function buildBlock(b: EnvBuilders, blk: BlockRect, rng: () => number): void {
   };
   const iw = inner.maxX - inner.minX;
   const id = inner.maxZ - inner.minZ;
+  if (iw < 3 || id < 3) return;
   const nx = Math.max(1, Math.min(3, Math.round(iw / 18)));
   const nz = Math.max(1, Math.min(4, Math.round(id / 18)));
 
@@ -331,7 +328,8 @@ function tryFacade(
   const faceZ = dz === 1 ? m.maxZ : dz === -1 ? m.minZ : cz;
   const width = dx !== 0 ? m.maxZ - m.minZ : m.maxX - m.minX;
   // Only dress the wall if there is road across the sidewalk from it.
-  if (!isRoad(faceX + dx * 7, faceZ + dz * 7) && !isRoad(faceX + dx * 11, faceZ + dz * 11)) return;
+  const isRoad = b.plan.isRoad;
+  if (!isRoad(faceX + dx * 7, faceZ + dz * 7) && !isRoad(faceX + dx * 11, faceZ + dz * 11) && !isRoad(faceX + dx * 15, faceZ + dz * 15)) return;
 
   const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
   const zone = blk.zone;
@@ -378,17 +376,20 @@ function tryFacade(
 
 /* ------------------------------------------------------------------ perimeter + skyline */
 
-/** Buildings packed into the 12 m wall band, so the arena is enclosed by city, not by a fence. */
+/** Buildings packed into the wall band, so the city is enclosed by city, not by a fence. */
 function buildPerimeter(b: EnvBuilders, rng: () => number): void {
-  for (const wall of ARENA_WALLS) {
+  const bounds = b.plan.bounds;
+  const centreX = (bounds.minX + bounds.maxX) / 2;
+  const centreZ = (bounds.minZ + bounds.maxZ) / 2;
+  for (const wall of b.plan.walls) {
     const horizontal = wall.maxX - wall.minX > wall.maxZ - wall.minZ;
     const min = horizontal ? wall.minX : wall.minZ;
     const max = horizontal ? wall.maxX : wall.maxZ;
     const bandMin = horizontal ? wall.minZ : wall.minX;
     const bandMax = horizontal ? wall.maxZ : wall.maxX;
     const bandMid = (bandMin + bandMax) / 2;
-    // The band edge that faces the arena.
-    const inward = bandMid < 0 ? 1 : -1;
+    // The band edge that faces the city.
+    const inward = bandMid < (horizontal ? centreZ : centreX) ? 1 : -1;
     const innerEdge = inward > 0 ? bandMax : bandMin;
     const along = (t: number, off: number): [number, number] =>
       horizontal ? [t, innerEdge - inward * off] : [innerEdge - inward * off, t];
@@ -419,7 +420,7 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
       const len = Math.min(11 + rng() * 18, max - 1 - t);
       if (len < 8) break;
       const [x, z] = along(t + len / 2, 3.4 + depth / 2);
-      const zone = zoneAt(x, z);
+      const zone = b.plan.zoneAt(x, z);
       const h = zone === 'corporate' ? 24 + rng() * 34 : zone === 'jdm' ? 11 + rng() * 15 : 16 + rng() * 26;
       const bw = horizontal ? len - 1.5 : depth;
       const bd = horizontal ? depth : len - 1.5;
@@ -447,8 +448,15 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
 
 /** Silhouette towers outside the playable area. Pure backdrop: no colliders, no detail. */
 function buildSkyline(b: EnvBuilders, rng: () => number): void {
+  const bounds = b.plan.bounds;
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cz = (bounds.minZ + bounds.maxZ) / 2;
+  const halfW = (bounds.maxX - bounds.minX) / 2;
+  const halfD = (bounds.maxZ - bounds.minZ) / 2;
+
   const place = (x: number, z: number, w: number, d: number, h: number): void => {
-    const zone = zoneAt(x * 0.4, z * 0.4);
+    // The backdrop takes the zone of the city edge it stands behind.
+    const zone = b.plan.zoneAt(cx + (x - cx) * 0.4, cz + (z - cz) * 0.4);
     facadeBuilder(b, zone).box(x, h / 2, z, w, h, d, {
       top: false,
       tileW: 10,
@@ -470,20 +478,23 @@ function buildSkyline(b: EnvBuilders, rng: () => number): void {
   };
 
   for (let side = 0; side < 4; side++) {
-    for (let i = 0; i < 13; i++) {
-      const along = -190 + i * 31 + rng() * 14;
-      const out = 122 + rng() * 62;
+    const horizontal = side < 2;
+    const span = (horizontal ? halfW : halfD) + 70;
+    const count = Math.max(8, Math.round((span * 2) / 31));
+    for (let i = 0; i < count; i++) {
+      const along = -span + i * ((span * 2) / count) + rng() * 14;
+      const out = (horizontal ? halfD : halfW) + 2 + rng() * 62;
       const w = 12 + rng() * 20;
       const d = 12 + rng() * 20;
       const h = 34 + rng() * rng() * 105;
-      if (side === 0) place(along, -out, w, d, h);
-      else if (side === 1) place(along, out, w, d, h);
-      else if (side === 2) place(-out, along, w, d, h);
-      else place(out, along, w, d, h);
+      if (side === 0) place(cx + along, cz - out, w, d, h);
+      else if (side === 1) place(cx + along, cz + out, w, d, h);
+      else if (side === 2) place(cx - out, cz + along, w, d, h);
+      else place(cx + out, cz + along, w, d, h);
     }
   }
   // A couple of hero towers to anchor the horizon, as in the approved reference.
-  place(-52, -214, 30, 30, 150);
-  place(38, -238, 26, 26, 128);
-  place(206, 64, 28, 28, 118);
+  place(cx - 52, cz - halfD - 94, 30, 30, 150);
+  place(cx + 38, cz - halfD - 118, 26, 26, 128);
+  place(cx + halfW + 86, cz + 64, 28, 28, 118);
 }

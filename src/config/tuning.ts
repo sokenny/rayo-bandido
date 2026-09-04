@@ -435,6 +435,8 @@ export const AUDIO = {
   nearMissVolume: 0.45,
   /** Nitro spool whoosh level. */
   nitroVolume: 0.4,
+  /** Race countdown beeps level. */
+  countdownVolume: 0.35,
   /**
    * Fake automatic gearbox for the engine note: the upper speed-fraction bound of each gear
    * (fraction of VEHICLE.maxSpeed). Within a gear the note rises to redline, then drops on the
@@ -515,6 +517,36 @@ export const THEME = {
   signDepth: 0.55,
   /** How hard the highs tick the stutter neon: broken alley tubes and roof beacons. */
   flickerDepth: 0.45,
+};
+
+/**
+ * Race mode (`src/sim/race.ts`): a timed run of `laps` laps around the circuit in
+ * `src/world/raceSpec.ts`, through every checkpoint in order. No opponents yet; the clock is
+ * the opponent, and `RaceState.progress` is what a multiplayer host will rank players by.
+ */
+export const RACE = {
+  laps: 2,
+  /** Seconds of countdown before GO. The car is held on the brakes until then. */
+  countdownSeconds: 3,
+  /** Seconds of driving against the lap direction before WRONG WAY shows. */
+  wrongWayDelay: 1.2,
+  /** Speed below which direction is not judged (m/s). Sitting still is never the wrong way. */
+  wrongWayMinSpeed: 4,
+  /** Metres of clearance past the road edge in which a car still counts as on a shortcut. */
+  shortcutPad: 2,
+  /** Grid layout: distance from the line to the first slot and between rows (m), lateral offset (m). */
+  gridFirstRow: 8,
+  gridRowGap: 6,
+  gridLateral: 3.6,
+  gridSlots: 8,
+};
+
+/** The minimap in the top-right corner of the HUD (`src/ui/minimap.ts`). */
+export const MINIMAP = {
+  /** Canvas size in CSS pixels (square). */
+  size: 176,
+  /** Padding inside the canvas around the map (px). */
+  padding: 10,
 };
 
 /**

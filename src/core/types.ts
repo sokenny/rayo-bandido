@@ -18,6 +18,11 @@
  * - Units: meters, seconds, radians, m/s. Speed HUD conversion to km/h happens in UI.
  */
 
+import type { TrackPath } from '../world/track';
+
+/** Which world is loaded: the free-roam test city or the racing circuit. */
+export type GameMode = 'test' | 'race';
+
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {
   /** 0..1 forward throttle. */
@@ -172,6 +177,48 @@ export interface EconomyState {
   lastReward: number;
 }
 
+export type RacePhase = 'countdown' | 'racing' | 'finished';
+
+/**
+ * Race mode rules state (`src/sim/race.ts`). Plain data like everything else here, so a
+ * multiplayer host can ship it to every client and rank them by `progress`.
+ */
+export interface RaceState {
+  phase: RacePhase;
+  /** Seconds until GO while in the countdown. */
+  countdown: number;
+  /** Current lap, 1-based. Stays at `laps` once the race is finished. */
+  lap: number;
+  laps: number;
+  /** Index into `RaceCourse.gates` of the next gate that has to be crossed (0 = the line). */
+  nextGate: number;
+  /** Sim time of GO (or -1 before it). */
+  goTime: number;
+  /** Sim time the current lap started. */
+  lapStart: number;
+  /** Sim time the previous lap started (to undo a lap when the line is re-crossed backwards). */
+  prevLapStart: number;
+  /** Seconds since GO, frozen at the finish. */
+  elapsed: number;
+  /** Completed lap times (s). Preallocated to `laps`; -1 for laps not yet run. */
+  lapTimes: number[];
+  /** Best / last completed lap (s), or -1. */
+  bestLap: number;
+  lastLap: number;
+  /** Total time at the finish (s), or -1 while racing. */
+  finishTime: number;
+  /** Station along the lap centreline (m), measured from sample 0 of the course path. */
+  station: number;
+  /** Race progress in laps: completed laps + fraction of the current one. Ranks players. */
+  progress: number;
+  /** True while the car has been driving against the direction of the lap for a while. */
+  wrongWay: boolean;
+  /** Seconds spent driving the wrong way (hysteresis timer). */
+  wrongWayTime: number;
+  /** Index of the shortcut the car is currently inside, or -1. */
+  shortcut: number;
+}
+
 /** Discrete happenings for presentation and audio. Cleared at the start of every tick. */
 export type GameEvent =
   | { type: 'driftStart' }
@@ -183,7 +230,13 @@ export type GameEvent =
   | { type: 'targetDestroyed'; targetId: number; x: number; z: number; reward: number }
   | { type: 'nearMiss'; targetId: number; x: number; z: number; points: number; quality: number }
   | { type: 'collision'; x: number; z: number; impact: number }
-  | { type: 'restart' };
+  | { type: 'restart' }
+  | { type: 'raceCountdown'; seconds: number }
+  | { type: 'raceStart' }
+  | { type: 'checkpoint'; index: number; split: number }
+  | { type: 'lapComplete'; lap: number; time: number; best: boolean }
+  | { type: 'raceFinish'; total: number; bestLap: number }
+  | { type: 'wrongWay'; on: boolean };
 
 export interface GameState {
   /** Simulation time in seconds since the session started. */
@@ -196,6 +249,8 @@ export interface GameState {
   targets: TargetState[];
   nearMiss: NearMissState;
   economy: EconomyState;
+  /** Present in race mode only. */
+  race: RaceState | null;
   events: GameEvent[];
 }
 
@@ -209,10 +264,62 @@ export interface ObstacleBox {
   tag?: string;
 }
 
+/**
+ * Wall segment collider from a to b, for tracks with curves and diagonals that boxes cannot
+ * follow. Solid on both sides; the car (a circle) is pushed off the segment.
+ */
+export interface ObstacleWall {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  tag?: string;
+}
+
 export interface SpawnPoint {
   x: number;
   z: number;
   heading: number;
+}
+
+/** A line across the track. Crossing it in the direction (fx, fz) counts. */
+export interface RaceGate {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  fx: number;
+  fz: number;
+  /** Station of the gate along the lap (m). */
+  s: number;
+}
+
+/** A shortcut off the main lap: its own path, and the main-lap stations where it leaves and rejoins. */
+export interface RaceShortcut {
+  path: TrackPath;
+  sIn: number;
+  sOut: number;
+}
+
+/** Everything race mode needs to know about the circuit. Built by `src/world/raceWorld.ts`. */
+export interface RaceCourse {
+  laps: number;
+  /** gates[0] is the start/finish line; the rest are checkpoints in lap order. */
+  gates: RaceGate[];
+  /** Grid slots just past the line. Slot 0 is the local player; the rest are for multiplayer. */
+  grid: SpawnPoint[];
+  /** Lap centreline: progress, wrong-way detection, the minimap. */
+  path: TrackPath;
+  shortcuts: RaceShortcut[];
+}
+
+/** Drivable surfaces in map coordinates, for the minimap. */
+export interface MinimapData {
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Axis-aligned road rectangles. */
+  rects: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
+  /** Roads as centreline polylines with a width. `hidden` ribbons (shortcuts) are not drawn. */
+  ribbons: Array<{ points: Array<{ x: number; z: number }>; width: number; closed: boolean; hidden: boolean }>;
 }
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
@@ -227,6 +334,11 @@ export interface ArenaLayout {
   /** Closed scenic loop along road centrelines, driven by cruise mode (`src/sim/cruise.ts`). */
   cruiseRoute: Array<{ x: number; z: number }>;
   colliders: ObstacleBox[];
+  /** Segment colliders (guardrails, alley walls). Empty on the box-only test city. */
+  walls: ObstacleWall[];
+  /** Race course, when this world hosts races. */
+  race: RaceCourse | null;
+  minimap: MinimapData;
 }
 
 /** Read-only view of the state that the HUD needs. Built by `src/game.ts`. */
@@ -260,6 +372,26 @@ export interface HudSnapshot {
   nitroRecharging: boolean;
   /** True while cruise mode is driving the car. */
   cruising: boolean;
+  mode: GameMode;
+  /** Race readout; null outside race mode. */
+  race: RaceHudSnapshot | null;
+}
+
+export interface RaceHudSnapshot {
+  phase: RacePhase;
+  countdown: number;
+  lap: number;
+  laps: number;
+  /** Seconds since GO. */
+  elapsed: number;
+  /** Seconds into the current lap. */
+  lapTime: number;
+  lastLap: number;
+  bestLap: number;
+  finishTime: number;
+  wrongWay: boolean;
+  /** Fraction of the current lap completed (0..1). */
+  lapFraction: number;
 }
 
 /**

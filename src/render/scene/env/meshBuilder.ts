@@ -217,6 +217,34 @@ export class MeshBuilder {
     }
   }
 
+  /**
+   * Box of length `len` along the unit direction (dx, dz), `thick` across it and from y0 to
+   * y1, centred at (cx, cz). Four sides and a top: guardrails, barriers and walls that follow
+   * a curved or diagonal road.
+   */
+  orientedBox(cx: number, cz: number, dx: number, dz: number, len: number, thick: number, y0: number, y1: number): void {
+    // Right-hand normal of the direction.
+    const nx = -dz;
+    const nz = dx;
+    const hl = len / 2;
+    const ht = thick / 2;
+    // Corners: a = back-left, b = front-left, c = front-right, d = back-right (left = -normal).
+    const ax = cx - dx * hl - nx * ht;
+    const az = cz - dz * hl - nz * ht;
+    const bx = cx + dx * hl - nx * ht;
+    const bz = cz + dz * hl - nz * ht;
+    const qx = cx + dx * hl + nx * ht;
+    const qz = cz + dz * hl + nz * ht;
+    const ex = cx - dx * hl + nx * ht;
+    const ez = cz - dz * hl + nz * ht;
+    // Left face (outward = -normal), right face, front, back, top.
+    this.quad(bx, y0, bz, ax, y0, az, ax, y1, az, bx, y1, bz);
+    this.quad(ex, y0, ez, qx, y0, qz, qx, y1, qz, ex, y1, ez);
+    this.quad(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz);
+    this.quad(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az);
+    this.quad(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
+  }
+
   build(): THREE.BufferGeometry {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));

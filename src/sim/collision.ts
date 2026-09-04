@@ -2,8 +2,9 @@ import type { ArenaLayout, GameEvent, TargetState, VehicleState } from '../core/
 import { TARGETS, VEHICLE } from '../config/tuning';
 
 /**
- * Circle-vs-AABB collision of the car against arena obstacles. Pushes the car out,
- * removes the velocity component into the wall and emits a collision event.
+ * Collision of the car (a circle) against the world: axis-aligned boxes (buildings, the test
+ * city's barriers) and wall segments (the circuit's guardrails and alley walls). Pushes the
+ * car out, removes the velocity component into the wall and emits a collision event.
  * Deliberately simple and forgiving: arcade feel over accuracy.
  */
 export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: GameEvent[]): void {
@@ -56,6 +57,52 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
     if (vn < 0) {
       impact = Math.max(impact, -vn);
       // Remove the normal component (with a little bounce), keep most of the tangential.
+      const tx = -nz;
+      const tz = nx;
+      const vt = (v.vx * tx + v.vz * tz) * VEHICLE.collisionSlide;
+      const bounce = -vn * VEHICLE.restitution;
+      v.vx = tx * vt + nx * bounce;
+      v.vz = tz * vt + nz * bounce;
+    }
+  }
+
+  // Segment walls: guardrails and alley walls on the race circuit. Circle vs capsule.
+  const walls = layout.walls;
+  for (let i = 0; i < walls.length; i++) {
+    const w = walls[i];
+    const ex = w.bx - w.ax;
+    const ez = w.bz - w.az;
+    const len2 = ex * ex + ez * ez;
+    let t = len2 > 0 ? ((v.x - w.ax) * ex + (v.z - w.az) * ez) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = w.ax + ex * t;
+    const cz = w.az + ez * t;
+    const dx = v.x - cx;
+    const dz = v.z - cz;
+    const dist2 = dx * dx + dz * dz;
+    if (dist2 >= r * r) continue;
+
+    let nx: number;
+    let nz: number;
+    let penetration: number;
+    if (dist2 > 1e-8) {
+      const dist = Math.sqrt(dist2);
+      nx = dx / dist;
+      nz = dz / dist;
+      penetration = r - dist;
+    } else {
+      // Dead on the line: leave toward the side the car came from.
+      const len = Math.sqrt(len2) || 1;
+      const side = (v.prevX - w.ax) * ez - (v.prevZ - w.az) * ex >= 0 ? 1 : -1;
+      nx = (ez / len) * side;
+      nz = (-ex / len) * side;
+      penetration = r;
+    }
+    v.x += nx * penetration;
+    v.z += nz * penetration;
+    const vn = v.vx * nx + v.vz * nz;
+    if (vn < 0) {
+      impact = Math.max(impact, -vn);
       const tx = -nz;
       const tz = nx;
       const vt = (v.vx * tx + v.vz * tz) * VEHICLE.collisionSlide;

@@ -1,14 +1,21 @@
 import { MeshBuilder } from './meshBuilder';
-import { ARENA_BARRIERS, ARENA_BLOCKS, ARENA_ROADS, ARENA_WALLS } from '../../../world/arenaLayout';
+import type { CityPlan } from '../../../world/cityPlan';
+
+export { SIDEWALK_Y } from '../../../world/cityPlan';
 
 /**
- * One MeshBuilder per material. Every piece of the arena lands in one of these, so the whole
+ * One MeshBuilder per material. Every piece of the city lands in one of these, so the whole
  * environment renders in roughly twenty draw calls no matter how much clutter we add.
+ *
+ * The plan rides along: every builder function reads roads, blocks and the three placement
+ * predicates (`isRoad`, `isSolid`, `padY`) from `b.plan`, so the same code dresses the test
+ * arena and the racing circuit.
  */
 export interface EnvBuilders {
+  plan: CityPlan;
   /** Wet asphalt, tinted per zone through vertex colours. */
   road: MeshBuilder;
-  /** Road paint: lane lines, plaza circle, hazard chevrons. */
+  /** Road paint: lane lines, plaza circle, hazard chevrons, the start line. */
   lane: MeshBuilder;
   /** Ground plane, sidewalks, curbs, perimeter walls. */
   concrete: MeshBuilder;
@@ -35,8 +42,9 @@ export interface EnvBuilders {
   billB: MeshBuilder;
 }
 
-export function createBuilders(): EnvBuilders {
+export function createBuilders(plan: CityPlan): EnvBuilders {
   return {
+    plan,
     road: new MeshBuilder(true),
     lane: new MeshBuilder(true),
     concrete: new MeshBuilder(true),
@@ -55,42 +63,17 @@ export function createBuilders(): EnvBuilders {
   };
 }
 
-/** True when the point is on a drivable surface (road, plaza or alley). */
-export function isRoad(x: number, z: number, pad = 0): boolean {
-  for (const r of ARENA_ROADS) {
-    if (x >= r.minX - pad && x <= r.maxX + pad && z >= r.minZ - pad && z <= r.maxZ + pad) return true;
+/** Triangle count and non-empty builder (draw call) count, for the budget test. */
+export function builderStats(b: EnvBuilders): { triangles: number; drawCalls: number } {
+  let triangles = 0;
+  let drawCalls = 0;
+  for (const [key, value] of Object.entries(b)) {
+    if (key === 'plan') continue;
+    const mb = value as MeshBuilder;
+    triangles += mb.triangles;
+    if (!mb.empty) drawCalls++;
   }
-  return false;
-}
-
-/**
- * True when the point sits inside a collider footprint. Every decorative prop is placed
- * through this test, which is what guarantees the player can never drive through scenery.
- */
-export function isSolid(x: number, z: number, pad = 0): boolean {
-  for (const b of ARENA_BLOCKS) {
-    if (x >= b.minX + pad && x <= b.maxX - pad && z >= b.minZ + pad && z <= b.maxZ - pad) return true;
-  }
-  for (const w of ARENA_WALLS) {
-    if (x >= w.minX + pad && x <= w.maxX - pad && z >= w.minZ + pad && z <= w.maxZ - pad) return true;
-  }
-  for (const b of ARENA_BARRIERS) {
-    if (x >= b.minX + pad && x <= b.maxX - pad && z >= b.minZ + pad && z <= b.maxZ - pad) return true;
-  }
-  return false;
-}
-
-/** Height of the walkable surface at a point: sidewalks and the perimeter band are raised. */
-export const SIDEWALK_Y = 0.22;
-
-export function padY(x: number, z: number): number {
-  for (const b of ARENA_BLOCKS) {
-    if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return SIDEWALK_Y;
-  }
-  for (const w of ARENA_WALLS) {
-    if (x >= w.minX && x <= w.maxX && z >= w.minZ && z <= w.maxZ) return SIDEWALK_Y;
-  }
-  return 0;
+  return { triangles, drawCalls };
 }
 
 /** Additive pool of light on the ground (lamp spill, wet neon reflection). */

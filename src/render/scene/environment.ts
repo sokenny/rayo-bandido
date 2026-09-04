@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { SILENT_MUSIC, type ArenaLayout, type MusicBands } from '../../core/types';
+import { SILENT_MUSIC, type MusicBands } from '../../core/types';
 import { RENDER, THEME } from '../../config/tuning';
+import type { CityPlan } from '../../world/cityPlan';
 import { PAL } from './env/palette';
 import { createBuilders } from './env/builders';
 import { buildCity } from './env/cityBuilder';
 import { buildProps } from './env/propsBuilder';
+import { buildTrack } from './env/trackBuilder';
 import { createWantedBillboard } from './env/wantedBillboard';
 import {
   makeAsphaltTexture,
@@ -18,9 +20,11 @@ import {
 import type { MeshBuilder } from './env/meshBuilder';
 
 /**
- * The Rayo Bandido arena: a compact nocturnal block of city built entirely from the rectangles
- * in `src/world/arenaLayout.ts`, so what you can see and what you can crash into are the same
- * data. This module also owns the scene background, fog and the only two lights in the game.
+ * The Rayo Bandido city: a nocturnal block of city built entirely from a `CityPlan`
+ * (`src/world/cityPlan.ts`), which the test arena and the racing circuit both produce from the
+ * same rectangles and paths their simulation collides with, so what you can see and what you
+ * can crash into are the same data. This module also owns the scene background, fog and the
+ * only two lights in the game.
  *
  * HOW IT STAYS CHEAP
  * - Everything is merged into fifteen BufferGeometries, one per material: fifteen draw calls
@@ -52,7 +56,7 @@ export interface EnvironmentVisual {
   dispose(): void;
 }
 
-export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): EnvironmentVisual {
+export function createEnvironment(scene: THREE.Scene, plan: CityPlan): EnvironmentVisual {
   const root = new THREE.Group();
   root.name = 'environment';
   scene.add(root);
@@ -178,9 +182,10 @@ export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): Envi
 
   /* ---------------------------------------------------------------- geometry */
 
-  const b = createBuilders();
-  buildCity(b, layout.bounds);
+  const b = createBuilders(plan);
+  buildCity(b);
   buildProps(b);
+  buildTrack(b);
 
   const geometries: THREE.BufferGeometry[] = [];
   const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
@@ -211,10 +216,10 @@ export function createEnvironment(scene: THREE.Scene, layout: ArenaLayout): Envi
   add(b.neonFlicker, neonFlickerMat, 'env-neon-flicker', 1);
   add(b.glow, glowMat, 'env-glow', 2);
 
-  /* ------------------------------------------------- wanted billboard (plaza) */
+  /* ------------------------------------------------- wanted billboard */
 
-  const wantedBoard = createWantedBillboard();
-  root.add(wantedBoard.group);
+  const wantedBoard = createWantedBillboard(plan.wantedBoard ?? { x: 0, z: -10_000, rotY: 0 });
+  if (plan.wantedBoard) root.add(wantedBoard.group);
 
   /* ---------------------------------------------------------------- animation */
 

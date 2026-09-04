@@ -122,6 +122,87 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
 
 ## Updates
 
+### 2026-09-04 — Main menu, racing circuit ("Race"), race mode, minimap
+
+- **Two worlds behind a main menu.** `src/main.ts` shows the menu (`src/ui/mainMenu.ts`) when
+  the URL has no `mode`; picking Test or Race writes `?mode=` and reloads into that world, and
+  Esc returns to the menu. A reload per world switch keeps disposal trivial and gives every
+  world a shareable URL (a race lobby link later). `?mode=` also drives the QA and perf scripts
+  (`--mode race` on the perf probe).
+- **The circuit is data.** `src/world/raceSpec.ts` is a 17-corner polygon with a fillet radius,
+  width and zone per corner, plus two open alley paths and five checkpoint points.
+  `src/world/track.ts` (pure, no imports) builds the sampled path — straights and arcs, station,
+  tangent, half width, curvature — and projects points onto it. Lap 1396 m, longest straight
+  148 m (the west highway), corners between 36 and 110 m radius, no arc over 61 degrees (the
+  brief forbade right-angle corners: every direction change is a chained sweeper). Estimated
+  lap ~50 s at 105 km/h average; the autopilot's lap at 47 km/h takes 121 s. Two laps.
+  `node scripts/track-preview.mjs` prints the geometry and writes `artifacts/track-preview.svg`.
+- **World generation** (`src/world/raceWorld.ts`): ribbon edges become 800+ wall segments
+  (a new `ObstacleWall` collider type, circle-vs-capsule in `src/sim/collision.ts`), with gaps
+  wherever another ribbon runs through — that is how the alleys join; city blocks are a 46 m
+  grid recursively split and dropped wherever a road plus a zone shoulder (9 m highway, 3.6 m
+  city, 3 m old town, 1.2 m alley) cuts through, so the diagonal and curved roads read as
+  avenues cut through a grid; the six electric cars patrol the lap itself, in the direction of
+  travel and in alternating lanes, spread round the lap away from the grid; cruise mode
+  follows the centreline.
+- **Hidden shortcuts.** Each alley leaves the main road on the outside of a corner, exactly
+  where the guardrail starts to bend away, runs behind the buildings across the mouth of a
+  "bay" (a four-corner dip into the city), and rejoins after it: 167 m vs 199 m and 163 m vs
+  197 m of main road, 8 m wide between 2.7 m concrete walls. A flickering blade sign marks each
+  mouth; the minimap does not draw them.
+- **Race rules** (`src/sim/race.ts`, `RaceState` in `GameState`, tuning in `RACE`): 3 s
+  countdown with the car held on the handbrake (the orchestrator swaps in a hold command, so a
+  future multiplayer host launches everyone on the same tick); gates crossed in order from the
+  car's motion segment; a gate crossed backwards must be re-crossed, the line crossed backwards
+  right after a lap takes the lap back; lap times, best/last, finish; `progress` in laps for
+  ranking; wrong-way detection against the local tangent; shortcut-aware station. Events:
+  raceCountdown/raceStart (with beeps), checkpoint (split), lapComplete, raceFinish, wrongWay.
+- **Renderer refactor.** The environment now reads a `CityPlan` (`src/world/cityPlan.ts`):
+  roads, ribbons, rails, blocks, walls, barriers, gates, billboards, cables, pylons, plaza, the
+  WANTED board pose and the three placement predicates. `cityBuilder`, `propsBuilder` and the
+  new `trackBuilder` (asphalt ribbon with station UVs, curve-following lane paint, one oriented
+  box per rail collider — guardrail / jersey barrier / striped barrier / alley wall by zone —,
+  lamps outside the rails, start gantry + checkered line, checkpoint arches, alley dressing)
+  all draw from it; the test city's plan is built from the same ARENA_* rectangles as before,
+  so it is unchanged. Still fifteen merged meshes: the circuit renders in 37-39 draw calls and
+  ~38k triangles with the same 28 shader programs (nothing compiles mid-play), the test city
+  in 34 draws / 15.8k triangles.
+- **HUD + minimap.** Race readout (lap, total, last/best, splits), countdown, WRONG WAY, results
+  panel; the controls card gained ESC. `src/ui/minimap.ts`: north-up canvas, roads drawn once
+  into an offscreen layer, per-frame dots for the cars and a cyan arrow for the player, the line
+  in magenta and checkpoints in cyan. Both worlds have one.
+- **Automation.** `__rb.mode`, `__rb.step(ticks)` (advance the sim and render one frame — the
+  in-app Browser pane throttles rAF when hidden, so scripted screenshots use this) and
+  `__rb.teleport(x, z, heading)` (with a camera snap).
+- **Tests**: 197 (was 165). New: `track.test.ts` (fillet geometry, projection, open paths),
+  `race.test.ts` (countdown, laps, skipped checkpoint, backwards over the line, wrong way,
+  progress), `raceWorld.test.ts` (design brief: length, radii, no 90-degree corner, straight
+  length, widths, shortcut savings and gate placement; contract: road clear of colliders, rails
+  never inside a road, alley mouths open, grid and patrols on the road; a full autopilot lap
+  with zero wall contacts and every checkpoint), circuit environment budget.
+- **Interpretation of the brief.** "90-degree turns forbidden" is read as no sharp corner:
+  every corner is a fillet arc of ≥ 36 m radius and ≤ 61 degrees; direction reversals are
+  chains of 45-60 degree sweepers with straights between them.
+- **Perf gate** (`npm run perf:check`, production build, headless Chrome 1600x900, Intel
+  integrated graphics, two runs each; headless is not vsync-limited so averages are headroom):
+
+  | Map | Programs (start -> play) | Draws | Worst frame in play | Steady cpu sim + render | Steady gpu | Startup long tasks |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Test city | 28 -> 28 | 29-49 | 33 ms once (nitro, run 1 only), 29 ms | 0.02 + 0.6 ms | 2.3-2.6 ms | 356-627 ms |
+  | Circuit | 28 -> 28 | 33-43 | 29 ms (first lightning) | 0.02 + 0.5 ms | 2.1-2.2 ms | 336-627 ms |
+
+  Both pass: no mid-play shader compile, budgets kept, no console errors. The circuit's steady
+  frame is cheaper than the city's despite 2.4x the triangles: fewer additive glow quads in view.
+- Verification: `npm run typecheck`, `npm test` (197 passed), `npm run build`, the perf gate
+  above, both maps and the menu checked in the in-app browser with no console errors (cruise
+  mode drove a full counted lap in-browser: 121 s at 47 km/h, zero wall contacts).
+- **Not done / next**: nobody has driven the circuit with a keyboard yet — the 90 s target is an
+  estimate (`scripts/track-preview.mjs`: 50 s per lap at 105 km/h average; real players will
+  brake more and nitro more), so expect to tune corner radii and widths in `raceSpec.ts` after
+  a hand-feel pass. The alleys' risk/reward has the same caveat. Multiplayer: `RaceState` is
+  plain data with `progress` for ranking and the countdown is a sim rule, but there is still no
+  networking, no lobby and no remote cars; `RaceCourse.grid` has 8 slots ready for it.
+
 ### 2026-09-04 12:30 — Performance audit: loading screen, GPU warm-up, resolution governor, perf probe
 
 - **Root cause of the early-frame glitches.** Three compiles a material's shader the first time an
@@ -167,6 +248,11 @@ in `src/sim`, rendering and UI only read state. No networking exists or is stubb
   240-tick throttle ends exactly at the last sample). `driftActivates`, `chargeFromDrift` and
   `nitroRecharges` fail on this commit and on the previous one alike: the scripted drift inputs
   predate the current vehicle tuning (max slip 1.7 deg). Left for the drift hand-feel pass.
+- **Perf gate**: `npm run perf:check` builds, serves `dist/`, probes it twice and fails on any
+  mid-play shader compile, a frame over 33 ms in a play phase, more than 60 draws / 200k tris, over
+  4 ms main-thread per frame, or console errors (`CHECKS` in `scripts/perf-probe.mjs`). Timing
+  checks must repeat in every run to fail. Negative test: the gate against `?nowarm=1` fails with
+  8 programs compiled mid-play. This is the performance regression test; vitest cannot drive a GPU.
 - Verification: `npm run typecheck`, `npm test` (165 passed), `npm run build`, `npm run perf`
   on dev and on the preview build (2 runs each), `npm run perf:headed`, `npm run qa`; loading
   screen and game checked in the in-app browser with no console errors.

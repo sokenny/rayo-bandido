@@ -6,9 +6,12 @@ import {
   ARENA_WALLS,
   createArenaLayout,
 } from '../src/world/arenaLayout';
-import { createBuilders, isRoad, isSolid } from '../src/render/scene/env/builders';
+import { builderStats, createBuilders } from '../src/render/scene/env/builders';
 import { buildCity } from '../src/render/scene/env/cityBuilder';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
+import { buildTrack } from '../src/render/scene/env/trackBuilder';
+import { createArenaWorld } from '../src/world/arenaWorld';
+import { createRaceWorld } from '../src/world/raceWorld';
 import type { ObstacleBox } from '../src/core/types';
 import { VEHICLE } from '../src/config/tuning';
 
@@ -19,6 +22,8 @@ import { VEHICLE } from '../src/config/tuning';
  */
 
 const layout = createArenaLayout();
+const { plan } = createArenaWorld();
+const { isRoad, isSolid } = plan;
 
 /** Distance from a point to an axis-aligned box, 0 when inside. */
 function distanceToBox(b: ObstacleBox, x: number, z: number): number {
@@ -184,15 +189,26 @@ describe('arena layout', () => {
 
 describe('environment budget', () => {
   it('builds the whole arena inside the triangle and draw-call budget', () => {
-    const b = createBuilders();
-    buildCity(b, layout.bounds);
+    const b = createBuilders(plan);
+    buildCity(b);
     buildProps(b);
-    const entries = Object.entries(b);
-    const total = entries.reduce((sum, [, mb]) => sum + mb.triangles, 0);
-    const drawCalls = entries.filter(([, mb]) => !mb.empty).length;
-    expect(total, `environment triangles: ${total}`).toBeLessThan(100000);
-    expect(total, 'the arena is not empty').toBeGreaterThan(4000);
+    buildTrack(b);
+    const { triangles, drawCalls } = builderStats(b);
+    expect(triangles, `environment triangles: ${triangles}`).toBeLessThan(100000);
+    expect(triangles, 'the arena is not empty').toBeGreaterThan(4000);
     // Plus the background pass; still far below the 60 draw call ceiling.
     expect(drawCalls, `environment draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
+  });
+
+  it('builds the whole circuit inside the triangle and draw-call budget', () => {
+    const race = createRaceWorld();
+    const b = createBuilders(race.plan);
+    buildCity(b);
+    buildProps(b);
+    buildTrack(b);
+    const { triangles, drawCalls } = builderStats(b);
+    expect(triangles, `circuit triangles: ${triangles}`).toBeLessThan(150000);
+    expect(triangles, 'the circuit is not empty').toBeGreaterThan(10000);
+    expect(drawCalls, `circuit draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
   });
 });

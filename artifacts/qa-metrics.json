@@ -1,5 +1,5 @@
 {
-  "url": "http://127.0.0.1:5173/?debug=1",
+  "url": "http://127.0.0.1:5174/?debug=1&mode=test",
   "executablePath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "headed": false,
   "checks": {
@@ -25,18 +25,18 @@
     "noConsoleErrors": true
   },
   "metrics": {
-    "maxSlipDeg": 1.5383600024626953,
+    "maxSlipDeg": 2.0222923486784157,
     "driftSamples": 0,
     "chargeAfterDrift": 0,
     "nitroAfterBoost": 74.7999999999999,
     "nitroAfterRecharge": 60.79999999999984,
-    "stressSeconds": 15.333333333333691,
-    "fpsAfterStress": 297.5239616613443,
-    "fpsDrivingAvg": 328.7534193887041,
-    "fpsDrivingMin": 271.2405265257281,
-    "frameMsDriving": 3.0680981595091987,
-    "drawCalls": 42,
-    "triangles": 16572,
+    "stressSeconds": 15.633333333333645,
+    "fpsAfterStress": 280.5571905042156,
+    "fpsDrivingAvg": 293.55909739432093,
+    "fpsDrivingMin": 228.8501219283437,
+    "frameMsDriving": 3.0493902439024416,
+    "drawCalls": 44,
+    "triangles": 16214,
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
     "gpu": "ANGLE (Intel, Intel(R) Graphics (0x00007D67) Direct3D11 vs_5_0 ps_5_0, D3D11)"
   },

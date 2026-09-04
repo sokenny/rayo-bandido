@@ -1,4 +1,4 @@
-import type { GameEvent, HudSnapshot } from '../core/types';
+import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/types';
 import { BOLT_ICON, FLAME_ICON, RETICLE_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
 
@@ -47,8 +47,19 @@ const CONTROLS = [
   ['E', 'lightning'],
   ['R', 'restart'],
   ['C', 'cruise'],
+  ['ESC', 'menu'],
   ['F3', 'debug'],
 ];
+
+/** `83.456` -> `1:23.45`. Allocates a short string; only called when the shown value changes. */
+export function formatRaceTime(seconds: number): string {
+  if (seconds < 0) return '--:--.--';
+  const total = Math.max(0, seconds);
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total - m * 60);
+  const c = Math.floor((total - m * 60 - s) * 100);
+  return `${m}:${s < 10 ? '0' : ''}${s}.${c < 10 ? '0' : ''}${c}`;
+}
 
 const canAnimate = typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
 
@@ -71,11 +82,11 @@ function formatMoney(value: number): string {
   return out;
 }
 
-export function createHud(root: HTMLElement): Hud {
+export function createHud(root: HTMLElement, mode: GameMode = 'test'): Hud {
   root.innerHTML = '';
 
   const hud = document.createElement('div');
-  hud.className = 'rb-hud';
+  hud.className = `rb-hud${mode === 'race' ? ' is-race' : ''}`;
   hud.innerHTML =
     `<div class="rb-controls">` +
     CONTROLS.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('') +
@@ -91,6 +102,20 @@ export function createHud(root: HTMLElement): Hud {
     `<div class="rb-reticle">${RETICLE_ICON}<span class="rb-reticle__label">TARGET LOCKED</span></div>` +
     `<div class="rb-banner">RESTART</div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
+    `<div class="rb-race">` +
+    `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span></div>` +
+    `<div class="rb-race__time">0:00.00</div>` +
+    `<div class="rb-race__laps"><span class="rb-race__last">LAST --:--.--</span><span class="rb-race__best">BEST --:--.--</span></div>` +
+    `<div class="rb-race__split"></div>` +
+    `</div>` +
+    `<div class="rb-countdown"></div>` +
+    `<div class="rb-wrongway">WRONG WAY</div>` +
+    `<div class="rb-results">` +
+    `<div class="rb-results__title">FINISH</div>` +
+    `<div class="rb-results__time">0:00.00</div>` +
+    `<div class="rb-results__meta"></div>` +
+    `<div class="rb-results__keys"><span class="rb-key">R</span> race again <span class="rb-key">ESC</span> menu</div>` +
+    `</div>` +
     `<div class="rb-stack rb-stack--left">` +
     `<div class="rb-driftline">` +
     `<div class="rb-drift"><span class="rb-drift__label">DRIFT</span>` +
@@ -136,6 +161,17 @@ export function createHud(root: HTMLElement): Hud {
   const readyEl = pick<HTMLElement>(hud, '.rb-ready');
   const speedEl = pick<HTMLElement>(hud, '.rb-speed');
   const speedValueEl = pick<HTMLElement>(hud, '.rb-speed__value');
+  const raceEl = pick<HTMLElement>(hud, '.rb-race');
+  const raceLapEl = pick<HTMLElement>(hud, '.rb-race__lap-value');
+  const raceTimeEl = pick<HTMLElement>(hud, '.rb-race__time');
+  const raceLastEl = pick<HTMLElement>(hud, '.rb-race__last');
+  const raceBestEl = pick<HTMLElement>(hud, '.rb-race__best');
+  const raceSplitEl = pick<HTMLElement>(hud, '.rb-race__split');
+  const countdownEl = pick<HTMLElement>(hud, '.rb-countdown');
+  const wrongWayEl = pick<HTMLElement>(hud, '.rb-wrongway');
+  const resultsEl = pick<HTMLElement>(hud, '.rb-results');
+  const resultsTimeEl = pick<HTMLElement>(hud, '.rb-results__time');
+  const resultsMetaEl = pick<HTMLElement>(hud, '.rb-results__meta');
 
   // Displayed-value cache. Sentinels guarantee a first write for every field.
   let shownSpeed = -1;
@@ -156,6 +192,14 @@ export function createHud(root: HTMLElement): Hud {
   let controlsUntil = CONTROLS_INTRO;
   let rewardIndex = 0;
   let lastDriveHint = -DRIVE_HINT_EVERY;
+  // Race readout cache.
+  let shownLap = -1;
+  let shownLaps = -1;
+  let shownCentis = -1;
+  let shownLastLap = -2;
+  let shownBestLap = -2;
+  let shownPhase = '';
+  let wrongWay = false;
 
   const animations = new Map<Element, Animation>();
 
@@ -182,10 +226,69 @@ export function createHud(root: HTMLElement): Hud {
     );
   }
 
+  function updateRace(r: RaceHudSnapshot): void {
+    if (r.lap !== shownLap || r.laps !== shownLaps) {
+      shownLap = r.lap;
+      shownLaps = r.laps;
+      raceLapEl.textContent = `${r.lap}/${r.laps}`;
+    }
+    const centis = Math.floor(r.elapsed * 100);
+    if (centis !== shownCentis) {
+      shownCentis = centis;
+      raceTimeEl.textContent = formatRaceTime(r.elapsed);
+    }
+    if (r.lastLap !== shownLastLap) {
+      shownLastLap = r.lastLap;
+      raceLastEl.textContent = `LAST ${formatRaceTime(r.lastLap)}`;
+    }
+    if (r.bestLap !== shownBestLap) {
+      shownBestLap = r.bestLap;
+      raceBestEl.textContent = `BEST ${formatRaceTime(r.bestLap)}`;
+    }
+    if (r.wrongWay !== wrongWay) {
+      wrongWay = r.wrongWay;
+      wrongWayEl.classList.toggle('is-on', r.wrongWay);
+    }
+    if (r.phase !== shownPhase) {
+      shownPhase = r.phase;
+      raceEl.classList.toggle('is-finished', r.phase === 'finished');
+      resultsEl.classList.toggle('is-on', r.phase === 'finished');
+      if (r.phase === 'finished') {
+        resultsTimeEl.textContent = formatRaceTime(r.finishTime);
+        resultsMetaEl.textContent = `${r.laps} LAPS · BEST LAP ${formatRaceTime(r.bestLap)}`;
+        play(
+          resultsEl,
+          [
+            { opacity: 0, transform: 'translate(-50%, -50%) scale(0.92)' },
+            { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
+          ],
+          420,
+        );
+      }
+    }
+  }
+
+  /** Big centred number (or GO) that pops and fades. */
+  function showCountdown(text: string, hot: boolean): void {
+    countdownEl.textContent = text;
+    countdownEl.classList.toggle('is-go', hot);
+    play(
+      countdownEl,
+      [
+        { opacity: 0, transform: 'translate(-50%, -50%) scale(1.5)' },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.18 },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(0.96)', offset: 0.7 },
+        { opacity: 0, transform: 'translate(-50%, -50%) scale(0.9)' },
+      ],
+      hot ? 900 : 800,
+    );
+  }
+
   return {
     update(s) {
       // A restart rewinds sim time; drop stale throttles so hints work again.
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
+      if (s.race) updateRace(s.race);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -331,9 +434,28 @@ export function createHud(root: HTMLElement): Hud {
         if (e.reason === 'noCharge') showNote(noteEl, 'DRIFT TO CHARGE');
         else if (e.reason === 'noTarget') showNote(noteEl, 'NO TARGET');
         else showNote(noteEl, 'RECHARGING');
+      } else if (e.type === 'raceCountdown') {
+        showCountdown(String(e.seconds), false);
+      } else if (e.type === 'raceStart') {
+        showCountdown('GO', true);
+      } else if (e.type === 'checkpoint') {
+        showNote(raceSplitEl, `CHECKPOINT ${e.index} · ${formatRaceTime(e.split)}`);
+      } else if (e.type === 'lapComplete') {
+        showNote(raceSplitEl, `${e.best ? 'BEST LAP' : 'LAP'} ${formatRaceTime(e.time)}`);
+        play(
+          raceTimeEl,
+          [
+            { transform: 'scale(1)' },
+            { transform: 'scale(1.12)', offset: 0.2 },
+            { transform: 'scale(1)' },
+          ],
+          480,
+        );
       } else if (e.type === 'restart') {
         controlsUntil = CONTROLS_REPLAY;
         lastDriveHint = -DRIVE_HINT_EVERY;
+        shownPhase = '';
+        resultsEl.classList.remove('is-on');
         play(
           bannerEl,
           [
