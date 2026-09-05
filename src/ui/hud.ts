@@ -1,6 +1,7 @@
 import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/types';
 import { BOLT_ICON, RETICLE_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
+import { createSystemMessage } from './systemMessage';
 import { createTacho } from './tacho';
 
 /**
@@ -123,7 +124,6 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<span class="rb-reward"></span></div>` +
     `</div>` +
     `<div class="rb-reticle">${RETICLE_ICON}<span class="rb-reticle__label">TARGET LOCKED</span></div>` +
-    `<div class="rb-banner">RESTART</div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-race">` +
     `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span></div>` +
@@ -163,6 +163,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `</div>`;
   root.appendChild(hud);
 
+  // Centre-screen messages (RESTART, the cruise hint) are a shared component, and they hang
+  // off `root` rather than off `hud` so cruise mode can hide the HUD without hiding them.
+  const message = createSystemMessage(root);
+
   const chargeGauge = createRingGauge({ variant: 'rb-gauge--charge', icon: BOLT_ICON, secondaryArc: true });
   // Nitro no longer has a gauge of its own: it rides the outside of the rev counter's sweep,
   // so the whole drivetrain — revs, gear, speed, bottle — reads as one instrument.
@@ -175,7 +179,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const nitroKeyEl = pick<HTMLElement>(hud, '.rb-key--nitro');
   // A pad only becomes visible to the page once it is used, so the card starts on the keys and
   // swaps the moment the player touches a controller.
+  let padActive = false;
   const showPadControls = (): void => {
+    padActive = true;
     controlsEl.innerHTML = controlsFor(PAD_CONTROLS);
     // The two gauges carry their own key hint; they name the pad button too.
     for (const [el, label] of [[fireKeyEl, 'X'], [nitroKeyEl, 'B']] as const) el.textContent = label;
@@ -192,7 +198,6 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const remainingEl = pick<HTMLElement>(hud, '.rb-money__remaining');
   const rewardEls = Array.from(hud.querySelectorAll<HTMLElement>('.rb-reward'));
   const reticleEl = pick<HTMLElement>(hud, '.rb-reticle');
-  const bannerEl = pick<HTMLElement>(hud, '.rb-banner');
   const cruiseEl = pick<HTMLElement>(hud, '.rb-cruise');
   const driftEl = pick<HTMLElement>(hud, '.rb-drift');
   const driftTimeEl = pick<HTMLElement>(hud, '.rb-drift__time');
@@ -342,6 +347,18 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (s.cruising !== cruising) {
         cruising = s.cruising;
         cruiseEl.classList.toggle('is-on', s.cruising);
+        // Cruise mode is meant to be left playing in the background, so it takes every
+        // readout off the screen and leaves just the city — see `.is-cruise-clean`.
+        root.classList.toggle('is-cruise-clean', s.cruising);
+        if (s.cruising) {
+          message.show('CRUISE', {
+            sub: `Use ${padActive ? 'Y' : 'P'} to switch camera POVs`,
+            tone: 'calm',
+            duration: 3600,
+          });
+        } else {
+          message.clear();
+        }
       }
 
       const showControls = s.time < controlsUntil;
@@ -533,21 +550,14 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         tacho.reset(0);
         shownPhase = '';
         resultsEl.classList.remove('is-on');
-        play(
-          bannerEl,
-          [
-            { opacity: 0, letterSpacing: '0.6em' },
-            { opacity: 1, letterSpacing: '0.34em', offset: 0.18 },
-            { opacity: 1, letterSpacing: '0.34em', offset: 0.55 },
-            { opacity: 0, letterSpacing: '0.44em' },
-          ],
-          900,
-        );
+        message.show('RESTART', { duration: 900 });
       }
     },
 
     dispose() {
       window.removeEventListener('gamepadconnected', onPadConnected);
+      root.classList.remove('is-cruise-clean');
+      message.dispose();
       tacho.dispose();
       for (const animation of animations.values()) animation.cancel();
       animations.clear();

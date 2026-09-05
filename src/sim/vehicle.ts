@@ -8,8 +8,20 @@ import { clamp, clamp01, damp, forwardX, forwardZ, lerp, rightX, rightZ, wrapAng
  * MODEL (all constants live in `src/config/tuning.ts`, VEHICLE section)
  *  1. World velocity is decomposed into the body frame every tick, so collision impulses
  *     applied by `src/sim/collision.ts` after the previous tick are respected.
- *  2. Longitudinal: engine force with a speed falloff curve, strong brakes that turn into
- *     reverse near standstill, drag + rolling resistance + engine braking + drift scrub.
+ *  2. Longitudinal: engine force with a speed falloff curve, brakes that act along the velocity
+ *     vector (so a sideways car is slowed, not driven backwards), drag + rolling resistance +
+ *     engine braking + drift scrub. Reverse is a separate gear that only engages from a real
+ *     standstill after the brake has been held there for `reverseArmTime`.
+ *     The brake also transfers weight forward: see the DRIVETRAIN note below.
+ *  2b. DRIVETRAIN: the car is rear-wheel drive, and the model expresses that rather than
+ *     simulating it. Drive force only ever loosens the rear (`powerSlideGain` breaks traction
+ *     under throttle; it never helps the car turn in), and braking loads the front while
+ *     unloading the rear — the left-foot-brake technique. So a brake pressed mid-corner raises
+ *     the front's grip budget (`brakeYawGain`, `brakeFrontBite`), weakens the self-aligning
+ *     torque that would straighten the car (`brakeAlignScale`) and holds a floor under the
+ *     slide (`brakeRearUnload`): the car tightens toward the apex instead of running wide.
+ *     Anything added here later — launch behaviour, a diff, wheelspin — must keep drive at
+ *     the rear.
  *  3. Steering angle tightens with speed and reacts within a couple of frames.
  *  4. Yaw = grip-limited bicycle yaw (+ handbrake kick) + a self-aligning term that rotates
  *     the nose back toward the velocity direction. The self-aligning term is what keeps
@@ -62,6 +74,9 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
 
   // --- 3. How much the car is sliding this tick (0 = full grip, 1 = full drift). -------
   const forwardMotion = speed > VEHICLE.movingThreshold;
+  // Forward weight transfer under braking (0..1). Drives the left-foot-brake behaviour used
+  // in steps 3, 4 and 5: front loaded, rear light.
+  const brakeLoad = forwardMotion ? brake * clamp01(absSpeed / VEHICLE.brakeLoadSpeed) : 0;
   const handbrakeSlide = cmd.handbrake && forwardMotion && absSpeed > VEHICLE.handbrakeMinSpeed;
   let slide = 0;
   if (forwardMotion) {
@@ -83,12 +98,22 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
       slide *= lerp(1, VEHICLE.counterSteerGrip, counter);
     }
 
+    // Left-foot brake: the unloaded rear keeps sliding, so braking mid-drift trims the line
+    // instead of snapping the car straight. Only while a slide already exists — braking in a
+    // straight line must not loosen the car.
+    if (slipMag > VEHICLE.slideSlipStart) {
+      const rear = brakeLoad * VEHICLE.brakeRearUnload;
+      if (rear > slide) slide = rear;
+    }
+
     if (handbrakeSlide) slide = 1;
     slide = clamp01(slide);
   }
 
   const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide);
-  const latCap = lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide);
+  // The loaded front can hold more lateral force, which is what closes the apex.
+  const latCap =
+    lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide) * lerp(1, VEHICLE.brakeFrontBite, brakeLoad);
 
   // --- 4. Longitudinal. -----------------------------------------------------------------
   const maxForward = VEHICLE.maxSpeed + (nitroActive ? NITRO.boostMaxSpeedBonus : 0);
@@ -111,13 +136,31 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
     speed += NITRO.boostAccel * VEHICLE.nitroIdleThrottle * ramp * (1 - boostRatio * boostRatio) * dt;
   }
 
-  if (brake > 0) {
-    if (speed > VEHICLE.brakeToReverseSpeed) {
-      speed -= VEHICLE.brakeDecel * brake * dt;
-      if (speed < 0) speed = 0; // stop first, then a held brake engages reverse next tick
-    } else if (speed > -VEHICLE.maxReverseSpeed) {
-      speed -= VEHICLE.reverseAccel * brake * dt;
+  // Brakes act on the velocity vector, not on the forward axis alone: the tyres do not care
+  // which way the nose points. Sideways speed is scrubbed at `brakeLateralShare` so a drift
+  // survives the pedal, and the forward component can only reach zero, never cross it.
+  if (brake > 0 && speed > 0) {
+    const vmag = Math.hypot(speed, lateral);
+    if (vmag > 1e-6) {
+      const fight = lerp(1, VEHICLE.brakeThrottleFight, throttle);
+      const dv = Math.min(vmag, VEHICLE.brakeDecel * brake * fight * dt);
+      speed -= (dv * speed) / vmag;
+      if (speed < 0) speed = 0;
+      const latShare = (dv * lateral * VEHICLE.brakeLateralShare) / vmag;
+      lateral -= Math.abs(latShare) > Math.abs(lateral) ? lateral : latShare;
     }
+  }
+
+  // Reverse is its own gear. It needs the whole car stopped — sideways speed included — and
+  // the brake held there for `reverseArmTime`, so a fast car (drifting or not) can never flick
+  // itself into reverse with a stab of the pedal.
+  const armed = v.reverseArm >= VEHICLE.reverseArmTime;
+  const stopped =
+    Math.hypot(speed, lateral) < VEHICLE.reverseSpeedWindow && speed <= VEHICLE.brakeToReverseSpeed;
+  // Once armed, backing up keeps the gear engaged; releasing the brake drops out of it.
+  v.reverseArm = brake > 0 && (stopped || (armed && speed <= 0)) ? v.reverseArm + dt : 0;
+  if (v.reverseArm >= VEHICLE.reverseArmTime && speed > -VEHICLE.maxReverseSpeed) {
+    speed -= VEHICLE.reverseAccel * brake * dt;
   }
 
   if (cmd.handbrake) {
@@ -142,7 +185,10 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
   // Bicycle yaw, limited by how much lateral acceleration the tyres can produce. Drifting
   // raises that budget (`driftYawGain`) so the nose can out-rotate the velocity.
   const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle);
-  const yawBudget = VEHICLE.maxLatAccel * lerp(1, VEHICLE.driftYawGain, slide);
+  // Weight on the nose = more front grip to spend on rotation: the left-foot brake tightens
+  // the line rather than opening it.
+  const yawBudget =
+    VEHICLE.maxLatAccel * lerp(1, VEHICLE.driftYawGain, slide) * lerp(1, VEHICLE.brakeYawGain, brakeLoad);
   const yawLimit = yawBudget / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
   let yaw = clamp(kinematicYaw, -yawLimit, yawLimit);
 
@@ -157,7 +203,9 @@ export function stepVehicle(v: VehicleState, cmd: PlayerCommand, nitroActive: bo
   // drifting (so slides can be held), strong while gripping, and it ramps up hard past
   // `spinGuardSlip` so only a really abusive input can spin the car.
   if (speed > VEHICLE.alignMinSpeed) {
-    let alignRate = lerp(VEHICLE.alignGrip, VEHICLE.driftStability, slide);
+    // The light rear under braking resists straightening, so the nose keeps coming around.
+    let alignRate =
+      lerp(VEHICLE.alignGrip, VEHICLE.driftStability, slide) * lerp(1, VEHICLE.brakeAlignScale, brakeLoad);
     const over = slipMag - VEHICLE.spinGuardSlip;
     if (over > 0) alignRate += over * VEHICLE.spinGuardGain;
     if (slipMag > VEHICLE.slideSlipStart) {

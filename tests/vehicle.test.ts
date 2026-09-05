@@ -101,6 +101,102 @@ describe('reverse', () => {
   });
 });
 
+describe('left-foot brake', () => {
+  /** Full throttle for 8 s, then a handbrake flick into a settled right-hand slide. */
+  function driftEntry(): { v: VehicleState; cmd: PlayerCommand } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 8);
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    run(v, cmd, 0.4);
+    cmd.handbrake = false;
+    run(v, cmd, 0.6);
+    return { v, cmd };
+  }
+
+  it('never sends a moving car backwards, however hard the brake is stabbed mid-drift', () => {
+    const { v, cmd } = driftEntry();
+    expect(Math.abs(v.slipAngle) * DEG).toBeGreaterThan(15);
+    cmd.brake = 1;
+    cmd.throttle = 0;
+    for (let i = 0; i < 60 * 0.6; i++) {
+      stepVehicle(v, cmd, false, DT);
+      expect(v.speed).toBeGreaterThan(0);
+    }
+    // Released, the car is still going forward at a healthy clip - not reversing.
+    cmd.brake = 0;
+    run(v, cmd, 0.6);
+    expect(v.speed).toBeGreaterThan(10);
+  });
+
+  it('only engages reverse once the whole car has stopped, sideways speed included', () => {
+    const { v, cmd } = driftEntry();
+    cmd.brake = 1;
+    cmd.throttle = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      stepVehicle(v, cmd, false, DT);
+      if (v.speed < 0) {
+        // The tick reverse engaged, the car was genuinely at rest in every direction.
+        expect(Math.hypot(v.speed, v.lateralSpeed)).toBeLessThan(VEHICLE.reverseSpeedWindow);
+        break;
+      }
+    }
+    // And a held brake does eventually back the car out.
+    run(v, cmd, 2);
+    expect(v.speed).toBeLessThan(-3);
+  });
+
+  it('tightens the corner instead of opening it: braking turns the car further, on a shorter arc', () => {
+    function corner(brake: number): { turn: number; radius: number } {
+      const v = createVehicleState(0, 0, 0);
+      const cmd = createPlayerCommand();
+      cmd.throttle = 1;
+      run(v, cmd, 8);
+      cmd.steer = 1;
+      cmd.brake = brake;
+      const h0 = v.heading;
+      const x0 = v.x;
+      const z0 = v.z;
+      run(v, cmd, 2);
+      const turn = v.heading - h0;
+      return { turn, radius: Math.hypot(v.x - x0, v.z - z0) / Math.max(turn, 1e-6) };
+    }
+
+    const free = corner(0);
+    const braked = corner(1);
+    expect(free.turn).toBeGreaterThan(0);
+    expect(braked.turn).toBeGreaterThan(free.turn * 1.5);
+    expect(braked.radius).toBeLessThan(free.radius * 0.7);
+  });
+
+  it('does not loosen the car when braking in a straight line', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 8);
+    cmd.throttle = 0;
+    cmd.brake = 1;
+    let maxSlip = 0;
+    for (let i = 0; i < 60 * 2; i++) {
+      stepVehicle(v, cmd, false, DT);
+      maxSlip = Math.max(maxSlip, Math.abs(v.slipAngle));
+    }
+    expect(maxSlip * DEG).toBeLessThan(1);
+  });
+
+  it('keeps a drift alive: the pedal scrubs speed without snapping the car straight', () => {
+    const { v, cmd } = driftEntry();
+    const slipBefore = Math.abs(v.slipAngle);
+    const speedBefore = v.speed;
+    cmd.brake = 1;
+    run(v, cmd, 0.5);
+    expect(v.speed).toBeLessThan(speedBefore - 3);
+    expect(Math.abs(v.slipAngle)).toBeGreaterThan(slipBefore);
+  });
+});
+
 describe('steering', () => {
   it('reaches most of the requested angle within two frames', () => {
     const v = createVehicleState(0, 0, 0);

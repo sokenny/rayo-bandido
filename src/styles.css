@@ -1417,19 +1417,71 @@ body {
   text-shadow: 0 0 10px rgba(79, 243, 255, 0.5);
 }
 
-.rb-banner {
+/* ------------------------------------------- centre screen: system message */
+
+/* One component for every transient centre-screen line the game says (RESTART, the cruise
+   hint) — see src/ui/systemMessage.ts. It sits outside `.rb-hud` on purpose: cruise mode
+   hides the HUD, and the message announcing cruise mode has to outlive that. */
+.rb-sysmsg {
   position: absolute;
   top: 44%;
   left: 50%;
   transform: translate(-50%, 0) skewX(-7deg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rb-sysmsg__text {
   font-family: var(--rb-display);
   font-size: 30px;
   font-weight: 700;
   font-stretch: condensed;
-  letter-spacing: 0.3em;
+  letter-spacing: inherit;
   color: var(--rb-yellow);
   text-shadow: 0 0 18px rgba(252, 238, 10, 0.4);
+}
+
+.rb-sysmsg__sub {
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--rb-text);
+  /* A dark halo, not a neon one: the sub line has to stay readable over a lit shopfront. */
+  text-shadow: 0 1px 6px rgba(4, 6, 14, 0.85);
+  opacity: 0.85;
+}
+
+/* The quiet tone: cyan instead of yellow, for a message that informs rather than announces. */
+.rb-sysmsg--calm .rb-sysmsg__text {
+  color: var(--rb-cyan);
+  text-shadow: 0 0 18px rgba(79, 243, 255, 0.45);
+}
+
+/* ------------------------------------------------- cruise mode: clean screen */
+
+/* Cruise mode is a screensaver you can leave running, so every overlay layer in #hud-root —
+   HUD, minimap, standings, name tags — fades out and leaves the city alone. The system
+   message is the one exception, which is why it is a sibling of them all. */
+#hud-root > *:not(.rb-sysmsg) {
+  transition: opacity 420ms ease;
+}
+
+#hud-root.is-cruise-clean > *:not(.rb-sysmsg) {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #hud-root > *:not(.rb-sysmsg) {
+    transition: none;
+  }
 }
 
 /* ------------------------------------------------ top centre: cruise mode */

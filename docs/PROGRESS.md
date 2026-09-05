@@ -725,3 +725,45 @@ hook `scripts/qa-mp.mjs` drives is unchanged, and so is every class the HUD writ
 the three modes selected, room browser, a created room's lobby, the classification panel, the
 in-game HUD in race mode, the finish panel, the wrong-way banner, the countdown, the live
 standings and the loading screen. Suite: 276 tests in 18 files, all passing; `tsc --noEmit` clean.
+
+### 2026-09-05 — Left-foot brake, and reverse that needs a real standstill
+
+Juan on the brake: "too powerful — at full speed, pressing it lets me start going backwards
+fairly easily, at least while drifting. It should behave like a left-foot brake: bring the
+weight forward and close the apex, make the car go tighter instead of opening."
+
+The cause was in `src/sim/vehicle.ts`: the brake only ever touched the *forward* component of
+the body-frame velocity, and reverse engaged the first tick that component reached zero. Deep
+in a slide most of the speed is sideways, so the forward component fell through zero in a few
+frames while the car was still travelling at 60 km/h — and the car flipped into reverse.
+
+Three changes, all constants in `src/config/tuning.ts`:
+
+- **The brakes act along the velocity vector**, not the forward axis. Sideways speed is scrubbed
+  at `brakeLateralShare` (0.6, so a drift survives the pedal) and the forward component can only
+  reach zero, never cross it.
+- **Reverse is its own gear.** It needs the whole car stopped — `reverseSpeedWindow` measures
+  forward *and* sideways speed — with the brake held there for `reverseArmTime` (0.35 s). Once
+  engaged it stays engaged until the brake is released. Nothing at speed can flick into reverse.
+- **Left-foot braking.** Forward weight transfer (`brakeLoad`, ramped by speed) loads the front
+  and unloads the rear: a bigger yaw budget (`brakeYawGain`) and lateral-grip cap
+  (`brakeFrontBite`), a weaker self-aligning torque (`brakeAlignScale`) and a slide floor while
+  already sliding (`brakeRearUnload`). Braking on a straight is unchanged — the rear only comes
+  loose past `slideSlipStart`. Brake force is cut to `brakeThrottleFight` while the throttle is
+  also held, because the engine is fighting the pedal.
+
+`docs/DECISIONS.md` now records the car as **rear-wheel drive**. It is not simulated per wheel,
+but the model has to express it, and the header of `src/sim/vehicle.ts` says where: drive only
+ever loosens the rear, and the brake loads the front. Anything added later — launch behaviour, a
+diff, wheelspin — keeps drive at the rear.
+
+**Verified in the browser** (dev server, free-roam test city, `window.__rb.inject`, no console
+errors): a half-second stab at 80 km/h scrubs to 31 km/h with no reverse; the brake pinned
+through a 72 km/h handbrake slide turns the car 27° further and never crosses into reverse; the
+same corner from the same spot runs a 45.8 m radius free and a 19.8 m radius on the brake
+(22.9° vs 41.3° of heading in 0.75 s); and a held brake from 80 km/h stops the car in 0.77 s,
+then engages reverse 0.42 s later at a genuine standstill. Suite: 313 tests in 21 files, all
+passing (five new ones in `tests/vehicle.test.ts`); `tsc --noEmit` clean.
+
+Pre-existing and untouched: `npm run qa` reports `driftActivates`, `chargeFromDrift` and
+`nitroRecharges` as FAIL on `main` as well — the QA drive sequence, not the vehicle.

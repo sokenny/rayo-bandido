@@ -16,6 +16,25 @@ export const VEHICLE = {
   engineAccel: 8.8,
   /** Braking deceleration (m/s^2). */
   brakeDecel: 26,
+  /**
+   * Fraction of the brake force that also scrubs sideways velocity. The brakes act on the
+   * velocity vector, not on the car's forward axis: at a big slip angle most of the speed is
+   * sideways, so 1 here would kill a drift stone dead and 0 would let the brake drive the
+   * forward component straight through zero into reverse while the car is still moving.
+   */
+  brakeLateralShare: 0.6,
+  /** Brake effectiveness while the throttle is also held: left-foot braking fights the engine. */
+  brakeThrottleFight: 0.55,
+  /** Speed at which the forward weight transfer under braking is fully developed (m/s). */
+  brakeLoadSpeed: 6,
+  /** Yaw-budget multiplier at full forward weight transfer. The loaded front bites and turns in. */
+  brakeYawGain: 1.4,
+  /** Lateral-grip-cap multiplier at full forward weight transfer. Pulls the car toward the apex. */
+  brakeFrontBite: 1.25,
+  /** Self-aligning multiplier at full forward weight transfer. The light rear keeps rotating. */
+  brakeAlignScale: 0.7,
+  /** Slide floor held by the unloaded rear under braking while already sliding (0..1). */
+  brakeRearUnload: 0.35,
   /** Reverse acceleration (m/s^2). */
   reverseAccel: 9,
   /** Rolling / air drag: longitudinal deceleration factor per second. */
@@ -35,8 +54,15 @@ export const VEHICLE = {
   nitroRampSpeed: 10,
   /** Fraction of the nitro boost applied when nitro is held without throttle. */
   nitroIdleThrottle: 0.4,
-  /** Below this forward speed a held brake becomes reverse (m/s). */
+  /** Below this forward speed a held brake may become reverse (m/s). */
   brakeToReverseSpeed: 0.5,
+  /**
+   * Total speed — forward AND sideways — below which the car counts as stopped for reverse
+   * (m/s). A car sliding sideways is not stopped, so the brake cannot flip it into reverse.
+   */
+  reverseSpeedWindow: 1.2,
+  /** Seconds the brake must be held at that standstill before reverse engages. */
+  reverseArmTime: 0.35,
   /** Max steering angle at standstill (rad). */
   maxSteerAngle: 0.55,
   /** Steering angle at max speed (rad). Steering tightens with speed for stability. */

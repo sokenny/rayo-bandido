@@ -46,6 +46,7 @@ export function createVehicleState(x: number, z: number, heading: number): Vehic
     wheelSpin: 0,
     throttleApplied: 0,
     brakeApplied: 0,
+    reverseArm: 0,
     handbrake: false,
     collided: false,
     collisionImpact: 0,

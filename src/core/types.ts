@@ -27,7 +27,7 @@ export type GameMode = 'test' | 'race';
 export interface PlayerCommand {
   /** 0..1 forward throttle. */
   throttle: number;
-  /** 0..1 brake. When the car is (nearly) stopped, brake becomes reverse throttle. */
+  /** 0..1 brake. Held at a full standstill it becomes reverse throttle after a short delay. */
   brake: number;
   /** -1..1 steering; negative = left, positive = right. */
   steer: number;
@@ -80,6 +80,11 @@ export interface VehicleState {
   throttleApplied: number;
   /** Brake actually applied this tick (0..1). */
   brakeApplied: number;
+  /**
+   * Seconds the brake has been held with the car stopped. Reverse engages once it passes
+   * `VEHICLE.reverseArmTime`; any real motion resets it to 0.
+   */
+  reverseArm: number;
   handbrake: boolean;
   /** True on the tick a collision impulse was applied. Presentation uses it for feedback. */
   collided: boolean;

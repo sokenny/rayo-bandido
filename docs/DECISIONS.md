@@ -12,6 +12,7 @@
 | World | Dark, nocturnal and dystopian; electric cars dominate the city |
 | Core fantasy | The combustion-powered outlaw destroys/disables electric cars through drift-charged lightning |
 | Drift | Easier and more forgiving than Need for Speed Underground 2 for the MVP |
+| Drivetrain | Rear-wheel drive. Not simulated per wheel, but the handling model must express it: throttle only ever loosens the rear, and the brake loads the front (left-foot braking tightens the line) |
 | Lightning charge | Charged only through valid drifting |
 | Lightning targeting | Auto-target nearest eligible electric vehicle inside a forward cone |
 | Reward | Destroyed/disabled electric vehicles award money |
