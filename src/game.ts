@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot } from './core/types';
-import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
+import { SIM_STEP, AUDIO, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -32,6 +32,7 @@ import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
 import { createAudio } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
+import { IDLE_RPM01, REF_SPEED, engineTone } from './audio/dsp';
 import { msToKmh } from './core/math';
 import { slotCss } from './core/playerColors';
 
@@ -90,7 +91,9 @@ export function createGame(
 
   // The world: the free-roam test city or the racing circuit. Both give the simulation a
   // layout (colliders, spawns, patrols, the race course) and the renderer a plan (the art).
-  const world = mode === 'race' ? createRaceWorld() : createArenaWorld();
+  // In a match every client must generate the same traffic, so the match id is the seed;
+  // alone, `createRaceWorld` picks its own and the traffic is laid out differently each race.
+  const world = mode === 'race' ? createRaceWorld(options.net?.match?.raceId) : createArenaWorld();
   const layout = world.layout;
 
   /* ------------------------------------------------------------- multiplayer */
@@ -224,6 +227,8 @@ export function createGame(
     chainWindow: 0,
     nitroRecharging: false,
     cruising: false,
+    rpm01: 0,
+    gear: 0,
     mode,
     race: null,
   };
@@ -616,6 +621,11 @@ export function createGame(
     snapshot.chainWindow = state.drift.active ? 0 : state.drift.chainWindow;
     snapshot.nitroRecharging = !state.nitro.active && state.nitro.amount > lastNitroAmount + 1e-6;
     snapshot.cruising = cruising;
+    // The tachometer reads the same fake gearbox the engine voice revs on, so the needle drops
+    // on exactly the frame the exhaust note does.
+    const tone = engineTone(Math.abs(v.speed) / REF_SPEED, AUDIO.gearBounds);
+    snapshot.gear = tone.gear;
+    snapshot.rpm01 = (tone.rpm01 - IDLE_RPM01) / (1 - IDLE_RPM01);
     lastNitroAmount = state.nitro.amount;
     const race = state.race;
     if (race) {

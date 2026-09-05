@@ -29,7 +29,7 @@ These values may be tuned without asking Juan. Keep them centralized.
 | Parameter | Starting default |
 | --- | --- |
 | Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart |
-| Gamepad | Xbox-style standard mapping, always live beside the keyboard: RT/LT drive, left stick steers, LB handbrake, RB nitro, X lightning, Y cruise, Start restart, View camera; A/Start confirm in menus |
+| Gamepad | Xbox-style standard mapping, always live beside the keyboard. NFS Underground 2's default pad layout, so the muscle memory carries over: RT throttle, LT brake/reverse, left stick steers, A handbrake, B nitro, Y camera. The three actions NFSU2 has no counterpart for take the buttons it leaves free: X lightning, View cruise, Start restart; A/Start confirm in menus |
 | Camera FOV | 60 base, easing toward 70 during nitro |
 | Drift activation | Speed above 25 km/h-equivalent and slip angle above roughly 12° for 200 ms |
 | Drift cancellation | Low speed, collision, reversal or slip below threshold for roughly 350 ms |

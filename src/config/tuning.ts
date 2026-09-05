@@ -411,17 +411,23 @@ export const CAMERA = {
       pitchFollow: -0.45,
     },
     /**
-     * Side-door view: a fender-mounted lens just outboard of the driver's-side skirt, at door
-     * height, aimed forward and a touch inboard so the flank and front arch ride the edge of
-     * the frame with the road opening up beside them.
+     * Side-door view: a fender-mounted lens just outboard of the driver's-side skirt, aimed
+     * forward and a touch inboard so the flank and front arch ride the edge of the frame with
+     * the road opening up beside them.
+     *
+     * The lens sits at hub height rather than door height (wheel radius is 0.33, so the top of
+     * the tyre is at 0.66 and the front wheel centre at 0.33): from up by the door the arch
+     * only clipped the corner of the frame, while from here the whole front wheel stands above
+     * the horizon line and the road rushes past under it. Dropping the look point with it
+     * keeps the aim near level, so the view gains the wheel without losing the road ahead.
      */
     side: {
       ahead: 0.35,
       side: -1.3,
-      height: 0.92,
+      height: 0.6,
       lookAhead: 9,
       lookSide: -0.95,
-      lookHeight: 0.78,
+      lookHeight: 0.5,
       fov: 64,
       rollFollow: 0.45,
       pitchFollow: 0.45,

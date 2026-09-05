@@ -87,16 +87,28 @@ describe('gamepad input', () => {
     expect(cmd.brake).toBeCloseTo(0.362, 2);
   });
 
-  it('falls back to the face buttons when the triggers report nothing analog', () => {
+  it('falls back to the stick when the triggers report nothing analog', () => {
     const set = mockPads();
     const input = createGamepadInput();
     const cmd = createPlayerCommand();
-    set(pad({ down: [0] }));
+    set(pad({ axes: [0, -1] }));
     input.poll(cmd);
-    expect(cmd.throttle).toBe(1);
-    set(pad({ down: [1] }));
+    expect(cmd.throttle).toBeCloseTo(1);
+    expect(cmd.brake).toBe(0);
+    set(pad({ axes: [0, 1] }));
     input.poll(cmd);
-    expect(cmd.brake).toBe(1);
+    expect(cmd.brake).toBeCloseTo(1);
+    expect(cmd.throttle).toBe(0);
+  });
+
+  it('leaves the throttle alone when A and B are pressed: they are the handbrake and the bottle', () => {
+    const set = mockPads();
+    const input = createGamepadInput();
+    const cmd = createPlayerCommand();
+    set(pad({ down: [0, 1] }));
+    input.poll(cmd);
+    expect(cmd.throttle).toBe(0);
+    expect(cmd.brake).toBe(0);
   });
 
   it('fires once per press, not once per tick, while the button is held', () => {
@@ -117,34 +129,51 @@ describe('gamepad input', () => {
     expect(cmd.fire).toBe(true);
   });
 
-  it('cycles the camera once per View press', () => {
+  it('cycles the camera once per Y press, the way NFSU2 changes view', () => {
     const set = mockPads();
     const input = createGamepadInput();
     const cmd = createPlayerCommand();
-    set(pad({ down: [8] }));
+    set(pad({ down: [3] }));
     input.poll(cmd);
     expect(cmd.pov).toBe(true);
     input.poll(cmd);
     expect(cmd.pov).toBe(false);
   });
 
-  it('holds the handbrake and nitro while the shoulder buttons are down', () => {
+  it('toggles cruise once per View press', () => {
     const set = mockPads();
     const input = createGamepadInput();
     const cmd = createPlayerCommand();
-    set(pad({ down: [4, 5] }));
+    set(pad({ down: [8] }));
+    input.poll(cmd);
+    expect(cmd.cruise).toBe(true);
+    input.poll(cmd);
+    expect(cmd.cruise).toBe(false);
+  });
+
+  it('holds the handbrake on A and the nitro on B, the NFSU2 default', () => {
+    const set = mockPads();
+    const input = createGamepadInput();
+    const cmd = createPlayerCommand();
+    set(pad({ down: [0, 1] }));
     input.poll(cmd);
     expect(cmd.handbrake).toBe(true);
     expect(cmd.nitro).toBe(true);
+    set(pad({ down: [4, 5] }));
+    input.poll(cmd);
+    expect(cmd.handbrake).toBe(false);
+    expect(cmd.nitro).toBe(false);
   });
 
   it('releases everything when the pad is unplugged mid-press', () => {
     const set = mockPads();
     const input = createGamepadInput();
     const cmd = createPlayerCommand();
-    set(pad({ down: [0, 4, 5] }));
+    set(pad({ down: [0, 1], values: { 7: 1 } }));
     input.poll(cmd);
     expect(cmd.throttle).toBe(1);
+    expect(cmd.handbrake).toBe(true);
+    expect(cmd.nitro).toBe(true);
     set(null);
     input.poll(cmd);
     expect(cmd).toEqual(createPlayerCommand());

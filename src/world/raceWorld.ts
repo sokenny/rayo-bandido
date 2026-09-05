@@ -41,9 +41,32 @@ const ALLEY_SHOULDER = 1.2;
 /** Coarsest / finest block cell (m). */
 const CELL = 46;
 const MIN_CELL = 11;
-/** Lateral offset of the electric cars' patrol lane (m), alternating per car. */
+/** Lateral offset of the electric cars' patrol lane (m); which side is drawn per car. */
 const PATROL_LANE = 3.4;
 const TARGET_COUNT = 12;
+/**
+ * Metres of lap either side of the start line kept clear of traffic. The grid sits from
+ * `RACE.gridFirstRow` to a few rows past it, so a car spawned just behind the line used to
+ * rear-end the back row before the countdown finished — and it did it every single race,
+ * because the spawns were spread at an exact `L / TARGET_COUNT` and one of them always
+ * landed there. Nothing spawns in this window now.
+ */
+const TRAFFIC_CLEAR_BEHIND = 70;
+const TRAFFIC_CLEAR_AHEAD = 80;
+/** How far into its slot a car may be jittered, as a fraction of the slot (0..0.5). */
+const TRAFFIC_JITTER = 0.4;
+
+/** mulberry32: small, fast, and the same sequence for the same seed on every machine. */
+function createRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export const RACE_LAPS = RACE.laps;
 
@@ -202,7 +225,13 @@ function buildRails(ribbons: RibbonDef[]): RailDef[] {
 
 /* ------------------------------------------------------------------ world */
 
-export function createRaceWorld(): World {
+/**
+ * `seed` decides where the traffic starts. Same seed, same circuit down to the last car —
+ * which is what multiplayer needs, since every client builds the world itself and the host
+ * only corrects it from there. In a match the match's `raceId` is the seed; alone, the
+ * caller passes nothing and each race gets a fresh one.
+ */
+export function createRaceWorld(seed: number = (Math.random() * 0xffffffff) >>> 0): World {
   const path = buildTrackPath(RACE_SPEC);
   const alleys = RACE_SHORTCUTS.map((spec) => buildTrackPath(spec));
   const ribbons: RibbonDef[] = [{ path, kind: 'track' }, ...alleys.map((p) => ({ path: p, kind: 'alley' as const }))];
@@ -294,11 +323,16 @@ export function createRaceWorld(): World {
   };
   const targetSpawns: SpawnPoint[] = [];
   const targetPatrols: Array<Array<{ x: number; z: number }>> = [];
+  const random = createRandom(seed);
+  // The lap minus the window around the grid, cut into one slot per car: the cars land in a
+  // different place every race, but never two on top of each other and never on the grid.
+  const usable = Math.max(1, L - TRAFFIC_CLEAR_AHEAD - TRAFFIC_CLEAR_BEHIND);
+  const slot = usable / TARGET_COUNT;
   for (let i = 0; i < TARGET_COUNT; i++) {
-    const lateral = (i % 2 === 0 ? 1 : -1) * PATROL_LANE;
+    const lateral = (random() < 0.5 ? 1 : -1) * PATROL_LANE;
     const loop = laneWaypoints(lateral);
-    // Spread the cars around the lap from a little past the grid, so none starts on it.
-    const startStation = (line.s + 90 + (i / TARGET_COUNT) * L) % L;
+    const jitter = (random() * 2 - 1) * TRAFFIC_JITTER * slot;
+    const startStation = (line.s + TRAFFIC_CLEAR_AHEAD + (i + 0.5) * slot + jitter + L) % L;
     const start = Math.min(loop.length - 1, Math.floor(startStation / L * loop.length));
     const rotated = [...loop.slice(start), ...loop.slice(0, start)];
     const s = path.samples[Math.min(path.samples.length - 1, start * 3)];

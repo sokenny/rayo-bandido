@@ -1482,7 +1482,7 @@ body {
   }
 }
 
-/* ------------------------------------------------- bottom corners: gauges */
+/* -------------------------------------------- bottom left: the charge gauge */
 
 /* Fixed width = gauge width. Transient rows use `max-content` so they overflow the
    column symmetrically instead of resizing it and nudging the gauge sideways. */
@@ -1498,10 +1498,6 @@ body {
 
 .rb-stack--left {
   left: 28px;
-}
-
-.rb-stack--right {
-  right: 28px;
 }
 
 .rb-slot {
@@ -1732,11 +1728,6 @@ body {
   --rb-gauge-glow: var(--rb-cyan);
 }
 
-.rb-gauge--nitro {
-  --rb-gauge-color: var(--rb-violet-hot);
-  --rb-gauge-glow: var(--rb-magenta);
-}
-
 .rb-gauge--charge.is-ready .rb-gauge__halo {
   opacity: 0.3;
   animation: rb-halo 1.35s ease-in-out infinite;
@@ -1746,19 +1737,15 @@ body {
   border-color: rgba(79, 243, 255, 0.6);
 }
 
-.rb-gauge--nitro.is-active .rb-gauge__halo {
+.rb-gauge.is-active .rb-gauge__halo {
   opacity: 0.34;
 }
 
-.rb-gauge--nitro.is-active .rb-gauge__glow {
+.rb-gauge.is-active .rb-gauge__glow {
   opacity: 0.4;
 }
 
-.rb-gauge--nitro.is-active .rb-gauge__core {
-  border-color: rgba(255, 61, 240, 0.6);
-}
-
-.rb-gauge--nitro.is-charging .rb-gauge__plus {
+.rb-gauge.is-charging .rb-gauge__plus {
   opacity: 0.85;
   animation: rb-blink 1.8s ease-in-out infinite;
 }
@@ -1778,19 +1765,94 @@ body {
 
 /* -------------------------------------------------------- bottom: speed */
 
-.rb-speed {
+/* ------------------------------------- bottom right: the drivetrain cluster */
+
+/* Rev counter, gear, speed and the nitro bottle in one instrument. The dial sits beside the
+   readout rather than around it, the way the arcade clusters this is modelled on do it, so
+   nothing ever crosses the needle's path. `--rb-dial` is the single size knob.
+
+   It lives in the bottom-right corner rather than centred: centred, the cluster sat directly
+   over the road the player is aiming the car down, and over the car's own tail. Cornered, the
+   whole centre of the frame is clear, and the HUD reads left-to-right as one arc — drift and
+   bolt bottom-left, drivetrain bottom-right. */
+.rb-cluster {
   position: absolute;
-  bottom: 22px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 16px;
+  right: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  --rb-dial: 208px;
+}
+
+.rb-cluster__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* Same trick as the dial: the readout also lands on lit scenery, so it carries its own soft
+   ground. The two washes overlap into one pool of shade under the whole cluster.
+
+   Right-aligned, because the column is the outermost thing on screen: the speed's last digit
+   then sits on the same vertical as the gear and the nitro hint, and the number grows leftward
+   into the frame instead of pushing at the edge. The wash is mirrored to match. */
+.rb-cluster__readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  /* The dial's sweep ends short of the box floor; drop the readout to sit on the same line. */
+  padding: 6px 8px 8px 16px;
+  margin-right: -8px;
+  background: radial-gradient(
+    76% 84% at 66% 58%,
+    rgba(5, 7, 13, 0.86) 0%,
+    rgba(5, 7, 13, 0.6) 54%,
+    rgba(5, 7, 13, 0) 84%
+  );
+}
+
+.rb-gear {
   display: flex;
   align-items: baseline;
-  gap: 9px;
+  gap: 6px;
+}
+
+.rb-gear__label {
+  font-size: 8px;
+  letter-spacing: 0.24em;
+  color: var(--rb-dim);
+}
+
+.rb-gear__value {
+  display: inline-block;
+  min-width: 0.62em;
+  font-family: var(--rb-display);
+  font-size: 26px;
+  font-weight: 700;
+  font-stretch: condensed;
+  line-height: 1;
+  color: var(--rb-yellow);
+  text-shadow: 0 0 12px rgba(252, 238, 10, 0.45);
+  will-change: transform;
+}
+
+.rb-gear.is-reverse .rb-gear__value {
+  color: var(--rb-red);
+  text-shadow: 0 0 12px rgba(255, 43, 61, 0.5);
+}
+
+.rb-speed {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .rb-speed__value {
   font-family: var(--rb-display);
-  font-size: 62px;
+  font-size: 56px;
   font-weight: 700;
   font-stretch: condensed;
   line-height: 1;
@@ -1798,25 +1860,6 @@ body {
   color: var(--rb-text);
   text-shadow: 0 0 18px rgba(5, 6, 10, 0.95), 0 0 30px rgba(5, 6, 10, 0.8);
   transition: opacity 150ms ease;
-}
-
-/* Reverse tag. Absolutely placed so the digits stay optically centred either way. */
-.rb-speed__rev {
-  position: absolute;
-  right: calc(100% + 10px);
-  bottom: 6px;
-  opacity: 0;
-  padding: 1px 6px;
-  background: var(--rb-red);
-  color: #05060a;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  transition: opacity 150ms ease;
-}
-
-.rb-speed.is-reverse .rb-speed__rev {
-  opacity: 1;
 }
 
 .rb-speed.is-reverse .rb-speed__value {
@@ -1829,6 +1872,196 @@ body {
   text-transform: uppercase;
   color: var(--rb-yellow);
   opacity: 0.75;
+}
+
+/* ------------------------------------------------------------- the tachometer */
+
+.rb-cluster__slot {
+  display: block;
+}
+
+/* Artwork box is 264x156; the height follows the width so the dial scales as one piece.
+   The dial sits over the car's own tail lights, so it carries a soft radial binnacle rather
+   than a frame: enough ground to read ticks and numerals against, with no hard edge. */
+.rb-tacho__dial {
+  position: relative;
+  width: var(--rb-dial);
+  height: calc(var(--rb-dial) * 156 / 264);
+  background: radial-gradient(
+    62% 74% at 50% 76%,
+    rgba(5, 7, 13, 0.88) 0%,
+    rgba(5, 7, 13, 0.66) 52%,
+    rgba(5, 7, 13, 0) 80%
+  );
+}
+
+.rb-tacho__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.rb-tacho__tick {
+  stroke: rgba(180, 214, 255, 0.38);
+  stroke-width: 1.4;
+}
+
+.rb-tacho__tick--major {
+  stroke: rgba(214, 232, 255, 0.72);
+  stroke-width: 2.4;
+}
+
+.rb-tacho__tick--red {
+  stroke: rgba(255, 43, 61, 0.42);
+}
+
+.rb-tacho__tick--major.rb-tacho__tick--red {
+  stroke: rgba(255, 43, 61, 0.8);
+}
+
+.rb-tacho__num {
+  fill: var(--rb-dim);
+  font-family: var(--rb-display);
+  font-size: 15px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.rb-tacho__num--red {
+  fill: var(--rb-red);
+}
+
+/* The red band, printed on the ticks' outer edge. A hairline, not a wedge: it has to warn
+   without becoming the loudest thing on screen. */
+.rb-tacho__band {
+  fill: none;
+  stroke: var(--rb-red);
+  stroke-width: 1.8;
+  opacity: 0.7;
+}
+
+.rb-tacho__scale {
+  fill: var(--rb-dim);
+  font-family: var(--rb-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-anchor: middle;
+  opacity: 0.38;
+}
+
+/* Inner trace: the needle's value again, as an arc, so the rev range reads peripherally. */
+.rb-tacho__trace,
+.rb-tacho__trace-glow {
+  fill: none;
+  stroke-linecap: butt;
+}
+
+.rb-tacho__trace {
+  stroke: var(--rb-cyan);
+  stroke-width: 2.6;
+}
+
+.rb-tacho__trace-glow {
+  stroke: var(--rb-cyan);
+  stroke-width: 8;
+  opacity: 0.14;
+}
+
+.rb-tacho__dial.is-redline .rb-tacho__trace {
+  stroke: var(--rb-red);
+}
+
+.rb-tacho__dial.is-redline .rb-tacho__trace-glow {
+  stroke: var(--rb-red);
+  opacity: 0.24;
+}
+
+/* Needle: a crisp blade over a wide translucent copy, both in the rotating group, so the
+   glow costs one transform instead of a per-frame filter rasterisation. */
+.rb-tacho__needle-blade {
+  fill: var(--rb-cyan-hot);
+}
+
+.rb-tacho__needle-halo {
+  fill: var(--rb-cyan);
+  opacity: 0.22;
+}
+
+.rb-tacho__dial.is-redline .rb-tacho__needle-blade {
+  fill: #fff1f2;
+}
+
+.rb-tacho__dial.is-redline .rb-tacho__needle-halo {
+  fill: var(--rb-red);
+  opacity: 0.4;
+}
+
+.rb-tacho__hub {
+  fill: var(--rb-panel-solid);
+  stroke: var(--rb-hairline-cold);
+  stroke-width: 1;
+}
+
+.rb-tacho__pin {
+  fill: var(--rb-cyan-hot);
+}
+
+.rb-tacho__dial.is-redline .rb-tacho__pin {
+  fill: var(--rb-red);
+}
+
+/* Nitro rides the outside of the same sweep: segmented, to keep the game's gauge language. */
+.rb-tacho__n2o-track,
+.rb-tacho__n2o-fill,
+.rb-tacho__n2o-glow {
+  fill: none;
+  stroke-width: 5.5;
+  stroke-linecap: butt;
+}
+
+.rb-tacho__n2o-track {
+  stroke: var(--rb-track);
+}
+
+.rb-tacho__n2o-fill {
+  stroke: var(--rb-violet-hot);
+}
+
+.rb-tacho__n2o-glow {
+  stroke: var(--rb-magenta);
+  stroke-width: 12;
+  opacity: 0.18;
+}
+
+.rb-tacho__n2o-tag {
+  fill: var(--rb-violet-hot);
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-anchor: middle;
+  opacity: 0.7;
+}
+
+.rb-tacho__dial.is-boosting .rb-tacho__n2o-fill {
+  stroke: #fff;
+}
+
+.rb-tacho__dial.is-boosting .rb-tacho__n2o-glow {
+  opacity: 0.45;
+}
+
+.rb-tacho__dial.is-boosting .rb-tacho__n2o-tag {
+  fill: #fff;
+  opacity: 1;
+}
+
+.rb-tacho__dial.is-charging .rb-tacho__n2o-tag {
+  animation: rb-blink 1.8s ease-in-out infinite;
 }
 
 /* ------------------------------------------------------------ animations */
@@ -1874,8 +2107,16 @@ body {
     height: 20px;
   }
 
+  .rb-cluster {
+    --rb-dial: 158px;
+  }
+
   .rb-speed__value {
-    font-size: 44px;
+    font-size: 40px;
+  }
+
+  .rb-gear__value {
+    font-size: 20px;
   }
 
   .rb-money__value {
@@ -2239,8 +2480,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rb-gauge--charge.is-ready .rb-gauge__halo,
-  .rb-gauge--nitro.is-charging .rb-gauge__plus,
+  .rb-gauge.is-charging .rb-gauge__plus,
   .rb-ready.is-on,
+  .rb-tacho__dial.is-charging .rb-tacho__n2o-tag,
   .rb-wrongway.is-on,
   .rb-title::before,
   .rb-title::after,

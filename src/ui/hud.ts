@@ -1,6 +1,7 @@
 import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/types';
-import { BOLT_ICON, FLAME_ICON, RETICLE_ICON } from './icons';
+import { BOLT_ICON, RETICLE_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
+import { createTacho } from './tacho';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -40,16 +41,19 @@ const DRIVE_HINT_EVERY = 8;
 /** Quantisation of the chain drain bar: 20 steps over the whole window. */
 const CHAIN_STEPS = 20;
 
-/** Same card, pad labels, shown instead of the keys once a controller is plugged in. */
+/**
+ * Same card, pad labels, shown instead of the keys once a controller is plugged in. The order
+ * follows NFS Underground 2's default layout, which is the mapping the pad uses.
+ */
 const PAD_CONTROLS = [
   ['RT/LT', 'drive'],
   ['STICK', 'steer'],
-  ['LB', 'handbrake'],
-  ['RB', 'nitro'],
+  ['A', 'handbrake'],
+  ['B', 'nitro'],
   ['X', 'lightning'],
+  ['Y', 'camera'],
+  ['VIEW', 'cruise'],
   ['START', 'restart'],
-  ['Y', 'cruise'],
-  ['VIEW', 'camera'],
 ];
 
 const CONTROLS = [
@@ -146,19 +150,25 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-slot"></div>` +
     `<div class="rb-keys"><span class="rb-key rb-key--fire">E</span><span class="rb-keys__name">lightning</span></div>` +
     `</div>` +
-    `<div class="rb-stack rb-stack--right">` +
+    `<div class="rb-cluster">` +
     `<div class="rb-note rb-note--nitro"></div>` +
-    `<div class="rb-slot"></div>` +
+    `<div class="rb-cluster__row">` +
+    `<div class="rb-cluster__slot"></div>` +
+    `<div class="rb-cluster__readout">` +
+    `<div class="rb-gear"><span class="rb-gear__label">GEAR</span><span class="rb-gear__value">1</span></div>` +
+    `<div class="rb-speed"><span class="rb-speed__value">0</span><span class="rb-speed__unit">km/h</span></div>` +
     `<div class="rb-keys"><span class="rb-key rb-key--nitro">SHIFT</span><span class="rb-keys__name">nitro</span></div>` +
     `</div>` +
-    `<div class="rb-speed"><span class="rb-speed__rev">R</span>` +
-    `<span class="rb-speed__value">0</span><span class="rb-speed__unit">km/h</span></div>`;
+    `</div>` +
+    `</div>`;
   root.appendChild(hud);
 
   const chargeGauge = createRingGauge({ variant: 'rb-gauge--charge', icon: BOLT_ICON, secondaryArc: true });
-  const nitroGauge = createRingGauge({ variant: 'rb-gauge--nitro', icon: FLAME_ICON, chargingBadge: true });
+  // Nitro no longer has a gauge of its own: it rides the outside of the rev counter's sweep,
+  // so the whole drivetrain — revs, gear, speed, bottle — reads as one instrument.
+  const tacho = createTacho();
   pick<HTMLElement>(hud, '.rb-stack--left .rb-slot').appendChild(chargeGauge.root);
-  pick<HTMLElement>(hud, '.rb-stack--right .rb-slot').appendChild(nitroGauge.root);
+  pick<HTMLElement>(hud, '.rb-cluster__slot').appendChild(tacho.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -168,7 +178,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const showPadControls = (): void => {
     controlsEl.innerHTML = controlsFor(PAD_CONTROLS);
     // The two gauges carry their own key hint; they name the pad button too.
-    for (const [el, label] of [[fireKeyEl, 'X'], [nitroKeyEl, 'RB']] as const) el.textContent = label;
+    for (const [el, label] of [[fireKeyEl, 'X'], [nitroKeyEl, 'B']] as const) el.textContent = label;
   };
   const onPadConnected = (): void => showPadControls();
   window.addEventListener('gamepadconnected', onPadConnected);
@@ -194,6 +204,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const readyEl = pick<HTMLElement>(hud, '.rb-ready');
   const speedEl = pick<HTMLElement>(hud, '.rb-speed');
   const speedValueEl = pick<HTMLElement>(hud, '.rb-speed__value');
+  const gearEl = pick<HTMLElement>(hud, '.rb-gear');
+  const gearValueEl = pick<HTMLElement>(hud, '.rb-gear__value');
   const raceEl = pick<HTMLElement>(hud, '.rb-race');
   const raceLapEl = pick<HTMLElement>(hud, '.rb-race__lap-value');
   const raceTimeEl = pick<HTMLElement>(hud, '.rb-race__time');
@@ -208,6 +220,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
 
   // Displayed-value cache. Sentinels guarantee a first write for every field.
   let shownSpeed = -1;
+  let shownGear = '';
+  let shownGearIndex = -1;
+  /** Sim time of the previous `update`, so the needle can be given a real delta. */
+  let lastFrameTime = -1;
   let shownMoney = -1;
   let shownDestroyed = -1;
   let shownNearMisses = -1;
@@ -342,6 +358,32 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (s.reversing !== reversing) {
         reversing = s.reversing;
         speedEl.classList.toggle('is-reverse', s.reversing);
+        gearEl.classList.toggle('is-reverse', s.reversing);
+      }
+
+      // The needle is given the frame's own delta so its inertia is frame-rate independent; a
+      // restart rewinds sim time, and a zero delta makes it snap instead of sweeping back.
+      const frameDt = lastFrameTime >= 0 && s.time > lastFrameTime ? Math.min(0.1, s.time - lastFrameTime) : 0;
+      lastFrameTime = s.time;
+      tacho.setRpm(s.rpm01, frameDt);
+      const gearText = s.reversing ? 'R' : String(s.gear + 1);
+      if (gearText !== shownGear) {
+        // Only an upshift pops: downshifts happen constantly under braking and would strobe.
+        const upshift = !s.reversing && s.gear > shownGearIndex && shownGearIndex >= 0;
+        shownGear = gearText;
+        shownGearIndex = s.reversing ? -1 : s.gear;
+        gearValueEl.textContent = gearText;
+        if (upshift) {
+          play(
+            gearValueEl,
+            [
+              { transform: 'scale(1)', opacity: 1 },
+              { transform: 'scale(1.22)', opacity: 0.7, offset: 0.18 },
+              { transform: 'scale(1)', opacity: 1 },
+            ],
+            360,
+          );
+        }
       }
 
       chargeGauge.setValue(s.charge);
@@ -355,9 +397,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         readyEl.classList.toggle('is-on', canFireNow);
       }
 
-      nitroGauge.setValue(s.nitro);
-      nitroGauge.setActive(s.nitroActive);
-      nitroGauge.setCharging(s.nitroRecharging);
+      tacho.setNitro(s.nitro);
+      tacho.setNitroActive(s.nitroActive);
+      tacho.setNitroCharging(s.nitroRecharging);
       if (s.nitro <= 0.005 && !s.nitroRecharging && !s.nitroActive && s.speedKmh < 1) {
         if (s.time - lastDriveHint >= DRIVE_HINT_EVERY) {
           lastDriveHint = s.time;
@@ -487,6 +529,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       } else if (e.type === 'restart') {
         controlsUntil = CONTROLS_REPLAY;
         lastDriveHint = -DRIVE_HINT_EVERY;
+        lastFrameTime = -1;
+        tacho.reset(0);
         shownPhase = '';
         resultsEl.classList.remove('is-on');
         play(
@@ -504,6 +548,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
 
     dispose() {
       window.removeEventListener('gamepadconnected', onPadConnected);
+      tacho.dispose();
       for (const animation of animations.values()) animation.cancel();
       animations.clear();
       root.innerHTML = '';

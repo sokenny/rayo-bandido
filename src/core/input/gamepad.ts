@@ -6,8 +6,15 @@ import type { InputSource } from './keyboard';
  * Same contract as the keyboard: edge-triggered actions report true for exactly one poll per
  * press, detected against the previous poll's button state.
  *
- * Bindings (docs/DECISIONS.md): RT/A throttle, LT/B brake, left stick or d-pad steers,
- * LB handbrake, RB nitro, X lightning, Y cruise, Start restart, View cycles the camera.
+ * Bindings are NFS Underground 2's default pad layout (docs/DECISIONS.md), because that is the
+ * muscle memory this game is built on: RT throttle, LT brake/reverse, left stick steers,
+ * A handbrake, B nitro, Y cycles the camera.
+ *
+ * Three actions have no NFSU2 counterpart, so they take the buttons that game leaves free for
+ * them: X fires the lightning (NFSU2's "look back", which this game has no equivalent of),
+ * View toggles cruise, Start restarts. The d-pad steers as well as the stick, and the stick's
+ * Y axis is a throttle/brake fallback for pads whose triggers report nothing analog - the face
+ * buttons cannot do that job any more now that they hold the handbrake and the bottle.
  *
  * The pad is read fresh on every poll because `navigator.getGamepads()` returns snapshots, not
  * live objects. Browsers hide a pad until the player presses something on it, so a controller
@@ -19,8 +26,6 @@ const BTN_A = 0;
 const BTN_B = 1;
 const BTN_X = 2;
 const BTN_Y = 3;
-const BTN_LB = 4;
-const BTN_RB = 5;
 const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_BACK = 8;
@@ -100,25 +105,25 @@ export function createGamepadInput(): InputSource {
         return;
       }
 
-      // Throttle and brake: triggers first, face buttons and the stick as fallbacks for pads
-      // whose triggers report nothing useful.
+      // Throttle and brake: the triggers, with the stick's Y axis as the only fallback for
+      // pads whose triggers report nothing useful. A and B are the handbrake and the bottle.
       const stickY = applyDeadzone(pad.axes[1] ?? 0, STICK_DEADZONE);
-      out.throttle = Math.max(buttonValue(pad, BTN_RT), buttonDown(pad, BTN_A) ? 1 : 0, Math.max(0, -stickY));
-      out.brake = Math.max(buttonValue(pad, BTN_LT), buttonDown(pad, BTN_B) ? 1 : 0, Math.max(0, stickY));
+      out.throttle = Math.max(buttonValue(pad, BTN_RT), Math.max(0, -stickY));
+      out.brake = Math.max(buttonValue(pad, BTN_LT), Math.max(0, stickY));
 
       const stickX = applyDeadzone(pad.axes[0] ?? 0, STICK_DEADZONE);
       const dpad = (buttonDown(pad, BTN_DPAD_RIGHT) ? 1 : 0) - (buttonDown(pad, BTN_DPAD_LEFT) ? 1 : 0);
       out.steer = dpad !== 0 ? dpad : stickX;
 
-      out.handbrake = buttonDown(pad, BTN_LB);
-      out.nitro = buttonDown(pad, BTN_RB);
+      out.handbrake = buttonDown(pad, BTN_A);
+      out.nitro = buttonDown(pad, BTN_B);
 
       // Edge-detected here rather than latched: `pressed` compares against the previous poll,
       // so a held button reports true exactly once however many ticks run in a frame.
       out.fire = pressed(pad, BTN_X);
       out.restart = pressed(pad, BTN_START);
-      out.cruise = pressed(pad, BTN_Y);
-      out.pov = pressed(pad, BTN_BACK);
+      out.cruise = pressed(pad, BTN_BACK);
+      out.pov = pressed(pad, BTN_Y);
     },
     dispose() {
       wasDown.clear();

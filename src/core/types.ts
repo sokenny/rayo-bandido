@@ -431,6 +431,13 @@ export interface HudSnapshot {
   nitroRecharging: boolean;
   /** True while cruise mode is driving the car. */
   cruising: boolean;
+  /**
+   * Engine note position within the current gear: 0 at idle, 1 at redline. The same value the
+   * engine voice revs on (`audio/dsp.ts:engineTone`), so the needle and the sound shift together.
+   */
+  rpm01: number;
+  /** Zero-based index into the fake gearbox (`AUDIO.gearBounds`). Displayed as `gear + 1`. */
+  gear: number;
   mode: GameMode;
   /** Race readout; null outside race mode. */
   race: RaceHudSnapshot | null;

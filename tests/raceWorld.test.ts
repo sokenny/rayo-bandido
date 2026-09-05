@@ -165,6 +165,23 @@ describe('race circuit contract', () => {
     }
   });
 
+  it('lays the traffic out from a seed: repeatable, different per race, never on the grid', () => {
+    const a = createRaceWorld(1234).layout.targetSpawns;
+    const again = createRaceWorld(1234).layout.targetSpawns;
+    const b = createRaceWorld(99).layout.targetSpawns;
+    // Same seed, same circuit — every client in a match builds the world itself.
+    expect(again).toEqual(a);
+    // A different race puts the cars somewhere else.
+    expect(b.some((s, i) => Math.hypot(s.x - a[i].x, s.z - a[i].z) > 5)).toBe(true);
+    // Whatever the seed, nothing starts on or just behind the grid.
+    for (const seed of [0, 7, 99999]) {
+      const w = createRaceWorld(seed).layout;
+      for (const s of w.targetSpawns) {
+        for (const g of w.race!.grid) expect(Math.hypot(s.x - g.x, s.z - g.z)).toBeGreaterThan(30);
+      }
+    }
+  });
+
   it('gives cruise mode a route along the centreline', () => {
     expect(layout.cruiseRoute.length).toBeGreaterThan(40);
     for (const p of layout.cruiseRoute) expect(plan.isRoad(p.x, p.z)).toBe(true);
