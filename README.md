@@ -104,8 +104,13 @@ same physics, same HUD.
   nitro, and a small restart in the top-left corner. **Tapping anywhere else on the screen fires
   lightning** — the empty middle of the screen is the fire button. Camera, cruise and the gearbox
   stay on the keyboard: a thumb pad with a control for everything is a control for nothing.
+- **The HUD is trimmed to what is read while driving.** Only the lightning charge ring — moved up
+  clear of the steer buttons — and the minimap, two fifths smaller and up in the top-right corner.
+  The key legends, the money column (¥, destroyed, near misses, targets left) and the whole
+  rev-counter cluster are hidden: the pad is the legend, and the gauges sat exactly where the GAS
+  and BRAKE buttons are.
 - The pad is an `InputSource` like the keyboard and the gamepad, combined in `src/game.ts`, so the
-  simulation never learns which one is driving. The HUD's key legend hides itself while it is up.
+  simulation never learns which one is driving.
 - `?touch=1` forces the phone treatment on a desktop browser and `?touch=0` turns it off, which is
   how it is tested without a handset.
 

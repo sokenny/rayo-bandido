@@ -2690,8 +2690,32 @@ body.rb-rotated .rb-touch {
   left: max(18px, env(safe-area-inset-left));
 }
 
-body.rb-touch-pad .rb-controls {
+/* ── the HUD, thumbed ──────────────────────────────────────────────────────
+ * A phone screen is small and two thumbs cover its bottom corners, so the HUD
+ * keeps only what is read while driving: the charge ring (it says when lightning
+ * is ready) and the map. The keyboard legends, the money column and the whole
+ * rev-counter cluster go — the pad is the legend, and the gauges sit exactly
+ * where the GAS and BRAKE buttons are. */
+
+body.rb-touch-pad .rb-controls,
+body.rb-touch-pad .rb-keys,
+body.rb-touch-pad .rb-money,
+body.rb-touch-pad .rb-cluster {
   display: none;
+}
+
+/* Above the steer buttons (84px + the pad's bottom padding), not behind them. */
+body.rb-touch-pad .rb-stack--left {
+  bottom: calc(112px + env(safe-area-inset-bottom));
+  left: max(18px, env(safe-area-inset-left));
+}
+
+/* Two fifths smaller, and up into the space the money column has left. */
+body.rb-touch-pad .rb-minimap {
+  top: max(12px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  transform: scale(0.6);
+  transform-origin: 100% 0;
 }
 
 .rb-touch__btn {
