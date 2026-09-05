@@ -767,3 +767,120 @@ passing (five new ones in `tests/vehicle.test.ts`); `tsc --noEmit` clean.
 
 Pre-existing and untouched: `npm run qa` reports `driftActivates`, `chargeFromDrift` and
 `nitroRecharges` as FAIL on `main` as well — the QA drive sequence, not the vehicle.
+
+### 2026-09-05 — Drivetrain: a drift is now held with the throttle
+
+Juan: drifting should be a deeper skill. Quick drifts stay easy — tap the handbrake, turn, get
+what you expect — but *sustaining* one should be technical and closer to a real car: the box
+locks a gear that keeps the engine high in its range, the throttle key becomes a modulator, and
+what keeps traction lost is torque at the rear, spinning wheels. Donuts and figure eights in
+first gear; the same figures in a taller gear need the road speed that gear's torque asks for.
+And, after the first cut: regular driving must stay a plain automatic — the lock is for a drift
+being held, nothing else.
+
+Until now rpm and gear were presentation only — the audio derived both from road speed, and the
+tacho drew that number. There is now a real drivetrain in the simulation, `src/sim/drivetrain.ts`,
+with every constant in the new `DRIVETRAIN` block of `src/config/tuning.ts`:
+
+- **Six-speed automatic, rpm linear through zero.** Road rpm is `speed / gearTop`. Upshifts land
+  the note at 50-80%, not at idle, and downshifts have hysteresis. The tacho, the engine voice
+  and the backfire trigger all read `VehicleState.rpm01` / `.gear` now; `engineTone` is gone.
+- **Wheelspin is excess rpm, and it needs a reason.** Under throttle the engine revs above road
+  rpm by up to the gear's torque (`spinAuthority`: first can spin at a standstill, third needs
+  ~40 km/h before the band is reachable, sixth never). But only with a reason for the rear to
+  let go: a drift being held, a slide already under way, or the wheel held at full lock below
+  43 km/h for 0.8 s (`VEHICLE.spinIntent*` — a donut is asked for, a corner is not). On a
+  straight the rear hooks up, so a launch revs and shifts like any automatic.
+- **The throttle is a modulator.** The excess rises at `revRiseRate` and falls at `revFallRate`:
+  a held key is a climbing needle, a tapped key a hovering one, a pad trigger parks it. Inside
+  the torque band (`bandLow`..`bandHigh`, ~6000-8200 rpm on the dial) the excess is wheelspin.
+- **Wheelspin holds the slide.** In `src/sim/vehicle.ts` the old `hold = max(throttle, steer)`
+  is `max(wheelspin, steer * steerHold)`, with the momentum floor lowered. Spinning rears plus
+  a turned wheel step the rear out at low speed (`spinSlide`, `powerYawKick`): the donut.
+- **The limiter punishes a pinned key, after a grace.** Past `overRevGrace` (0.8 s) against the
+  limiter with the rear loose, drive, self-alignment and rear grip fall away and the rear keeps
+  coming round (`overRevYaw`): the car walks out past 80° and bogs to a crawl. Lift or
+  counter-steer to catch it. A one-second flick with the key held is forgiven. A sliding rear
+  spins in any gear up to fourth (`slideSpinBonus`), so this holds at speed too.
+- **Gear lock, keyed to the drift rules.** `stepVehicle` now takes `DriftState.active`; while a
+  drift is held the box keeps its gear and shifts only to keep road rpm *under* the band with
+  torque to spare — down below `lockDownshiftRpm`, up once past `lockUpshiftRpm` for a moment,
+  so a drift that gathers speed climbs a gear instead of hooking up or hitting the limiter. It
+  hands back to the automatic 0.2 s after the drift ends. Ordinary cornering never locks it.
+  The tacho shows the torque band while locked (`is-locked`) and lights it while the needle
+  sits in it (`is-in-band`).
+- **Donuts count as drifts** (`DRIFT.spinValid`), and lightning charge drops by
+  `chargeLimiterLoss` while pinned — the one departure from "leave charge alone": the angle
+  bonus would otherwise have paid a pinned throttle more than a clean drift.
+
+**Verified in the browser** (dev server, test city with colliders cleared via `window.__rb`,
+no console errors):
+
+- Flat out on a straight: shifts at 32, 66, 105 and 148 km/h landing at 49-77% rpm, 163 km/h
+  after 10 s, never locked, no wheelspin. A 40 km/h corner exit at full lock under power for
+  0.6 s: no lock, no wheelspin, 101 km/h two seconds later.
+- A 60 km/h handbrake flick held with the throttle tapped into the band: 4 s at 29-48° of slip,
+  climbs from second to third, ends at 32 km/h with 70 charge. The same flick with the key
+  pinned: walks out to 82°, ends at 9 km/h with 30 charge.
+- A standstill donut with full lock and a tapped throttle: 533° in 8 s inside a 12 m box, a
+  drift for 7.2 of those seconds, first gear then second as it gathers speed, 92 charge.
+- Known: a full-throttle slalom at 70-90 km/h swinging full lock each way is a power-oversteer
+  drift by the existing rules, so the box locks through it; it still climbs to fourth.
+
+Suite: 334 tests in 22 files, all passing (`tests/drivetrain.test.ts` is new, plus donut, lock,
+corner-exit and pinned-versus-tapped tests); `tsc --noEmit` clean.
+
+Not done: manual gears (the lock is what "auto" gives the player instead), and the pad's
+analog trigger is untested on hardware — the model parks the needle where the trigger says.
+
+### 2026-09-05 — Manual box, self-steering counter-steer, and cars that spin
+
+Juan, on the drivetrain: two boxes. The automatic keeps the simpler drift and is hard to hold a
+drift on because the revs drop on every shift; the manual is where the drifting versatility
+lives — donuts, figure eights — and that versatility is the reward for learning it. Then the
+wheel: real counter-steer, where you lift your hand and the wheel slides through it; holding
+the arrow too long in a first-gear donut makes the circle tighter, tapping it widens it; an
+on-screen indicator of where the wheels are. And the car must be able to spin off if the
+counter-steer is not done properly.
+
+**Transmission** (`GameState.transmission`, T to toggle, remembered in `localStorage`; X/Z or
+RB/LB to shift; the gear readout carries an A/M tag and the toggle prints a system message):
+
+- The **automatic** reads engine revs, not just road speed: with the rear spinning it shifts up
+  at `autoUpshiftRpm` (never from a standstill, never on road speed alone, and it then holds the
+  taller gear for `autoShiftHold` so it does not hunt). Rev into the band with the rear loose
+  and it shifts from under you — the needle lands out of the band in a gear with less torque.
+  Regular driving is untouched: no excess revs, so the shift points are the road ones.
+- The **manual** box moves only on the player's shifts. Flat out in a gear the limiter holds the
+  car at the gear's top; a downshift the road is too fast for is dragged down to it; a tall gear
+  at low revs lugs (`lugDrive`). The old gear lock is gone — manual is what it was for.
+- Cruise mode shifts for itself whatever the box (`StepOptions.cruising`).
+
+**Steering** (`src/sim/vehicle.ts`, step 2 and step 5):
+
+- **Self-steer.** A released wheel in a slide aligns itself with the direction of travel at
+  `selfSteerRate` — counter-steer — and returns to centre on grip. The arrow adds its lock on
+  top, so holding it keeps full lock and tapping it holds a partial angle between taps.
+- **The front turns the car by its angle to the line of travel**, not to the body
+  (`maxEffectiveSteer`). A counter-steered wheel on that line rotates nothing; a wheel held
+  into the slide keeps the rotation going. This replaced the old "counter-steer regrips faster"
+  shortcut, which now only applies without wheelspin, and it is what makes a held arrow in a
+  first-gear donut tighter than a tapped one.
+- **Spins.** The anti-spin assist has its full strength only while the wheel is counter-steered
+  and none at all steered into the slide (`spinGuardBare`). `VehicleState.counterSteer` reports
+  where the wheel sits against the slide; the new wheel glyph in the cluster
+  (`src/ui/wheelIndicator.ts`) turns its front wheels with the live angle, cyan when
+  counter-steered, red when steered in.
+
+**Verified in the browser** (dev server, test city with colliders cleared via `window.__rb`, no
+console errors): T flips the box, prints MANUAL / X / Z TO SHIFT and persists it. Manual first
+gear flat out holds 30 km/h at the limiter. A standstill donut with the throttle tapped and the
+arrow lifted past 30°: manual turns 726° in 8 s inside an 8 m box in first; the same inputs on
+the automatic run 1st→4th into a 67 m arc at 79 km/h. A manual second-gear 60 km/h flick: arrow
+held into the slide walks out to 63° and crawls at 26 km/h (spun off); arrow lifted past 28°
+holds 33° for the full 4 s at 41 km/h with the wheel swinging between +9° and −2°; arrow
+released outright counter-steers within 0.25 s and the car straightens in 0.7 s. Suite: 343
+tests in 22 files, all passing; `tsc --noEmit` clean.
+
+Known and deliberate: on the automatic a full-throttle drift is not lost, it runs away — the
+box climbs the gears and the slide widens into a fast power slide. Tight is manual's.

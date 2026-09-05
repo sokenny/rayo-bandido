@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createVehicleState } from '../src/sim/gameState';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { stepVehicle } from '../src/sim/vehicle';
-import { NITRO, VEHICLE } from '../src/config/tuning';
+import { DRIVETRAIN, NITRO, VEHICLE } from '../src/config/tuning';
+import { bandEntrySpeed } from '../src/sim/drivetrain';
 import type { PlayerCommand, VehicleState } from '../src/core/types';
 
 /**
@@ -102,12 +103,15 @@ describe('reverse', () => {
 });
 
 describe('left-foot brake', () => {
-  /** Full throttle for 8 s, then a handbrake flick into a settled right-hand slide. */
+  /**
+   * Full throttle for 5 s (~140 km/h, a gear the rear can still spin in), then a handbrake
+   * flick into a settled right-hand slide.
+   */
   function driftEntry(): { v: VehicleState; cmd: PlayerCommand } {
     const v = createVehicleState(0, 0, 0);
     const cmd = createPlayerCommand();
     cmd.throttle = 1;
-    run(v, cmd, 8);
+    run(v, cmd, 5);
     cmd.steer = 1;
     cmd.handbrake = true;
     run(v, cmd, 0.4);
@@ -118,7 +122,7 @@ describe('left-foot brake', () => {
 
   it('never sends a moving car backwards, however hard the brake is stabbed mid-drift', () => {
     const { v, cmd } = driftEntry();
-    expect(Math.abs(v.slipAngle) * DEG).toBeGreaterThan(15);
+    expect(Math.abs(v.slipAngle) * DEG).toBeGreaterThan(12); // past the drift threshold
     cmd.brake = 1;
     cmd.throttle = 0;
     for (let i = 0; i < 60 * 0.6; i++) {
@@ -311,5 +315,182 @@ describe('body load signals', () => {
     run(v, cmd, 1);
     expect(v.latAccel).toBe(0);
     expect(v.longAccel).toBe(0);
+  });
+});
+
+describe('wheelspin', () => {
+  it('cannot donut in a tall gear: the band needs road speed the lower the torque', () => {
+    expect(bandEntrySpeed(0)).toBe(0);
+    for (let g = 1; g < DRIVETRAIN.gearTops.length; g++) {
+      expect(bandEntrySpeed(g)).toBeGreaterThan(bandEntrySpeed(g - 1));
+    }
+    // Third gear wants real road speed before the throttle can reach the band.
+    expect(bandEntrySpeed(2) * 3.6).toBeGreaterThan(30);
+  });
+
+  it('launches like an automatic: no wheelspin on a straight, shifts up through the gears', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    let maxSpin = 0;
+    let maxSlip = 0;
+    let maxRpm = 0;
+    for (let i = 0; i < 60 * 3; i++) {
+      stepVehicle(v, cmd, false, DT);
+      maxSpin = Math.max(maxSpin, v.wheelspin);
+      maxSlip = Math.max(maxSlip, Math.abs(v.slipAngle) * DEG);
+      maxRpm = Math.max(maxRpm, v.rpm01);
+    }
+    expect(maxSpin).toBe(0);
+    expect(maxSlip).toBeLessThan(0.5);
+    expect(maxRpm).toBeLessThanOrEqual(1);
+    expect(v.gear).toBeGreaterThanOrEqual(1);
+  });
+
+  it('never locks the box on ordinary cornering under power, so the car keeps shifting', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    cmd.steer = 0.6;
+    for (let i = 0; i < 60 * 6; i++) stepVehicle(v, cmd, false, DT);
+    expect(v.gear).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not step the rear out on a short full-lock corner under power', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 1.5);
+    cmd.steer = 1;
+    let maxSpin = 0;
+    for (let i = 0; i < Math.round(0.4 / DT); i++) {
+      stepVehicle(v, cmd, false, DT);
+      maxSpin = Math.max(maxSpin, v.wheelspin);
+    }
+    expect(maxSpin).toBe(0);
+    cmd.steer = 0;
+    run(v, cmd, 1);
+    expect(v.spinIntent).toBe(0);
+  });
+});
+
+describe('self-steer', () => {
+  /** Manual second, 50 km/h, handbrake flick to the right: a settled slide with the arrow still held. */
+  function slide(): { v: VehicleState; cmd: PlayerCommand } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    while (v.speed * 3.6 < 50) stepVehicle(v, cmd, false, DT);
+    v.gear = 1;
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    for (let i = 0; i < Math.round(0.4 / DT); i++) stepVehicle(v, cmd, false, DT, false, true);
+    cmd.handbrake = false;
+    return { v, cmd };
+  }
+
+  it('swings the released wheel across to counter-steer in a slide', () => {
+    const { v, cmd } = slide();
+    expect(v.slipAngle).toBeLessThan(0); // sliding right: travel is to the left of the nose
+    expect(v.steerAngle).toBeGreaterThan(0);
+    cmd.steer = 0;
+    cmd.throttle = 0;
+    let crossed = -1;
+    for (let i = 0; i < Math.round(1 / DT); i++) {
+      stepVehicle(v, cmd, false, DT, true, true);
+      if (crossed < 0 && v.steerAngle < -0.05) crossed = (i + 1) * DT;
+    }
+    expect(crossed).toBeGreaterThan(0);
+    expect(crossed).toBeLessThan(0.5);
+  });
+
+  it('returns the released wheel to centre on grip', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 3);
+    cmd.steer = 1;
+    run(v, cmd, 0.3);
+    cmd.steer = 0;
+    run(v, cmd, 0.5);
+    expect(Math.abs(v.steerAngle)).toBeLessThan(0.01);
+  });
+
+  it('reports the wheel against the slide: into it while held, counter once released', () => {
+    const { v, cmd } = slide();
+    expect(v.counterSteer).toBeLessThan(-0.5);
+    cmd.steer = 0;
+    for (let i = 0; i < Math.round(0.5 / DT); i++) stepVehicle(v, cmd, false, DT, true, true);
+    expect(v.counterSteer).toBeGreaterThan(0.3);
+  });
+});
+
+describe('spinning out', () => {
+  /** Throttle tapped into the band, the wheel driven by `steer(slipDeg)`, for `seconds`. */
+  function hold(v: VehicleState, cmd: PlayerCommand, seconds: number, steer: (slipDeg: number) => number): number {
+    let maxSlip = 0;
+    const mid = (DRIVETRAIN.bandLow + DRIVETRAIN.bandHigh) / 2;
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      if (v.rpm01 < mid) cmd.throttle = 1;
+      else if (v.rpm01 > DRIVETRAIN.bandHigh - 0.03) cmd.throttle = 0;
+      const slipDeg = Math.abs(v.slipAngle) * DEG;
+      cmd.steer = steer(slipDeg);
+      stepVehicle(v, cmd, false, DT, true, true);
+      maxSlip = Math.max(maxSlip, slipDeg);
+    }
+    return maxSlip;
+  }
+  function entry(): { v: VehicleState; cmd: PlayerCommand } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    while (v.speed * 3.6 < 60) stepVehicle(v, cmd, false, DT);
+    v.gear = 1;
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    for (let i = 0; i < Math.round(0.4 / DT); i++) stepVehicle(v, cmd, false, DT, false, true);
+    cmd.handbrake = false;
+    return { v, cmd };
+  }
+
+  it('spins the car when the arrow is held into the slide, and catches it when lifted in time', () => {
+    const held = entry();
+    const maxHeld = hold(held.v, held.cmd, 4, () => 1);
+    expect(maxHeld).toBeGreaterThan(60);
+    expect(held.v.speed * 3.6).toBeLessThan(32); // sideways and crawling: spun off
+
+    const managed = entry();
+    const maxManaged = hold(managed.v, managed.cmd, 4, (slip) => (slip < 28 ? 1 : 0));
+    expect(maxManaged).toBeLessThan(45);
+    expect(managed.v.speed * 3.6).toBeGreaterThan(30);
+  });
+
+  it('tightens a first-gear donut the longer the arrow is held, and widens it when tapped', () => {
+    const box = (steer: (slipDeg: number) => number): number => {
+      const v = createVehicleState(0, 0, 0);
+      const cmd = createPlayerCommand();
+      let minX = 0;
+      let maxX = 0;
+      let minZ = 0;
+      let maxZ = 0;
+      const mid = (DRIVETRAIN.bandLow + DRIVETRAIN.bandHigh) / 2;
+      for (let i = 0; i < Math.round(8 / DT); i++) {
+        if (v.rpm01 < mid) cmd.throttle = 1;
+        else if (v.rpm01 > DRIVETRAIN.bandHigh - 0.03) cmd.throttle = 0;
+        cmd.steer = steer(Math.abs(v.slipAngle) * DEG);
+        stepVehicle(v, cmd, false, DT, i > 60, true);
+        minX = Math.min(minX, v.x);
+        maxX = Math.max(maxX, v.x);
+        minZ = Math.min(minZ, v.z);
+        maxZ = Math.max(maxZ, v.z);
+      }
+      expect(v.gear).toBe(0);
+      return Math.max(maxX - minX, maxZ - minZ);
+    };
+    const held = box(() => 1);
+    const tapped = box((slip) => (slip < 30 ? 1 : 0));
+    expect(held).toBeLessThan(10);
+    expect(tapped).toBeGreaterThan(held + 1);
+    expect(tapped).toBeLessThan(16);
   });
 });

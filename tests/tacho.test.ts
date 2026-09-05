@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { TACHO_REDLINE01, tachoAngle, tachoRpm } from '../src/ui/tacho';
-import { IDLE_RPM01, REF_SPEED, engineTone } from '../src/audio/dsp';
-import { AUDIO } from '../src/config/tuning';
+import { REF_SPEED, autoGear, roadRpm01 } from '../src/sim/drivetrain';
+import { DRIVETRAIN } from '../src/config/tuning';
 
-/** Same conversion `game.ts` does when it fills the HUD snapshot. */
+/** Road rpm the automatic shows at `speed` with no throttle excess: what the HUD snapshot carries. */
 function rpm01For(speed: number): number {
-  const { rpm01 } = engineTone(Math.abs(speed) / REF_SPEED, AUDIO.gearBounds);
-  return (rpm01 - IDLE_RPM01) / (1 - IDLE_RPM01);
+  return roadRpm01(Math.abs(speed), autoGear(Math.abs(speed), 0));
 }
 
 describe('tacho scale', () => {
@@ -44,7 +43,7 @@ describe('tacho against the gearbox that drives the sound', () => {
   });
 
   it('drops the needle on the upshift the engine note drops on', () => {
-    const bound = AUDIO.gearBounds[1] * REF_SPEED;
+    const bound = DRIVETRAIN.gearTops[1] * REF_SPEED;
     const before = tachoAngle(tachoRpm(rpm01For(bound - 0.01)));
     const after = tachoAngle(tachoRpm(rpm01For(bound + 0.01)));
     // Angles decrease clockwise, so a bigger angle after the shift means the needle fell back.

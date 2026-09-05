@@ -17,6 +17,7 @@
  */
 
 import { clamp01 } from '../core/math';
+import { DRIVETRAIN } from '../config/tuning';
 
 /** Dial artwork is authored in this box; CSS scales it to the on-screen width. */
 const VIEW_W = 264;
@@ -96,6 +97,8 @@ export interface Tacho {
   setNitroActive(on: boolean): void;
   /** Refilling: the N2O tag blinks. */
   setNitroCharging(on: boolean): void;
+  /** A drift is being held: show the torque band the needle has to sit in. */
+  setTorqueBand(on: boolean): void;
   /** Snap the needle to `rpm01` without inertia (restart). */
   reset(rpm01: number): void;
   dispose(): void;
@@ -133,6 +136,11 @@ function furniture(): string {
   const [rx2, ry2] = polar(tachoAngle(MAX_RPM), TICK_R + 4);
   const r = f(TICK_R + 4);
   out += `<path class="rb-tacho__band" d="M ${f(rx1)} ${f(ry1)} A ${r} ${r} 0 0 1 ${f(rx2)} ${f(ry2)}"/>`;
+  // Torque band: where the throttle keeps the rear spinning through a drift. Printed on the
+  // same edge as the red, shown only while a drift is held.
+  const [tx1, ty1] = polar(tachoAngle(tachoRpm(DRIVETRAIN.bandLow)), TICK_R + 4);
+  const [tx2, ty2] = polar(tachoAngle(tachoRpm(DRIVETRAIN.bandHigh)), TICK_R + 4);
+  out += `<path class="rb-tacho__torque" d="M ${f(tx1)} ${f(ty1)} A ${r} ${r} 0 0 1 ${f(tx2)} ${f(ty2)}"/>`;
   return out;
 }
 
@@ -188,6 +196,8 @@ export function createTacho(): Tacho {
   let shownTraceStep = -1;
   let shownNitroStep = -1;
   let redline = false;
+  let driftLock = false;
+  let inBand = false;
   let nitroActive = false;
   let nitroCharging = false;
   const animations: Animation[] = [];
@@ -212,6 +222,11 @@ export function createTacho(): Tacho {
     if (hot !== redline) {
       redline = hot;
       root.classList.toggle('is-redline', hot);
+    }
+    const band = driftLock && needle >= DRIVETRAIN.bandLow && needle <= DRIVETRAIN.bandHigh;
+    if (band !== inBand) {
+      inBand = band;
+      root.classList.toggle('is-in-band', band);
     }
   }
 
@@ -252,6 +267,12 @@ export function createTacho(): Tacho {
       if (on === nitroCharging) return;
       nitroCharging = on;
       root.classList.toggle('is-charging', on);
+    },
+    setTorqueBand(on) {
+      if (on === driftLock) return;
+      driftLock = on;
+      root.classList.toggle('is-locked', on);
+      paint();
     },
     reset(rpm01) {
       needle = clamp01(rpm01);

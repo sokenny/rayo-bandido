@@ -79,6 +79,10 @@ const SLIP_FULL = 10;
 const MIN_SMOKE_SPEED = 2.5;
 /** Slip that counts as sliding even when the drift rules have not latched yet. */
 const SLIDE_LATERAL = 4;
+/** Wheelspin below which the rears are not visibly spinning; matches `audio/dsp.ts:SKID`. */
+const SPIN_START = 0.3;
+/** Smoke of fully spinning rears with no sideways motion. */
+const SPIN_SMOKE = 0.6;
 
 /**
  * Backfire ignition colour: deep red-orange, hot enough to glow white in the additive core but
@@ -140,6 +144,11 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
         intensity = clamp01((lateral - SLIP_START) / (SLIP_FULL - SLIP_START));
         // A latched drift always smokes, even in a smooth low-angle slide.
         if (drifting && intensity < 0.35) intensity = 0.35;
+      }
+      // Spinning rears smoke at any speed: a burnout at a standstill, the donut's cloud.
+      if (vehicle.wheelspin > SPIN_START) {
+        const spin = clamp01((vehicle.wheelspin - SPIN_START) / (1 - SPIN_START)) * SPIN_SMOKE;
+        if (spin > intensity) intensity = spin;
       }
 
       smoke.emit(frameDt, intensity, leftX, leftZ, rightWheelX, rightWheelZ, vehicle.vx, vehicle.vz);

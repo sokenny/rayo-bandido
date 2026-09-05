@@ -129,6 +129,22 @@ describe('gamepad input', () => {
     expect(cmd.fire).toBe(true);
   });
 
+  it('shifts once per bumper press: RB up, LB down', () => {
+    const set = mockPads();
+    const input = createGamepadInput();
+    const cmd = createPlayerCommand();
+    set(pad({ down: [5] }));
+    input.poll(cmd);
+    expect(cmd.shiftUp).toBe(true);
+    expect(cmd.shiftDown).toBe(false);
+    input.poll(cmd);
+    expect(cmd.shiftUp).toBe(false);
+    set(pad({ down: [4] }));
+    input.poll(cmd);
+    expect(cmd.shiftDown).toBe(true);
+    expect(cmd.transmission).toBe(false);
+  });
+
   it('cycles the camera once per Y press, the way NFSU2 changes view', () => {
     const set = mockPads();
     const input = createGamepadInput();

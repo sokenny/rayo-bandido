@@ -2,6 +2,7 @@ import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/
 import { BOLT_ICON, RETICLE_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
 import { createSystemMessage } from './systemMessage';
+import { createWheelIndicator } from './wheelIndicator';
 import { createTacho } from './tacho';
 
 /**
@@ -55,6 +56,7 @@ const PAD_CONTROLS = [
   ['Y', 'camera'],
   ['VIEW', 'cruise'],
   ['START', 'restart'],
+  ['RB/LB', 'shift'],
 ];
 
 const CONTROLS = [
@@ -65,6 +67,8 @@ const CONTROLS = [
   ['R', 'restart'],
   ['C', 'cruise'],
   ['P', 'camera'],
+  ['T', 'auto/manual'],
+  ['X/Z', 'shift'],
   ['ESC', 'menu'],
   ['F3', 'debug'],
 ];
@@ -155,7 +159,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-cluster__row">` +
     `<div class="rb-cluster__slot"></div>` +
     `<div class="rb-cluster__readout">` +
-    `<div class="rb-gear"><span class="rb-gear__label">GEAR</span><span class="rb-gear__value">1</span></div>` +
+    `<div class="rb-gear"><span class="rb-gear__label">GEAR</span><span class="rb-gear__value">1</span><span class="rb-gear__mode">A</span></div>` +
     `<div class="rb-speed"><span class="rb-speed__value">0</span><span class="rb-speed__unit">km/h</span></div>` +
     `<div class="rb-keys"><span class="rb-key rb-key--nitro">SHIFT</span><span class="rb-keys__name">nitro</span></div>` +
     `</div>` +
@@ -211,6 +215,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const speedValueEl = pick<HTMLElement>(hud, '.rb-speed__value');
   const gearEl = pick<HTMLElement>(hud, '.rb-gear');
   const gearValueEl = pick<HTMLElement>(hud, '.rb-gear__value');
+  const gearModeEl = pick<HTMLElement>(hud, '.rb-gear__mode');
+  let manualShown = false;
+  // Front-wheel indicator: sits in the readout so the wheel swinging to counter-steer when the
+  // arrow is lifted mid-slide is read next to the gear it happens in.
+  const wheels = createWheelIndicator();
+  pick<HTMLElement>(hud, '.rb-cluster__readout').insertBefore(wheels.root, gearEl);
   const raceEl = pick<HTMLElement>(hud, '.rb-race');
   const raceLapEl = pick<HTMLElement>(hud, '.rb-race__lap-value');
   const raceTimeEl = pick<HTMLElement>(hud, '.rb-race__time');
@@ -383,6 +393,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       const frameDt = lastFrameTime >= 0 && s.time > lastFrameTime ? Math.min(0.1, s.time - lastFrameTime) : 0;
       lastFrameTime = s.time;
       tacho.setRpm(s.rpm01, frameDt);
+      tacho.setTorqueBand(s.torqueBand);
+      if (s.manual !== manualShown) {
+        manualShown = s.manual;
+        gearModeEl.textContent = s.manual ? 'M' : 'A';
+        gearEl.classList.toggle('is-manual', s.manual);
+      }
+      wheels.set(s.steer, s.counterSteer, s.torqueBand);
       const gearText = s.reversing ? 'R' : String(s.gear + 1);
       if (gearText !== shownGear) {
         // Only an upshift pops: downshifts happen constantly under braking and would strobe.
@@ -543,6 +560,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
           ],
           480,
         );
+      } else if (e.type === 'transmission') {
+        message.show(e.mode === 'manual' ? 'MANUAL' : 'AUTOMATIC', {
+          sub: e.mode === 'manual' ? (padActive ? 'RB / LB TO SHIFT' : 'X / Z TO SHIFT') : 'THE BOX SHIFTS FOR YOU',
+          tone: 'calm',
+          duration: 1800,
+        });
       } else if (e.type === 'restart') {
         controlsUntil = CONTROLS_REPLAY;
         lastDriveHint = -DRIVE_HINT_EVERY;
@@ -559,6 +582,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();
+      wheels.dispose();
       for (const animation of animations.values()) animation.cancel();
       animations.clear();
       root.innerHTML = '';

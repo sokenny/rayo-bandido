@@ -68,7 +68,7 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
   menu.className = 'rb-menu rb-main';
   menu.innerHTML =
     frameDecor('MAIN') +
-    menuHeader('JDM // CYBERPUNK') +
+    menuHeader('DRIFT THROUGH THE CYBERPUNK UNDERGROUND') +
     `<div class="rb-console">` +
     `<div class="rb-list" role="listbox" aria-label="Game mode">` +
     ENTRIES.map(

@@ -1,6 +1,6 @@
 import { AUDIO } from '../config/tuning';
 import { clamp01 } from '../core/math';
-import { REF_SPEED, engineTone } from './dsp';
+import { REF_SPEED, engineNote } from './dsp';
 
 /**
  * Exhaust backfire — the "pops and bangs" of an anti-lag / overrun tune.
@@ -77,7 +77,7 @@ export interface BackfireTrigger {
    * @param nitro Boosting this frame.
    * @returns 0 for no bang, otherwise the strength 0..1 to fire the sound and flame at.
    */
-  tick(dt: number, speed: number, throttle: number, nitro: boolean): number;
+  tick(dt: number, speed: number, rpm01: number, throttle: number, nitro: boolean): number;
   reset(): void;
 }
 
@@ -89,11 +89,11 @@ export function createBackfireTrigger(): BackfireTrigger {
   let nextIn = 0;
 
   return {
-    tick(dt, speed, throttle, nitro) {
+    tick(dt, speed, rpm01In, throttle, nitro) {
       sinceLast += dt;
 
       const speedFrac = Math.abs(speed) / REF_SPEED;
-      const { rpm01 } = engineTone(speedFrac, AUDIO.gearBounds);
+      const rpm01 = engineNote(rpm01In);
       // How heat-soaked the pipes are: a proxy for time spent under load, so it tracks road
       // speed rather than the fake gearbox — which sweeps past redline once per gear and would
       // otherwise make an overrun bang a coincidence of when you happened to lift.

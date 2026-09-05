@@ -1,5 +1,6 @@
 import type { DriftState, GameEvent, VehicleState } from '../core/types';
 import { DRIFT } from '../config/tuning';
+import { limiterPenalty } from './drivetrain';
 
 /**
  * Drift detection state machine.
@@ -13,11 +14,15 @@ import { DRIFT } from '../config/tuning';
  * Thresholds are tuned against the controller in `src/sim/vehicle.ts`: straight-line and
  * gentle cornering settle around 4-7 degrees of slip (below `slipEnter`), a handbrake or
  * power-oversteer slide settles around 20-40 degrees, and `chargePerSecond` is sized so a
- * clean drift reaches the 50-unit lightning cost in roughly 3-4 seconds.
+ * clean drift reaches the 50-unit lightning cost in roughly 3-4 seconds. Below `minSpeed` a
+ * slide is still a drift while the rear wheels are spinning (`spinValid`), so donuts count.
+ * The rate drops by `chargeLimiterLoss` while the engine is pinned against the limiter, so the
+ * throttle-modulated drift (`src/sim/drivetrain.ts`) out-earns the pinned one.
  */
 export function stepDrift(d: DriftState, v: VehicleState, dt: number, events: GameEvent[]): void {
   const slip = Math.abs(v.slipAngle);
-  const fast = v.speed > DRIFT.minSpeed;
+  // A slow slide counts while the rear is spinning: a first-gear donut is a drift.
+  const fast = v.speed > DRIFT.minSpeed || (v.speed > DRIFT.spinMinSpeed && v.wheelspin > DRIFT.spinValid);
   const threshold = d.active ? DRIFT.slipExit : DRIFT.slipEnter;
   const sliding = fast && slip > threshold;
   const forcedCancel = v.collided || v.speed < 0;
@@ -53,7 +58,9 @@ export function stepDrift(d: DriftState, v: VehicleState, dt: number, events: Ga
     d.lapseTime = 0;
     const chainBonus = Math.min(d.chain - 1, DRIFT.maxChainBonus) * DRIFT.chargeChainBonus;
     const angle = slip < DRIFT.chargeAngleCap ? slip : DRIFT.chargeAngleCap;
-    d.chargeRate = (DRIFT.chargePerSecond + chainBonus) * (1 + angle * DRIFT.chargeAngleGain);
+    // A throttle pinned against the limiter is the sloppy way to a big angle: it pays less.
+    const discipline = 1 - limiterPenalty(v) * DRIFT.chargeLimiterLoss;
+    d.chargeRate = (DRIFT.chargePerSecond + chainBonus) * (1 + angle * DRIFT.chargeAngleGain) * discipline;
   } else {
     d.lapseTime += dt;
     d.chargeRate = 0;

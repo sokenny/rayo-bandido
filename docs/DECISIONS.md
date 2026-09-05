@@ -11,8 +11,9 @@
 | Theme | 50% JDM, 50% cyberpunk |
 | World | Dark, nocturnal and dystopian; electric cars dominate the city |
 | Core fantasy | The combustion-powered outlaw destroys/disables electric cars through drift-charged lightning |
-| Drift | Easier and more forgiving than Need for Speed Underground 2 for the MVP |
+| Drift | Easier and more forgiving than Need for Speed Underground 2 for the MVP to *start*: a handbrake flick and the wheel is enough. *Sustaining* one is a throttle and a steering skill. Throttle: the rear stays loose only while the engine is in its torque band, so a held key over-revs (the car walks out and bogs) and no throttle regrips. Steering: in a slide the front wheels turn the car by their angle to the direction of travel, and a released wheel self-steers onto that line (counter-steer, the wheel spinning through your hands). Holding the arrow into the slide tightens it and, held too long, spins the car; lifting catches it; tapping holds an angle in between. The anti-spin assist only works while the wheel is counter-steered. A first-gear donut is possible from a standstill on the manual box; the same figure in a taller gear needs the road speed that gear's torque asks for |
 | Drivetrain | Rear-wheel drive. Not simulated per wheel, but the handling model must express it: throttle only ever loosens the rear, and the brake loads the front (left-foot braking tightens the line) |
+| Gearbox | Six-speed with a simulated engine rpm (`src/sim/drivetrain.ts`): road rpm is linear through zero per gear, and under throttle the engine revs above it by the gear's torque — that excess is wheelspin, and it only appears with a reason (a held drift, a slide, or full lock held at low speed). Two boxes, toggled with T and remembered: the **automatic** reads revs like a real one, so with the rear spinning it shifts up from under a drift and drops the needle out of the band — regular driving is a plain automatic, holding a drift on it is hard. The **manual** (X/Z, RB/LB) hands the gear to the player: the engine can sit in the band at any speed, so donuts, figure eights and long slides are the reward for learning it. Same physics under both |
 | Lightning charge | Charged only through valid drifting |
 | Lightning targeting | Auto-target nearest eligible electric vehicle inside a forward cone |
 | Reward | Destroyed/disabled electric vehicles award money |
@@ -29,10 +30,10 @@ These values may be tuned without asking Juan. Keep them centralized.
 
 | Parameter | Starting default |
 | --- | --- |
-| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart |
+| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart; T automatic/manual; X/Z shift up/down (RB/LB on a pad). In a drift the throttle key is tapped to hold the needle in the tacho's torque band (roughly 6000-8200 rpm) and the steering arrow is tapped to hold a wheel angle against the self-steer; a pad trigger and stick are feathered there instead |
 | Gamepad | Xbox-style standard mapping, always live beside the keyboard. NFS Underground 2's default pad layout, so the muscle memory carries over: RT throttle, LT brake/reverse, left stick steers, A handbrake, B nitro, Y camera. The three actions NFSU2 has no counterpart for take the buttons it leaves free: X lightning, View cruise, Start restart; A/Start confirm in menus |
 | Camera FOV | 60 base, easing toward 70 during nitro |
-| Drift activation | Speed above 25 km/h-equivalent and slip angle above roughly 12° for 200 ms |
+| Drift activation | Speed above 25 km/h-equivalent (or the rear wheels spinning above 7 km/h: a donut counts) and slip angle above roughly 12° for 200 ms |
 | Drift cancellation | Low speed, collision, reversal or slip below threshold for roughly 350 ms |
 | Lightning capacity | 100 units |
 | Lightning cost | 50 units per shot |
@@ -131,3 +132,19 @@ menus and the UI only: the scene, the car, the circuit and the effects were not 
 | The main menu is a list plus a dossier | Three numbered rows, and a record panel that describes whichever one the cursor is on — with the WANTED poster cropped to the driver | Three equal cards said nothing about the modes. The dossier gives the copy somewhere to live, and reuses `public/rayo-wanted.webp`, which was already in the build for the in-world billboard |
 | Decoration cannot be clicked | The corner brackets, the frame readouts and the scanlines are `aria-hidden` and `pointer-events: none`, and the scanline layer sits below the content | A skin that swallows a click on START RACE is a bug, not a style |
 | The loading screen repeats the skin by hand | `index.html` keeps its own inlined copy of the type, the stamp and the hazard bar rather than importing the stylesheet | It has to paint before the bundle is requested, which is the whole reason it is inline |
+
+## Phones: rotate the game, not the menus (2026-09-05)
+
+Juan asked for the *game* (not the menu) to render horizontally on a phone, plus basic controls
+"so that they can play around". Scope was deliberately small: make it playable on a handset, not
+port the interface to mobile.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Rotate in CSS, do not ask the OS | While a touch device is held portrait, the canvas, the HUD and the pad are given the swapped dimensions and turned a quarter turn (`body.rb-rotated`, `src/ui/viewport.ts`) | `screen.orientation.lock()` needs fullscreen and does not exist on iOS, so a promise built on it would break on half the phones. A CSS transform works everywhere, and the browser inverts it for hit-testing, so the on-screen buttons need no coordinate maths |
+| The renderer sizes from the layer, not the window | `viewportWidth/Height()` swap with the rotation, and the renderer, the camera aspect and the resize handler all read them | The game layer is as wide as the window is tall. Reading `window.innerWidth` would have built a portrait framebuffer for a landscape picture |
+| Menus stay portrait | Only the game layer carries the class, and the lock is installed by `createGame` and released by `dispose` | The menus read fine in portrait, and rotating a screen the player is reading rather than driving is disorienting. Tying the lock to the game's lifetime also covers multiplayer, where a race is built and torn down without a page load |
+| Size published as `--rb-vw` / `--rb-vh` | The rotated layer is sized from custom properties set on every resize, not from `vw` / `vh` units | On mobile Safari `vh` measures a viewport that is not on screen while the address bar is showing, which would leave the game hanging off the bottom |
+| Seven buttons, and the screen is the eighth | Steer, gas, brake, handbrake, nitro, restart — and a tap anywhere else fires lightning, which the existing mouse-click binding already did | Drifting needs handbrake and throttle; lightning is the point of drifting. Camera, cruise and the gearbox are not worth a thumb, and the HUD's key legend hides itself so the pad is the only legend on screen |
+| Pointer events with capture | One pointer per button, `setPointerCapture` on press (guarded: it throws for a pointer the browser has dropped) | Multi-touch — gas and steer together — comes free, and a thumb that slides off the button still releases it. A lost `pointerup` on the throttle is a car that never stops |
+

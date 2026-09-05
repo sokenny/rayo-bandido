@@ -1,4 +1,5 @@
 import type {
+  Transmission,
   ArenaLayout,
   DriftState,
   EconomyState,
@@ -50,6 +51,15 @@ export function createVehicleState(x: number, z: number, heading: number): Vehic
     handbrake: false,
     collided: false,
     collisionImpact: 0,
+    slide: 0,
+    gear: 0,
+    rpm01: 0,
+    spinRev: 0,
+    wheelspin: 0,
+    limiterTime: 0,
+    spinIntent: 0,
+    shiftHold: 0,
+    counterSteer: 0,
   };
 }
 
@@ -69,9 +79,10 @@ export function createEconomyState(): EconomyState {
   return { money: 0, destroyed: 0, lastReward: 0 };
 }
 
-export function createInitialGameState(layout: ArenaLayout): GameState {
+export function createInitialGameState(layout: ArenaLayout, transmission: Transmission = 'auto'): GameState {
   const s = layout.playerSpawn;
   return {
+    transmission,
     time: 0,
     tick: 0,
     vehicle: createVehicleState(s.x, s.z, s.heading),
@@ -107,7 +118,20 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
  * throttle. Steering and fire are copied from the player's command so the wheels turn and
  * the lightning still works. One long-lived object, never allocated per tick.
  */
-const HOLD: PlayerCommand = { throttle: 0, brake: 0, steer: 0, handbrake: true, nitro: false, fire: false, restart: false, cruise: false, pov: false };
+const HOLD: PlayerCommand = {
+  throttle: 0,
+  brake: 0,
+  steer: 0,
+  handbrake: true,
+  nitro: false,
+  fire: false,
+  restart: false,
+  cruise: false,
+  pov: false,
+  shiftUp: false,
+  shiftDown: false,
+  transmission: false,
+};
 
 /** What a multiplayer race adds to a tick. Absent in single player. */
 export interface StepOptions {
@@ -119,6 +143,8 @@ export interface StepOptions {
    * copies never disagree about whether it is there.
    */
   respawnTraffic?: boolean;
+  /** Cruise mode is driving: a manual box shifts itself, the autopilot has no hands for it. */
+  cruising?: boolean;
 }
 
 /**
@@ -144,6 +170,11 @@ export function stepGame(
     state.events.push({ type: 'restart' });
     return;
   }
+  if (cmd.transmission) {
+    state.transmission = state.transmission === 'auto' ? 'manual' : 'auto';
+    state.events.push({ type: 'transmission', mode: state.transmission });
+  }
+  const manual = state.transmission === 'manual' && !options?.cruising;
   state.time += dt;
   state.tick++;
   state.economy.lastReward = 0;
@@ -158,7 +189,7 @@ export function stepGame(
   }
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
-  stepVehicle(state.vehicle, input, state.nitro.active, dt);
+  stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
   resolveCollisions(state.vehicle, layout, state.events);
   if (rivals) resolveRivalCollisions(state.vehicle, rivals, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);

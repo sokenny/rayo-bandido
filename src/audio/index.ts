@@ -11,6 +11,8 @@ export interface SkidInput {
   lateralSpeed: number;
   speed: number;
   drifting: boolean;
+  /** Rear wheels spinning (0..1): a burnout scrubs even at a standstill. */
+  wheelspin: number;
 }
 
 /**
@@ -80,7 +82,7 @@ export function createAudio(targetCount: number): AudioSystem {
   return {
     update(dt, engineInput, listener, targets, skid) {
       engine.update(dt, engineInput);
-      tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting), skid.speed);
+      tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin), skid.speed);
       hums.update(dt, listener, targets);
     },
 

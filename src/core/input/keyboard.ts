@@ -5,7 +5,8 @@ import type { PlayerCommand } from '../types';
  * between polls so a short tap is never lost, and cleared after `poll()` reads them once.
  *
  * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
- * E or mouse click fires lightning, R restarts, C toggles cruise mode, P cycles camera view.
+ * E or mouse click fires lightning, R restarts, C toggles cruise mode, P cycles camera view,
+ * X / Z shift up / down on a manual box, T toggles automatic / manual.
  */
 export interface InputSource {
   /** Fill `out` with the current command. Edge-triggered flags are consumed. */
@@ -14,7 +15,20 @@ export interface InputSource {
 }
 
 export function createPlayerCommand(): PlayerCommand {
-  return { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, fire: false, restart: false, cruise: false, pov: false };
+  return {
+    throttle: 0,
+    brake: 0,
+    steer: 0,
+    handbrake: false,
+    nitro: false,
+    fire: false,
+    restart: false,
+    cruise: false,
+    pov: false,
+    shiftUp: false,
+    shiftDown: false,
+    transmission: false,
+  };
 }
 
 export function createKeyboardInput(target: Window | HTMLElement = window): InputSource {
@@ -23,6 +37,9 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   let restartLatched = false;
   let cruiseLatched = false;
   let povLatched = false;
+  let shiftUpLatched = false;
+  let shiftDownLatched = false;
+  let transmissionLatched = false;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) {
@@ -34,6 +51,9 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
     if (e.code === 'KeyR') restartLatched = true;
     if (e.code === 'KeyC') cruiseLatched = true;
     if (e.code === 'KeyP') povLatched = true;
+    if (e.code === 'KeyX') shiftUpLatched = true;
+    if (e.code === 'KeyZ') shiftDownLatched = true;
+    if (e.code === 'KeyT') transmissionLatched = true;
     if (isGameKey(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -66,10 +86,16 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.restart = restartLatched;
       out.cruise = cruiseLatched;
       out.pov = povLatched;
+      out.shiftUp = shiftUpLatched;
+      out.shiftDown = shiftDownLatched;
+      out.transmission = transmissionLatched;
       fireLatched = false;
       restartLatched = false;
       cruiseLatched = false;
       povLatched = false;
+      shiftUpLatched = false;
+      shiftDownLatched = false;
+      transmissionLatched = false;
     },
     dispose() {
       target.removeEventListener('keydown', onKeyDown as EventListener);
@@ -97,6 +123,9 @@ function isGameKey(code: string): boolean {
     case 'KeyR':
     case 'KeyC':
     case 'KeyP':
+    case 'KeyX':
+    case 'KeyZ':
+    case 'KeyT':
       return true;
     default:
       return false;

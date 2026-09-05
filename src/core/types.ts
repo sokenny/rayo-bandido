@@ -43,7 +43,15 @@ export interface PlayerCommand {
   cruise: boolean;
   /** Cycle the camera view. Edge-triggered. Presentation only: the simulation ignores it. */
   pov: boolean;
+  /** Manual transmission: shift up. Edge-triggered. Ignored by an automatic. */
+  shiftUp: boolean;
+  /** Manual transmission: shift down. Edge-triggered. Ignored by an automatic. */
+  shiftDown: boolean;
+  /** Toggle automatic / manual transmission. Edge-triggered. */
+  transmission: boolean;
 }
+
+export type Transmission = 'auto' | 'manual';
 
 export interface VehicleState {
   x: number;
@@ -90,6 +98,27 @@ export interface VehicleState {
   collided: boolean;
   /** Speed lost in the last collision (m/s), 0 when no collision this tick. */
   collisionImpact: number;
+  /** How much the car is sliding this tick (0 = full grip, 1 = full drift). */
+  slide: number;
+  /** Zero-based gear of the automatic (`DRIVETRAIN.gearTops`). Displayed as `gear + 1`. */
+  gear: number;
+  /** Engine rpm, 0 at idle .. 1 at redline. Road rpm plus whatever the throttle revs above it. */
+  rpm01: number;
+  /** Excess rpm over road rpm the engine is holding under throttle (rpm01). The wheelspin integrator. */
+  spinRev: number;
+  /** Rear wheels spinning (0..1): excess rpm inside the torque band. What holds a drift. */
+  wheelspin: number;
+  /** Seconds the engine has been against the limiter; its penalties ramp in over `overRevGrace`. */
+  limiterTime: number;
+  /** Power-over intent (0..1): full lock held at low speed for a moment. See `VEHICLE.spinIntent*`. */
+  spinIntent: number;
+  /** Seconds the automatic still refuses to shift down after a rev-triggered upshift. */
+  shiftHold: number;
+  /**
+   * How the front wheels sit against the slide (-1..1): positive = counter-steered (pointing
+   * where the car is going), negative = steered into the slide. 0 when not sliding.
+   */
+  counterSteer: number;
 }
 
 export interface DriftState {
@@ -300,7 +329,8 @@ export type GameEvent =
   | { type: 'checkpoint'; index: number; split: number }
   | { type: 'lapComplete'; lap: number; time: number; best: boolean }
   | { type: 'raceFinish'; total: number; bestLap: number }
-  | { type: 'wrongWay'; on: boolean };
+  | { type: 'wrongWay'; on: boolean }
+  | { type: 'transmission'; mode: Transmission };
 
 export interface GameState {
   /** Simulation time in seconds since the session started. */
@@ -315,6 +345,8 @@ export interface GameState {
   economy: EconomyState;
   /** Present in race mode only. */
   race: RaceState | null;
+  /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
+  transmission: Transmission;
   events: GameEvent[];
 }
 
@@ -437,12 +469,20 @@ export interface HudSnapshot {
   /** True while cruise mode is driving the car. */
   cruising: boolean;
   /**
-   * Engine note position within the current gear: 0 at idle, 1 at redline. The same value the
-   * engine voice revs on (`audio/dsp.ts:engineTone`), so the needle and the sound shift together.
+   * Engine rpm: 0 at idle, 1 at redline. The same `VehicleState.rpm01` the engine voice revs
+   * on, so the needle and the sound shift together.
    */
   rpm01: number;
-  /** Zero-based index into the fake gearbox (`AUDIO.gearBounds`). Displayed as `gear + 1`. */
+  /** Zero-based gear of the automatic (`DRIVETRAIN.gearTops`). Displayed as `gear + 1`. */
   gear: number;
+  /** True while a drift is held: the tacho shows the torque band the needle has to sit in. */
+  torqueBand: boolean;
+  /** Manual transmission selected. */
+  manual: boolean;
+  /** Front wheel angle as a fraction of full lock (-1..1, positive = right). */
+  steer: number;
+  /** `VehicleState.counterSteer`, for the wheel indicator's tint. */
+  counterSteer: number;
   mode: GameMode;
   /** Race readout; null outside race mode. */
   race: RaceHudSnapshot | null;

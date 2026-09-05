@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Rayo Bandido</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%2718 2 6 18h8l-2 12 14-18h-8z%27 fill=%27%23fcee0a%27/%3E%3C/svg%3E" />
     <!--
@@ -12,7 +12,7 @@
       moving while the main thread builds the city and compiles shaders.
     -->
     <style>
-      html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+      html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; overscroll-behavior: none; }
       #loading-root {
         position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 16px;
@@ -67,7 +67,7 @@
     <div id="debug-root"></div>
     <div id="loading-root" role="status" aria-live="polite">
       <h1 class="rb-loading__title" data-text="RAYO BANDIDO"><span>RAYO BANDIDO</span></h1>
-      <div class="rb-loading__sub">JDM // CYBERPUNK</div>
+      <div class="rb-loading__sub">DRIFT THROUGH THE CYBERPUNK UNDERGROUND</div>
       <div class="rb-loading__bar"><div class="rb-loading__bar-fill"></div><div class="rb-loading__bar-shimmer"></div></div>
       <div class="rb-loading__status">LOADING</div>
     </div>

@@ -4,45 +4,27 @@ import {
   REF_SPEED,
   SKID,
   distanceGain,
-  engineTone,
+  engineNote,
   skidIntensity,
   squealHz,
   stereoPan,
 } from '../src/audio/dsp';
 import { BACKFIRE, createBackfireTrigger } from '../src/audio/backfire';
 import { FLUTTER, chuffTimes, createTurboFlutterTrigger } from '../src/audio/turboFlutter';
-import { AUDIO } from '../src/config/tuning';
+import { DRIVETRAIN } from '../src/config/tuning';
+import { autoGear, roadRpm01 } from '../src/sim/drivetrain';
 
-describe('engineTone gearbox', () => {
-  const bounds = AUDIO.gearBounds;
+/** Road rpm the automatic would show at `speed` with no throttle excess (0 idle .. 1 redline). */
+function rpmFor(speed: number): number {
+  return roadRpm01(Math.abs(speed), autoGear(Math.abs(speed), 0));
+}
 
-  it('sits at the idle floor when stopped', () => {
-    const { gear, rpm01 } = engineTone(0, bounds);
-    expect(gear).toBe(0);
-    expect(rpm01).toBeCloseTo(IDLE_RPM01, 5);
-  });
-
-  it('rises to redline at the top of a gear', () => {
-    // Just under the first gear's upper bound → nearly redline.
-    const { gear, rpm01 } = engineTone(bounds[0] - 1e-4, bounds);
-    expect(gear).toBe(0);
-    expect(rpm01).toBeGreaterThan(0.98);
-  });
-
-  it('drops the note on the upshift (gear boundary is not monotonic in rpm)', () => {
-    const top1 = engineTone(bounds[0] - 1e-4, bounds).rpm01;
-    const bottom2 = engineTone(bounds[0] + 1e-4, bounds).rpm01;
-    expect(bottom2).toBeLessThan(top1);
-    expect(engineTone(bounds[0] + 1e-4, bounds).gear).toBe(1);
-  });
-
-  it('selects ascending gears with speed and holds redline past the last bound', () => {
-    expect(engineTone(0.05, bounds).gear).toBe(0);
-    expect(engineTone(0.5, bounds).gear).toBe(3);
-    // Overspeed (nitro) clamps within the top gear rather than exploding past redline.
-    const over = engineTone(1.4, bounds);
-    expect(over.gear).toBe(bounds.length - 1);
-    expect(over.rpm01).toBeLessThanOrEqual(1);
+describe('engineNote', () => {
+  it('puts the idle floor under the simulation rpm and keeps redline at 1', () => {
+    expect(engineNote(0)).toBeCloseTo(IDLE_RPM01, 5);
+    expect(engineNote(1)).toBeCloseTo(1, 5);
+    expect(engineNote(0.5)).toBeGreaterThan(engineNote(0.2));
+    expect(engineNote(1.4)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -88,9 +70,9 @@ describe('skidIntensity', () => {
 
 describe('backfire trigger', () => {
   const FRAME = 1 / 60;
-  // Just under the second gear's upper bound: past the minimum speed and near redline.
-  const REDLINE_SPEED = (AUDIO.gearBounds[1] - 1e-3) * REF_SPEED;
-  // Inside first gear: the fake gearbox reads near redline, but the car is barely moving.
+  // Just under the second gear's top: past the minimum speed and near redline.
+  const REDLINE_SPEED = (DRIVETRAIN.gearTops[1] - 1e-3) * REF_SPEED;
+  // Inside first gear: the engine reads near redline, but the car is barely moving.
   const CRAWL_SPEED = 0.1 * REF_SPEED;
 
   /** Run `frames` frames at a held throttle, collecting every bang strength returned. */
@@ -103,7 +85,7 @@ describe('backfire trigger', () => {
   ): number[] {
     const bangs: number[] = [];
     for (let i = 0; i < frames; i++) {
-      const s = trigger.tick(FRAME, speed, throttle, nitro);
+      const s = trigger.tick(FRAME, speed, rpmFor(speed), throttle, nitro);
       if (s > 0) bangs.push(s);
     }
     return bangs;
@@ -126,9 +108,9 @@ describe('backfire trigger', () => {
   });
 
   it('bangs on a lift-off mid-gear, where the note is nowhere near the limiter', () => {
-    // Middle of third gear: fast, hot pipes, but a low engine note after the upshift.
-    const speed = ((AUDIO.gearBounds[1] + AUDIO.gearBounds[2]) / 2) * REF_SPEED;
-    expect(engineTone(speed / REF_SPEED, AUDIO.gearBounds).rpm01).toBeLessThan(BACKFIRE.MIN_RPM01);
+    // Just after the shift into third: fast, hot pipes, but a low engine note.
+    const speed = (DRIVETRAIN.gearTops[1] + 1e-3) * REF_SPEED;
+    expect(engineNote(rpmFor(speed))).toBeLessThan(BACKFIRE.MIN_RPM01);
     const trigger = createBackfireTrigger();
     drive(trigger, 30, speed, 1);
     expect(drive(trigger, 90, speed, 0).length).toBeGreaterThanOrEqual(1);
@@ -166,7 +148,7 @@ describe('backfire trigger', () => {
     drive(trigger, 30, REDLINE_SPEED, start);
     const bangs: number[] = [];
     for (let i = 0; i < 40; i++) {
-      const s = trigger.tick(FRAME, REDLINE_SPEED, Math.max(0, start - i * 0.05), false);
+      const s = trigger.tick(FRAME, REDLINE_SPEED, rpmFor(REDLINE_SPEED), Math.max(0, start - i * 0.05), false);
       if (s > 0) bangs.push(s);
     }
     expect(bangs).toEqual([]);
@@ -184,7 +166,7 @@ describe('backfire trigger', () => {
     let count = 0;
     for (let i = 0; i < 1200; i++) {
       elapsed += FRAME;
-      if (trigger.tick(FRAME, REDLINE_SPEED, 1, false) === 0) continue;
+      if (trigger.tick(FRAME, REDLINE_SPEED, rpmFor(REDLINE_SPEED), 1, false) === 0) continue;
       // The trigger starts ready, so only gaps between consecutive bangs are constrained.
       if (previous >= 0) expect(elapsed - previous).toBeGreaterThanOrEqual(BACKFIRE.MIN_INTERVAL);
       previous = elapsed;
@@ -196,7 +178,7 @@ describe('backfire trigger', () => {
   it('drops a queued burst on reset', () => {
     const trigger = createBackfireTrigger();
     drive(trigger, 30, REDLINE_SPEED, 1);
-    trigger.tick(FRAME, REDLINE_SPEED, 0, false); // queues (and fires the first of) a burst
+    trigger.tick(FRAME, REDLINE_SPEED, rpmFor(REDLINE_SPEED), 0, false); // queues (and fires the first of) a burst
     trigger.reset();
     expect(drive(trigger, 90, REDLINE_SPEED, 0)).toEqual([]);
   });

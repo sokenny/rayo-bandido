@@ -1896,6 +1896,66 @@ body {
   text-shadow: 0 0 12px rgba(255, 43, 61, 0.5);
 }
 
+/* A / M tag beside the gear: which box is in charge of it. */
+.rb-gear__mode {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--rb-dim);
+  align-self: flex-start;
+  padding-top: 2px;
+}
+
+.rb-gear.is-manual .rb-gear__mode {
+  color: var(--rb-cyan);
+}
+
+/* Front-wheel indicator: a top-down car whose front wheels follow the live steering angle.
+   Dim on grip; while a drift is held it lights cyan when the wheels are counter-steered and
+   red when they are steered into the slide, which is the one that spins the car. */
+.rb-wheels {
+  width: 26px;
+  height: 36px;
+  opacity: 0.55;
+  transition: opacity 160ms ease-out;
+}
+
+.rb-wheels.is-sliding {
+  opacity: 1;
+}
+
+.rb-wheels__svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.rb-wheels__body {
+  fill: rgba(5, 7, 13, 0.7);
+  stroke: rgba(180, 214, 255, 0.45);
+  stroke-width: 1.2;
+}
+
+.rb-wheels__cabin {
+  fill: rgba(180, 214, 255, 0.16);
+}
+
+.rb-wheels__wheel {
+  fill: rgba(180, 214, 255, 0.6);
+  transition: fill 120ms ease-out;
+}
+
+.rb-wheels__wheel--front {
+  fill: var(--rb-text);
+}
+
+.rb-wheels.is-counter .rb-wheels__wheel--front {
+  fill: var(--rb-cyan);
+}
+
+.rb-wheels.is-into .rb-wheels__wheel--front {
+  fill: var(--rb-red);
+}
+
 .rb-speed {
   display: flex;
   align-items: baseline;
@@ -1993,6 +2053,26 @@ body {
   stroke: var(--rb-red);
   stroke-width: 1.8;
   opacity: 0.7;
+}
+
+/* The torque band: the stretch of the dial a drift is held in. Hidden until the box locks a
+   gear for a slide, then a cool hairline that turns hot while the needle sits inside it. */
+.rb-tacho__torque {
+  fill: none;
+  stroke: var(--rb-cyan);
+  stroke-width: 1.8;
+  opacity: 0;
+  transition: opacity 160ms ease-out, stroke-width 160ms ease-out;
+}
+
+.rb-tacho__dial.is-locked .rb-tacho__torque {
+  opacity: 0.55;
+}
+
+.rb-tacho__dial.is-locked.is-in-band .rb-tacho__torque {
+  stroke: var(--rb-cyan-hot);
+  stroke-width: 3.2;
+  opacity: 1;
 }
 
 .rb-tacho__scale {
@@ -2211,7 +2291,7 @@ body {
 
 .rb-race {
   position: absolute;
-  top: 16px;
+  top: 62px;
   left: 50%;
   transform: translateX(-50%);
   display: none;
@@ -2232,7 +2312,7 @@ body {
 
 /* In race mode the cruise badge steps down below the readout. */
 .rb-hud.is-race .rb-cruise {
-  top: 112px;
+  top: 158px;
 }
 
 .rb-race__lap {
@@ -2496,17 +2576,6 @@ body {
   }
 }
 
-/* Narrow windows: the race readout steps below the controls card and the money block. */
-@media (max-width: 1180px) {
-  .rb-race {
-    top: 62px;
-  }
-
-  .rb-hud.is-race .rb-cruise {
-    top: 158px;
-  }
-}
-
 /* Narrow or short windows: the bottom readouts would collide with each other and with the
    hint, so only the top pair stays. The corner brackets are what carry the frame anyway. */
 @media (max-width: 820px), (max-height: 560px) {
@@ -2547,4 +2616,169 @@ body {
   .rb-menu::after {
     display: none;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * PHONES
+ *
+ * Two things and no more: the game layer turns sideways on a portrait handset
+ * (`src/ui/viewport.ts` owns the class and publishes the size), and a thumb pad
+ * appears (`src/ui/touchControls.ts`). Menus are untouched — they read in portrait.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+body.rb-rotated #game-canvas,
+body.rb-rotated #hud-root,
+body.rb-rotated .rb-touch {
+  /* The layer is as wide as the window is tall, then rotated a quarter turn clockwise about
+     its top-left corner; the translate brings it back down over the window. */
+  inset: auto;
+  top: 0;
+  left: 0;
+  width: var(--rb-vh);
+  height: var(--rb-vw);
+  transform-origin: 0 0;
+  transform: rotate(90deg) translate(0, -100%);
+}
+
+.rb-touch {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  /* No scrolling, no double-tap zoom, no long-press callout anywhere over the pad. */
+  touch-action: none;
+  -webkit-touch-callout: none;
+  padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+.rb-touch__cluster {
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.rb-touch__cluster--left {
+  left: max(18px, env(safe-area-inset-left));
+}
+
+.rb-touch__cluster--right {
+  right: max(18px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* The nested rows inside the right group sit in the normal flow: the two small auxiliary
+   buttons ride above the two big drive buttons. Sizes below are chosen so the whole stack
+   stays under the minimap on a 390pt-tall landscape phone, the shortest screen worth having. */
+.rb-touch__cluster--aux,
+.rb-touch__cluster--drive {
+  position: static;
+  bottom: auto;
+  gap: 8px;
+}
+
+/* Top-left, where the keyboard legend was: out of the way of both thumbs, so a restart has
+   to be meant. */
+.rb-touch__cluster--restart {
+  top: max(12px, env(safe-area-inset-top));
+  bottom: auto;
+  left: max(18px, env(safe-area-inset-left));
+}
+
+body.rb-touch-pad .rb-controls {
+  display: none;
+}
+
+.rb-touch__btn {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 78px;
+  height: 78px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rb-hairline);
+  border-radius: 0;
+  clip-path: var(--rb-notch);
+  background: var(--rb-panel);
+  color: var(--rb-text);
+  font-family: var(--rb-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  backdrop-filter: blur(2px);
+  transition: background 90ms linear, color 90ms linear, transform 90ms ease-out;
+}
+
+.rb-touch__btn.is-on {
+  background: rgba(252, 238, 10, 0.82);
+  color: var(--rb-bg);
+  transform: scale(0.96);
+}
+
+.rb-touch__btn--steer {
+  width: 84px;
+  height: 84px;
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+.rb-touch__btn--gas {
+  width: 88px;
+  height: 88px;
+  border-color: rgba(168, 255, 62, 0.4);
+  color: var(--rb-acid);
+}
+
+.rb-touch__btn--gas.is-on {
+  background: rgba(168, 255, 62, 0.85);
+  color: var(--rb-bg);
+}
+
+.rb-touch__btn--brake {
+  width: 80px;
+  height: 88px;
+  border-color: rgba(255, 43, 61, 0.4);
+  color: var(--rb-red);
+}
+
+.rb-touch__btn--brake.is-on {
+  background: rgba(255, 43, 61, 0.85);
+  color: #fff;
+}
+
+.rb-touch__btn--nitro {
+  width: 84px;
+  height: 44px;
+  font-size: 12px;
+  border-color: rgba(255, 61, 240, 0.4);
+  color: var(--rb-magenta);
+}
+
+.rb-touch__btn--nitro.is-on {
+  background: rgba(255, 61, 240, 0.85);
+  color: #fff;
+}
+
+.rb-touch__btn--hand {
+  width: 84px;
+  height: 44px;
+  font-size: 12px;
+}
+
+.rb-touch__btn--restart {
+  width: 44px;
+  height: 32px;
+  font-size: 12px;
+  opacity: 0.55;
 }

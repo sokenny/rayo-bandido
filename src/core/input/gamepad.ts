@@ -26,6 +26,8 @@ const BTN_A = 0;
 const BTN_B = 1;
 const BTN_X = 2;
 const BTN_Y = 3;
+const BTN_LB = 4;
+const BTN_RB = 5;
 const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_BACK = 8;
@@ -102,6 +104,9 @@ export function createGamepadInput(): InputSource {
         out.restart = false;
         out.cruise = false;
         out.pov = false;
+        out.shiftUp = false;
+        out.shiftDown = false;
+        out.transmission = false;
         return;
       }
 
@@ -124,6 +129,10 @@ export function createGamepadInput(): InputSource {
       out.restart = pressed(pad, BTN_START);
       out.cruise = pressed(pad, BTN_BACK);
       out.pov = pressed(pad, BTN_Y);
+      // Bumpers shift a manual box, NFSU2's layout again. The transmission toggle is keyboard-only.
+      out.shiftUp = pressed(pad, BTN_RB);
+      out.shiftDown = pressed(pad, BTN_LB);
+      out.transmission = false;
     },
     dispose() {
       wasDown.clear();

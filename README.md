@@ -3,7 +3,8 @@
 Browser arcade drift game. Drive an outlaw combustion GT86-like coupe through a dark JDM x cyberpunk
 city, drift to charge lightning, fire it at the electric cars that replaced everything else, get paid.
 
-Desktop browser, keyboard. Three ways in from the main menu:
+Desktop browser with a keyboard or a pad — and a phone, held sideways, with the on-screen pad
+(see [Phones](#phones)). Three ways in from the main menu:
 
 - **Test** — the free-roam city block: drift plaza, highway, JDM alley, six patrolling electric cars.
 - **Race** — the *Bandido Loop*, a 1.4 km street circuit for 2-lap races of about a minute and a
@@ -74,15 +75,39 @@ Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md
 
 | Key | Action |
 | --- | --- |
-| W / S or Up / Down | Throttle / brake (brake at standstill reverses) |
-| A / D or Left / Right | Steer |
-| Space | Handbrake (kick the rear out to start a drift) |
+| W / S or Up / Down | Throttle / brake (brake at standstill reverses). Mid-drift, tap the throttle to hold the needle in the tacho's torque band: pinned, the car over-revs and walks out; lifted, it regrips |
+| A / D or Left / Right | Steer. Released in a slide, the wheel self-steers to counter-steer (watch the wheel glyph by the gear). Hold the arrow into the slide too long and the car spins; tap it to hold an angle |
+| Space | Handbrake (kick the rear out to start a drift). Full lock plus a tapped throttle from a standstill is a first-gear donut — on the manual box; the automatic shifts up from under it |
+| T | Automatic / manual transmission (remembered). Manual is the drifting box: you keep the gear, so the engine can sit in the torque band at any speed |
+| X / Z | Shift up / down (manual). On a pad: RB / LB |
 | Shift | Nitro (recharges gradually while driving) |
 | E or left click | Fire lightning at the nearest electric car in the forward cone |
 | R | Instant restart (in a race: back to the grid and a new countdown; in a multiplayer race: a rescue back onto the road at the last gate, clock still running) |
 | C | Cruise mode: the car drives itself around the city (or the lap) at a relaxed pace. Any driving input hands control back |
 | Esc | Back to the main menu |
 | F3 or ` | Toggle the debug overlay (FPS, draw calls, triangles) |
+
+On a phone the same actions are on the on-screen pad — see [Phones](#phones).
+
+## Phones
+
+A phone gets the game turned sideways and a thumb pad, and nothing else changes: same city,
+same physics, same HUD.
+
+- **Landscape without asking.** The menus stay portrait, but the moment a world loads the whole
+  game layer is rotated a quarter turn in CSS while the handset is held upright, so turning the
+  phone sideways shows a picture that is already the right way up. The web cannot request an
+  orientation outside fullscreen (and never on iOS), so the rotation is ours, not the OS's:
+  `src/ui/viewport.ts` owns it, and the renderer and camera take their size from it rather than
+  from the window.
+- **Basic controls only** (`src/ui/touchControls.ts`): steer left / right, gas, brake, handbrake,
+  nitro, and a small restart in the top-left corner. **Tapping anywhere else on the screen fires
+  lightning** — the empty middle of the screen is the fire button. Camera, cruise and the gearbox
+  stay on the keyboard: a thumb pad with a control for everything is a control for nothing.
+- The pad is an `InputSource` like the keyboard and the gamepad, combined in `src/game.ts`, so the
+  simulation never learns which one is driving. The HUD's key legend hides itself while it is up.
+- `?touch=1` forces the phone treatment on a desktop browser and `?touch=0` turns it off, which is
+  how it is tested without a handset.
 
 ## Race mode
 

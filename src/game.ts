@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
 import { createRaceWorld } from './world/raceWorld';
-import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot } from './core/types';
-import { SIM_STEP, AUDIO, CAMERA, LIGHTNING, NITRO, RENDER } from './config/tuning';
+import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot, Transmission } from './core/types';
+import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -26,13 +26,14 @@ import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
 import { compileScene, warmRender } from './render/warmup';
 import { createHud } from './ui/hud';
+import { createTouchControls } from './ui/touchControls';
+import { installLandscapeLock, isTouchDevice, viewportHeight, viewportWidth } from './ui/viewport';
 import { createMinimap } from './ui/minimap';
 import { createDebugOverlay, type DebugFrameInput } from './ui/debugOverlay';
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
 import { createAudio } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
-import { IDLE_RPM01, REF_SPEED, engineTone } from './audio/dsp';
 import { msToKmh } from './core/math';
 import { slotCss } from './core/playerColors';
 
@@ -109,10 +110,18 @@ export function createGame(
   /** True for the client that owns the electric-car traffic for this match. */
   const ownsTraffic = !!net && net.isHost;
 
-  const state = createInitialGameState(layout);
+  const state = createInitialGameState(layout, readTransmission());
   const command: PlayerCommand = createPlayerCommand();
-  // Keyboard and pad are both always live; whichever the player touches drives the car.
-  const input = combineInputs(createKeyboardInput(window), createGamepadInput());
+  // On a phone the picture is turned sideways for as long as this game lives, so the renderer
+  // below is sized for the landscape layer rather than for the portrait window.
+  const releaseLandscape = installLandscapeLock();
+  // Keyboard, pad and — on a touch screen — the thumb pad are all always live; whichever the
+  // player touches drives the car.
+  const input = combineInputs(
+    createKeyboardInput(window),
+    createGamepadInput(),
+    ...(isTouchDevice() ? [createTouchControls()] : []),
+  );
 
   let end = measure('renderer');
   const renderer = createRenderer(canvas);
@@ -147,7 +156,7 @@ export function createGame(
   }
   end();
 
-  const chase = createChaseCamera(window.innerWidth / window.innerHeight);
+  const chase = createChaseCamera(viewportWidth() / viewportHeight());
 
   end = measure('effects');
   const effects = createEffects(scene);
@@ -193,7 +202,7 @@ export function createGame(
 
   function applyPixelRatio(ratio: number): void {
     renderer.setPixelRatio(ratio);
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    renderer.setSize(viewportWidth(), viewportHeight(), false);
   }
 
   // `?scale=1` pins the render scale for A/B testing and screenshots.
@@ -229,6 +238,10 @@ export function createGame(
     cruising: false,
     rpm01: 0,
     gear: 0,
+    torqueBand: false,
+    manual: state.transmission === 'manual',
+    steer: 0,
+    counterSteer: 0,
     mode,
     race: null,
   };
@@ -273,6 +286,22 @@ export function createGame(
     }
   }
 
+  /** The transmission choice outlives the session: a player who learned manual keeps it. */
+  function readTransmission(): Transmission {
+    try {
+      return localStorage.getItem('rb.transmission') === 'manual' ? 'manual' : 'auto';
+    } catch {
+      return 'auto';
+    }
+  }
+  function saveTransmission(mode: Transmission): void {
+    try {
+      localStorage.setItem('rb.transmission', mode);
+    } catch {
+      /* storage unavailable: the choice lasts the session */
+    }
+  }
+
   function isDriving(cmd: PlayerCommand): boolean {
     return cmd.throttle > 0 || cmd.brake > 0 || cmd.steer !== 0 || cmd.handbrake || cmd.nitro;
   }
@@ -290,7 +319,7 @@ export function createGame(
   /** Scratch list for `trafficSync.apply`; reused so a report never allocates. */
   const newlyDestroyed: number[] = [];
   /** What `stepGame` needs to know about the match. One object, never reallocated. */
-  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic };
+  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic, cruising: false };
   /**
    * How long a non-host keeps its own kill after the host's reports stop agreeing with it.
    * A round trip plus a couple of traffic intervals covers any connection worth racing on.
@@ -412,6 +441,7 @@ export function createGame(
   }
 
   function handleEvent(ev: GameEvent): void {
+    if (ev.type === 'transmission') saveTransmission(ev.mode);
     hud.onEvent(ev);
     audio.onEvent(ev);
     switch (ev.type) {
@@ -524,7 +554,8 @@ export function createGame(
       if (driving && cruiseArmed) setCruise(false);
       else cruiseControl.step(state.vehicle, command, dt);
     }
-    stepGame(state, command, layout, dt, net ? stepOptions : null);
+    stepOptions.cruising = cruising;
+    stepGame(state, command, layout, dt, stepOptions);
     simTime = state.time;
     const events = state.events;
     for (let i = 0; i < events.length; i++) handleEvent(events[i]);
@@ -585,14 +616,14 @@ export function createGame(
     chase.update(cameraPose, frameDt);
     audio.update(
       frameDt,
-      { speed: v.speed, throttle: v.throttleApplied, brake: v.brakeApplied, nitro: state.nitro.active },
+      { rpm01: v.rpm01, speed: v.speed, throttle: v.throttleApplied, brake: v.brakeApplied, nitro: state.nitro.active },
       pose,
       state.targets,
-      { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active },
+      { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin },
     );
 
     // Pops and bangs: one decision, fired into the audio and the tailpipes together.
-    const bang = backfire.tick(frameDt, v.speed, v.throttleApplied, state.nitro.active);
+    const bang = backfire.tick(frameDt, v.speed, v.rpm01, v.throttleApplied, state.nitro.active);
     if (bang > 0) {
       audio.backfire(bang);
       effects.backfire(bang);
@@ -621,11 +652,13 @@ export function createGame(
     snapshot.chainWindow = state.drift.active ? 0 : state.drift.chainWindow;
     snapshot.nitroRecharging = !state.nitro.active && state.nitro.amount > lastNitroAmount + 1e-6;
     snapshot.cruising = cruising;
-    // The tachometer reads the same fake gearbox the engine voice revs on, so the needle drops
-    // on exactly the frame the exhaust note does.
-    const tone = engineTone(Math.abs(v.speed) / REF_SPEED, AUDIO.gearBounds);
-    snapshot.gear = tone.gear;
-    snapshot.rpm01 = (tone.rpm01 - IDLE_RPM01) / (1 - IDLE_RPM01);
+    // The tachometer reads the simulation's engine, the same one the exhaust note revs on.
+    snapshot.gear = v.gear;
+    snapshot.rpm01 = v.rpm01;
+    snapshot.torqueBand = state.drift.active;
+    snapshot.manual = state.transmission === 'manual';
+    snapshot.steer = v.steerAngle / VEHICLE.maxSteerAngle;
+    snapshot.counterSteer = v.counterSteer;
     lastNitroAmount = state.nitro.amount;
     const race = state.race;
     if (race) {
@@ -665,7 +698,7 @@ export function createGame(
 
   function onResize(): void {
     applyPixelRatio(governor.ratio);
-    chase.resize(window.innerWidth / window.innerHeight);
+    chase.resize(viewportWidth() / viewportHeight());
   }
   window.addEventListener('resize', onResize);
 
@@ -716,6 +749,7 @@ export function createGame(
     dispose() {
       loop.stop();
       window.removeEventListener('resize', onResize);
+      releaseLandscape();
       for (const off of netCleanup) off();
       netCleanup.length = 0;
       input.dispose();

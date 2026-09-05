@@ -27,6 +27,9 @@ export function combineInputs(...sources: InputSource[]): InputSource {
         out.restart = out.restart || s.restart;
         out.cruise = out.cruise || s.cruise;
         out.pov = out.pov || s.pov;
+        out.shiftUp = out.shiftUp || s.shiftUp;
+        out.shiftDown = out.shiftDown || s.shiftDown;
+        out.transmission = out.transmission || s.transmission;
       }
     },
     dispose() {

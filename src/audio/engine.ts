@@ -1,13 +1,15 @@
 import type { AudioCore } from './core';
 import { AUDIO } from '../config/tuning';
 import { clamp, clamp01, lerp } from '../core/math';
-import { REF_SPEED, engineTone } from './dsp';
+import { engineNote } from './dsp';
 import { fireBackfire } from './backfire';
 import { createTurboFlutterTrigger, fireTurboFlutter } from './turboFlutter';
 
 /** Live drive state the engine voice reads each frame. */
 export interface EngineInput {
-  /** Signed longitudinal speed (m/s). */
+  /** Engine rpm from the simulation, 0 idle .. 1 redline (`VehicleState.rpm01`). */
+  rpm01: number;
+  /** Signed longitudinal speed (m/s); the turbo model spools on road speed. */
   speed: number;
   /** Applied throttle 0..1. */
   throttle: number;
@@ -182,8 +184,7 @@ export function createEngine(core: AudioCore): EngineVoice {
       const t = ctx.currentTime;
       const tc = Math.max(0.03, Math.min(0.12, dt * 3)); // smooth revs; gear shifts glide
 
-      const speedFrac = Math.abs(input.speed) / REF_SPEED;
-      const { rpm01 } = engineTone(speedFrac, AUDIO.gearBounds);
+      const rpm01 = engineNote(input.rpm01);
       const throttle = clamp01(input.throttle);
       const nitroBoost = input.nitro ? 1 : 0;
 
