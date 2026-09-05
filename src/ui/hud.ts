@@ -40,6 +40,18 @@ const DRIVE_HINT_EVERY = 8;
 /** Quantisation of the chain drain bar: 20 steps over the whole window. */
 const CHAIN_STEPS = 20;
 
+/** Same card, pad labels, shown instead of the keys once a controller is plugged in. */
+const PAD_CONTROLS = [
+  ['RT/LT', 'drive'],
+  ['STICK', 'steer'],
+  ['LB', 'handbrake'],
+  ['RB', 'nitro'],
+  ['X', 'lightning'],
+  ['START', 'restart'],
+  ['Y', 'cruise'],
+  ['VIEW', 'camera'],
+];
+
 const CONTROLS = [
   ['WASD', 'drive'],
   ['SPACE', 'handbrake'],
@@ -47,6 +59,7 @@ const CONTROLS = [
   ['E', 'lightning'],
   ['R', 'restart'],
   ['C', 'cruise'],
+  ['P', 'camera'],
   ['ESC', 'menu'],
   ['F3', 'debug'],
 ];
@@ -89,11 +102,14 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   hud.className = `rb-hud${mode === 'race' ? ' is-race' : ''}`;
   // R restarts on your own; in a match it cannot, because the race belongs to everybody — it
   // puts the car back on the road at the last gate instead, with the clock still running.
-  const controls = multiplayer ? CONTROLS.map(([key, action]) => (key === 'R' ? [key, 'rescue'] : [key, action])) : CONTROLS;
+  function controlsFor(source: string[][]): string {
+    const rows = multiplayer
+      ? source.map(([key, action]) => (action === 'restart' ? [key, 'rescue'] : [key, action]))
+      : source;
+    return rows.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('');
+  }
   hud.innerHTML =
-    `<div class="rb-controls">` +
-    controls.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('') +
-    `</div>` +
+    `<div class="rb-controls">${controlsFor(CONTROLS)}</div>` +
     `<div class="rb-money">` +
     `<div class="rb-money__value"><span class="rb-money__yen">¥</span><span class="rb-money__digits">0</span></div>` +
     `<div class="rb-money__meta"><span class="rb-money__destroyed">destroyed 0</span>` +
@@ -128,12 +144,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-note"></div>` +
     `<div class="rb-ready">READY</div>` +
     `<div class="rb-slot"></div>` +
-    `<div class="rb-keys"><span class="rb-key">E</span><span class="rb-keys__name">lightning</span></div>` +
+    `<div class="rb-keys"><span class="rb-key rb-key--fire">E</span><span class="rb-keys__name">lightning</span></div>` +
     `</div>` +
     `<div class="rb-stack rb-stack--right">` +
     `<div class="rb-note rb-note--nitro"></div>` +
     `<div class="rb-slot"></div>` +
-    `<div class="rb-keys"><span class="rb-key">SHIFT</span><span class="rb-keys__name">nitro</span></div>` +
+    `<div class="rb-keys"><span class="rb-key rb-key--nitro">SHIFT</span><span class="rb-keys__name">nitro</span></div>` +
     `</div>` +
     `<div class="rb-speed"><span class="rb-speed__rev">R</span>` +
     `<span class="rb-speed__value">0</span><span class="rb-speed__unit">km/h</span></div>`;
@@ -145,6 +161,20 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   pick<HTMLElement>(hud, '.rb-stack--right .rb-slot').appendChild(nitroGauge.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
+  const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
+  const nitroKeyEl = pick<HTMLElement>(hud, '.rb-key--nitro');
+  // A pad only becomes visible to the page once it is used, so the card starts on the keys and
+  // swaps the moment the player touches a controller.
+  const showPadControls = (): void => {
+    controlsEl.innerHTML = controlsFor(PAD_CONTROLS);
+    // The two gauges carry their own key hint; they name the pad button too.
+    for (const [el, label] of [[fireKeyEl, 'X'], [nitroKeyEl, 'RB']] as const) el.textContent = label;
+  };
+  const onPadConnected = (): void => showPadControls();
+  window.addEventListener('gamepadconnected', onPadConnected);
+  if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
+    if (Array.from(navigator.getGamepads()).some((p) => p && p.connected)) showPadControls();
+  }
   const moneyValueEl = pick<HTMLElement>(hud, '.rb-money__value');
   const moneyDigitsEl = pick<HTMLElement>(hud, '.rb-money__digits');
   const destroyedEl = pick<HTMLElement>(hud, '.rb-money__destroyed');
@@ -473,6 +503,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     },
 
     dispose() {
+      window.removeEventListener('gamepadconnected', onPadConnected);
       for (const animation of animations.values()) animation.cancel();
       animations.clear();
       root.innerHTML = '';

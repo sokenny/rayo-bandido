@@ -2,6 +2,7 @@ import { MAX_PLAYERS, NAME_MAX, sanitizeName, sanitizeRoomCode } from '../net/pr
 import type { NetSession } from '../net/session';
 import { slotCss } from '../core/playerColors';
 import { formatRaceTime } from './hud';
+import { createGamepadMenuNav } from '../core/input/gamepadMenu';
 import { frameDecor, menuHeader } from './chrome';
 
 /**
@@ -318,6 +319,15 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
     }
   };
   window.addEventListener('keydown', onKey);
+  // The pad's A button does what Enter does: ready up, or drop the flag if you are the host.
+  const pad = createGamepadMenuNav({
+    onMove: () => {},
+    onConfirm: () => {
+      if (session.phase !== 'lobby' && session.phase !== 'results') return;
+      if (session.isHost) session.start();
+      else toggleReady();
+    },
+  });
 
   // Start from the name the session actually connected under, so the field always agrees with
   // the roster instead of leaving the player to wonder which of the two is real.
@@ -340,6 +350,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
     },
     dispose() {
       window.removeEventListener('keydown', onKey);
+      pad.dispose();
       wrap.remove();
     },
   };

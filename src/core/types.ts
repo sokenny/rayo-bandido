@@ -41,6 +41,8 @@ export interface PlayerCommand {
   restart: boolean;
   /** Toggle cruise mode. Edge-triggered: true for exactly one tick per key press. */
   cruise: boolean;
+  /** Cycle the camera view. Edge-triggered. Presentation only: the simulation ignores it. */
+  pov: boolean;
 }
 
 export interface VehicleState {

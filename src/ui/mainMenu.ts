@@ -1,5 +1,6 @@
 import type { GameMode } from '../core/types';
 import { MAX_PLAYERS } from '../net/protocol';
+import { createGamepadMenuNav } from '../core/input/gamepadMenu';
 import { frameDecor, menuHeader } from './chrome';
 
 /**
@@ -168,6 +169,10 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
     }
   };
   window.addEventListener('keydown', onKey);
+  const pad = createGamepadMenuNav({
+    onMove: (delta) => select(selected + delta),
+    onConfirm: () => choose(selected),
+  });
   cards.forEach((c, i) => {
     c.addEventListener('mouseenter', () => select(i));
     c.addEventListener('click', () => choose(i));
@@ -178,6 +183,7 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
   return {
     dispose() {
       window.removeEventListener('keydown', onKey);
+      pad.dispose();
       menu.remove();
     },
   };

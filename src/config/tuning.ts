@@ -366,6 +366,75 @@ export const CAMERA = {
   /** Shake amplitude on collision per m/s of impact (m). */
   shakeCollisionPerImpact: 0.02,
   shakeDecay: 6,
+
+  /**
+   * Bolted-on camera views, cycled with P (chase -> front -> side -> chase). Unlike the chase
+   * camera these are rigid mounts: the pose is written straight onto the camera with no
+   * damping or lag, because a camera bolted to the bodywork should not trail the car — the
+   * world moves, the lens does not.
+   *
+   * Every offset is in the car's own frame, in metres: `ahead` toward the nose (negative =
+   * toward the tail), `side` toward the car's right (negative = left), `height` above the
+   * road. The lens sits at that mount and aims at (`lookAhead`, `lookSide`, `lookHeight`) in
+   * the same frame, so a look point behind the mount gives a rear-facing view.
+   *
+   * `rollFollow` / `pitchFollow` are the fraction of the body's roll and dive the lens
+   * inherits (0 = a level horizon that reads as floating, 1 = the full body motion, which is
+   * nauseating). Their sign flips with the direction the lens faces: a rear-facing mount sees
+   * the same lean mirrored.
+   *
+   * Body reference (`carVisual.ts`): nose at ahead 2.16, tail at ahead -2.24, flanks at
+   * side ±1.0, roof at height 1.35.
+   */
+  mounts: {
+    /**
+     * Front view: the lens hangs just over 2 m off the nose looking back down the car, so the
+     * whole front end fills the lower frame and the road behind you fills the rest. Aimed at
+     * a point past the tail so anyone chasing stays in shot.
+     *
+     * It sits deliberately close. This mount is the one view whose lens lives out in the
+     * world rather than on the bodywork, so anything the car is driving into — traffic, a
+     * wall — reaches the lens before it reaches the bumper. Keeping the boom short bounds
+     * that to the space the car is about to occupy anyway: if something is inside it, you
+     * were about to hit it.
+     */
+    front: {
+      ahead: 4.3,
+      side: 0,
+      height: 1.4,
+      lookAhead: -1.4,
+      lookSide: 0,
+      lookHeight: 1,
+      fov: 58,
+      /** Facing backwards, so the body's lean arrives mirrored. */
+      rollFollow: -0.45,
+      pitchFollow: -0.45,
+    },
+    /**
+     * Side-door view: a fender-mounted lens just outboard of the driver's-side skirt, at door
+     * height, aimed forward and a touch inboard so the flank and front arch ride the edge of
+     * the frame with the road opening up beside them.
+     */
+    side: {
+      ahead: 0.35,
+      side: -1.3,
+      height: 0.92,
+      lookAhead: 9,
+      lookSide: -0.95,
+      lookHeight: 0.78,
+      fov: 64,
+      rollFollow: 0.45,
+      pitchFollow: 0.45,
+    },
+  },
+  /**
+   * Near plane for the mounted views (m). The default 0.3 would slice into the bodywork from
+   * a lens parked 30 cm off the door; 0.12 clears it and still leaves ample depth precision
+   * against the 400 m far plane.
+   */
+  mountNear: 0.12,
+  /** How much the mounted views widen on nitro (deg). Smaller than the chase camera's swing. */
+  mountFovNitro: 6,
 };
 
 /**

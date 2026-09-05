@@ -1,11 +1,11 @@
 import type { PlayerCommand } from '../types';
 
 /**
- * Keyboard input -> PlayerCommand. Edge-triggered actions (fire, restart, cruise) are latched
+ * Keyboard input -> PlayerCommand. Edge-triggered actions (fire, restart, cruise, pov) are latched
  * between polls so a short tap is never lost, and cleared after `poll()` reads them once.
  *
  * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
- * E or mouse click fires lightning, R restarts, C toggles cruise mode.
+ * E or mouse click fires lightning, R restarts, C toggles cruise mode, P cycles camera view.
  */
 export interface InputSource {
   /** Fill `out` with the current command. Edge-triggered flags are consumed. */
@@ -14,7 +14,7 @@ export interface InputSource {
 }
 
 export function createPlayerCommand(): PlayerCommand {
-  return { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, fire: false, restart: false, cruise: false };
+  return { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, fire: false, restart: false, cruise: false, pov: false };
 }
 
 export function createKeyboardInput(target: Window | HTMLElement = window): InputSource {
@@ -22,6 +22,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   let fireLatched = false;
   let restartLatched = false;
   let cruiseLatched = false;
+  let povLatched = false;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) {
@@ -32,6 +33,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
     if (e.code === 'KeyE') fireLatched = true;
     if (e.code === 'KeyR') restartLatched = true;
     if (e.code === 'KeyC') cruiseLatched = true;
+    if (e.code === 'KeyP') povLatched = true;
     if (isGameKey(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -63,9 +65,11 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.fire = fireLatched;
       out.restart = restartLatched;
       out.cruise = cruiseLatched;
+      out.pov = povLatched;
       fireLatched = false;
       restartLatched = false;
       cruiseLatched = false;
+      povLatched = false;
     },
     dispose() {
       target.removeEventListener('keydown', onKeyDown as EventListener);
@@ -92,6 +96,7 @@ function isGameKey(code: string): boolean {
     case 'KeyE':
     case 'KeyR':
     case 'KeyC':
+    case 'KeyP':
       return true;
     default:
       return false;

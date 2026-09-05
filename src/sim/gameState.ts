@@ -106,7 +106,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
  * throttle. Steering and fire are copied from the player's command so the wheels turn and
  * the lightning still works. One long-lived object, never allocated per tick.
  */
-const HOLD: PlayerCommand = { throttle: 0, brake: 0, steer: 0, handbrake: true, nitro: false, fire: false, restart: false, cruise: false };
+const HOLD: PlayerCommand = { throttle: 0, brake: 0, steer: 0, handbrake: true, nitro: false, fire: false, restart: false, cruise: false, pov: false };
 
 /** What a multiplayer race adds to a tick. Absent in single player. */
 export interface StepOptions {

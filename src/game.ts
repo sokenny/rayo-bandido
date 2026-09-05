@@ -10,6 +10,8 @@ import { createStandings, rankStandings, type Standings, type StandingsRow } fro
 import type { CarPublish, NetSession } from './net/session';
 import { createGameLoop, type GameLoop } from './core/loop';
 import { createKeyboardInput, createPlayerCommand } from './core/input/keyboard';
+import { createGamepadInput } from './core/input/gamepad';
+import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
 import { createRenderer } from './render/renderer';
@@ -17,7 +19,7 @@ import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
 import { createEnvironment } from './render/scene/environment';
 import { createCarVisual } from './render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
-import { createChaseCamera, type CameraPose } from './render/camera/chaseCamera';
+import { createChaseCamera, type CameraPose, type CameraView } from './render/camera/chaseCamera';
 import { createEffects } from './render/fx';
 import { interpolateVehicle, syncCar, syncTargets, type InterpolatedPose } from './render/sync';
 import { createGpuTimer } from './render/gpuTimer';
@@ -106,7 +108,8 @@ export function createGame(
 
   const state = createInitialGameState(layout);
   const command: PlayerCommand = createPlayerCommand();
-  const input = createKeyboardInput(window);
+  // Keyboard and pad are both always live; whichever the player touches drives the car.
+  const input = combineInputs(createKeyboardInput(window), createGamepadInput());
 
   let end = measure('renderer');
   const renderer = createRenderer(canvas);
@@ -198,7 +201,7 @@ export function createGame(
   }
 
   const pose: InterpolatedPose = { x: 0, z: 0, heading: 0 };
-  const cameraPose: CameraPose = { x: 0, z: 0, heading: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false };
+  const cameraPose: CameraPose = { x: 0, z: 0, heading: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false, roll: 0, pitch: 0 };
   const snapshot: HudSnapshot = {
     speedKmh: 0,
     nitro: 1,
@@ -468,6 +471,10 @@ export function createGame(
     cameraPose.slipAngle = v.slipAngle;
     cameraPose.nitro = nitroVisual;
     cameraPose.drifting = state.drift.active;
+    // The bolted-on views lean with the bodywork; `chassis` already holds this frame's
+    // spring angles because `car.update()` ran before the camera does.
+    cameraPose.roll = car.chassis.rotation.z;
+    cameraPose.pitch = car.chassis.rotation.x;
   }
 
   function simulate(dt: number): void {
@@ -504,6 +511,7 @@ export function createGame(
       }
     }
 
+    if (command.pov) chase.cycleView();
     if (command.cruise) setCruise(!cruising);
     if (cruising) {
       const driving = isDriving(command);
@@ -737,6 +745,7 @@ export function createGame(
     metrics: debug.metrics,
     renderer,
     scene,
+    camera: chase.camera,
     audio,
     theme,
     /** True once the warm-up has finished and the loop may run without first-use hitches. */
@@ -754,6 +763,11 @@ export function createGame(
     /** Override the keyboard for one or more ticks (used by browser automation). */
     inject(partial: Partial<PlayerCommand>, ticks = 1) {
       injectQueue.push({ partial, ticks });
+    },
+    /** Camera view. Reads the live view with no argument, cuts to one with an argument. */
+    view(next?: CameraView) {
+      if (next) chase.setView(next);
+      return chase.view;
     },
     /** Cruise mode. Reads the flag with no argument, sets it with one. */
     cruise(on?: boolean) {

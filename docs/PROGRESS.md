@@ -28,7 +28,12 @@ Open http://127.0.0.1:5173 (add `?debug=1` for the performance overlay).
 | `npm run qa:headed` | Same, in a visible Chrome window (use this for a real, vsync-limited FPS number) |
 
 Controls: WASD / arrows drive, Space handbrake, Shift nitro, E or left click fires lightning,
-R restarts, M mutes audio, F3 or backquote toggles the debug overlay. Browser automation hook: `window.__rb`
+R restarts, M mutes audio, F3 or backquote toggles the debug overlay.
+Gamepad (Xbox-style, standard mapping): RT/LT drive, left stick or d-pad steers, LB handbrake,
+RB nitro, X lightning, Y cruise, Start restart, View camera. The pad and the keyboard are both
+live at once - no setting to flip - and A/Start confirms in the main menu and the lobby. The
+browser only reveals a pad after the first button press on it, so it starts working as soon as
+it is used. Typing a room code still needs a keyboard. Browser automation hook: `window.__rb`
 (`state`, `layout`, `metrics`, `inject(partialCommand, ticks)`, `pending()`).
 
 Node was not installed on this machine; Node 24.19 LTS was installed via winget during the session.
