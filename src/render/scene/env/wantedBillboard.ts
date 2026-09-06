@@ -221,8 +221,8 @@ export interface WantedBillboard {
    * never re-rasterizes during play on a normal connection.
    */
   ready: Promise<void>;
-  /** Subtle strobe. `time` is seconds, `swell` (0..1) is the mid band, which lifts it. */
-  update(time: number, swell: number): void;
+  /** Subtle strobe. `time` is seconds. */
+  update(time: number): void;
   dispose(): void;
 }
 
@@ -338,8 +338,8 @@ export function createWantedBillboard(pose: { x: number; z: number; rotY: number
   return {
     group,
     ready,
-    update(time, swell) {
-      // Slow breath plus an occasional dropped-frame stutter, lifted a little on the mids.
+    update(time) {
+      // Slow breath plus an occasional dropped-frame stutter.
       const breath = 0.86 + 0.1 * Math.sin(time * 2.1);
       const slot = Math.floor(time * 7);
       if (slot !== flickerSlot) {
@@ -347,8 +347,7 @@ export function createWantedBillboard(pose: { x: number; z: number; rotY: number
         const h = Math.abs(Math.sin(slot * 12.9898) * 43758.5453) % 1;
         flickerValue = h < 0.06 ? 0.45 : h < 0.12 ? 0.78 : 1;
       }
-      const lift = 1 + 0.25 * swell;
-      const level = breath * flickerValue * lift;
+      const level = breath * flickerValue;
       panelMat.color.setScalar(Math.min(1.25, level));
       haloMat.opacity = 0.12 * level;
       poolMat.opacity = 0.09 * level;

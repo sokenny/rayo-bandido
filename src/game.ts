@@ -166,8 +166,7 @@ export function createGame(
 
   end = measure('audio');
   const audio = createAudio(state.targets.length);
-  // Background theme song. Loops quietly and feeds a per-band music signal to the arena
-  // lighting, so bass, mids and highs each drive a different family of lights.
+  // Background theme song. Loops quietly under the game.
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
   theme.arm(window);
@@ -628,7 +627,7 @@ export function createGame(
     effects.setCarPose(pose, v, state.drift.active, nitroVisual, frameDt);
     effects.update(frameDt, simTime);
     theme.update(frameDt);
-    environment.update(frameDt, simTime, theme.bands);
+    environment.update(frameDt, simTime);
     chase.update(cameraPose, frameDt);
     audio.update(
       frameDt,

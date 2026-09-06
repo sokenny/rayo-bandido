@@ -801,24 +801,6 @@ export const THEME = {
   energyRise: 0.01,
   /** How fast `energy` sags in a quiet section. Slower than the rise, so it holds a chorus. */
   energyFall: 0.004,
-  /**
-   * How far `energy` is allowed to move the two scene lights, as a fraction of their base
-   * value. This is the slowest thing in the scene: the arena gets brighter through a chorus.
-   */
-  lightDepth: 0.3,
-  /**
-   * How hard the bass drives the main neon mass — the static tubes, strips and window glow
-   * that light most of this world. This is the one you feel: the city thumps on the kick.
-   */
-  neonDepth: 0.6,
-  /** How hard the bass blooms the additive halos and wet light pools under the neon. */
-  glowDepth: 0.5,
-  /** How hard the mids lift the emissive facades. Slow and wide — whole buildings breathe. */
-  facadeDepth: 0.4,
-  /** How hard the mids lift the breathing signs (vertical signs, gate bars, hanging tubes). */
-  signDepth: 0.55,
-  /** How hard the highs tick the stutter neon: broken alley tubes and roof beacons. */
-  flickerDepth: 0.45,
 };
 
 /**
