@@ -309,7 +309,7 @@ describe('gear-change body kick', () => {
 describe('banging off the limiter', () => {
   /** Hold a gear at its top speed on the manual box for `seconds` and log the fuel cut. */
   const pinned = (seconds: number, gear = 2, throttle = 1) => {
-    const v = createVehicleState();
+    const v = createVehicleState(0, 0, 0);
     v.gear = gear;
     const go = createPlayerCommand();
     go.throttle = throttle;
@@ -336,7 +336,7 @@ describe('banging off the limiter', () => {
   });
 
   it('bounces the needle off redline instead of pinning it there', () => {
-    const v = createVehicleState();
+    const v = createVehicleState(0, 0, 0);
     v.gear = 2;
     const dt = 1 / 120;
     const rpms: number[] = [];
@@ -352,7 +352,7 @@ describe('banging off the limiter', () => {
 
   it('stays quiet off the throttle and on the automatic', () => {
     expect(pinned(1, 2, 0).cuts.every((c) => c === 0)).toBe(true);
-    const v = createVehicleState();
+    const v = createVehicleState(0, 0, 0);
     v.gear = 2;
     const dt = 1 / 120;
     for (let i = 0; i < 120; i++) {
