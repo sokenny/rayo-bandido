@@ -6,7 +6,7 @@
   "description": "Rayo Bandido - browser arcade drift game (JDM x cyberpunk) built with Three.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "build": "tsc --noEmit -p tsconfig.json && vite build && node scripts/precompress.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "node server/index.mjs",
     "serve": "node server/index.mjs",

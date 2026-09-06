@@ -884,3 +884,73 @@ tests in 22 files, all passing; `tsc --noEmit` clean.
 
 Known and deliberate: on the automatic a full-throttle drift is not lost, it runs away — the
 box climbs the gears and the slide widens into a fast power slide. Tight is manual's.
+
+### 2026-09-05 — Walls: a hit and a scrape are different
+
+Juan: hit a wall at an angle and the car kind of gets stuck. Two separate causes, both in
+`src/sim/collision.ts`.
+
+- The wall response was written for the moment of impact but ran on **every tick of contact**:
+  it kept `collisionSlide` (85%) of the along-the-wall speed each time. Riding a barrier at
+  60 Hz that is 15% of the car's speed gone sixty times a second — a 97%/s brake nothing can
+  out-pull, so any car that touched a wall at an angle was pinned to it. Contact is now split
+  from impact by `wallImpactSpeed` (2.5 m/s into the surface): a real hit still bounces
+  (`restitution`) and scrubs once (`collisionSlide`), while a scrape only pays the steady
+  `wallScrapeDecel` (4 m/s², about half the engine) and never bounces — a bounce off a wall the
+  car is only leaning on buzzes it away from the barrier.
+- Even freed of that, a car **stopped nose-first** in a wall could not leave: yaw comes from
+  road speed (`src/sim/vehicle.ts`, step 5), so at a standstill full lock does nothing and full
+  throttle only pushes harder into the wall. Reverse was the only way out, which is not what a
+  player reaches for mid-chase. `unwedge()` gives the pinned car the pivot a turned wheel
+  actually has against an obstacle: while it is pressed into a surface below `wedgeSpeed`
+  (3 m/s) with the throttle down, it rotates at `wedgeYaw` (1.1 rad/s at full throttle) toward
+  the wall's tangent — the side the wheel asks for, or the one the nose already leans toward —
+  fading out as the car finds speed. Off the throttle, or dead square to the wall with the
+  wheel straight, nothing happens: the car is not asking to go anywhere.
+
+`pushOutOfWorld` now takes a `WallResponse` (restitution, slide, impact threshold, scrape
+deceleration) and `dt` instead of two loose numbers, and optionally reports the contact normals
+it pushed along. Shoved traffic uses its own response and is otherwise unchanged.
+
+**Measured** (headless, `tests/collision.test.ts`): a 90 km/h approach at 10-45° to a wall now
+leaves the car above 60 km/h four seconds later and still accelerating along the barrier, where
+before it settled to a crawl; a wedged car on throttle and lock is away inside 4 s from nose
+angles of 50-90°; a head-on hit still reports an impact above `wallImpactSpeed` and drops the
+car below 30 km/h. **Verified in the browser** (dev server, test city, no console errors): a
+30° hit on `blk-nw-a` at 90 km/h costs speed, aligns the car to the face and then pulls away
+along it under throttle. Suite: 348 tests in 23 files, all passing; `tsc --noEmit` clean.
+
+## Phones: app-like touch behaviour (2026-09-05)
+
+The on-screen pad landed first and defended only itself, so the rest of the page still behaved
+like a document: a fast double tap on the canvas zoomed (the canvas is the fire button), a
+two-finger touch pinched, a drag rubber-banded on iOS or pulled to refresh on Android, and a
+held button offered the text callout.
+
+- **CSS** (`src/styles.css`, and the inlined loading-screen copy in `index.html`): `html, body`
+  are `position: fixed` with `overscroll-behavior: none` and `touch-action: none`; the canvas
+  is `touch-action: none` and unselectable; the callout and the tap highlight are off. The two
+  screens that can outgrow a short window (`.rb-lobby`, `.rb-rooms`) and the room list keep
+  `touch-action: pan-y` with `overscroll-behavior: contain`, and `#menu-root` gets
+  `manipulation` — fast taps, no double-tap zoom.
+- **`src/ui/mobileShell.ts`** (new, installed once from `src/main.ts`) closes what CSS cannot:
+  Safari's `gesturestart/change/end` (pinch survives `user-scalable=no` on iOS), a second tap
+  within 320 ms, `contextmenu`, and `touchmove` — the last two filtered by target, so anything
+  over a scrollable ancestor still scrolls. It also takes a Wake Lock (re-taken whenever the
+  tab comes back) and asks for fullscreen on the first tap of a touch session; both failures
+  are ignored, which is what an iPhone does with them.
+- **Firing moved to `pointerdown`** (`src/core/input/keyboard.ts`): the tap-to-fire binding used
+  the compatibility `mousedown`, which arrives after `touchend` and dies with it — the
+  double-tap guard would have swallowed every second shot. Taps on a control (`.rb-touch`,
+  `#menu-root`, buttons, fields) are not shots.
+- **Installable**: `public/manifest.webmanifest` (fullscreen, landscape, dark), the
+  `apple-mobile-web-app-*` tags and an `apple-touch-icon` in `index.html`, and
+  `scripts/make-icons.mjs`, which rasterises the favicon's bolt into 192/512/180 PNGs with
+  nothing but `zlib` — re-run it if the mark changes. `.webmanifest` was added to the server's
+  MIME table (`server/index.mjs`) and to the pre-compressor's text extensions.
+
+**Verified in the browser** (dev server, 375×812 touch emulation, `?touch=1`): computed
+`touch-action` is `none` on body and canvas and `pan-y` on the menu scrollers; a synthetic first
+tap passes and a second within 320 ms is cancelled; `touchmove` over the canvas and
+`gesturestart` are cancelled; `contextmenu` is refused. The rotated landscape layer and the pad
+are unchanged. Suite: 348 tests in 23 files, all passing; `tsc --noEmit` clean.

@@ -203,8 +203,20 @@ export const VEHICLE = {
   movingThreshold: 0.5,
   /** Collision restitution (0..1). */
   restitution: 0.25,
-  /** Speed retained along the wall after a collision (0..1). */
+  /** Speed retained along the wall after a real impact (0..1). Applied once per hit. */
   collisionSlide: 0.85,
+  /**
+   * Speed into a surface (m/s) above which contact counts as an impact — bounce, scrub and a
+   * collision event — rather than the car merely leaning on the wall. Below it the wall only
+   * takes the into-the-wall velocity away, so a car scraping along a barrier keeps moving.
+   */
+  wallImpactSpeed: 2.5,
+  /** Along-the-wall deceleration while scraping a surface (m/s^2). Panel damage, not a brake. */
+  wallScrapeDecel: 4,
+  /** Speed below which a car pressed nose-first into a surface may pivot off it (m/s). */
+  wedgeSpeed: 3,
+  /** How fast that pivot turns the car at full throttle (rad/s). */
+  wedgeYaw: 1.1,
   /** Collision proxy radius (m). */
   collisionRadius: 1.1,
   /** Wheel radius (m). */

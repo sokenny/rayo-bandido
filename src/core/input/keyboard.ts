@@ -62,14 +62,25 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   const onBlur = (): void => {
     down.clear();
   };
-  const onMouseDown = (e: MouseEvent): void => {
-    if (e.button === 0) fireLatched = true;
+  /**
+   * A click — or a tap — fires lightning. This listens for `pointerdown` rather than
+   * `mousedown` so a phone fires on the touch itself: the compatibility mouse event a tap
+   * would otherwise be waiting for is synthesised only after `touchend`, and is dropped
+   * entirely when the double-tap-zoom guard in `src/ui/mobileShell.ts` swallows a fast second
+   * tap. Taps on a control — the thumb pad, a menu, any button — are that control's, not the
+   * gun's.
+   */
+  const onPointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return;
+    const el = e.target instanceof Element ? e.target : null;
+    if (el?.closest('.rb-touch, #menu-root, button, input, select, textarea, a')) return;
+    fireLatched = true;
   };
 
   target.addEventListener('keydown', onKeyDown as EventListener);
   target.addEventListener('keyup', onKeyUp as EventListener);
   window.addEventListener('blur', onBlur);
-  window.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('pointerdown', onPointerDown);
 
   return {
     poll(out) {
@@ -101,7 +112,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       target.removeEventListener('keydown', onKeyDown as EventListener);
       target.removeEventListener('keyup', onKeyUp as EventListener);
       window.removeEventListener('blur', onBlur);
-      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('pointerdown', onPointerDown);
     },
   };
 }

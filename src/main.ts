@@ -7,6 +7,7 @@ import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
 import { sanitizeName, sanitizeRoomCode, sanitizeRoomLabel, type RoomEntry } from './net/protocol';
+import { installMobileShell } from './ui/mobileShell';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 const hudRoot = document.getElementById('hud-root');
@@ -280,6 +281,11 @@ function menu(): void {
     setTimeout(() => location.assign(url), 180);
   });
 }
+
+// Before anything is shown: a phone has to stop treating the game as a document — no zoom on a
+// fast double tap, no pinch, no pull-to-refresh, no callout on a held button. Installed once
+// for the life of the page, whichever screen the address bar asks for.
+installMobileShell();
 
 const mode = modeFromUrl();
 if (new URLSearchParams(location.search).has('mp')) {

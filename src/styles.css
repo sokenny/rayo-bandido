@@ -50,17 +50,30 @@
   --rb-notch: polygon(0 0, calc(100% - var(--rb-n)) 0, 100% var(--rb-n), 100% 100%, 0 100%);
 }
 
+/* The document itself is furniture, not a page: nothing here scrolls, bounces, zooms or
+ * offers to select itself. `position: fixed` on both elements is what stops mobile Safari
+ * rubber-banding the whole game when a thumb drags, and `overscroll-behavior` is what stops
+ * Chrome for Android reading the same drag as pull-to-refresh. The gestures CSS cannot reach
+ * — Safari's pinch and its double-tap zoom — are handled in `src/ui/mobileShell.ts`. */
 html,
 body {
+  position: fixed;
+  inset: 0;
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--rb-bg);
   color: var(--rb-text);
   font-family: var(--rb-mono);
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Menus opt back into scrolling below; the game layer never does. */
+  touch-action: none;
 }
 
 #game-canvas {
@@ -70,6 +83,30 @@ body {
   height: 100%;
   display: block;
   outline: none;
+  /* The big empty middle of the screen is the fire button (`src/core/input/keyboard.ts`), and
+     a fire button must not zoom, scroll or select when it is tapped twice in a second. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The one place a thumb is allowed to move the document: the two menu screens that can grow
+   taller than a short window, and the room list inside one of them. `pan-y` keeps the scroll
+   and drops the pinch. The touch guards in `src/ui/mobileShell.ts` find these on their own by
+   walking up for a scrollable ancestor; anything they get wrong can be marked
+   `data-rb-scroll` to be let through by name. */
+.rb-lobby,
+.rb-rooms,
+.rb-rooms__list {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Everything else in a menu is tapped, so it keeps taps fast (no 300ms wait) without keeping
+   double-tap zoom. */
+#menu-root {
+  touch-action: manipulation;
 }
 
 #hud-root {

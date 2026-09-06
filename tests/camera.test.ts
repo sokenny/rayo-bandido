@@ -52,7 +52,7 @@ describe('camera views', () => {
   });
 
   it('latches P into the command for exactly one poll', () => {
-    // `createKeyboardInput` also hangs blur/mousedown off the global window; this suite runs
+    // `createKeyboardInput` also hangs blur/pointerdown off the global window; this suite runs
     // in node, so it gets the same event target to hang them on.
     const target = new EventTarget() as unknown as Window;
     const previous = (globalThis as { window?: Window }).window;

@@ -1,5 +1,6 @@
 import type { ArenaLayout, GameEvent, TargetState, VehicleState } from '../core/types';
 import { TARGETS, VEHICLE } from '../config/tuning';
+import { forwardX, forwardZ, rightX, rightZ, wrapAngle } from '../core/math';
 
 /** The part of a moving thing that world collision needs: a circle with a velocity. */
 export interface CircleBody {
@@ -11,14 +12,46 @@ export interface CircleBody {
   vz: number;
 }
 
+/** How a surface answers a body that runs into it. See `WALL` for the car's own numbers. */
+export interface WallResponse {
+  /** Bounce fraction on a real impact (0..1). */
+  restitution: number;
+  /** Along-the-wall speed kept through a real impact (0..1). */
+  slide: number;
+  /** Speed into the surface (m/s) above which contact is an impact rather than a scrape. */
+  impactSpeed: number;
+  /** Along-the-wall deceleration while scraping (m/s^2). */
+  scrapeDecel: number;
+}
+
+/** Where a body touched the world during a `pushOutOfWorld` call: the summed contact normals. */
+export interface Contact {
+  nx: number;
+  nz: number;
+  /** How many surfaces were touched. 0 means the body is in the clear. */
+  count: number;
+}
+
+/** Reused across ticks: `resolveCollisions` is the only caller that asks for contacts. */
+const CONTACT: Contact = { nx: 0, nz: 0, count: 0 };
+
+/** The player's car against the world. */
+const WALL: WallResponse = {
+  restitution: VEHICLE.restitution,
+  slide: VEHICLE.collisionSlide,
+  impactSpeed: VEHICLE.wallImpactSpeed,
+  scrapeDecel: VEHICLE.wallScrapeDecel,
+};
+
 /**
  * Collision of the car (a circle) against the world: axis-aligned boxes (buildings, the test
  * city's barriers) and wall segments (the circuit's guardrails and alley walls). Pushes the
  * car out, removes the velocity component into the wall and emits a collision event.
  * Deliberately simple and forgiving: arcade feel over accuracy.
  */
-export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: GameEvent[]): void {
-  const impact = pushOutOfWorld(v, VEHICLE.collisionRadius, layout, VEHICLE.restitution, VEHICLE.collisionSlide);
+export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: GameEvent[], dt: number): void {
+  const impact = pushOutOfWorld(v, VEHICLE.collisionRadius, layout, WALL, dt, CONTACT);
+  if (CONTACT.count > 0) unwedge(v, CONTACT, dt);
 
   if (impact > 0.5) {
     v.collided = true;
@@ -35,13 +68,32 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
 }
 
 /**
- * Push a circle of radius `r` out of every box, wall and the arena bounds, bouncing its
- * velocity off whatever it hit with `restitution` and keeping `slide` of the tangential
- * part. Returns the hardest impact (m/s into a surface), 0 for none. Shared by the player's
- * car and by an electric car that has been shoved: neither may pass through a guardrail.
+ * Push a circle of radius `r` out of every box, wall and the arena bounds, and answer its
+ * velocity with `response`. Returns the hardest impact (m/s into a surface), 0 for none.
+ * Shared by the player's car and by an electric car that has been shoved: neither may pass
+ * through a guardrail.
+ *
+ * A hit and a scrape are different events. Driving into a wall is an impact: it bounces and
+ * scrubs speed. Riding along one afterwards is contact, and contact must only take the
+ * into-the-wall velocity away — scrubbing the along-the-wall part every tick is what used to
+ * pin a car that touched a barrier at an angle, since the wall then ate 15% of its speed
+ * sixty times a second while the nose kept it from steering off. So the scrape only costs the
+ * steady `scrapeDecel`, which the engine can out-pull.
  */
-export function pushOutOfWorld(v: CircleBody, r: number, layout: ArenaLayout, restitution: number, slide: number): number {
+export function pushOutOfWorld(
+  v: CircleBody,
+  r: number,
+  layout: ArenaLayout,
+  response: WallResponse,
+  dt: number,
+  contact: Contact | null = null,
+): number {
   let impact = 0;
+  if (contact) {
+    contact.nx = 0;
+    contact.nz = 0;
+    contact.count = 0;
+  }
   const boxes = layout.colliders;
   for (let i = 0; i < boxes.length; i++) {
     const b = boxes[i];
@@ -85,16 +137,11 @@ export function pushOutOfWorld(v: CircleBody, r: number, layout: ArenaLayout, re
     }
     v.x += nx * penetration;
     v.z += nz * penetration;
-    const vn = v.vx * nx + v.vz * nz;
-    if (vn < 0) {
-      impact = Math.max(impact, -vn);
-      // Remove the normal component (with a little bounce), keep most of the tangential.
-      const tx = -nz;
-      const tz = nx;
-      const vt = (v.vx * tx + v.vz * tz) * slide;
-      const bounce = -vn * restitution;
-      v.vx = tx * vt + nx * bounce;
-      v.vz = tz * vt + nz * bounce;
+    impact = Math.max(impact, answerSurface(v, nx, nz, response, dt));
+    if (contact) {
+      contact.nx += nx;
+      contact.nz += nz;
+      contact.count++;
     }
   }
 
@@ -132,15 +179,11 @@ export function pushOutOfWorld(v: CircleBody, r: number, layout: ArenaLayout, re
     }
     v.x += nx * penetration;
     v.z += nz * penetration;
-    const vn = v.vx * nx + v.vz * nz;
-    if (vn < 0) {
-      impact = Math.max(impact, -vn);
-      const tx = -nz;
-      const tz = nx;
-      const vt = (v.vx * tx + v.vz * tz) * slide;
-      const bounce = -vn * restitution;
-      v.vx = tx * vt + nx * bounce;
-      v.vz = tz * vt + nz * bounce;
+    impact = Math.max(impact, answerSurface(v, nx, nz, response, dt));
+    if (contact) {
+      contact.nx += nx;
+      contact.nz += nz;
+      contact.count++;
     }
   }
 
@@ -162,6 +205,83 @@ export function pushOutOfWorld(v: CircleBody, r: number, layout: ArenaLayout, re
   }
 
   return impact;
+}
+
+/**
+ * Work a car that is stopped with its nose in a wall back off it.
+ *
+ * Yaw comes from road speed (`src/sim/vehicle.ts`, step 5), so a car pinned at a standstill
+ * has none: full throttle only pushes harder into the wall and full lock does nothing, which
+ * leaves reverse as the only way out of a scrape the player did not mean to take. The tyres
+ * are still turning against the obstacle though, and a turned wheel there walks the car
+ * around. So while the car is pressed into a surface below `wedgeSpeed` and the throttle is
+ * asking to go, pivot it toward the wall's tangent — the side the wheel is asking for, or the
+ * one the nose already leans toward. It fades out as the car finds speed and the normal model
+ * takes over, and it can never turn a car that is moving.
+ */
+function unwedge(v: VehicleState, contact: Contact, dt: number): void {
+  const throttle = v.throttleApplied;
+  if (throttle <= 0.01) return;
+  const speed = Math.hypot(v.vx, v.vz);
+  if (speed >= VEHICLE.wedgeSpeed) return;
+
+  const len = Math.hypot(contact.nx, contact.nz);
+  if (len < 1e-6) return;
+  const nx = contact.nx / len;
+  const nz = contact.nz / len;
+  const fx = forwardX(v.heading);
+  const fz = forwardZ(v.heading);
+  // Only when the nose is the part in the wall: a car backing into one steers out normally.
+  if (fx * nx + fz * nz >= 0) return;
+
+  // Which way to come off: the wheel decides when it is turned, otherwise the car follows the
+  // wall tangent its nose already leans toward. Positive yaw turns the nose toward the right.
+  const wheel = v.steerAngle;
+  let sign: number;
+  if (wheel > 0.05 || wheel < -0.05) {
+    sign = wheel > 0 ? 1 : -1;
+  } else {
+    const tx = -nz;
+    const tz = nx;
+    const lean = fx * tx + fz * tz;
+    if (lean > -1e-3 && lean < 1e-3) return; // Dead square to the wall, wheel straight: nothing asked for.
+    const dx = lean > 0 ? tx : -tx;
+    const dz = lean > 0 ? tz : -tz;
+    sign = dx * rightX(v.heading) + dz * rightZ(v.heading) >= 0 ? 1 : -1;
+  }
+
+  const yaw = sign * VEHICLE.wedgeYaw * throttle * (1 - speed / VEHICLE.wedgeSpeed);
+  v.heading = wrapAngle(v.heading + yaw * dt);
+  v.yawRate += yaw;
+}
+
+/**
+ * Answer a contact whose outward normal is (`nx`, `nz`): kill the velocity going into the
+ * surface and decide what the along-the-surface part keeps. Returns the speed into the
+ * surface (m/s), 0 when the body is already moving away.
+ */
+function answerSurface(v: CircleBody, nx: number, nz: number, response: WallResponse, dt: number): number {
+  const vn = v.vx * nx + v.vz * nz;
+  if (vn >= 0) return 0;
+
+  const tx = -nz;
+  const tz = nx;
+  let vt = v.vx * tx + v.vz * tz;
+  let bounce: number;
+  if (-vn > response.impactSpeed) {
+    // A real hit: bounce off it and scrub the along-the-wall speed once, for the crunch.
+    vt *= response.slide;
+    bounce = -vn * response.restitution;
+  } else {
+    // Scraping along: a steady drag the engine can pull against, and no bounce — bouncing a
+    // car off a barrier it is only leaning on would buzz it away from the wall.
+    const drop = Math.min(vt < 0 ? -vt : vt, response.scrapeDecel * dt);
+    vt -= vt < 0 ? -drop : drop;
+    bounce = 0;
+  }
+  v.vx = tx * vt + nx * bounce;
+  v.vz = tz * vt + nz * bounce;
+  return -vn;
 }
 
 /**

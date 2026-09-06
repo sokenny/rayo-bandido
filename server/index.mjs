@@ -43,6 +43,8 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // Served with its own type or Android quietly ignores the install prompt.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -74,16 +76,44 @@ function resolveInDist(urlPath) {
   return candidate;
 }
 
-function serveFile(res, file) {
+/**
+ * Pick the pre-compressed twin of `file` that this visitor can decode.
+ *
+ * `scripts/precompress.mjs` writes `<file>.br` and `<file>.gz` beside every text asset at
+ * build time, and omits either one that did not actually shrink — so the existence check is
+ * the whole negotiation. Brotli first: it wins on every asset here, and any browser new enough
+ * for the `es2022` bundle understands it. Anything the build did not compress (images, audio,
+ * the tiny files) simply has no twin and goes out as-is.
+ */
+function negotiateEncoding(file, accept) {
+  const offers = /\bbr\b/.test(accept) ? ['br', 'gzip'] : /\bgzip\b/.test(accept) ? ['gzip'] : [];
+  for (const encoding of offers) {
+    const twin = `${file}${encoding === 'br' ? '.br' : '.gz'}`;
+    if (existsSync(twin)) return { encoding, body: twin };
+  }
+  return { encoding: null, body: file };
+}
+
+function serveFile(res, file, accept = '') {
+  // The type comes from the *logical* file: `index.js.br` is still JavaScript, and a browser
+  // told otherwise refuses to run it as a module.
   const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream';
   // Vite fingerprints everything under /assets, so those are safe to cache hard; index.html
   // must not be, or a rebuilt game keeps loading the old bundle for whoever raced before.
   const immutable = file.includes(`${sep}assets${sep}`);
+  const { encoding, body } = negotiateEncoding(file, accept);
   res.writeHead(200, {
     'content-type': type,
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    // Two visitors can get different bytes for one URL, so any cache in between has to key on
+    // what they asked for.
+    vary: 'accept-encoding',
+    // The bundle is served from a fingerprinted path with a declared type; refusing MIME
+    // sniffing keeps a proxy or browser from guessing a different one.
+    'x-content-type-options': 'nosniff',
+    ...(encoding ? { 'content-encoding': encoding } : {}),
   });
-  createReadStream(file).pipe(res);
+  createReadStream(body).pipe(res);
 }
 
 const server = createServer((req, res) => {
@@ -115,13 +145,14 @@ const server = createServer((req, res) => {
     return;
   }
 
+  const accept = req.headers['accept-encoding'] || '';
   const file = resolveInDist(req.url || '/');
   if (!file) return notFound(res, 'Not found');
-  if (existsSync(file) && statSync(file).isFile()) return serveFile(res, file);
+  if (existsSync(file) && statSync(file).isFile()) return serveFile(res, file, accept);
 
   // Anything else falls back to the entry document, so `/?mp=1` works as a shared link.
   const index = join(dist, 'index.html');
-  if (existsSync(index)) return serveFile(res, index);
+  if (existsSync(index)) return serveFile(res, index, accept);
   return notFound(res, 'Not found');
 });
 

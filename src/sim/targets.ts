@@ -1,7 +1,7 @@
 import type { ArenaLayout, TargetState } from '../core/types';
 import { TARGETS } from '../config/tuning';
 import { wrapAngle } from '../core/math';
-import { pushOutOfWorld } from './collision';
+import { pushOutOfWorld, type WallResponse } from './collision';
 
 /**
  * Electric-car targets. Each target starts at a spawn point and optionally patrols a loop
@@ -13,10 +13,8 @@ import { pushOutOfWorld } from './collision';
  * speed used to send a car straight through the guardrail and out of the circuit.
  */
 
-/** A shoved electric car loses this much of its into-the-wall speed on contact. */
-const WALL_RESTITUTION = 0.25;
-/** ...and keeps this much of its along-the-wall speed. */
-const WALL_SLIDE = 0.7;
+/** How a wall answers a shoved electric car: a firm bounce, and a drag once it settles on it. */
+const WALL: WallResponse = { restitution: 0.25, slide: 0.7, impactSpeed: 2.5, scrapeDecel: 6 };
 export function createTargets(layout: ArenaLayout): TargetState[] {
   const list: TargetState[] = [];
   for (let i = 0; i < layout.targetSpawns.length; i++) {
@@ -91,7 +89,7 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
       }
       // Walls, buildings and the arena edge. Only while shoved: the patrol lane is clear of
       // them all, so an unbumped car never pays for this.
-      pushOutOfWorld(t, TARGETS.knock.radius, layout, WALL_RESTITUTION, WALL_SLIDE);
+      pushOutOfWorld(t, TARGETS.knock.radius, layout, WALL, dt);
     }
 
     const patrol = layout.targetPatrols[t.id];

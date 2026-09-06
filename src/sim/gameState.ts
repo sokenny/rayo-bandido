@@ -190,7 +190,7 @@ export function stepGame(
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
-  resolveCollisions(state.vehicle, layout, state.events);
+  resolveCollisions(state.vehicle, layout, state.events, dt);
   if (rivals) resolveRivalCollisions(state.vehicle, rivals, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);
   stepTargets(state.targets, layout, state.time, dt, respawnTraffic);

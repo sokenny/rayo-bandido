@@ -79,6 +79,29 @@
         "--strictPort"
       ],
       "port": 5177
+    },
+    {
+      "name": "rayo-bandido-serve",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/index.mjs",
+        "--port",
+        "8088"
+      ],
+      "port": 8088
+    },
+    {
+      "name": "rayo-bandido-dev-mac-5178",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5178",
+        "--strictPort"
+      ],
+      "port": 5178
     }
   ]
 }
