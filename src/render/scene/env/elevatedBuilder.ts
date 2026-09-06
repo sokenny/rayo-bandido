@@ -87,15 +87,16 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number): void {
 
     if (a.y < EMBANKMENT_BELOW && c.y < EMBANKMENT_BELOW) continue;
     const bottom = my - DECK_THICKNESS;
-    // Underside, facing down.
+    // Underside, facing down: left-forward-right winding, the mirror of the road surface's,
+    // or the slab is invisible from under the deck.
     b.concrete.color(PAL.concrete, 0.5);
-    b.concrete.quad(alx, bottomA, alz, arx, bottomA, arz, crx, bottomC, crz, clx, bottomC, clz);
+    b.concrete.quad(alx, bottomA, alz, clx, bottomC, clz, crx, bottomC, crz, arx, bottomA, arz);
     // The structure under the slab: an edge beam under each fascia, a centre beam, and pipes.
     b.concrete.color(PAL.concrete, 0.7);
-    b.concrete.orientedBox(mx + nx * (a.halfWidth - 0.7), mz + nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom);
-    b.concrete.orientedBox(mx - nx * (a.halfWidth - 0.7), mz - nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom);
+    b.concrete.orientedBox(mx + nx * (a.halfWidth - 0.7), mz + nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom, { bottom: true });
+    b.concrete.orientedBox(mx - nx * (a.halfWidth - 0.7), mz - nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom, { bottom: true });
     b.concrete.color(PAL.concrete, 0.62);
-    b.concrete.orientedBox(mx, mz, dx, dz, len + 0.05, 1.1, bottom - 1.1, bottom);
+    b.concrete.orientedBox(mx, mz, dx, dz, len + 0.05, 1.1, bottom - 1.1, bottom, { bottom: true });
     b.props.color(PAL.metalDark, 0.9);
     for (const off of [-a.halfWidth * 0.42, a.halfWidth * 0.36]) {
       b.props.tube(a.x + nx * off, bottomA - 0.45, a.z + nz * off, c.x + nx * off, bottomC - 0.45, c.z + nz * off, 0.3);
@@ -174,7 +175,7 @@ function buildPillar(b: EnvBuilders, p: PillarDef, rng: () => number): void {
   }
   // Cross beam under the slab, the full width of the deck, and a brace to each column.
   b.concrete.color(PAL.concrete, 0.72);
-  b.concrete.orientedBox(p.x, p.z, nx, nz, out * 2 + 1.7, 1.6, top - 1.3, top);
+  b.concrete.orientedBox(p.x, p.z, nx, nz, out * 2 + 1.7, 1.6, top - 1.3, top, { bottom: true });
   b.concrete.color(PAL.concrete, 0.6);
   for (const side of [-1, 1]) {
     const cx = p.x + nx * out * side;

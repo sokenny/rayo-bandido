@@ -3,6 +3,7 @@ import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
 import { signCell } from './textures';
+import { rollLampFault } from './lampFaults';
 
 /**
  * Everything that dresses the streets: guardrails, street lights, the neon route gates from
@@ -162,6 +163,9 @@ export function lampColor(zone: ZoneId, rng: () => number): number {
 /**
  * One lamp post at (x, z) standing on ground height `y0`, with its arm reaching `arm` metres
  * in the unit direction (dx, dz) toward the road. The spill lands `spill` metres out.
+ *
+ * `fault` is the lamp's fault seed from `rollLampFault`: 0 for a lamp that works, otherwise
+ * the head, its halo and its pool of light all carry the seed and stutter together.
  */
 export function lampPost(
   b: EnvBuilders,
@@ -174,6 +178,7 @@ export function lampPost(
   poleH: number,
   color: number,
   spill: number,
+  fault = 0,
 ): void {
   const alongX = Math.abs(dx) > Math.abs(dz);
   b.props.color(PAL.metalDark, 0.8);
@@ -183,13 +188,14 @@ export function lampPost(
   const hy = y0 + poleH;
   b.props.color(PAL.metalDark, 0.7);
   b.props.tube(x, hy - 0.2, z, hx, hy - 0.2, hz, 0.16);
-  b.neon.color(color, 1);
+  b.neon.color(color, 1).fault(fault);
   // Lamp head is elongated along the arm; its halo faces down the street at the driver.
   b.neon.box(hx, hy - 0.45, hz, alongX ? 1.5 : 0.6, 0.22, alongX ? 0.6 : 1.5);
+  b.neon.fault(0);
   // The arm is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
-  halo(b, hx, hy - 0.5, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2);
+  halo(b, hx, hy - 0.5, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2, fault);
   // The spill always lands on the asphalt, whatever the pole ended up standing on.
-  groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, 0.14);
+  groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, 0.14, 0.03, fault);
 }
 
 function buildStreetLights(b: EnvBuilders, rng: () => number): void {
@@ -222,7 +228,7 @@ function buildStreetLights(b: EnvBuilders, rng: () => number): void {
         const arm = alley ? 0.9 : Math.min(off + 2.2, 5.2);
         const dx = along ? -side : 0;
         const dz = along ? 0 : -side;
-        lampPost(b, ax, az, y0, dx, dz, arm, poleH, c, off + 5);
+        lampPost(b, ax, az, y0, dx, dz, arm, poleH, c, off + 5, rollLampFault(rng));
       }
     }
   }

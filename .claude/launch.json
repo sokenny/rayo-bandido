@@ -102,6 +102,17 @@
         "--strictPort"
       ],
       "port": 5178
+    },
+    {
+      "name": "rayo-bandido-dev-auto",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5180,
+      "autoPort": true
     }
   ]
 }

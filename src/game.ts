@@ -15,6 +15,7 @@ import { createGamepadInput } from './core/input/gamepad';
 import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
+import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
 import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
 import { createEnvironment } from './render/scene/environment';
@@ -263,6 +264,10 @@ export function createGame(
   const debugInput: DebugFrameInput = { simMs: 0, renderMs: 0, gpuMs: -1, pixelRatio: startRatio, governor: governor.status };
   let lastNitroAmount = state.nitro.amount;
   let nitroVisual = 0;
+  /* The gear the body has already been shoved for. A shift is an event, not a state, and the
+   * simulation may run several ticks between frames — comparing the gear the body knows about
+   * with the one the car is in catches the change whatever the frame rate is doing. */
+  let bodyGear = state.vehicle.gear;
   let simTime = 0;
   let ready = false;
   // Exhaust pops. One trigger feeds both the bang and the flame so they land on the same frame.
@@ -437,6 +442,7 @@ export function createGame(
     v.slipAngle = 0;
     v.steerAngle = 0;
     car.resetBody();
+    bodyGear = v.gear;
     effects.reset();
     backfire.reset();
     fillCameraPose(1);
@@ -486,6 +492,7 @@ export function createGame(
         effects.reset();
         backfire.reset();
         car.resetBody();
+        bodyGear = state.vehicle.gear;
         // The car is back at the spawn: pick up the route from there.
         if (cruising) cruiseControl.reset(state.vehicle);
         interpolateVehicle(state.vehicle, 1, pose);
@@ -603,6 +610,10 @@ export function createGame(
     car.setBrakeLights(v.brakeApplied > 0 && v.speed > 0.5);
     car.setReverseLights(v.speed < -0.5);
     car.setBodyAccel(v.latAccel, v.longAccel);
+    if (v.gear !== bodyGear) {
+      car.shiftKick(shiftKickStrength(v, bodyGear));
+      bodyGear = v.gear;
+    }
     car.update(frameDt, simTime);
     syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);

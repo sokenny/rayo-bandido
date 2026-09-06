@@ -110,6 +110,32 @@ export const VEHICLE = {
   slideSlipFull: (22 * Math.PI) / 180,
   /** Fraction of the slide that survives when throttle and steering are released (0..1). */
   slideReleaseFloor: 0.85,
+  /**
+   * How fast the rear can break away, at full commitment (1/s). The axle does not let go in
+   * one tick: `slide` chases its target through a first-order ramp, and this is the ceiling
+   * of that ramp's rate.
+   */
+  slideBreakRate: 12,
+  /**
+   * Fraction of `slideBreakRate` available at the instant traction starts to go (0..1). The
+   * rate climbs from here toward 1 as the slide develops, so the break-out is an S-curve —
+   * a soft first few degrees, then the tail running away — instead of a step. Lower = the
+   * car hangs on longer before it lets go.
+   */
+  slideBreakEase: 0.22,
+  /**
+   * Shape of that climb: the rate scales with `slide ** slideBreakCurve`. Below 1 the rate
+   * picks up early (the loss accelerates soon after it starts); above 1 it stays soft for
+   * longer and then snaps.
+   */
+  slideBreakCurve: 0.7,
+  /** Break-away rate while the handbrake is pulled (1/s). A yank is meant to snap — but not instantly. */
+  slideHandbrakeRate: 22,
+  /**
+   * How fast the tyres take hold again when the slide target drops (1/s). Deliberately
+   * quicker and uncurved: losing the rear should be progressive, catching it should not lag.
+   */
+  slideRegripRate: 9,
   /** Speed above which throttle + hard steering can break traction (m/s). ~70 km/h. */
   powerSlideSpeed: 19.4,
   /** Speed range over which power oversteer ramps in above `powerSlideSpeed` (m/s). */
@@ -247,6 +273,14 @@ export const DRIVETRAIN = {
   lugDrive: 0.3,
   /** rpm01 at which the lugging penalty is fully gone. */
   lugRpm: 0.3,
+
+  /* PRESENTATION ONLY: how big a shove a gear change gives the body. See
+   * `drivetrain.shiftKickStrength` and `render/scene/bodyAttitude.ts:kick`. */
+  /** Step in engine rpm (rpm01) at which a shift kicks the body its hardest. First into second
+   * at redline is about 0.54, so the short gears saturate and sixth arrives with a nudge. */
+  shiftKickFullStep: 0.45,
+  /** Fraction of the kick a shift taken with the throttle shut still gives. */
+  shiftKickIdle: 0.35,
 };
 
 /**
@@ -282,6 +316,50 @@ export const BODY = {
   pitchDamping: 0.7,
   /** Largest sub-step the spring integrator takes (s). Long frames are split, not skipped. */
   maxStepDt: 1 / 120,
+
+  /* ------------------------------------------------------------ gear change
+   * A shift is a torque interruption: drive cuts, the car stops pulling for a moment, the
+   * body runs forward on its mounts, then drive comes back and shoves it home. The
+   * accelerations behind that happen inside one tick, so `longAccel` never really sees them
+   * — the shift is fed to the springs as an impulse instead (`BodyAttitude.kick`), and the
+   * under-damped springs turn it into the dip-and-settle by themselves.
+   *
+   * Strength (0..1) comes from `drivetrain.shiftKickStrength`: how big a step in engine rpm
+   * the new ratio is, and how much throttle was being interrupted.
+   *
+   * The pitch and roll kicks run on their own springs rather than the corner/brake ones
+   * above, so tuning how a shift feels never touches how the car leans or dives — only
+   * `surge` (fore-aft) had that separation before; pitch and roll now get it too. Their
+   * frequencies sit at half of the corner/brake springs' on purpose: a slower spring with
+   * half the impulse traces the same peak angle but takes twice as long to get there and
+   * come back, which is what actually reads as "slower" rather than "smaller". */
+  /** Pitch velocity an upshift injects at full strength (rad/s). Nose drops, then rebounds. */
+  shiftPitchImpulse: 0.25,
+  /** Fore-aft velocity a shift injects at full strength (m/s): the body lurching on its mounts. */
+  shiftSurgeImpulse: 0.21,
+  /** Roll velocity a shift injects (rad/s): torque reaction always rocks the body the same way. */
+  shiftRollImpulse: 0.06,
+  /** Hard cap on the shift's own pitch contribution (rad), on top of whatever braking/power owns. */
+  pitchKickLimit: 0.05,
+  /** Hard cap on the shift's own roll contribution (rad), on top of whatever cornering owns. */
+  rollKickLimit: 0.03,
+  /** How far the body may travel fore-aft (m). ~3 cm; the wheels stay where they are. */
+  surgeLimit: 0.03,
+  /** Shift-pitch spring frequency (rad/s): half of `pitchFrequency`, so the dip plays out slow. */
+  shiftPitchFrequency: 6.5,
+  shiftPitchDamping: 0.7,
+  /** Shift-roll spring frequency (rad/s): half of `rollFrequency`. */
+  shiftRollFrequency: 5.5,
+  shiftRollDamping: 0.62,
+  /** Surge spring frequency (rad/s): half of the original 17 — the lurch takes twice as long. */
+  surgeFrequency: 8.5,
+  /** Surge damping ratio. Low enough to leave the one rebound that reads as the shift. */
+  surgeDamping: 0.5,
+  /**
+   * A downshift kicks the other way at this fraction of an upshift's impulse: the lower gear
+   * grabs and shoves the body back, where the upshift's cut lets it run forward.
+   */
+  downshiftScale: 0.85,
 };
 
 export const DRIFT = {

@@ -17,7 +17,8 @@ import { SILENT_MUSIC, type MusicBands } from '../core/types';
  * 0) when Web Audio is unavailable, e.g. in the headless QA runner.
  */
 export interface ThemeAudio {
-  /** Attach one-time input listeners that start the song on the first user gesture. */
+  /** Attach one-time input listeners that start the song on the first user gesture, and the
+   *  `M` key listener that mutes it. */
   arm(target: Window): void;
   /** Read the analyser and advance the band envelopes. Call once per render frame. */
   update(frameDt: number): void;
@@ -29,6 +30,8 @@ export interface ThemeAudio {
   /** Playback state for QA/automation: 'unavailable' (no Web Audio), 'idle' (not started yet),
    *  or the live AudioContext state ('running' once the song is playing). */
   status(): 'unavailable' | 'idle' | AudioContextState;
+  setMuted(muted: boolean): void;
+  isMuted(): boolean;
   dispose(): void;
 }
 
@@ -61,6 +64,8 @@ function silentTheme(): ThemeAudio {
     update() {},
     bands: SILENT_MUSIC,
     status: () => 'unavailable',
+    setMuted() {},
+    isMuted: () => false,
     dispose() {},
   };
 }
@@ -122,6 +127,7 @@ export function createThemeAudio(): ThemeAudio {
   let started = false;
   let armed = false;
   let armWindow: Window | null = null;
+  let muted = false;
 
   function start(): void {
     if (started) return;
@@ -131,15 +137,30 @@ export function createThemeAudio(): ThemeAudio {
       // Autoplay still blocked (rare after a gesture) — leave it; a later gesture retries.
       started = false;
     });
-    // Fade the track in so it eases under the game instead of stabbing in.
+    // Fade the track in so it eases under the game instead of stabbing in. If the player has
+    // already muted (e.g. hit M before the first gesture landed), settle at silence instead.
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(THEME.volume, now + THEME.fadeInSeconds);
+    gain.gain.linearRampToValueAtTime(muted ? 0 : THEME.volume, now + THEME.fadeInSeconds);
   }
 
   function onGesture(): void {
     start();
+  }
+
+  function setMuted(next: boolean): void {
+    if (muted === next) return;
+    muted = next;
+    if (!started) return; // Nothing playing yet; `start()` will honor `muted` when it fires.
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(muted ? 0 : THEME.volume, now + 0.05);
+  }
+
+  function onMuteKey(e: KeyboardEvent): void {
+    if (e.code === 'KeyM') setMuted(!muted);
   }
 
   return {
@@ -151,6 +172,7 @@ export function createThemeAudio(): ThemeAudio {
       // listeners and simply no-op once `started` sticks.
       target.addEventListener('keydown', onGesture);
       target.addEventListener('pointerdown', onGesture);
+      target.addEventListener('keydown', onMuteKey);
     },
     update() {
       if (!started) return;
@@ -190,10 +212,15 @@ export function createThemeAudio(): ThemeAudio {
     status() {
       return started ? ctx.state : 'idle';
     },
+    setMuted,
+    isMuted() {
+      return muted;
+    },
     dispose() {
       if (armWindow) {
         armWindow.removeEventListener('keydown', onGesture);
         armWindow.removeEventListener('pointerdown', onGesture);
+        armWindow.removeEventListener('keydown', onMuteKey);
         armWindow = null;
       }
       try {

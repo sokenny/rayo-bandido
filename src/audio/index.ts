@@ -29,7 +29,8 @@ export interface SkidInput {
  * - `reset()` on restart.
  *
  * Browsers block audio until a user gesture, so the context stays suspended until the first
- * keydown/pointer/touch, then resumes. `M` toggles mute.
+ * keydown/pointer/touch, then resumes. `setMuted` is exposed for QA/automation; the game itself
+ * only wires `M` to the background theme song (`audio/theme.ts`), not to these engine/SFX voices.
  */
 export interface AudioSystem {
   update(
@@ -73,11 +74,6 @@ export function createAudio(targetCount: number): AudioSystem {
   const resume = (): void => core.resume();
   const gestures: Array<keyof WindowEventMap> = ['keydown', 'pointerdown', 'touchstart'];
   for (const g of gestures) window.addEventListener(g, resume, { passive: true });
-
-  const onMuteKey = (e: KeyboardEvent): void => {
-    if (e.code === 'KeyM') core.setMuted(!core.isMuted());
-  };
-  window.addEventListener('keydown', onMuteKey);
 
   return {
     update(dt, engineInput, listener, targets, skid) {
@@ -136,7 +132,6 @@ export function createAudio(targetCount: number): AudioSystem {
 
     dispose() {
       for (const g of gestures) window.removeEventListener(g, resume);
-      window.removeEventListener('keydown', onMuteKey);
       engine.dispose();
       tires.dispose();
       hums.dispose();

@@ -18,13 +18,17 @@ export class MeshBuilder {
   readonly normals: number[] = [];
   readonly uvs: number[] = [];
   readonly colors: number[] = [];
+  readonly faults: number[] = [];
   private readonly withColor: boolean;
+  private readonly withFault: boolean;
   private r = 1;
   private g = 1;
   private b = 1;
+  private fa = 0;
 
-  constructor(withColor = false) {
+  constructor(withColor = false, withFault = false) {
     this.withColor = withColor;
+    this.withFault = withFault;
   }
 
   /** Sets the vertex colour used by subsequent primitives. `mul` scales brightness. */
@@ -33,6 +37,15 @@ export class MeshBuilder {
     this.r = SCRATCH.r * mul;
     this.g = SCRATCH.g * mul;
     this.b = SCRATCH.b * mul;
+    return this;
+  }
+
+  /**
+   * Tags subsequent primitives with a fault seed (see `lampFaults`). 0, the default, means a
+   * piece of light that simply works; every lamp part sharing a seed strobes together.
+   */
+  fault(seed: number): this {
+    this.fa = seed;
     return this;
   }
 
@@ -90,6 +103,10 @@ export class MeshBuilder {
     if (this.withColor) {
       const c = this.colors;
       for (let i = 0; i < 6; i++) c.push(this.r, this.g, this.b);
+    }
+    if (this.withFault) {
+      const fl = this.faults;
+      for (let i = 0; i < 6; i++) fl.push(this.fa);
     }
   }
 
@@ -220,9 +237,19 @@ export class MeshBuilder {
   /**
    * Box of length `len` along the unit direction (dx, dz), `thick` across it and from y0 to
    * y1, centred at (cx, cz). Four sides and a top: guardrails, barriers and walls that follow
-   * a curved or diagonal road.
+   * a curved or diagonal road. `bottom` adds the underside, for a box that hangs in the air.
    */
-  orientedBox(cx: number, cz: number, dx: number, dz: number, len: number, thick: number, y0: number, y1: number): void {
+  orientedBox(
+    cx: number,
+    cz: number,
+    dx: number,
+    dz: number,
+    len: number,
+    thick: number,
+    y0: number,
+    y1: number,
+    opts?: { bottom?: boolean },
+  ): void {
     // Right-hand normal of the direction.
     const nx = -dz;
     const nz = dx;
@@ -243,6 +270,8 @@ export class MeshBuilder {
     this.quad(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz);
     this.quad(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az);
     this.quad(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
+    // Underside, facing -Y: only worth its triangles where the box is seen from below.
+    if (opts?.bottom) this.quad(ax, y0, az, bx, y0, bz, qx, y0, qz, ex, y0, ez);
   }
 
   /**
@@ -285,6 +314,7 @@ export class MeshBuilder {
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
     if (this.withColor) geo.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
+    if (this.withFault) geo.setAttribute('aLampFault', new THREE.Float32BufferAttribute(this.faults, 1));
     geo.computeBoundingSphere();
     return geo;
   }

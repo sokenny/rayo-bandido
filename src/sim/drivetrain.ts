@@ -128,6 +128,26 @@ export function stepDrivetrain(
   else v.limiterTime = Math.max(0, v.limiterTime - 2 * dt);
 }
 
+/**
+ * How hard a change from `fromGear` into `v.gear` shoves the body (signed, -1..1; positive is
+ * an upshift). Presentation only — `src/render/scene/bodyAttitude.ts:kick` turns it into the
+ * dip and lurch, and nothing in the simulation reads it.
+ *
+ * Two things set the size. The step in engine rpm the new ratio makes at this road speed is
+ * the shift itself: the short low gears jolt, sixth barely registers, and a gear swapped at a
+ * standstill (or the forced drop into first when the car starts rolling backwards) is nothing
+ * at all. On top of that, how much throttle was interrupted — a shift off the power still
+ * moves the body, just less than one taken flat out.
+ */
+export function shiftKickStrength(v: VehicleState, fromGear: number): number {
+  if (fromGear === v.gear) return 0;
+  const absSpeed = Math.abs(v.speed);
+  const step = Math.abs(roadRpm01(absSpeed, v.gear) - roadRpm01(absSpeed, fromGear));
+  const load = DRIVETRAIN.shiftKickIdle + (1 - DRIVETRAIN.shiftKickIdle) * clamp01(v.throttleApplied);
+  const magnitude = clamp01((step / DRIVETRAIN.shiftKickFullStep) * load);
+  return v.gear > fromGear ? magnitude : -magnitude;
+}
+
 /** Drive available at `rpm01` in `gear` (0..1): a tall gear lugs below `lugRpm`. */
 export function lugFactor(rpm01: number, gear: number): number {
   if (gear === 0) return 1;

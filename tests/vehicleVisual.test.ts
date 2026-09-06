@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createCarVisual } from '../src/render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources } from '../src/render/scene/electricCarVisual';
-import { VEHICLE } from '../src/config/tuning';
+import { BODY, VEHICLE } from '../src/config/tuning';
 
 interface Budget {
   triangles: number;
@@ -137,6 +137,67 @@ describe('player car body roll', () => {
       car.update(1 / 60, 0);
       expect(car.chassis.rotation.z).toBe(0);
       expect(car.chassis.rotation.x).toBe(0);
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('dips and lurches forward on an upshift, then settles back', () => {
+    const car = createCarVisual();
+    try {
+      const wheelZ = car.wheels.map((w) => w.steer.getWorldPosition(new THREE.Vector3()).z);
+
+      car.shiftKick(1);
+      let lowestPitch = 0;
+      let furthestSurge = 0;
+      for (let i = 0; i < 12; i++) {
+        car.update(1 / 60, i / 60);
+        lowestPitch = Math.min(lowestPitch, car.chassis.rotation.x);
+        furthestSurge = Math.min(furthestSurge, car.chassis.position.z);
+      }
+      // Nose down and body toward the nose (-Z), both visible and both small.
+      expect(lowestPitch).toBeLessThan(-0.005);
+      expect(lowestPitch).toBeGreaterThan(-0.04);
+      expect(furthestSurge).toBeLessThan(-0.004);
+      expect(furthestSurge).toBeGreaterThan(-0.035);
+
+      // No acceleration is holding it there: it comes home on its own.
+      settle(car, 2);
+      expect(Math.abs(car.chassis.rotation.x)).toBeLessThan(1e-3);
+      expect(Math.abs(car.chassis.position.z)).toBeLessThan(1e-3);
+
+      // A downshift shoves the other way.
+      car.shiftKick(-1);
+      let highestPitch = 0;
+      for (let i = 0; i < 12; i++) {
+        car.update(1 / 60, i / 60);
+        highestPitch = Math.max(highestPitch, car.chassis.rotation.x);
+      }
+      expect(highestPitch).toBeGreaterThan(0.004);
+
+      // Whatever the body does, the wheels stay put.
+      for (let i = 0; i < car.wheels.length; i++) {
+        expect(car.wheels[i].steer.getWorldPosition(new THREE.Vector3()).z).toBeCloseTo(wheelZ[i], 6);
+      }
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('keeps the body on the car through a burst of shifts, and resets with it', () => {
+    const car = createCarVisual();
+    try {
+      for (let i = 0; i < 20; i++) {
+        car.shiftKick(i % 2 === 0 ? 1 : -1);
+        car.update(1 / 60, i / 60);
+      }
+      expect(Math.abs(car.chassis.position.z)).toBeLessThanOrEqual(BODY.surgeLimit + 1e-9);
+      expect(Math.abs(car.chassis.rotation.x)).toBeLessThan(0.07);
+
+      car.resetBody();
+      expect(car.chassis.position.z).toBe(0);
+      car.update(1 / 60, 0);
+      expect(car.chassis.position.z).toBe(0);
     } finally {
       car.dispose();
     }

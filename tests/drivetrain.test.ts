@@ -10,6 +10,7 @@ import {
   bandEntrySpeed,
   gearTopSpeed,
   roadRpm01,
+  shiftKickStrength,
   spinAuthority,
   lugFactor,
   stepDrivetrain,
@@ -256,5 +257,51 @@ describe('automatic reads the revs', () => {
     expect(v.gear).toBe(1);
     for (let i = 0; i < 60; i++) stepDrivetrain(v, 0, speed, true, 0, false, 0, DT);
     expect(v.gear).toBe(0);
+  });
+});
+
+describe('gear-change body kick', () => {
+  it('is signed by the shift, sized by the ratio step, and silent at a standstill', () => {
+    const v = createVehicleState(0, 0, 0);
+    v.throttleApplied = 1;
+
+    v.speed = gearTopSpeed(0);
+    v.gear = 1;
+    const low = shiftKickStrength(v, 0);
+    expect(low).toBeGreaterThan(0);
+    expect(low).toBeLessThanOrEqual(1);
+
+    // The same shift the other way is a downshift: same size, opposite sign.
+    v.gear = 0;
+    expect(shiftKickStrength(v, 1)).toBeCloseTo(-low, 6);
+
+    // The tall gears step far less, so they shove the body far less.
+    const tall = createVehicleState(0, 0, 0);
+    tall.throttleApplied = 1;
+    tall.speed = gearTopSpeed(4);
+    tall.gear = 5;
+    const high = shiftKickStrength(tall, 4);
+    expect(high).toBeGreaterThan(0);
+    expect(high).toBeLessThan(low);
+
+    // Stopped, or in the gear it is already in, nothing moves.
+    const parked = createVehicleState(0, 0, 0);
+    parked.throttleApplied = 1;
+    parked.gear = 2;
+    expect(shiftKickStrength(parked, 0)).toBe(0);
+    expect(shiftKickStrength(v, v.gear)).toBe(0);
+  });
+
+  it('still moves the body off the throttle, but less than a shift taken flat out', () => {
+    const v = createVehicleState(0, 0, 0);
+    v.speed = gearTopSpeed(1);
+    v.gear = 2;
+    v.throttleApplied = 1;
+    const flat = shiftKickStrength(v, 1);
+    v.throttleApplied = 0;
+    const lifted = shiftKickStrength(v, 1);
+    expect(lifted).toBeGreaterThan(0);
+    expect(lifted).toBeLessThan(flat);
+    expect(lifted).toBeCloseTo(flat * DRIVETRAIN.shiftKickIdle, 6);
   });
 });

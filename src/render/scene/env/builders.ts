@@ -27,7 +27,7 @@ export interface EnvBuilders {
   roof: MeshBuilder;
   /** Painted metal: barriers, containers, poles, pipes, AC units, roof boxes. */
   props: MeshBuilder;
-  /** Unlit neon, always on. */
+  /** Unlit neon, always on — except the lamp heads tagged with a fault seed. */
   neon: MeshBuilder;
   /** Unlit neon that breathes. */
   neonPulse: MeshBuilder;
@@ -53,10 +53,10 @@ export function createBuilders(plan: CityPlan): EnvBuilders {
     jdm: new MeshBuilder(false),
     roof: new MeshBuilder(true),
     props: new MeshBuilder(true),
-    neon: new MeshBuilder(true),
+    neon: new MeshBuilder(true, true),
     neonPulse: new MeshBuilder(true),
     neonFlicker: new MeshBuilder(true),
-    glow: new MeshBuilder(true),
+    glow: new MeshBuilder(true, true),
     signs: new MeshBuilder(false),
     billA: new MeshBuilder(false),
     billB: new MeshBuilder(false),
@@ -76,7 +76,10 @@ export function builderStats(b: EnvBuilders): { triangles: number; drawCalls: nu
   return { triangles, drawCalls };
 }
 
-/** Additive pool of light on the ground (lamp spill, wet neon reflection). */
+/**
+ * Additive pool of light on the ground (lamp spill, wet neon reflection). `fault` tags the
+ * pool with a lamp's fault seed so it strobes with the head that casts it; see `lampFaults`.
+ */
 export function groundGlow(
   b: EnvBuilders,
   x: number,
@@ -86,9 +89,11 @@ export function groundGlow(
   color: number,
   strength: number,
   y = 0.03,
+  fault = 0,
 ): void {
-  b.glow.color(color, strength);
+  b.glow.color(color, strength).fault(fault);
   b.glow.planeY(x, y, z, sx, sz);
+  b.glow.fault(0);
 }
 
 /** Additive halo standing in front of a sign or lamp. */
@@ -102,7 +107,9 @@ export function halo(
   rotY: number,
   color: number,
   strength: number,
+  fault = 0,
 ): void {
-  b.glow.color(color, strength);
+  b.glow.color(color, strength).fault(fault);
   b.glow.panel(x, y, z, w, h, rotY);
+  b.glow.fault(0);
 }

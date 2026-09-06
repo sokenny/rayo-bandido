@@ -6,6 +6,7 @@ import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
 import { buildViaducts } from './elevatedBuilder';
 import { lampColor, lampPost } from './propsBuilder';
+import { rollLampFault } from './lampFaults';
 import { PAINT_Y, ROAD_TILE, roadTint } from './cityBuilder';
 import { signCell } from './textures';
 
@@ -348,7 +349,7 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
     const dz = -side * c.tx;
     const poleH = deck ? 7 : alley ? 4.4 : zone === 'corporate' ? 8.2 : 7.2;
     const arm = deck ? 3.4 : alley ? 0.9 : zone === 'corporate' ? 4.6 : 3.6;
-    lampPost(b, p.x, p.z, y0, dx, dz, arm, poleH, color, off + 4);
+    lampPost(b, p.x, p.z, y0, dx, dz, arm, poleH, color, off + 4, rollLampFault(rng));
   }
 }
 

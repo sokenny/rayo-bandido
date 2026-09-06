@@ -313,3 +313,73 @@ describe('body load signals', () => {
     expect(v.longAccel).toBe(0);
   });
 });
+
+describe('breaking traction', () => {
+  /** Flat out in a straight line, then the input that breaks the rear away. */
+  function atSpeed(): { v: VehicleState; cmd: PlayerCommand } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 8);
+    return { v, cmd };
+  }
+
+  /** `slide` sampled once per tick, from the tick the input lands. */
+  function slideRamp(cmd: PlayerCommand, v: VehicleState, ticks: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < ticks; i++) {
+      stepVehicle(v, cmd, false, DT);
+      out.push(v.slide);
+    }
+    return out;
+  }
+
+  it('lets the rear go along a ramp, not in a single tick', () => {
+    const { v, cmd } = atSpeed();
+    cmd.steer = 1;
+    const ramp = slideRamp(cmd, v, 36);
+    // The tyres still hold on the tick the wheel is turned.
+    expect(ramp[0]).toBeLessThan(0.1);
+    // Half gone takes real time, not a frame.
+    expect(ramp.findIndex((s) => s > 0.5)).toBeGreaterThan(6);
+    // And it does commit: this is a ramp, not a refusal to slide.
+    expect(ramp[ramp.length - 1]).toBeGreaterThan(0.85);
+    expect(ramp.every((s, i) => i === 0 || s >= ramp[i - 1])).toBe(true);
+  });
+
+  it('accelerates into the slide instead of easing off: the loss speeds up as it develops', () => {
+    const { v, cmd } = atSpeed();
+    cmd.steer = 1;
+    const ramp = slideRamp(cmd, v, 20);
+    const step = ramp.map((s, i) => s - (i === 0 ? 0 : ramp[i - 1]));
+    // A plain first-order lag moves fastest on its very first tick and slows from there.
+    // The rear does the opposite early on: the break-out gathers pace before it settles.
+    const peak = step.indexOf(Math.max(...step));
+    expect(peak).toBeGreaterThan(2);
+    expect(step[peak]).toBeGreaterThan(step[0] * 1.3);
+  });
+
+  it('still snaps on the handbrake: a yank is not subject to the slow ramp', () => {
+    const { v, cmd } = atSpeed();
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    const ramp = slideRamp(cmd, v, 12);
+    expect(ramp[0]).toBeGreaterThan(0.25);
+    // Fully loose inside ~0.15 s.
+    expect(ramp[8]).toBeGreaterThan(0.9);
+  });
+
+  it('takes hold again faster than it let go', () => {
+    const { v, cmd } = atSpeed();
+    cmd.steer = 1;
+    const out = slideRamp(cmd, v, 60);
+    const toLoose = out.findIndex((s) => s > 0.6);
+    // Release everything: the slide target collapses and the tyres bite.
+    cmd.steer = 0;
+    cmd.throttle = 0;
+    const back = slideRamp(cmd, v, 60);
+    const toGrip = back.findIndex((s) => s < 0.4);
+    expect(toGrip).toBeGreaterThanOrEqual(0);
+    expect(toGrip).toBeLessThan(toLoose);
+  });
+});

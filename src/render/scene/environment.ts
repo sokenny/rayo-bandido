@@ -19,6 +19,8 @@ import {
   makeWindowTexture,
 } from './env/textures';
 import type { MeshBuilder } from './env/meshBuilder';
+import { createWindowActivity } from './env/windowActivity';
+import { createLampFaults } from './env/lampFaults';
 
 /**
  * The Rayo Bandido city: a nocturnal block of city built entirely from a `CityPlan`
@@ -91,27 +93,29 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const asphaltTex = makeAsphaltTexture(PAL.asphalt, 7);
   // Fewer, larger, softer windows. A tower should read as a couple of glowing bands seen
   // through haze, not as a hundred individual pixels fighting each other for attention.
+  // The grids are shared with `windowActivity` below, which needs the same cells to find one
+  // window in the shader; they must not drift apart.
+  const corpGrid = { cols: 5, rows: 5 };
+  const urbanGrid = { cols: 4, rows: 4 };
+  const jdmGrid = { cols: 4, rows: 3 };
   const winCorp = makeWindowTexture({
     facade: PAL.facadeCorp,
     lights: PAL.windowsCorp,
-    cols: 5,
-    rows: 5,
+    ...corpGrid,
     lit: 0.2 * PAL.litGain,
     seed: 11,
   });
   const winUrban = makeWindowTexture({
     facade: PAL.facadeUrban,
     lights: PAL.windowsUrban,
-    cols: 4,
-    rows: 4,
+    ...urbanGrid,
     lit: 0.26 * PAL.litGain,
     seed: 23,
   });
   const winJdm = makeWindowTexture({
     facade: PAL.facadeJdm,
     lights: PAL.windowsJdm,
-    cols: 4,
-    rows: 3,
+    ...jdmGrid,
     lit: 0.18 * PAL.litGain,
     seed: 37,
   });
@@ -146,6 +150,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const corpMat = facade(winCorp, 0.85 * PAL.windowGain);
   const urbanMat = facade(winUrban, 0.9 * PAL.windowGain);
   const jdmMat = facade(winJdm, 0.75 * PAL.windowGain);
+  // Rooms behind the panes: each window drifts, and now and then one goes dark or comes back.
+  const windows = createWindowActivity();
+  windows.apply(corpMat, corpGrid.cols, corpGrid.rows, 2.7);
+  windows.apply(urbanMat, urbanGrid.cols, urbanGrid.rows, 8.3);
+  windows.apply(jdmMat, jdmGrid.cols, jdmGrid.rows, 14.9);
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
   const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -163,6 +172,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     // sink into the horizon instead of punching through it as bright specks.
     fog: true,
   });
+  // Roughly a third of the street lamps are broken. The heads live in `neon` and their halos
+  // and light pools in `glow`, so both materials read the per-vertex fault seed.
+  const lampFaults = createLampFaults();
+  lampFaults.apply(neonMat);
+  lampFaults.apply(glowMat);
   const signMat = new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false });
   const billMatA = new THREE.MeshBasicMaterial({ map: billTexA, toneMapped: false });
   const billMatB = new THREE.MeshBasicMaterial({ map: billTexB, toneMapped: false });
@@ -277,6 +291,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       const lightLift = 1 + THEME.lightDepth * music.energy;
       hemi.intensity = hemiBase * lightLift;
       key.intensity = keyBase * lightLift;
+
+      // Independent of the music: the rooms behind the windows and the failing street lamps
+      // keep their own clocks.
+      windows.update(time);
+      lampFaults.update(time);
 
       // MIDS — the big emissive surfaces. Wide and late: whole building faces breathe with the
       // chords and the snare, arriving just behind the kick and letting go slowly.

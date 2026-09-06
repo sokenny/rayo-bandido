@@ -38,6 +38,12 @@ import { gearTopSpeed, lugFactor, stepDrivetrain } from './drivetrain';
  *     => the car follows its nose. Low grip => it slides. `slide` (0..1) blends between them
  *     and is driven by slip angle, handbrake and power-oversteer, so drifting is easy to
  *     start, easy to hold with throttle + steering, and regrips when inputs are released.
+ *  5b. Those inputs set a *target*; `slide` ramps toward it instead of adopting it, and the
+ *     ramp rate on the way out of grip grows with how far the rear has already gone
+ *     (`slideBreakEase` / `slideBreakCurve`). Traction is therefore lost along an S-curve —
+ *     soft, then running away, then settling — rather than flipped in one tick, which is what
+ *     the step change used to feel like. Everything downstream (`grip`, `latCap`, the yaw
+ *     budget, the self-aligning rate) is a `lerp` on `slide`, so they all inherit the curve.
  *
  * Mutates `v` in place, allocation-free.
  */
@@ -110,11 +116,13 @@ export function stepVehicle(
   // in steps 3, 4 and 5: front loaded, rear light.
   const brakeLoad = forwardMotion ? brake * clamp01(absSpeed / VEHICLE.brakeLoadSpeed) : 0;
   const handbrakeSlide = cmd.handbrake && forwardMotion && absSpeed > VEHICLE.handbrakeMinSpeed;
-  let slide = 0;
+  // How loose the conditions *ask* the car to be this tick. The axle then ramps toward it
+  // below rather than adopting it outright.
+  let slideTarget = 0;
   if (forwardMotion) {
     // Already sliding: stay loose while the player asks for it (throttle or steering).
     const hold = throttle > steerMag ? throttle : steerMag;
-    slide =
+    slideTarget =
       smoothstep(VEHICLE.slideSlipStart, VEHICLE.slideSlipFull, slipMag) *
       lerp(VEHICLE.slideReleaseFloor, 1, hold);
 
@@ -122,22 +130,40 @@ export function stepVehicle(
     const powerSpeed = clamp01((absSpeed - VEHICLE.powerSlideSpeed) / VEHICLE.powerSlideSpeedRamp);
     const power =
       throttle * powerSpeed * smoothstep(VEHICLE.powerSlideSteer, 1, steerMag) * VEHICLE.powerSlideGain;
-    if (power > slide) slide = power;
+    if (power > slideTarget) slideTarget = power;
 
     // Counter-steering (steering out of the slide) recovers grip faster.
-    slide *= lerp(1, VEHICLE.counterSteerGrip, counter);
+    slideTarget *= lerp(1, VEHICLE.counterSteerGrip, counter);
 
     // Left-foot brake: the unloaded rear keeps sliding, so braking mid-drift trims the line
     // instead of snapping the car straight. Only while a slide already exists — braking in a
     // straight line must not loosen the car.
     if (slipMag > VEHICLE.slideSlipStart) {
       const rear = brakeLoad * VEHICLE.brakeRearUnload;
-      if (rear > slide) slide = rear;
+      if (rear > slideTarget) slideTarget = rear;
     }
 
-    if (handbrakeSlide) slide = 1;
-    slide = clamp01(slide);
+    if (handbrakeSlide) slideTarget = 1;
+    slideTarget = clamp01(slideTarget);
   }
+
+  // The rear does not let go in a single tick — that is what makes a step change here read as
+  // arcade. `slide` chases its target through a rate-limited ramp, and on the way *out* of
+  // grip that rate itself grows with how far the axle has already stepped out: soft for the
+  // first few degrees (`slideBreakEase` of full rate), then running away as the slide
+  // develops. Rate rising into an asymptotic approach is an S-curve — the tail eases out,
+  // accelerates, then settles — instead of the old cliff. Regrip uses a single, quicker rate:
+  // losing the car should be progressive, catching it should not feel laggy. The handbrake
+  // keeps its own fast rate so a yank still snaps.
+  const prevSlide = v.slide;
+  const slideRate =
+    slideTarget > prevSlide
+      ? handbrakeSlide
+        ? VEHICLE.slideHandbrakeRate
+        : VEHICLE.slideBreakRate *
+          lerp(VEHICLE.slideBreakEase, 1, Math.pow(prevSlide, VEHICLE.slideBreakCurve))
+      : VEHICLE.slideRegripRate;
+  const slide = clamp01(damp(prevSlide, slideTarget, slideRate, dt));
 
   const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide);
   // The loaded front can hold more lateral force, which is what closes the apex.

@@ -4,6 +4,7 @@ import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
 import { blockSetback, facadeBuilder } from './cityBuilder';
 import { lampPost } from './propsBuilder';
+import { rollLampFault } from './lampFaults';
 
 /**
  * The big city's landmarks, from the plan: the quay along the water, lattice radio masts and
@@ -256,7 +257,7 @@ function buildQuay(b: EnvBuilders, rng: () => number): void {
     }
     if (n % 9 === 4) {
       const c = rng() < 0.7 ? PAL.winCold : PAL.neonCyan;
-      lampPost(b, mx, qz - 1.2, 0.22, 0, -1, 2.2, 6.4, c, 7);
+      lampPost(b, mx, qz - 1.2, 0.22, 0, -1, 2.2, 6.4, c, 7, rollLampFault(rng));
     }
   }
   // Neon strip along the parapet, the line the whole waterfront reads by.

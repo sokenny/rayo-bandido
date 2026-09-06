@@ -13,7 +13,8 @@ import { buildWheelGeometry } from './vehicles/wheel';
  * - `root` origin is on the ground at the center of the wheelbase. The nose points toward
  *   local -Z. `src/render/sync.ts` sets `root.position` and `root.rotation.y`.
  * - Everything that rides on the springs (bodywork, glass, lights, exhaust and rocker glow)
- *   lives under `chassis`, which rolls and pitches about the root origin. The wheels and the
+ *   lives under `chassis`, which rolls and pitches about the root origin and shifts a
+ *   centimetre or two fore-aft when the gearbox shoves it. The wheels and the
  *   ground light pool stay on `root` so they keep their contact with the road.
  * - `wheels` are ordered [front-left, front-right, rear-left, rear-right]. Sync rotates
  *   `steer.rotation.y` (front wheels only) and `spin.rotation.x` (all wheels).
@@ -53,6 +54,11 @@ export interface CarVisual {
    * `latAccel` and `longAccel`. Drives body roll and dive/squat; `update()` integrates it.
    */
   setBodyAccel(latAccel: number, longAccel: number): void;
+  /**
+   * Shove the body once for a gear change: `drivetrain.shiftKickStrength` signed -1..1,
+   * positive for an upshift. One call per shift — this is an impulse, not a per-frame value.
+   */
+  shiftKick(strength: number): void;
   /** Settle the body back to level immediately (respawn). */
   resetBody(): void;
   setBrakeLights(on: boolean): void;
@@ -584,9 +590,13 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
     setBodyAccel(latAccel, longAccel) {
       attitude.setAccel(latAccel, longAccel);
     },
+    shiftKick(strength) {
+      attitude.kick(strength);
+    },
     resetBody() {
       attitude.reset();
       chassis.rotation.set(0, 0, 0);
+      chassis.position.set(0, 0, 0);
     },
     setBrakeLights(on) {
       braking = on;
@@ -600,6 +610,8 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
       attitude.update(frameDt);
       chassis.rotation.z = attitude.roll;
       chassis.rotation.x = attitude.pitch;
+      // The shell runs fore-aft on its mounts; the wheels below it never move.
+      chassis.position.z = attitude.surge;
       syncWheelInstances();
       if (charge > 0.6) {
         const t = time * 26;
