@@ -194,8 +194,12 @@ export interface CityPlan {
   bounds: Rect;
   /** Which colour script the world is drawn in. Missing = the arena's. */
   palette?: 'arena' | 'bay';
-  /** Fog distances for this world, when it wants other than the default. */
-  fog?: { near: number; far: number } | null;
+  /**
+   * The world's haze, when it wants other than the default linear fog. `exp2` never fully
+   * saturates, so a big world keeps some contrast in its skyline all the way to the far clip
+   * instead of clamping to flat fog colour at `far`.
+   */
+  fog?: { near: number; far: number } | { density: number } | null;
   /** The skyscraper district: the perimeter and the skyline behind it grow to match. */
   downtown?: Rect | null;
   /** Axis-aligned drivable rectangles (the test city). */

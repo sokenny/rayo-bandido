@@ -387,7 +387,9 @@ describe('city art budget', () => {
     buildTrack(b);
     buildLandmarks(b);
     const { triangles, drawCalls } = builderStats(b);
-    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(160000);
+    // The headroom above 157k is the vertical corner fillet every building now carries
+    // (`buildingKit`'s `cornerFillet`): four extra wall strips a volume, ~3.6k triangles.
+    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(170000);
     expect(triangles, 'the city is not empty').toBeGreaterThan(40000);
     expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
   });

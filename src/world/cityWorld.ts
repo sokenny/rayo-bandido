@@ -1,5 +1,6 @@
 import type { ArenaLayout, ObstacleBox, ObstacleWall, SpawnPoint } from '../core/types';
 import { PAL } from '../render/scene/env/palette';
+import { HAZE } from '../render/scene/env/haze';
 import type { World } from './arenaWorld';
 import {
   inRect,
@@ -330,8 +331,9 @@ export function createCityWorld(): World {
   const plan: CityPlan = {
     bounds,
     palette: 'bay',
-    // Dense: the haze starts at the bonnet and the far towers are shapes in blue.
-    fog: { near: 10, far: 300 },
+    // Exponential haze rather than a linear curtain: the far towers stay towers, read
+    // through blue air, and their windows keep burning (see `env/haze.ts`).
+    fog: { density: HAZE.cityDensity },
     downtown: { ...DOWNTOWN },
     roads: [],
     ribbons,

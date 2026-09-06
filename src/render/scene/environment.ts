@@ -10,6 +10,7 @@ import { buildTrack } from './env/trackBuilder';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeSkyTexture } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
+import { applyHaze, HAZE } from './env/haze';
 import type { MeshBuilder } from './env/meshBuilder';
 import { createWindowActivity } from './env/windowActivity';
 import { createLampFaults } from './env/lampFaults';
@@ -63,9 +64,16 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   scene.environment = envTex;
   // Enough to give the wet asphalt a sheen and to keep the blue in the shadows.
   scene.environmentIntensity = 0.95;
-  // The haze starts close and closes fast: distance should dissolve into blue, not into black.
-  // A world may ask for more reach (the big city has a skyline to see across the bay).
-  scene.fog = new THREE.Fog(PAL.fog, plan.fog?.near ?? RENDER.fogNear, plan.fog?.far ?? RENDER.fogFar);
+  // Distance dissolves into blue, never into black. Small worlds use linear fog, which is
+  // cheap to reason about at arena scale; a world with a skyline asks for exponential haze
+  // instead (`{ density }`), which thickens gradually and never clamps to flat fog colour,
+  // so the far side of the bay stays a skyline instead of a card. What keeps the lights in
+  // it visible through that haze is the per-material patch in `env/haze.ts`.
+  const fogPlan = plan.fog;
+  scene.fog =
+    fogPlan && 'density' in fogPlan
+      ? new THREE.FogExp2(PAL.fog, fogPlan.density)
+      : new THREE.Fog(PAL.fog, fogPlan?.near ?? RENDER.fogNear, fogPlan?.far ?? RENDER.fogFar);
 
   // Deep teal sky bounce over a blue-grey ground bounce. This is the "not pitch dark" light:
   // it never goes to black underneath anything, so shadowed geometry still reads as blue.
@@ -118,8 +126,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     toneMapped: false,
-    // `fog` is left at its default (on) on purpose: far-off halos take the haze colour and
-    // sink into the horizon instead of punching through it as bright specks.
+    // Fogged, but additively: `applyHaze` below attenuates these halos towards black with
+    // distance instead of mixing them towards the fog colour, which on an additive blend
+    // would paint haze-coloured light onto the sky behind every far-off lamp.
     fog: true,
   });
   // Roughly a third of the street lamps are broken. The heads live in `neon` and their halos
@@ -135,6 +144,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   billMatB.color.setScalar(PAL.screenGain);
   neonMat.color.setScalar(PAL.neonGain);
   glowMat.color.setScalar(PAL.glowGain);
+
+  // Aerial perspective, per material family: walls fade first, lights fade last. Must come
+  // after every other patch above — the window activity and the lamp faults each install
+  // their own `onBeforeCompile`, and `applyHaze` composes with whatever it finds.
+  applyHaze(facadeMat, { lightKeep: HAZE.facadeLightKeep });
+  for (const m of [neonMat, neonPulseMat, neonFlickerMat, signMat, billMatA, billMatB]) {
+    applyHaze(m, { strength: HAZE.neonStrength, lightKeep: HAZE.neonLightKeep });
+  }
+  applyHaze(glowMat, { strength: HAZE.glowStrength, additive: true });
   const materials = [
     roadMat,
     laneMat,

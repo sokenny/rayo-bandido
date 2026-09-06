@@ -13,6 +13,16 @@ import * as THREE from 'three';
 
 const SCRATCH = new THREE.Color();
 
+/**
+ * How far a softened corner normal may lean out of its face, as the tangent of the tilt
+ * angle. 0.5 is about 26 degrees: enough to read as a rounded edge, not so much that a face
+ * looks inflated.
+ */
+const SOFT_MAX_BEND = 0.5;
+
+/** Scratch for the four corner normals of one quad (a, b, c, d), 3 floats each. */
+const N4 = new Float64Array(12);
+
 export class MeshBuilder {
   readonly positions: number[] = [];
   readonly normals: number[] = [];
@@ -30,6 +40,8 @@ export class MeshBuilder {
   private cu = 0;
   private cv = 0;
   private cw = 1;
+  private softRadius = 0;
+  private chamferSize = 0;
 
   constructor(withColor = false, withFault = false, withCell = false) {
     this.withColor = withColor;
@@ -63,6 +75,31 @@ export class MeshBuilder {
     this.cu = u0;
     this.cv = v0;
     this.cw = wall;
+    return this;
+  }
+
+  /**
+   * Turns on edge softening for subsequent boxes, with `radius` the fillet the shading
+   * should suggest, in metres. 0 (the default) keeps the hard flat normals.
+   *
+   * This rounds the *lighting*, not the geometry: no extra vertices, no extra triangles, no
+   * change to the silhouette. See `softQuad`.
+   */
+  soft(radius: number): this {
+    this.softRadius = radius;
+    return this;
+  }
+
+  /**
+   * Turns on a real chamfer of `size` metres on every edge of subsequent `box` calls: the
+   * corners are cut away, so the silhouette changes and the cut facet catches its own light.
+   * 0 (the default) leaves boxes sharp.
+   *
+   * Unlike `soft`, this costs geometry: 44 triangles a box instead of 12. Reach for it only
+   * where the edge is read close up.
+   */
+  chamfer(size: number): this {
+    this.chamferSize = size;
     return this;
   }
 
@@ -106,17 +143,140 @@ export class MeshBuilder {
     nx /= len;
     ny /= len;
     nz /= len;
+    for (let i = 0; i < 12; i += 3) {
+      N4[i] = nx;
+      N4[i + 1] = ny;
+      N4[i + 2] = nz;
+    }
+    this.emit(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
+  }
 
+  /**
+   * Quad a-b-c-d with edge-softened normals: every corner normal leans out of the face
+   * towards the two faces that meet it, so light rolls around the edge instead of stopping
+   * dead at it. The four leans are symmetric, so they cancel at the face centre and the
+   * middle of the face still shades flat.
+   *
+   * The lean is sized from `softRadius` against the face's own half-extent, one axis at a
+   * time: the same fillet radius reads hard on a lamp post and all but disappears on a tower
+   * wall, which is what a real chamfer of that size would do. Free — identical vertices and
+   * triangles to `quad`, only different normals.
+   */
+  private softQuad(
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    u0: number,
+    v0: number,
+    u1: number,
+    v1: number,
+  ): void {
+    // In-plane axes: u along a->b, v along a->d.
+    let ux = bx - ax;
+    let uy = by - ay;
+    let uz = bz - az;
+    const ul = Math.hypot(ux, uy, uz) || 1;
+    ux /= ul;
+    uy /= ul;
+    uz /= ul;
+    let vx = dx - ax;
+    let vy = dy - ay;
+    let vz = dz - az;
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    vx /= vl;
+    vy /= vl;
+    vz /= vl;
+    // Face normal = u x v.
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl;
+    ny /= nl;
+    nz /= nl;
+    const r = this.softRadius;
+    const bu = Math.min(SOFT_MAX_BEND, r / (ul / 2));
+    const bv = Math.min(SOFT_MAX_BEND, r / (vl / 2));
+    // Corner signs along (u, v): a(-,-) b(+,-) c(+,+) d(-,+).
+    for (let i = 0; i < 4; i++) {
+      const su = i === 1 || i === 2 ? bu : -bu;
+      const sv = i >= 2 ? bv : -bv;
+      let x = nx + ux * su + vx * sv;
+      let y = ny + uy * su + vy * sv;
+      let z = nz + uz * su + vz * sv;
+      const l = Math.hypot(x, y, z) || 1;
+      x /= l;
+      y /= l;
+      z /= l;
+      N4[i * 3] = x;
+      N4[i * 3 + 1] = y;
+      N4[i * 3 + 2] = z;
+    }
+    this.emit(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
+  }
+
+  /** One face of a box: softened when `soft()` is on, hard otherwise. */
+  private face(
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    u0 = 0,
+    v0 = 0,
+    u1 = 1,
+    v1 = 1,
+  ): void {
+    if (this.softRadius > 0) this.softQuad(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
+    else this.quad(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
+  }
+
+  /** Pushes the two triangles of quad a-b-c-d, taking the corner normals from `N4`. */
+  private emit(
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    u0: number,
+    v0: number,
+    u1: number,
+    v1: number,
+  ): void {
     const p = this.positions;
     const n = this.normals;
     const t = this.uvs;
     // a, b, c
     p.push(ax, ay, az, bx, by, bz, cx, cy, cz);
     t.push(u0, v0, u1, v0, u1, v1);
+    n.push(N4[0], N4[1], N4[2], N4[3], N4[4], N4[5], N4[6], N4[7], N4[8]);
     // a, c, d
     p.push(ax, ay, az, cx, cy, cz, dx, dy, dz);
     t.push(u0, v0, u1, v1, u0, v1);
-    for (let i = 0; i < 6; i++) n.push(nx, ny, nz);
+    n.push(N4[0], N4[1], N4[2], N4[6], N4[7], N4[8], N4[9], N4[10], N4[11]);
     if (this.withColor) {
       const c = this.colors;
       for (let i = 0; i < 6; i++) c.push(this.r, this.g, this.b);
@@ -206,6 +366,140 @@ export class MeshBuilder {
     );
   }
 
+  /** Triangle a-b-c, counter-clockwise seen from the front face, with one flat normal. */
+  private tri(
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+  ): void {
+    const e1x = bx - ax;
+    const e1y = by - ay;
+    const e1z = bz - az;
+    const e2x = cx - ax;
+    const e2y = cy - ay;
+    const e2z = cz - az;
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    this.positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+    this.uvs.push(0, 0, 1, 0, 1, 1);
+    for (let i = 0; i < 3; i++) this.normals.push(nx, ny, nz);
+    if (this.withColor) for (let i = 0; i < 3; i++) this.colors.push(this.r, this.g, this.b);
+    if (this.withFault) for (let i = 0; i < 3; i++) this.faults.push(this.fa);
+    if (this.withCell) for (let i = 0; i < 3; i++) this.cells.push(this.cu, this.cv, this.cw);
+  }
+
+  /**
+   * `box`, with every edge cut back by `chamferSize`: six inset faces, twelve bevel strips
+   * and eight corner triangles, 44 triangles against the sharp box's 12.
+   *
+   * The chamfer is clamped to a third of the box's smallest side, so a thin box keeps a face
+   * instead of collapsing into its own bevel.
+   */
+  private chamferBox(
+    cx: number,
+    cy: number,
+    cz: number,
+    sx: number,
+    sy: number,
+    sz: number,
+    top: boolean,
+    bottom: boolean,
+    sides: boolean,
+    tw: number,
+    th: number,
+    uo: number,
+  ): void {
+    const c = Math.min(this.chamferSize, Math.min(sx, Math.min(sy, sz)) / 3);
+    const hx = sx / 2;
+    const hy = sy / 2;
+    const hz = sz / 2;
+    // Inset extents: where a face stops and its bevel begins.
+    const ax = hx - c;
+    const ay = hy - c;
+    const az = hz - c;
+    const uX = tw > 0 ? sz / tw : 1;
+    const uZ = tw > 0 ? sx / tw : 1;
+    const vY = th > 0 ? sy / th : 1;
+
+    // Six inset faces, each spanning its full UV rect: the chamfer stretches the texture by
+    // c over the side, a few percent at the sizes this is used for.
+    if (sides) {
+      this.face(cx + hx, cy - ay, cz + az, cx + hx, cy - ay, cz - az, cx + hx, cy + ay, cz - az, cx + hx, cy + ay, cz + az, uo, 0, uo + uX, vY);
+      this.face(cx - hx, cy - ay, cz - az, cx - hx, cy - ay, cz + az, cx - hx, cy + ay, cz + az, cx - hx, cy + ay, cz - az, uo, 0, uo + uX, vY);
+      this.face(cx - ax, cy - ay, cz + hz, cx + ax, cy - ay, cz + hz, cx + ax, cy + ay, cz + hz, cx - ax, cy + ay, cz + hz, uo, 0, uo + uZ, vY);
+      this.face(cx + ax, cy - ay, cz - hz, cx - ax, cy - ay, cz - hz, cx - ax, cy + ay, cz - hz, cx + ax, cy + ay, cz - hz, uo, 0, uo + uZ, vY);
+    }
+    if (top) {
+      const uT = tw > 0 ? sx / tw : 1;
+      const vT = tw > 0 ? sz / tw : 1;
+      this.face(cx - ax, cy + hy, cz + az, cx + ax, cy + hy, cz + az, cx + ax, cy + hy, cz - az, cx - ax, cy + hy, cz - az, 0, 0, uT, vT);
+    }
+    if (bottom) {
+      this.face(cx - ax, cy - hy, cz - az, cx + ax, cy - hy, cz - az, cx + ax, cy - hy, cz + az, cx - ax, cy - hy, cz + az, 0, 0, 1, 1);
+    }
+
+    // Twelve bevel strips. The four vertical ones join side to side; the eight horizontal
+    // ones join a side to the top or the bottom.
+    const sgn = [1, -1];
+    for (const ix of sgn) {
+      for (const iz of sgn) {
+        // Vertical corner, between the +/-X face and the +/-Z face.
+        const px = cx + ix * hx;
+        const pz = cz + iz * az;
+        const qx = cx + ix * ax;
+        const qz = cz + iz * hz;
+        // Wind so the face looks outward: swap ends when the corner's handedness flips.
+        if (ix * iz > 0) this.quad(qx, cy - ay, qz, px, cy - ay, pz, px, cy + ay, pz, qx, cy + ay, qz);
+        else this.quad(px, cy - ay, pz, qx, cy - ay, qz, qx, cy + ay, qz, px, cy + ay, pz);
+      }
+    }
+    for (const iy of sgn) {
+      const py = cy + iy * hy;
+      const qy = cy + iy * ay;
+      // Horizontal bevel along the +/-X faces, then along the +/-Z faces.
+      for (const ix of sgn) {
+        const px = cx + ix * ax;
+        const qx = cx + ix * hx;
+        if (ix * iy > 0) this.quad(px, py, cz - az, px, py, cz + az, qx, qy, cz + az, qx, qy, cz - az);
+        else this.quad(px, py, cz + az, px, py, cz - az, qx, qy, cz - az, qx, qy, cz + az);
+      }
+      for (const iz of sgn) {
+        const pz = cz + iz * az;
+        const qz = cz + iz * hz;
+        if (iz * iy > 0) this.quad(cx + ax, py, pz, cx - ax, py, pz, cx - ax, qy, qz, cx + ax, qy, qz);
+        else this.quad(cx - ax, py, pz, cx + ax, py, pz, cx + ax, qy, qz, cx - ax, qy, qz);
+      }
+    }
+
+    // Eight corner triangles, one per original box corner.
+    for (const ix of sgn) {
+      for (const iy of sgn) {
+        for (const iz of sgn) {
+          const px = cx + ix * hx;
+          const py = cy + iy * hy;
+          const pz = cz + iz * hz;
+          const a = [px, cy + iy * ay, cz + iz * az];
+          const bb = [cx + ix * ax, py, cz + iz * az];
+          const d = [cx + ix * ax, cy + iy * ay, pz];
+          // The winding that faces outward flips with the sign of the corner's octant.
+          if (ix * iy * iz > 0) this.tri(a[0], a[1], a[2], bb[0], bb[1], bb[2], d[0], d[1], d[2]);
+          else this.tri(a[0], a[1], a[2], d[0], d[1], d[2], bb[0], bb[1], bb[2]);
+        }
+      }
+    }
+  }
+
   /**
    * Axis-aligned box. When `tileW`/`tileH` are given, side UVs repeat by world size so
    * window grids keep a constant scale across differently sized buildings.
@@ -225,6 +519,10 @@ export class MeshBuilder {
     const tw = opts?.tileW ?? 0;
     const th = opts?.tileH ?? 0;
     const uo = opts?.uOffset ?? 0;
+    if (this.chamferSize > 0) {
+      this.chamferBox(cx, cy, cz, sx, sy, sz, top, bottom, sides, tw, th, uo);
+      return;
+    }
     const x0 = cx - sx / 2;
     const x1 = cx + sx / 2;
     const y0 = cy - sy / 2;
@@ -237,21 +535,21 @@ export class MeshBuilder {
       const uZ = tw > 0 ? sx / tw : 1;
       const vY = th > 0 ? sy / th : 1;
       // +X
-      this.quad(x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, uo, 0, uo + uX, vY);
+      this.face(x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, uo, 0, uo + uX, vY);
       // -X
-      this.quad(x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, uo, 0, uo + uX, vY);
+      this.face(x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, uo, 0, uo + uX, vY);
       // +Z
-      this.quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, uo, 0, uo + uZ, vY);
+      this.face(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, uo, 0, uo + uZ, vY);
       // -Z
-      this.quad(x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, uo, 0, uo + uZ, vY);
+      this.face(x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, uo, 0, uo + uZ, vY);
     }
     if (top) {
       const uT = tw > 0 ? sx / tw : 1;
       const vT = tw > 0 ? sz / tw : 1;
-      this.quad(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, 0, 0, uT, vT);
+      this.face(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, 0, 0, uT, vT);
     }
     if (bottom) {
-      this.quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, 0, 0, 1, 1);
+      this.face(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, 0, 0, 1, 1);
     }
   }
 
@@ -286,13 +584,13 @@ export class MeshBuilder {
     const ex = cx - dx * hl + nx * ht;
     const ez = cz - dz * hl + nz * ht;
     // Left face (outward = -normal), right face, front, back, top.
-    this.quad(bx, y0, bz, ax, y0, az, ax, y1, az, bx, y1, bz);
-    this.quad(ex, y0, ez, qx, y0, qz, qx, y1, qz, ex, y1, ez);
-    this.quad(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz);
-    this.quad(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az);
-    this.quad(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
+    this.face(bx, y0, bz, ax, y0, az, ax, y1, az, bx, y1, bz);
+    this.face(ex, y0, ez, qx, y0, qz, qx, y1, qz, ex, y1, ez);
+    this.face(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz);
+    this.face(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az);
+    this.face(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
     // Underside, facing -Y: only worth its triangles where the box is seen from below.
-    if (opts?.bottom) this.quad(ax, y0, az, bx, y0, bz, qx, y0, qz, ex, y0, ez);
+    if (opts?.bottom) this.face(ax, y0, az, bx, y0, bz, qx, y0, qz, ex, y0, ez);
   }
 
   /**
@@ -321,12 +619,12 @@ export class MeshBuilder {
     const ya1 = ya + height;
     const yb1 = yb + height;
     // Left face (outward = -normal), right face, top, and the two caps.
-    this.quad(blx, yb, blz, alx, ya, alz, alx, ya1, alz, blx, yb1, blz);
-    this.quad(arx, ya, arz, brx, yb, brz, brx, yb1, brz, arx, ya1, arz);
-    this.quad(alx, ya1, alz, arx, ya1, arz, brx, yb1, brz, blx, yb1, blz);
-    this.quad(alx, ya, alz, blx, yb, blz, brx, yb, brz, arx, ya, arz);
-    this.quad(arx, ya, arz, alx, ya, alz, alx, ya1, alz, arx, ya1, arz);
-    this.quad(blx, yb, blz, brx, yb, brz, brx, yb1, brz, blx, yb1, blz);
+    this.face(blx, yb, blz, alx, ya, alz, alx, ya1, alz, blx, yb1, blz);
+    this.face(arx, ya, arz, brx, yb, brz, brx, yb1, brz, arx, ya1, arz);
+    this.face(alx, ya1, alz, arx, ya1, arz, brx, yb1, brz, blx, yb1, blz);
+    this.face(alx, ya, alz, blx, yb, blz, brx, yb, brz, arx, ya, arz);
+    this.face(arx, ya, arz, alx, ya, alz, alx, ya1, alz, arx, ya1, arz);
+    this.face(blx, yb, blz, brx, yb, brz, brx, yb1, brz, blx, yb1, blz);
   }
 
   build(): THREE.BufferGeometry {

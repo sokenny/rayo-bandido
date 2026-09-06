@@ -43,15 +43,57 @@ export interface EnvBuilders {
   billB: MeshBuilder;
 }
 
+/**
+ * Fillet radii (m) the shading suggests on box edges, per material. Bigger, softer objects
+ * carry a bigger radius; the bend itself is scaled against each face's own size inside
+ * `MeshBuilder.soft`, so a 0.3 m radius rounds a kerb hard and a tower wall barely at all.
+ *
+ * Only the lit materials are worth setting: the neon, glow, sign and lane builders draw with
+ * MeshBasicMaterial, which never reads a normal.
+ *
+ * Note what this can and cannot reach. The night lighting is a HemisphereLight at ~1.9
+ * over a 0.42 key, and a hemisphere's contribution depends on normal.y alone -- so bending a
+ * wall normal sideways, around a building's vertical corner, changes nothing at all, and on
+ * the walls the key does reach it is worth about a percent. The payoff is on the horizontal
+ * edges (roof rims, kerb tops, the tops of props) and on small geometry, where the bend hits
+ * its cap: there it moves the shading by a few percent up to a quarter. Rounding a vertical
+ * building corner visibly needs real geometry, not a normal.
+ */
+const SOFT_EDGE = {
+  concrete: 0.25,
+  facade: 0.4,
+  roof: 0.3,
+  props: 0.15,
+} as const;
+
+/**
+ * Real chamfers (m) cut into box edges, per builder. Off everywhere for now.
+ *
+ * `MeshBuilder.chamfer` works and is tested, but switching it on for the whole props and
+ * concrete builders cost 103k triangles -- the city went from 157k to 259k, up two thirds --
+ * for no difference anyone could see in a side-by-side at street level. Most of those boxes
+ * are rooftop clutter and block detail seen from tens of metres away, where an 8 cm cut is
+ * under a pixel, and the thin street furniture that IS close (lamp posts, railings) has its
+ * chamfer clamped to a third of its smallest side anyway.
+ *
+ * If a chamfer is ever worth paying for it should be turned on around a specific group of
+ * close, chunky boxes -- the sidewalk dumpsters and AC units in `propsBuilder` -- with
+ * `b.props.chamfer(0.08)` before them and `.chamfer(0)` after, not builder-wide.
+ */
+const CHAMFER = {
+  concrete: 0,
+  props: 0,
+} as const;
+
 export function createBuilders(plan: CityPlan): EnvBuilders {
   return {
     plan,
     road: new MeshBuilder(true),
     lane: new MeshBuilder(true),
-    concrete: new MeshBuilder(true),
-    facade: new MeshBuilder(true, false, true),
-    roof: new MeshBuilder(true),
-    props: new MeshBuilder(true),
+    concrete: new MeshBuilder(true).soft(SOFT_EDGE.concrete).chamfer(CHAMFER.concrete),
+    facade: new MeshBuilder(true, false, true).soft(SOFT_EDGE.facade),
+    roof: new MeshBuilder(true).soft(SOFT_EDGE.roof),
+    props: new MeshBuilder(true).soft(SOFT_EDGE.props).chamfer(CHAMFER.props),
     neon: new MeshBuilder(true, true),
     neonPulse: new MeshBuilder(true),
     neonFlicker: new MeshBuilder(true),

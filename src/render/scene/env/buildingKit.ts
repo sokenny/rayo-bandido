@@ -100,6 +100,13 @@ export const KIT = {
   backStyleChance: 0.35,
   /** Chance a tower's corners are clipped (massing 3 and 4). */
   chamferChance: { 3: 0.22, 4: 0.4 } as Record<number, number>,
+  /**
+   * The fillet (m) every building gets on its vertical corners when it has not drawn the big
+   * architectural clip above. Cutting the footprint is how a building's corners stop reading
+   * as knife edges: a chamfer on the wall boxes themselves would cost 44 triangles for a
+   * 40 m wall, where this costs four extra wall strips.
+   */
+  cornerFillet: 0.35,
   /** Corner light strips, per tall building. */
   cornerLightChance: 0.3,
   /** Rooftop: mechanical blocks, antennas, and how rare a beacon is. */
@@ -271,7 +278,7 @@ function place(r: Rect2, fw: number, fd: number, tx: number, tz: number): Rect2 
 
 function chamferFor(f: Frame): number {
   const chance = KIT.chamferChance[f.spec.massing] ?? 0;
-  if (Math.min(f.w, f.d) < 12 || f.rng() >= chance) return 0;
+  if (Math.min(f.w, f.d) < 12 || f.rng() >= chance) return KIT.cornerFillet;
   return Math.min(f.w, f.d) * (0.12 + f.rng() * 0.1);
 }
 
@@ -793,7 +800,7 @@ function cornerLights(b: EnvBuilders, v: Volume, accent: number, rng: () => numb
   const t = rng() < 0.5 ? b.neon : b.neonPulse;
   for (const k of lit) {
     const [px, pz, sx, sz] = corners[k];
-    const off = v.chamfer > 0 ? v.chamfer * 0.5 : 0.25;
+    const off = v.chamfer > KIT.cornerFillet ? v.chamfer * 0.5 : 0.25;
     t.color(accent, 0.85);
     t.tube(px + sx * off, v.y0 + 3, pz + sz * off, px + sx * off, v.y1 - 1, pz + sz * off, 0.4);
   }
