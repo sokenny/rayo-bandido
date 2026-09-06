@@ -57,7 +57,6 @@ export function createVehicleState(x: number, z: number, heading: number): Vehic
     spinRev: 0,
     wheelspin: 0,
     limiterTime: 0,
-    spinIntent: 0,
     shiftHold: 0,
     counterSteer: 0,
   };

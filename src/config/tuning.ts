@@ -90,13 +90,6 @@ export const VEHICLE = {
   /** Extra yaw authority while drifting so the player can hold and steer the slide. */
   driftYawGain: 1.7,
   /**
-   * In a slide the front wheels turn the car by how far they point away from the direction of
-   * travel, not by their angle to the body: a wheel counter-steered onto the line of travel
-   * rotates nothing, a wheel held into the slide rotates hard (and past the point of
-   * recovery, spins). This caps that effective angle (rad). ~60 deg.
-   */
-  maxEffectiveSteer: (60 * Math.PI) / 180,
-  /**
    * Self-aligning rate while drifting (1/s): how strongly the nose rotates back toward the
    * velocity direction. Low = the slide holds; this is what makes drifts forgiving.
    */
@@ -115,41 +108,8 @@ export const VEHICLE = {
   slideSlipStart: (6 * Math.PI) / 180,
   /** Slip angle at which the car is fully in drift mode (rad). ~22 deg. */
   slideSlipFull: (22 * Math.PI) / 180,
-  /**
-   * Fraction of the slide that survives with nothing holding it (0..1). What holds a slide is
-   * wheelspin (torque at the rear, see DRIVETRAIN) or steering; the floor is what a slide
-   * decays to on momentum alone, so a flick still carries for a moment before it regrips.
-   */
-  slideReleaseFloor: 0.65,
-  /** How much full steering lock alone holds a slide (0..1). Below 1 so the throttle matters. */
-  steerHold: 0.5,
-  /** Steering input at which spinning rear wheels start to step the rear out (0..1). */
-  spinSteerStart: 0.2,
-  /** Steering input at which wheelspin loosens the rear fully (0..1). */
-  spinSteerFull: 0.7,
-  /** Maximum slide produced by wheelspin plus steering (0..1). */
-  spinSlideGain: 1,
-  /**
-   * Power-over intent: the rear gets a reason to spin only after the wheel has been held at
-   * (near) full lock below `spinIntentSpeed` for `spinIntentRise` seconds — a donut is asked
-   * for, a corner is not. It unwinds in `spinIntentFall` seconds once the wheel opens.
-   */
-  spinIntentSteer: 0.9,
-  spinIntentSpeed: 12,
-  spinIntentRise: 0.8,
-  spinIntentFall: 0.2,
-  /** Intent below which the rear still hooks up (0..1): the first half of the hold is free. */
-  spinIntentStart: 0.5,
-  /** Yaw kick from spinning rear wheels with the wheel turned (rad/s): the donut source. */
-  powerYawKick: 1.15,
-  /** Slip angle where the power kick starts fading (rad). Wider than the handbrake's. */
-  powerYawFadeStart: (25 * Math.PI) / 180,
-  /** Slip angle where the power kick is gone (rad). Past this only the throttle rotates the car. */
-  powerYawFadeEnd: (60 * Math.PI) / 180,
-  /** Speed at which the power kick starts fading (m/s): it is a low-speed rotation tool. */
-  powerYawSpeedFadeStart: 10,
-  /** Speed at which the power kick is gone (m/s). */
-  powerYawSpeedFadeEnd: 25,
+  /** Fraction of the slide that survives when throttle and steering are released (0..1). */
+  slideReleaseFloor: 0.85,
   /** Speed above which throttle + hard steering can break traction (m/s). ~70 km/h. */
   powerSlideSpeed: 19.4,
   /** Speed range over which power oversteer ramps in above `powerSlideSpeed` (m/s). */
@@ -162,24 +122,6 @@ export const VEHICLE = {
   counterSteerGrip: 0.45,
   /** Self-aligning multiplier while counter-steering. Above 1 = the slide is easy to catch. */
   counterSteerAssist: 1.6,
-  /**
-   * SELF-STEER: with the wheel released in a slide, the front wheels align themselves with
-   * the direction of travel — the wheel spinning through your hands — which is counter-steer.
-   * Holding the arrow keeps full lock (a first-gear donut tightens the longer it is held);
-   * tapping it lets the wheel drift back between taps, which is how a partial angle is held.
-   */
-  /** Rate the released wheel moves toward the self-steer angle (1/s). Slower than the return. */
-  selfSteerRate: 4.5,
-  /** Slip angle below which a released wheel simply returns to centre (rad). ~3 deg. */
-  selfSteerSlipStart: (3 * Math.PI) / 180,
-  /** Slip angle at which the released wheel fully follows the direction of travel (rad). ~10 deg. */
-  selfSteerSlipFull: (10 * Math.PI) / 180,
-  /**
-   * SPIN: the anti-spin assist (`spinGuardGain`) only has its full strength while the wheel is
-   * counter-steered. Steered into the slide it drops to this fraction, so holding the arrow
-   * past the point of recovery spins the car; lift (the wheel self-counters) to catch it.
-   */
-  spinGuardBare: 0,
   /** Handbrake longitudinal deceleration (m/s^2). */
   handbrakeDecel: 8,
   /** Minimum speed for handbrake to kick the rear out (m/s). */
@@ -192,11 +134,8 @@ export const VEHICLE = {
   handbrakeKickFadeStart: (18 * Math.PI) / 180,
   /** Slip angle where the handbrake kick is fully gone (rad). Prevents handbrake spins. */
   handbrakeKickFadeEnd: (42 * Math.PI) / 180,
-  /**
-   * Throttle effectiveness while fully sliding (0..1). Speed still bleeds during a drift
-   * (`driftDrag`), but a throttle kept in the torque band carries the car through it.
-   */
-  driftThrottleScale: 0.65,
+  /** Throttle effectiveness while fully sliding (0..1). Speed bleeds during a drift. */
+  driftThrottleScale: 0.5,
   /** Longitudinal scrub per m/s of lateral speed while sliding (1/s). */
   driftDrag: 0.22,
   /** Minimum speed to consider the car "moving" for direction/steering logic (m/s). */
@@ -233,18 +172,17 @@ export const VEHICLE = {
  *  - Under throttle the engine can rev *above* road rpm: that excess is wheelspin. How far it
  *    can rev is the torque at the wheels, `spinAuthority` per gear: first gear spins at a
  *    standstill, third needs real road speed before the band is reachable, sixth never spins.
- *  - Wheelspin only has bite inside the torque band (`bandLow`..`bandHigh`). Below it the
- *    engine has no torque to keep the rear loose; above it the car bounces off the limiter,
- *    loses drive and stability. So a sustained drift is the needle held in the band, which on
- *    a keyboard means tapping the throttle and on a pad means feathering the trigger.
- *  - The rear only spins when there is a reason for it: a turned wheel at low speed, a slide
- *    already under way, or a drift being held. A straight-line launch revs and shifts like any
- *    automatic, with no burnout.
- *  - The automatic shifts on road speed alone, drift or no drift, so an upshift mid-slide drops
- *    the needle out of the band and the rear hooks up: holding a drift on an automatic is
- *    hard, and that is the point. The manual box (`GameState.transmission`) gives the player
- *    the gear, and with it the ability to sit in the band at any speed — donuts, figure
- *    eights, long slides. Same physics; the reward for learning manual is that versatility.
+ *  - Wheelspin only reads inside the torque band (`bandLow`..`bandHigh`); above it the engine
+ *    is bouncing off the limiter. The rear only spins with a reason (a slide already under way
+ *    or a drift being held), so a straight-line launch revs and shifts like any automatic.
+ *  - The manual box (`GameState.transmission`) gives the player the gear, and with it a gear
+ *    that will not shift out from under a slide and a limiter that caps the car at the gear's
+ *    top speed. The automatic picks for them.
+ *
+ * SCOPE: this is a longitudinal and presentational system. `wheelspin` drives the tacho and the
+ * engine note; it is NOT an input to the handling model. The slide is owned entirely by
+ * `src/sim/vehicle.ts` (slip angle, handbrake, power oversteer, left-foot brake), and the car
+ * slides identically on either box. Keep it that way — the gearbox is a gearbox.
  */
 export const DRIVETRAIN = {
   /**
@@ -295,21 +233,6 @@ export const DRIVETRAIN = {
    * is forgiven; a drift held that way for a couple of seconds is not.
    */
   overRevGrace: 0.8,
-  /**
-   * Drive lost with loose rears pinned against the limiter (fraction, scaled by slide). A
-   * pinned throttle mid-drift bogs; on grip the limiter costs nothing, so launches are as ever.
-   */
-  overRevDriftDriveLoss: 0.65,
-  /** Self-aligning torque lost the same way (fraction, scaled by slide): pin it and the car spins. */
-  overRevStabilityLoss: 0.8,
-  /** Lateral grip lost the same way (fraction, scaled by slide): the rear walks out further. */
-  overRevGripLoss: 0.85,
-  /**
-   * Yaw the rear adds in the direction of the slide while pinned (rad/s, scaled by slide).
-   * Unlike the kicks it never fades with slip angle: this is what turns a pinned throttle
-   * into a spin, and it is why the throttle has to come off or the wheel has to counter.
-   */
-  overRevYaw: 1.5,
   /** Deceleration that holds a locked gear at its top speed (m/s^2). */
   limiterDecel: 6,
   /**
@@ -359,10 +282,6 @@ export const BODY = {
 export const DRIFT = {
   /** Minimum speed for a valid drift (m/s). 25 km/h. */
   minSpeed: 25 / 3.6,
-  /** Below `minSpeed`, a drift is still valid above this speed while the rear is spinning. */
-  spinMinSpeed: 2,
-  /** Wheelspin (0..1) that makes a slow slide — a donut — count as a drift. */
-  spinValid: 0.5,
   /** Slip angle above which the car is considered sliding (rad). ~12 degrees. */
   slipEnter: (12 * Math.PI) / 180,
   /** Slip angle below which a drift may lapse (rad). ~7 degrees, hysteresis for forgiveness. */
@@ -382,12 +301,6 @@ export const DRIFT = {
   chargeAngleGain: 1.6,
   /** Slip angle beyond which the angle bonus stops growing (rad). ~45 deg. */
   chargeAngleCap: (45 * Math.PI) / 180,
-  /**
-   * Charge lost while the engine is pinned against the limiter mid-drift (fraction of the
-   * rate at full penalty). The angle bonus would otherwise pay a pinned throttle — which walks
-   * the car out to a big angle — more than a clean drift held in the torque band.
-   */
-  chargeLimiterLoss: 0.7,
 };
 
 export const NITRO = {

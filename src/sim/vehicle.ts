@@ -1,7 +1,7 @@
 import type { PlayerCommand, VehicleState } from '../core/types';
 import { DRIVETRAIN, NITRO, VEHICLE } from '../config/tuning';
 import { clamp, clamp01, damp, forwardX, forwardZ, lerp, rightX, rightZ, wrapAngle } from '../core/math';
-import { gearTopSpeed, limiterPenalty, lugFactor, stepDrivetrain } from './drivetrain';
+import { gearTopSpeed, lugFactor, stepDrivetrain } from './drivetrain';
 
 /**
  * Arcade vehicle controller on a planar world (no wheel simulation).
@@ -21,22 +21,18 @@ import { gearTopSpeed, limiterPenalty, lugFactor, stepDrivetrain } from './drive
  *     the front's grip budget (`brakeYawGain`, `brakeFrontBite`), weakens the self-aligning
  *     torque that would straighten the car (`brakeAlignScale`) and holds a floor under the
  *     slide (`brakeRearUnload`): the car tightens toward the apex instead of running wide.
- *     Anything added here later — launch behaviour, a diff — must keep drive at the rear.
- *  2c. WHEELSPIN (`src/sim/drivetrain.ts`): the engine has a gear and an rpm, and under
- *     throttle it can rev above what the road turns it at. That excess, inside the torque band,
- *     is the rear spinning (`wheelspin`). It is what holds a slide (`hold` in step 3), what
- *     steps the rear out with the wheel turned (`spinSlide`, `powerYawKick`: a first-gear
- *     donut), and against the limiter it costs drive and stability (`overRev`). A binary
- *     throttle therefore has to be tapped to keep the needle in the band; that modulation is
- *     the skill in a sustained drift. The automatic shifts regardless of the drift, which is
- *     what makes holding one hard on it; the manual box hands the gear to the player.
- *  3. Steering angle tightens with speed and reacts within a couple of frames. Released in a
- *     slide, the wheel self-steers toward the direction of travel (counter-steer, see
- *     `VEHICLE.selfSteer*`); holding the arrow keeps lock, tapping it holds a partial angle.
+ *     Anything added here later — launch behaviour, a diff, wheelspin — must keep drive at
+ *     the rear.
+ *  2c. GEARBOX (`src/sim/drivetrain.ts`): the engine has a gear and an rpm, six-speed, either
+ *     automatic or handed to the player (`manual`). It is a longitudinal and presentational
+ *     system only: it sets the tachometer and the engine note, a gear caps the car at its top
+ *     speed (`limited`), and a tall gear lugs at low revs (`lugFactor`). It deliberately does
+ *     NOT feed the slide — handling is the same under either box, and `wheelspin` is a
+ *     readout, not a handling input. Keep it that way: the drift model below owns the slide.
+ *  3. Steering angle tightens with speed and reacts within a couple of frames.
  *  4. Yaw = grip-limited bicycle yaw (+ handbrake kick) + a self-aligning term that rotates
  *     the nose back toward the velocity direction. The self-aligning term is what keeps
- *     slides stable instead of spinning: bigger slip angle => stronger counter-rotation — but
- *     the anti-spin part of it only works while the wheel is counter-steered (`spinGuardBare`).
+ *     slides stable instead of spinning: bigger slip angle => stronger counter-rotation.
  *  5. Lateral: rotating the body injects lateral velocity (`-speed * yaw * dt`, i.e. the
  *     velocity vector keeps its world direction), and lateral grip bleeds it off. High grip
  *     => the car follows its nose. Low grip => it slides. `slide` (0..1) blends between them
@@ -84,23 +80,13 @@ export function stepVehicle(
   const steerInput = clamp(cmd.steer, -1, 1);
   const steerMag = steerInput < 0 ? -steerInput : steerInput;
 
-  // --- 1b. Drivetrain: gear, rpm and wheelspin for this tick (uses last tick's slide). ----
-  // The rear has a reason to spin in a held drift, in a slide already under way, or once the
-  // wheel has been held at full lock at low speed for a moment (the donut is asked for; a
-  // corner is not). On a straight it hooks up: launches are a plain automatic's.
-  const spinLoad = smoothstep(VEHICLE.spinSteerStart, VEHICLE.spinSteerFull, steerMag) * powerSpeedFade(absSpeed);
-  const wantsSpin = steerMag >= VEHICLE.spinIntentSteer && absSpeed < VEHICLE.spinIntentSpeed && !cmd.handbrake;
-  v.spinIntent = wantsSpin
-    ? Math.min(1, v.spinIntent + dt / VEHICLE.spinIntentRise)
-    : Math.max(0, v.spinIntent - dt / VEHICLE.spinIntentFall);
-  const intent = smoothstep(VEHICLE.spinIntentStart, 1, v.spinIntent);
-  const spinDemand = drifting ? 1 : intent > v.slide ? intent : v.slide;
+  // --- 1b. Gearbox: gear and rpm for this tick (uses last tick's slide). -----------------
+  // The rear is given a reason to rev above road speed when the car is already loose, so the
+  // needle and the engine note come alive in a slide. Nothing below reads `wheelspin` back:
+  // the gearbox does not change how the car handles.
+  const spinDemand = drifting ? 1 : v.slide;
   const shift = cmd.shiftUp ? 1 : cmd.shiftDown ? -1 : 0;
   stepDrivetrain(v, cmd.handbrake ? 0 : throttle, absSpeed, speed >= 0, spinDemand, manual, shift, dt);
-  const wheelspin = v.wheelspin;
-  // Against the limiter for longer than a flick: drive, stability and rear grip suffer, all
-  // scaled by how loose the car is, so on grip the limiter costs nothing.
-  const over = limiterPenalty(v);
 
   // --- 2. Steering angle: quick response, tightens with speed. -------------------------
   const speedT = clamp01(absSpeed / VEHICLE.maxSpeed);
@@ -109,47 +95,27 @@ export function stepVehicle(
     VEHICLE.maxSteerAngleHighSpeed,
     Math.pow(speedT, VEHICLE.steerSpeedCurve),
   );
-  // Self-steer: a released wheel in a slide aligns itself with the direction of travel (the
-  // wheel spinning through your hands), which is counter-steer. On grip it returns to centre.
-  const forwardMotion = speed > VEHICLE.movingThreshold;
-  const selfFade = forwardMotion ? smoothstep(VEHICLE.selfSteerSlipStart, VEHICLE.selfSteerSlipFull, slipMag) : 0;
-  const selfSteer = clamp(slip, -steerLimit, steerLimit) * selfFade;
-  // The input is added in full; only the self-steer part fades as the arrow is pressed.
-  const targetSteer = steerInput * steerLimit + selfSteer * (1 - steerMag);
-  let rate: number;
-  if (steerMag > 0.05) {
-    const returning = Math.abs(targetSteer) < Math.abs(v.steerAngle) && targetSteer * v.steerAngle >= 0;
-    rate = returning ? VEHICLE.steerReturnRate : VEHICLE.steerRate;
-  } else {
-    rate = lerp(VEHICLE.steerReturnRate, VEHICLE.selfSteerRate, selfFade);
-  }
-  v.steerAngle = damp(v.steerAngle, targetSteer, rate, dt);
-  // Where the wheel sits against the slide: + counter-steered, - steered into it.
-  const steerFrac = v.steerAngle / steerLimit;
-  const against = slipMag > VEHICLE.slideSlipStart ? (slip < 0 ? -1 : 1) * clamp(steerFrac, -1, 1) : 0;
-  const counter = clamp01(against);
-  v.counterSteer = against;
+  const targetSteer = steerInput * steerLimit;
+  const returning = Math.abs(targetSteer) < Math.abs(v.steerAngle) && targetSteer * v.steerAngle >= 0;
+  v.steerAngle = damp(v.steerAngle, targetSteer, returning ? VEHICLE.steerReturnRate : VEHICLE.steerRate, dt);
+  // Where the wheel sits against the slide: + counter-steered, - steered into it. A readout
+  // for the cluster's wheel indicator; the handling terms below use `counter` directly.
+  const counter = slipMag > VEHICLE.slideSlipStart ? clamp01((slip < 0 ? -1 : 1) * steerInput) : 0;
+  v.counterSteer = slipMag > VEHICLE.slideSlipStart ? (slip < 0 ? -1 : 1) * steerInput : 0;
 
   // --- 3. How much the car is sliding this tick (0 = full grip, 1 = full drift). -------
+  const forwardMotion = speed > VEHICLE.movingThreshold;
   // Forward weight transfer under braking (0..1). Drives the left-foot-brake behaviour used
   // in steps 3, 4 and 5: front loaded, rear light.
   const brakeLoad = forwardMotion ? brake * clamp01(absSpeed / VEHICLE.brakeLoadSpeed) : 0;
   const handbrakeSlide = cmd.handbrake && forwardMotion && absSpeed > VEHICLE.handbrakeMinSpeed;
   let slide = 0;
   if (forwardMotion) {
-    // Already sliding: what keeps the rear loose is torque at the wheels (wheelspin), with the
-    // steering holding only part of it. Momentum alone decays to `slideReleaseFloor`.
-    const steerHold = steerMag * VEHICLE.steerHold;
-    const hold = wheelspin > steerHold ? wheelspin : steerHold;
-    const slipFactor = smoothstep(VEHICLE.slideSlipStart, VEHICLE.slideSlipFull, slipMag);
-    slide = slipFactor * lerp(VEHICLE.slideReleaseFloor, 1, hold);
-
-    // Spinning rear wheels with the wheel turned step the rear out: the donut. That is a
-    // low-speed tool (at speed the rear only comes out under lateral load, `power` below),
-    // but once the car is sliding, wheelspin keeps it out at any speed. Straight-line
-    // wheelspin (a launch) only smokes; it never makes the car wander.
-    const spinSlide = wheelspin * (spinLoad > slipFactor ? spinLoad : slipFactor) * VEHICLE.spinSlideGain;
-    if (spinSlide > slide) slide = spinSlide;
+    // Already sliding: stay loose while the player asks for it (throttle or steering).
+    const hold = throttle > steerMag ? throttle : steerMag;
+    slide =
+      smoothstep(VEHICLE.slideSlipStart, VEHICLE.slideSlipFull, slipMag) *
+      lerp(VEHICLE.slideReleaseFloor, 1, hold);
 
     // Power oversteer: hard steering + throttle above `powerSlideSpeed` breaks traction.
     const powerSpeed = clamp01((absSpeed - VEHICLE.powerSlideSpeed) / VEHICLE.powerSlideSpeedRamp);
@@ -157,10 +123,8 @@ export function stepVehicle(
       throttle * powerSpeed * smoothstep(VEHICLE.powerSlideSteer, 1, steerMag) * VEHICLE.powerSlideGain;
     if (power > slide) slide = power;
 
-    // Counter-steering (the wheel pointing where the car is going, held or self-steered)
-    // recovers grip faster — unless the rear is being kept spinning, in which case it steers
-    // the slide rather than ending it.
-    slide *= lerp(1, VEHICLE.counterSteerGrip, counter * (1 - wheelspin));
+    // Counter-steering (steering out of the slide) recovers grip faster.
+    slide *= lerp(1, VEHICLE.counterSteerGrip, counter);
 
     // Left-foot brake: the unloaded rear keeps sliding, so braking mid-drift trims the line
     // instead of snapping the car straight. Only while a slide already exists — braking in a
@@ -174,8 +138,7 @@ export function stepVehicle(
     slide = clamp01(slide);
   }
 
-  const grip =
-    lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide) * (1 - over * slide * DRIVETRAIN.overRevGripLoss);
+  const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide);
   // The loaded front can hold more lateral force, which is what closes the apex.
   const latCap =
     lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide) * lerp(1, VEHICLE.brakeFrontBite, brakeLoad);
@@ -199,9 +162,6 @@ export function stepVehicle(
       const ramp = clamp01(absSpeed / VEHICLE.nitroRampSpeed);
       drive += NITRO.boostAccel * ramp * (1 - boostRatio * boostRatio);
     }
-    // Loose rears pinned against the limiter put down far less power: a pinned throttle
-    // mid-drift bogs. On grip the limiter costs nothing, so launches and straights are as ever.
-    drive *= 1 - over * slide * DRIVETRAIN.overRevDriftDriveLoss;
     // A tall gear at low revs lugs (manual only in practice: the automatic never gets there).
     drive *= lugFactor(v.rpm01, v.gear);
     // Wheels that are already sliding put down less power.
@@ -263,12 +223,7 @@ export function stepVehicle(
   // --- 5. Yaw. --------------------------------------------------------------------------
   // Bicycle yaw, limited by how much lateral acceleration the tyres can produce. Drifting
   // raises that budget (`driftYawGain`) so the nose can out-rotate the velocity.
-  // On grip the bicycle model reads the wheel's angle to the body. In a slide the front tyres
-  // work against the direction of travel instead: the effective angle is the wheel minus the
-  // slip, so a counter-steered wheel on the line of travel turns nothing and a wheel held into
-  // the slide keeps the rotation going. The blend by `slide` keeps grip handling untouched.
-  const steerEff = clamp(v.steerAngle - slip * slide, -VEHICLE.maxEffectiveSteer, VEHICLE.maxEffectiveSteer);
-  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(steerEff);
+  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle);
   // Weight on the nose = more front grip to spend on rotation: the left-foot brake tightens
   // the line rather than opening it.
   const yawBudget =
@@ -283,20 +238,6 @@ export function stepVehicle(
     yaw += VEHICLE.handbrakeYawKick * steerInput * fade * ramp;
   }
 
-  // Power kick: spinning rears with the wheel turned rotate the car around its nose. This is
-  // what makes a donut from a standstill; it fades with slip (so it cannot spin the car on
-  // its own) and with speed (at speed the slide is held by grip balance, not by torque).
-  if (wheelspin > 0 && forwardMotion) {
-    const fade = 1 - smoothstep(VEHICLE.powerYawFadeStart, VEHICLE.powerYawFadeEnd, slipMag);
-    yaw += VEHICLE.powerYawKick * wheelspin * steerInput * fade * powerSpeedFade(absSpeed);
-  }
-
-  // Pinned against the limiter with the rear loose, the rear keeps coming round in the
-  // direction it is already going, and nothing about slip angle stops it: lift or spin.
-  if (over > 0 && slipMag > VEHICLE.slideSlipStart) {
-    yaw += (slip < 0 ? 1 : -1) * DRIVETRAIN.overRevYaw * over * slide;
-  }
-
   // Self-aligning torque: rotates the nose toward the velocity direction. Weak while
   // drifting (so slides can be held), strong while gripping, and it ramps up hard past
   // `spinGuardSlip` so only a really abusive input can spin the car.
@@ -304,16 +245,9 @@ export function stepVehicle(
     // The light rear under braking resists straightening, so the nose keeps coming around.
     let alignRate =
       lerp(VEHICLE.alignGrip, VEHICLE.driftStability, slide) * lerp(1, VEHICLE.brakeAlignScale, brakeLoad);
-    // The anti-spin assist needs the wheel counter-steered to work with. Steered into the
-    // slide it is nearly gone: hold the arrow past the point of recovery and the car spins.
     const beyond = slipMag - VEHICLE.spinGuardSlip;
-    if (beyond > 0) {
-      const guard = lerp(VEHICLE.spinGuardBare, 1, smoothstep(-1, 0.5, against));
-      alignRate += beyond * VEHICLE.spinGuardGain * guard;
-    }
+    if (beyond > 0) alignRate += beyond * VEHICLE.spinGuardGain;
     alignRate *= lerp(1, VEHICLE.counterSteerAssist, counter);
-    // A loose rear pinned against the limiter has nothing to align with, spin guard included.
-    alignRate *= 1 - over * slide * DRIVETRAIN.overRevStabilityLoss;
     const fade = clamp01((speed - VEHICLE.alignMinSpeed) / VEHICLE.alignFadeSpeed);
     yaw += slip * alignRate * fade;
   }
@@ -358,16 +292,6 @@ export function stepVehicle(
   v.throttleApplied = nitroActive ? Math.max(throttle, VEHICLE.nitroIdleThrottle) : throttle;
   v.brakeApplied = brake;
   v.handbrake = cmd.handbrake;
-}
-
-/** How much of the power-over tools (kick, step-out) survive at `absSpeed`: full slow, gone fast. */
-function powerSpeedFade(absSpeed: number): number {
-  return (
-    1 -
-    clamp01(
-      (absSpeed - VEHICLE.powerYawSpeedFadeStart) / (VEHICLE.powerYawSpeedFadeEnd - VEHICLE.powerYawSpeedFadeStart),
-    )
-  );
 }
 
 /** Hermite ease between two edges. Local copy so `src/core/math.ts` stays untouched. */

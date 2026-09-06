@@ -75,10 +75,10 @@ Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md
 
 | Key | Action |
 | --- | --- |
-| W / S or Up / Down | Throttle / brake (brake at standstill reverses). Mid-drift, tap the throttle to hold the needle in the tacho's torque band: pinned, the car over-revs and walks out; lifted, it regrips |
-| A / D or Left / Right | Steer. Released in a slide, the wheel self-steers to counter-steer (watch the wheel glyph by the gear). Hold the arrow into the slide too long and the car spins; tap it to hold an angle |
-| Space | Handbrake (kick the rear out to start a drift). Full lock plus a tapped throttle from a standstill is a first-gear donut — on the manual box; the automatic shifts up from under it |
-| T | Automatic / manual transmission (remembered). Manual is the drifting box: you keep the gear, so the engine can sit in the torque band at any speed |
+| W / S or Up / Down | Throttle / brake (brake at standstill reverses). Braking mid-drift is a left-foot brake: it loads the front and tightens the line toward the apex rather than snapping the car straight |
+| A / D or Left / Right | Steer. Throttle or steering holds a slide; counter-steering out of it recovers grip, and releasing everything regrips within about 1.5 s |
+| Space | Handbrake (kick the rear out to start a drift) |
+| T | Automatic / manual transmission (remembered). On manual you keep the gear through a corner and the limiter caps you at that gear's top speed. The box sets the tacho, the engine note and the limiter — it does not change how the car slides |
 | X / Z | Shift up / down (manual). On a pad: RB / LB |
 | Shift | Nitro (recharges gradually while driving) |
 | E or left click | Fire lightning at the nearest electric car in the forward cone |

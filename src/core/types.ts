@@ -106,12 +106,13 @@ export interface VehicleState {
   rpm01: number;
   /** Excess rpm over road rpm the engine is holding under throttle (rpm01). The wheelspin integrator. */
   spinRev: number;
-  /** Rear wheels spinning (0..1): excess rpm inside the torque band. What holds a drift. */
+  /**
+   * Rear wheels spinning (0..1): excess rpm inside the torque band. A readout for the tacho
+   * and the engine note — the handling model in `src/sim/vehicle.ts` does not read it.
+   */
   wheelspin: number;
   /** Seconds the engine has been against the limiter; its penalties ramp in over `overRevGrace`. */
   limiterTime: number;
-  /** Power-over intent (0..1): full lock held at low speed for a moment. See `VEHICLE.spinIntent*`. */
-  spinIntent: number;
   /** Seconds the automatic still refuses to shift down after a rev-triggered upshift. */
   shiftHold: number;
   /**

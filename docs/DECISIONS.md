@@ -11,9 +11,9 @@
 | Theme | 50% JDM, 50% cyberpunk |
 | World | Dark, nocturnal and dystopian; electric cars dominate the city |
 | Core fantasy | The combustion-powered outlaw destroys/disables electric cars through drift-charged lightning |
-| Drift | Easier and more forgiving than Need for Speed Underground 2 for the MVP to *start*: a handbrake flick and the wheel is enough. *Sustaining* one is a throttle and a steering skill. Throttle: the rear stays loose only while the engine is in its torque band, so a held key over-revs (the car walks out and bogs) and no throttle regrips. Steering: in a slide the front wheels turn the car by their angle to the direction of travel, and a released wheel self-steers onto that line (counter-steer, the wheel spinning through your hands). Holding the arrow into the slide tightens it and, held too long, spins the car; lifting catches it; tapping holds an angle in between. The anti-spin assist only works while the wheel is counter-steered. A first-gear donut is possible from a standstill on the manual box; the same figure in a taller gear needs the road speed that gear's torque asks for |
+| Drift | Easier and more forgiving than Need for Speed Underground 2 for the MVP. A handbrake flick starts one; throttle or steering holds it; counter-steering catches it; releasing both regrips within about 1.5 s. The realistic model tried on 2026-09-05 (self-steer, torque-band throttle, spin-on-hold) was reverted — see the 2026-09-05 note below |
 | Drivetrain | Rear-wheel drive. Not simulated per wheel, but the handling model must express it: throttle only ever loosens the rear, and the brake loads the front (left-foot braking tightens the line) |
-| Gearbox | Six-speed with a simulated engine rpm (`src/sim/drivetrain.ts`): road rpm is linear through zero per gear, and under throttle the engine revs above it by the gear's torque — that excess is wheelspin, and it only appears with a reason (a held drift, a slide, or full lock held at low speed). Two boxes, toggled with T and remembered: the **automatic** reads revs like a real one, so with the rear spinning it shifts up from under a drift and drops the needle out of the band — regular driving is a plain automatic, holding a drift on it is hard. The **manual** (X/Z, RB/LB) hands the gear to the player: the engine can sit in the band at any speed, so donuts, figure eights and long slides are the reward for learning it. Same physics under both |
+| Gearbox | Six-speed with a simulated engine rpm (`src/sim/drivetrain.ts`): road rpm is linear through zero per gear, and under throttle the engine revs above it by the gear's torque. Two boxes, toggled with T and remembered: the **automatic** picks the gear, the **manual** (X/Z, RB/LB) hands it to the player, who then holds a gear through a corner and gets capped at that gear's top speed. It drives the tacho, the engine note and the limiter — **not** the slide: the car handles identically on either box |
 | Lightning charge | Charged only through valid drifting |
 | Lightning targeting | Auto-target nearest eligible electric vehicle inside a forward cone |
 | Reward | Destroyed/disabled electric vehicles award money |
@@ -30,10 +30,10 @@ These values may be tuned without asking Juan. Keep them centralized.
 
 | Parameter | Starting default |
 | --- | --- |
-| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart; T automatic/manual; X/Z shift up/down (RB/LB on a pad). In a drift the throttle key is tapped to hold the needle in the tacho's torque band (roughly 6000-8200 rpm) and the steering arrow is tapped to hold a wheel angle against the self-steer; a pad trigger and stick are feathered there instead |
+| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart; T automatic/manual; X/Z shift up/down (RB/LB on a pad) |
 | Gamepad | Xbox-style standard mapping, always live beside the keyboard. NFS Underground 2's default pad layout, so the muscle memory carries over: RT throttle, LT brake/reverse, left stick steers, A handbrake, B nitro, Y camera. The three actions NFSU2 has no counterpart for take the buttons it leaves free: X lightning, View cruise, Start restart; A/Start confirm in menus |
 | Camera FOV | 60 base, easing toward 70 during nitro |
-| Drift activation | Speed above 25 km/h-equivalent (or the rear wheels spinning above 7 km/h: a donut counts) and slip angle above roughly 12° for 200 ms |
+| Drift activation | Speed above 25 km/h-equivalent and slip angle above roughly 12° for 200 ms |
 | Drift cancellation | Low speed, collision, reversal or slip below threshold for roughly 350 ms |
 | Lightning capacity | 100 units |
 | Lightning cost | 50 units per shot |
@@ -173,3 +173,14 @@ callout.
 | Lightning moved to `pointerdown` | `src/core/input/keyboard.ts` listens for `pointerdown` instead of `mousedown`, and ignores taps that land on a control (`.rb-touch`, `#menu-root`, any button or field) | The compatibility mouse event a tap used to fire arrives after `touchend` and is cancelled with it — the double-tap guard would have eaten every second shot of a fast tap. `pointerdown` also fires on the touch itself rather than a beat later, which is what rapid fire should feel like |
 | Installed, not just mobile-friendly | `public/manifest.webmanifest` (fullscreen, landscape) plus the `apple-mobile-web-app-*` tags and an `apple-touch-icon`; icons are generated by `scripts/make-icons.mjs` | Safari on iPhone keeps its edge gestures and its chrome no matter what a page asks for; adding the game to the home screen is the only way past that. The icons are rasterised from the favicon's bolt by a script rather than checked in as binaries nobody can edit |
 | Screen stays awake, first tap asks for fullscreen | Wake Lock re-taken on `visibilitychange`; one `requestFullscreen` on the first tap of a touch session, failures swallowed | A driving game can go a minute without a touch, which is long enough for a handset to dim. Android drops its address bar for a fullscreen element; iPhone refuses both, and refusing is fine — nothing depends on either |
+
+## The realistic drift model was reverted; the gearbox stayed (2026-09-05)
+
+The manual gearbox and the realistic drift model shipped in one commit (`006db50`). They are
+separable, and only one of them was worth keeping.
+
+| Decision | What | Why |
+| --- | --- | --- |
+| The gearbox stays | Gears, rpm, the auto/manual toggle, the per-gear limiter and lugging all remain (`src/sim/drivetrain.ts`) | It is a good system on its own: the tacho became an instrument, the engine note got a reason to drop on a shift, and holding a gear through a corner is a real choice. None of that needs the drift model |
+| The drift model goes back | Self-steer/counter-steer at the wheel, wheelspin holding the slide, the slip-relative bicycle model, the power yaw kick, the over-rev penalties (grip, drive, stability, yaw) and the donut drift-validity rule are all removed | It made the car a simulator to hold sideways — the throttle had to be tapped to keep the needle in a band, and holding the arrow spun you — against the stated goal of being *more* forgiving than NFSU2. The left-foot-brake behaviour from `256fbdc` is the drift feel this game wants |
+| The gearbox must not touch the slide | `stepVehicle` no longer reads `wheelspin`, `limiterPenalty` or the over-rev constants; the drivetrain gets `slide` as an input and gives nothing back to handling | Keeping the coupling one-directional is what makes the two systems separable at all — it is why the gearbox survived this revert, and it should survive the next tuning pass the same way |

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createVehicleState } from '../src/sim/gameState';
+import { createInitialGameState, createVehicleState, stepGame } from '../src/sim/gameState';
+import { createArenaLayout } from '../src/world/arenaLayout';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { stepVehicle } from '../src/sim/vehicle';
 import {
@@ -169,6 +170,51 @@ describe('manual box', () => {
     expect(v.speed).toBeLessThan(before);
     expect(v.speed).toBeLessThanOrEqual(gearTopSpeed(1) + 0.5);
     expect(v.rpm01).toBeGreaterThan(0.95);
+  });
+});
+
+describe('the gearbox does not change how the car handles', () => {
+  /**
+   * The premise of keeping the manual box while reverting the realistic drift model: the
+   * drivetrain reads `slide` and gives nothing back to it. Same entry, same inputs, either
+   * box — the slide has to be identical, even with the manual pinned against the limiter.
+   */
+  it('produces the same slide on either box, limiter included', () => {
+    const slideAfterFlick = (manual: boolean): { slip: number; rpm: number; gear: number } => {
+      const layout = createArenaLayout();
+      layout.colliders.length = 0;
+      layout.bounds.minX = -100000;
+      layout.bounds.maxX = 100000;
+      layout.bounds.minZ = -100000;
+      layout.bounds.maxZ = 100000;
+      const state = createInitialGameState(layout);
+      state.vehicle.x = 0;
+      state.vehicle.z = 0;
+      state.vehicle.heading = 0;
+      const go = createPlayerCommand();
+      go.throttle = 1;
+      // Both runs reach 60 km/h on the automatic, so they enter the flick identically.
+      let guard = 0;
+      while (state.vehicle.speed * 3.6 < 60 && guard++ < 60 * 30) stepGame(state, go, layout, DT);
+      // Hand the gear over only now: the manual box then holds this gear through the slide.
+      if (manual) state.transmission = 'manual';
+      const flick = createPlayerCommand();
+      flick.steer = 1;
+      flick.handbrake = true;
+      for (let i = 0; i < Math.round(0.4 / DT); i++) stepGame(state, flick, layout, DT);
+      const held = createPlayerCommand();
+      held.throttle = 1;
+      held.steer = 1;
+      for (let i = 0; i < Math.round(2 / DT); i++) stepGame(state, held, layout, DT);
+      const v = state.vehicle;
+      return { slip: Math.abs(v.slipAngle), rpm: v.rpm01, gear: v.gear };
+    };
+    const auto = slideAfterFlick(false);
+    const manual = slideAfterFlick(true);
+    // The boxes really are in different states: the manual is sitting on the limiter.
+    expect(manual.rpm).toBeGreaterThan(auto.rpm + 0.2);
+    // ...and the car slides exactly the same anyway.
+    expect(manual.slip).toBeCloseTo(auto.slip, 6);
   });
 });
 
