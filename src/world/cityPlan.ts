@@ -229,6 +229,8 @@ export interface CityPlan {
    * wants it drawn. The blocks already stand that far back; this is only the surface.
    */
   shoulders?: { corporate: number; urban: number; jdm: number; alley: number };
+  /** Where that pavement stands proud of the road, when the world raises it. */
+  kerbs?: KerbField | null;
   /** Open water. The ground stops at its edge; the quay wall runs along `quayZ`. */
   water?: { rect: Rect; quayZ: number } | null;
   /** Painted drift plaza, when the world has one. */
@@ -249,6 +251,25 @@ export interface CityPlan {
 
 /** Height of a sidewalk / perimeter slab above the road. */
 export const SIDEWALK_Y = 0.22;
+
+/**
+ * The raised pavement beside the ground-level roads: where it is, and how high the ground
+ * stands there. One object answers both the renderer (which segments to pave, how wide) and
+ * the simulation (the height under a point), so a car that mounts the kerb rises by exactly
+ * as much as the kerb you can see. Built by `src/world/kerbs.ts`.
+ */
+export interface KerbField {
+  /** Paved width beside `rb` at sample `i` (m). 0 where that stretch is not paved. */
+  widthAt(rb: RibbonDef, i: number): number;
+  /** True when segment `i` of `rb` carries pavement on `side` (-1 left, +1 right of travel). */
+  paved(rb: RibbonDef, i: number, side: number): boolean;
+  /**
+   * Height of the pavement at (x, z) above the road (m): 0 on the asphalt and past the
+   * pavement's outer edge, `KERB_HEIGHT` on it, ramped across the kerb face between. Writes
+   * the grade of that face into `out`, which is what tilts a car climbing it.
+   */
+  heightAt(x: number, z: number, out: { gx: number; gz: number }): number;
+}
 
 export function inRect(r: Rect, x: number, z: number, pad = 0): boolean {
   return x >= r.minX - pad && x <= r.maxX + pad && z >= r.minZ - pad && z <= r.maxZ + pad;

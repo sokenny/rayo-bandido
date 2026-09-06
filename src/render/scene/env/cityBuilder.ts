@@ -2,6 +2,7 @@ import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan'
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
+import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec } from './buildingKit';
 import { signCell } from './textures';
 
 /**
@@ -12,9 +13,6 @@ import { signCell } from './textures';
 
 /** Metres covered by one asphalt texture tile. */
 export const ROAD_TILE = 8;
-/** Metres covered by one facade texture tile (horizontally / vertically). */
-const FACADE_TILE_W = 12;
-const FACADE_TILE_H = 10;
 /** Sidewalk ledge kept between the collider edge and the nearest wall. */
 const SIDEWALK = 3.4;
 
@@ -31,8 +29,9 @@ export function blockSetback(w: number, d: number): { x: number; z: number } {
   };
 }
 
-export function facadeBuilder(b: EnvBuilders, zone: ZoneId): MeshBuilder {
-  return zone === 'corporate' ? b.corp : zone === 'jdm' ? b.jdm : b.urban;
+/** Every zone's facades land in the one facade builder; the zone only picks the light. */
+export function facadeBuilder(b: EnvBuilders, _zone: ZoneId): MeshBuilder {
+  return b.facade;
 }
 
 export function accent(zone: ZoneId, rng: () => number): number {
@@ -45,7 +44,7 @@ export function buildCity(b: EnvBuilders): void {
   buildGround(b, b.plan.bounds);
   buildRoads(b);
   buildRoadPaint(b, rng);
-  for (const blk of b.plan.blocks) buildBlock(b, blk, rng);
+  buildBlocks(b);
   buildPerimeter(b, rng);
   buildSkyline(b, rng);
 }
@@ -208,6 +207,37 @@ function buildPlazaPaint(b: EnvBuilders, plaza: Rect, rng: () => number): void {
 
 /* ------------------------------------------------------------------ city blocks */
 
+/**
+ * How a block turns into buildings. The knobs that shape the skyline:
+ *
+ * - `minPlot` / `bigStop` / `emptyChance`: how a block is cut into plots (see
+ *   `subdividePlot`). Bigger `bigStop` = more large plots = more podiums and landmarks.
+ * - `heights`: the height band for each massing tier (m). This is the hierarchy of low,
+ *   medium, tall and skyscraper.
+ * - `fieldDepth`: how much the smooth skyline field (`skylineField`) swings heights,
+ *   0.5 = between -25 % and +25 %. The rhythm: districts rise and fall instead of scattering.
+ * - `edgeDrop` / `innerRise`: on a block of several plots, the ones on the street lose up to
+ *   `edgeDrop` and the ones behind gain up to `innerRise`, so the tall stuff stands behind
+ *   the low stuff and the layers overlap.
+ * - `landmarks`: how many plots anchor the skyline with one of the kit's landmark
+ *   silhouettes, the least distance between two of them, and how much taller they stand.
+ * - `linkChance`: enclosed bridges between neighbouring towers on one block.
+ * - `districtScreens`: the screens on downtown facades, per face.
+ */
+export const BLOCKS = {
+  minPlot: 9,
+  bigStop: { 1: 0.15, 2: 0.2, 3: 0.35, 4: 0.4 } as Record<number, number>,
+  emptyChance: 0.06,
+  heights: { 1: [6, 15], 2: [14, 34], 3: [28, 62], 4: [70, 135] } as Record<number, [number, number]>,
+  fieldDepth: 0.5,
+  edgeDrop: 0.2,
+  innerRise: 0.22,
+  landmarks: { count: 6, spacing: 90, scale: 1.45, maxHeight: 150, minSide: 14 },
+  linkChance: 0.3,
+  linkMax: 30,
+  districtScreens: { perFace: 2, faceChance: 0.6 },
+};
+
 interface Module {
   minX: number;
   maxX: number;
@@ -216,15 +246,35 @@ interface Module {
   height: number;
 }
 
-function heightFor(massing: 1 | 2 | 3 | 4, rng: () => number): number {
-  if (massing === 1) return 7 + rng() * 9;
-  if (massing === 2) return 15 + rng() * 19;
-  if (massing === 3) return 26 + rng() * 34;
-  // Skyscrapers: the reference's wall of towers, twice the height of anything else.
-  return 70 + rng() * 70;
+/** A plot with everything decided about it, before anything is drawn. */
+interface Plot extends Module {
+  blk: BlockRect;
+  inner: Rect2;
+  spec: BuildingSpec;
+  seed: number;
+  /** Set once built. */
+  top?: number;
+  dark?: boolean;
 }
 
-function buildBlock(b: EnvBuilders, blk: BlockRect, rng: () => number): void {
+function heightFor(massing: 1 | 2 | 3 | 4, rng: () => number): number {
+  const [lo, hi] = BLOCKS.heights[massing];
+  return lo + rng() * (hi - lo);
+}
+
+/** True when the plot's wall on side (dx, dz) is flush with the block edge and faces a road. */
+function facesStreet(b: EnvBuilders, inner: Rect2, m: Rect2, dx: number, dz: number): boolean {
+  const flush =
+    dx === 1 ? m.maxX > inner.maxX - 1.2 : dx === -1 ? m.minX < inner.minX + 1.2 : dz === 1 ? m.maxZ > inner.maxZ - 1.2 : m.minZ < inner.minZ + 1.2;
+  if (!flush) return false;
+  const faceX = dx === 1 ? m.maxX : dx === -1 ? m.minX : (m.minX + m.maxX) / 2;
+  const faceZ = dz === 1 ? m.maxZ : dz === -1 ? m.minZ : (m.minZ + m.maxZ) / 2;
+  const isRoad = b.plan.isRoad;
+  return isRoad(faceX + dx * 7, faceZ + dz * 7) || isRoad(faceX + dx * 11, faceZ + dz * 11) || isRoad(faceX + dx * 15, faceZ + dz * 15);
+}
+
+/** Pavement, kerb and the plots of one block. Nothing is drawn but the slab. */
+function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
   const w = blk.maxX - blk.minX;
   const d = blk.maxZ - blk.minZ;
   const cx = (blk.minX + blk.maxX) / 2;
@@ -245,340 +295,122 @@ function buildBlock(b: EnvBuilders, blk: BlockRect, rng: () => number): void {
   };
   const iw = inner.maxX - inner.minX;
   const id = inner.maxZ - inner.minZ;
-  if (iw < 3 || id < 3) return;
-  const nx = Math.max(1, Math.min(6, Math.round(iw / 17)));
-  const nz = Math.max(1, Math.min(6, Math.round(id / 17)));
+  if (iw < 3 || id < 3) return [];
 
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iz = 0; iz < nz; iz++) {
-      const gap = 0.6;
-      const m: Module = {
-        minX: inner.minX + (iw / nx) * ix + (ix > 0 ? gap : 0) + rng() * 1.2,
-        maxX: inner.minX + (iw / nx) * (ix + 1) - (ix < nx - 1 ? gap : 0) - rng() * 1.2,
-        minZ: inner.minZ + (id / nz) * iz + (iz > 0 ? gap : 0) + rng() * 1.2,
-        maxZ: inner.minZ + (id / nz) * (iz + 1) - (iz < nz - 1 ? gap : 0) - rng() * 1.2,
-        height: heightFor(blk.massing, rng),
-      };
-      buildModule(b, blk, inner, m, rng);
+  const rng = makeRng(plotSeed(cx, cz));
+  const rects = subdividePlot(inner, rng, { minPlot: BLOCKS.minPlot, bigStop: BLOCKS.bigStop[blk.massing] ?? 0.2, emptyChance: blk.massing <= 2 ? BLOCKS.emptyChance : 0 });
+  const plots: Plot[] = [];
+  for (const r of rects) {
+    if (r.maxX - r.minX < 3 || r.maxZ - r.minZ < 3) continue;
+    const px = (r.minX + r.maxX) / 2;
+    const pz = (r.minZ + r.maxZ) / 2;
+    const seed = plotSeed(px, pz);
+    const prng = makeRng(seed);
+    const street: [boolean, boolean, boolean, boolean] = [
+      facesStreet(b, inner, r, 1, 0),
+      facesStreet(b, inner, r, -1, 0),
+      facesStreet(b, inner, r, 0, 1),
+      facesStreet(b, inner, r, 0, -1),
+    ];
+    let h = heightFor(blk.massing, prng);
+    // The skyline field: the district rises and falls instead of scattering.
+    h *= 1 - BLOCKS.fieldDepth / 2 + BLOCKS.fieldDepth * skylineField(px, pz);
+    // Low in front, tall behind: on a block of several plots the street edge drops and the
+    // plots behind it rise. Downtown is a wall of towers either way.
+    if (rects.length >= 4 && blk.massing >= 2 && blk.massing <= 3) {
+      if (street.some(Boolean)) h *= 1 - BLOCKS.edgeDrop * prng();
+      else h *= 1 + BLOCKS.innerRise * (0.5 + 0.5 * prng());
     }
+    // Something passes overhead: nothing here may reach it.
+    if (blk.maxHeight !== undefined) h = Math.max(4, Math.min(h, blk.maxHeight - 1));
+    plots.push({
+      ...r,
+      height: h,
+      blk,
+      inner,
+      seed,
+      spec: { zone: blk.zone, massing: blk.massing, height: h, base: 0.22, detail: 'near', street },
+    });
   }
+  return plots;
 }
-
-type Variant = 'plain' | 'tower' | 'slab' | 'stepped' | 'shabby' | 'skyscraper';
 
 /**
- * Which silhouette a module gets. Towers are set back on a podium or stepped; mid-rises
- * are plain or stepped or a slab with a lit spine; the low stuff in the old town is a
- * shabby box hung with cages, awnings and a tank on the roof.
+ * The landmark anchors: the biggest plots that can carry a tower, at least `spacing` apart,
+ * each given one of the kit's silhouettes in turn and a head above the field. Deterministic:
+ * the same plots every time, unless the block grid changes.
  */
-function pickVariant(blk: BlockRect, rng: () => number): Variant {
-  const r = rng();
-  if (blk.massing === 4) return 'skyscraper';
-  if (blk.massing === 3) return r < 0.45 ? 'tower' : r < 0.75 ? 'slab' : 'stepped';
-  if (blk.massing === 2) return r < 0.45 ? 'plain' : r < 0.75 ? 'stepped' : 'slab';
-  if (blk.zone === 'jdm') return r < 0.65 ? 'shabby' : 'plain';
-  return r < 0.35 ? 'shabby' : 'plain';
+function assignLandmarks(plots: Plot[]): void {
+  const L = BLOCKS.landmarks;
+  const candidates = plots
+    .filter((p) => p.blk.massing >= 3 && p.blk.maxHeight === undefined && Math.min(p.maxX - p.minX, p.maxZ - p.minZ) >= L.minSide)
+    .map((p) => ({ p, score: (p.maxX - p.minX) * (p.maxZ - p.minZ) * (p.blk.massing === 4 ? 1.3 : 1) }))
+    .sort((a, c) => c.score - a.score || a.p.seed - c.p.seed);
+  const taken: Plot[] = [];
+  for (const { p } of candidates) {
+    if (taken.length >= L.count) break;
+    const cx = (p.minX + p.maxX) / 2;
+    const cz = (p.minZ + p.maxZ) / 2;
+    let clear = true;
+    for (const t of taken) {
+      if (Math.hypot((t.minX + t.maxX) / 2 - cx, (t.minZ + t.maxZ) / 2 - cz) < L.spacing) clear = false;
+    }
+    if (!clear) continue;
+    p.spec.landmark = taken.length;
+    p.spec.height = Math.min(L.maxHeight, p.height * L.scale);
+    p.height = p.spec.height;
+    taken.push(p);
+  }
 }
 
-function buildModule(b: EnvBuilders, blk: BlockRect, inner: Rect2, m: Module, rng: () => number): void {
-  const w = m.maxX - m.minX;
-  const d = m.maxZ - m.minZ;
-  if (w < 3 || d < 3) return;
-  const cx = (m.minX + m.maxX) / 2;
-  const cz = (m.minZ + m.maxZ) / 2;
-  const base = 0.22;
-  let h = m.height;
-  // Something passes overhead: nothing here may reach it.
-  if (blk.maxHeight !== undefined) h = Math.max(4, Math.min(h, blk.maxHeight - 1));
-  const fb = facadeBuilder(b, blk.zone);
-  const zone = blk.zone;
-  const uOffset = Math.floor(rng() * 4) * 0.25;
-
-  /** One box of building with its roof, from y0 up by `height`. */
-  const tier = (x0: number, x1: number, z0: number, z1: number, y0: number, height: number): void => {
-    fb.box((x0 + x1) / 2, y0 + height / 2, (z0 + z1) / 2, x1 - x0, height, z1 - z0, {
-      top: false,
-      tileW: FACADE_TILE_W,
-      tileH: FACADE_TILE_H,
-      uOffset,
-    });
-    b.roof.color(PAL.concrete, 0.75 + rng() * 0.5);
-    b.roof.planeY((x0 + x1) / 2, y0 + height, (z0 + z1) / 2, x1 - x0, z1 - z0);
-  };
-  /** A smaller footprint centred on the module, `inset` in on every side, never thinner than 5 m. */
-  const shrink = (inset: number): [number, number, number, number] => {
-    const ix = Math.min(inset, Math.max(0, (w - 5) / 2));
-    const iz = Math.min(inset, Math.max(0, (d - 5) / 2));
-    return [m.minX + ix, m.maxX - ix, m.minZ + iz, m.maxZ - iz];
-  };
-
-  const variant = pickVariant(blk, rng);
-  /** Height of the top of the tallest part, for the masts and rims. */
-  let top = base + h;
-  /** Footprint of the top tier, where the crown and the masts go. */
-  let crown: [number, number, number, number] = [m.minX, m.maxX, m.minZ, m.maxZ];
-
-  if (variant === 'plain') {
-    tier(m.minX, m.maxX, m.minZ, m.maxZ, base, h);
-    if (zone === 'jdm' && rng() < 0.55) awning(b, m, base, rng);
-  } else if (variant === 'skyscraper') {
-    // Three tiers of setbacks, light strips up the corners, screens the size of a building
-    // on the street faces, a lit crown and an antenna cluster.
-    const [x0, x1, z0, z1] = shrink(0.4);
-    const h1 = h * (0.55 + rng() * 0.15);
-    const h2 = h * (0.25 + rng() * 0.1);
-    const h3 = h - h1 - h2;
-    tier(x0, x1, z0, z1, base, h1);
-    const t2 = shrink(Math.min(w, d) * (0.08 + rng() * 0.08));
-    tier(t2[0], t2[1], t2[2], t2[3], base + h1, h2);
-    const t3 = shrink(Math.min(w, d) * (0.2 + rng() * 0.12));
-    tier(t3[0], t3[1], t3[2], t3[3], base + h1 + h2, h3);
-    crown = t3;
-    top = base + h;
-    const c = accent(zone, rng);
-    // Vertical light strips on two corners of the base tier, the full height of it.
-    const corners: Array<[number, number, number, number]> = [
-      [x0, z0, -1, -1],
-      [x1, z0, 1, -1],
-      [x1, z1, 1, 1],
-      [x0, z1, -1, 1],
-    ];
-    const first = Math.floor(rng() * 4);
-    const lit = h > 100 ? [0, 1, 2, 3] : [first, (first + 2) % 4];
-    for (const k of lit) {
-      const [px, pz, sx, sz] = corners[k];
-      const t = rng() < 0.5 ? b.neon : b.neonPulse;
-      t.color(c, 0.85);
-      t.tube(px + sx * 0.25, base + 3, pz + sz * 0.25, px + sx * 0.25, base + h1 - 1, pz + sz * 0.25, 0.4);
-    }
-    // A line of light where each tier steps back.
-    for (const [bx0, bx1, bz0, bz1, by] of [
-      [x0, x1, z0, z1, base + h1] as const,
-      [t2[0], t2[1], t2[2], t2[3], base + h1 + h2] as const,
-    ]) {
-      b.neon.color(c, 0.55);
-      b.neon.tube(bx0, by + 0.2, bz0, bx1, by + 0.2, bz0, 0.22);
-      b.neon.tube(bx0, by + 0.2, bz1, bx1, by + 0.2, bz1, 0.22);
-      b.neon.tube(bx0, by + 0.2, bz0, bx0, by + 0.2, bz1, 0.22);
-      b.neon.tube(bx1, by + 0.2, bz0, bx1, by + 0.2, bz1, 0.22);
-    }
-    // Screens: one or two per street face, tall, alternating the two holographic textures.
-    const faces: Array<[number, number]> = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ];
-    let screens = 0;
-    for (const [dx, dz] of faces) {
-      if (screens >= 3) break;
-      const faceX = dx === 1 ? x1 : dx === -1 ? x0 : (x0 + x1) / 2;
-      const faceZ = dz === 1 ? z1 : dz === -1 ? z0 : (z0 + z1) / 2;
-      const flush = dx === 1 ? m.maxX > inner.maxX - 1.2 : dx === -1 ? m.minX < inner.minX + 1.2 : dz === 1 ? m.maxZ > inner.maxZ - 1.2 : m.minZ < inner.minZ + 1.2;
-      if (!flush) continue;
-      const isRoad = b.plan.isRoad;
-      if (!isRoad(faceX + dx * 9, faceZ + dz * 9) && !isRoad(faceX + dx * 14, faceZ + dz * 14) && !isRoad(faceX + dx * 20, faceZ + dz * 20)) continue;
-      if (rng() < 0.25) continue;
-      const faceW = dx !== 0 ? z1 - z0 : x1 - x0;
-      const sw = Math.min(faceW * 0.55, 9 + rng() * 8);
-      const sh = sw * (1.6 + rng() * 1.2);
-      const sy = base + 18 + rng() * Math.max(6, h1 - sh - 22);
-      if (sy + sh / 2 > base + h1 - 2) continue;
-      const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
-      const target = rng() < 0.5 ? b.billA : b.billB;
-      target.panel(faceX + dx * 0.5, sy, faceZ + dz * 0.5, sw, sh, rotY);
-      const hc = target === b.billA ? PAL.neonCyan : PAL.neonMagenta;
-      halo(b, faceX + dx * 1.1, sy, faceZ + dz * 1.1, sw * 1.9, sh * 1.5, rotY, hc, 0.12);
-      screens++;
-    }
-    // Crown: a lit rim on the top tier and antennas.
-    b.neonPulse.color(c, 1);
-    const [cx0, cx1, cz0, cz1] = t3;
-    const ry = top + 0.3;
-    b.neonPulse.tube(cx0, ry, cz0, cx1, ry, cz0, 0.3);
-    b.neonPulse.tube(cx0, ry, cz1, cx1, ry, cz1, 0.3);
-    b.neonPulse.tube(cx0, ry, cz0, cx0, ry, cz1, 0.3);
-    b.neonPulse.tube(cx1, ry, cz0, cx1, ry, cz1, 0.3);
-    halo(b, (cx0 + cx1) / 2, top + 1, (cz0 + cz1) / 2, cx1 - cx0 + 6, 8, 0, c, 0.12);
-    halo(b, (cx0 + cx1) / 2, top + 1, (cz0 + cz1) / 2, cz1 - cz0 + 6, 8, Math.PI / 2, c, 0.12);
-    const masts = 2 + Math.floor(rng() * 3);
-    for (let i = 0; i < masts; i++) {
-      const mh = 6 + rng() * 14;
-      const px = cx0 + 1 + rng() * Math.max(0.5, cx1 - cx0 - 2);
-      const pz = cz0 + 1 + rng() * Math.max(0.5, cz1 - cz0 - 2);
-      b.props.color(PAL.metalDark, 0.7);
-      b.props.box(px, top + mh / 2, pz, 0.4, mh, 0.4);
-      if (i === 0) {
-        b.neonFlicker.color(PAL.neonMagenta, 0.9);
-        b.neonFlicker.box(px, top + mh, pz, 0.9, 0.9, 0.9);
-        halo(b, px, top + mh, pz, 6, 6, 0, PAL.neonMagenta, 0.14);
-      }
-    }
-  } else if (variant === 'tower') {
-    // A podium the full size of the plot, and the tower set back on top of it.
-    const podium = 5 + rng() * 7;
-    tier(m.minX, m.maxX, m.minZ, m.maxZ, base, podium);
-    const [x0, x1, z0, z1] = shrink(Math.min(w, d) * (0.14 + rng() * 0.12));
-    tier(x0, x1, z0, z1, base + podium, h - podium);
-    crown = [x0, x1, z0, z1];
-    // A lit crown: the rim of the roof, and a frame standing a couple of metres above it.
-    const c = accent(zone, rng);
-    b.props.color(PAL.metalDark, 0.8);
-    for (const [px, pz] of [
-      [x0 + 0.6, z0 + 0.6],
-      [x1 - 0.6, z0 + 0.6],
-      [x1 - 0.6, z1 - 0.6],
-      [x0 + 0.6, z1 - 0.6],
-    ]) {
-      b.props.box(px, top + 1.2, pz, 0.4, 2.4, 0.4);
-    }
-    b.neonPulse.color(c, 0.9);
-    b.neonPulse.tube(x0 + 0.6, top + 2.4, z0 + 0.6, x1 - 0.6, top + 2.4, z0 + 0.6, 0.22);
-    b.neonPulse.tube(x0 + 0.6, top + 2.4, z1 - 0.6, x1 - 0.6, top + 2.4, z1 - 0.6, 0.22);
-    b.neonPulse.tube(x0 + 0.6, top + 2.4, z0 + 0.6, x0 + 0.6, top + 2.4, z1 - 0.6, 0.22);
-    b.neonPulse.tube(x1 - 0.6, top + 2.4, z0 + 0.6, x1 - 0.6, top + 2.4, z1 - 0.6, 0.22);
-    halo(b, (x0 + x1) / 2, top + 2.4, (z0 + z1) / 2, x1 - x0 + 4, 6, 0, c, 0.1);
-    halo(b, (x0 + x1) / 2, top + 2.4, (z0 + z1) / 2, z1 - z0 + 4, 6, Math.PI / 2, c, 0.1);
-  } else if (variant === 'stepped') {
-    const tiers = blk.massing === 3 ? 3 : 2;
-    const share = tiers === 3 ? [0.45, 0.33, 0.22] : [0.6, 0.4];
-    let y = base;
-    let box: [number, number, number, number] = [m.minX, m.maxX, m.minZ, m.maxZ];
-    for (let i = 0; i < tiers; i++) {
-      if (i > 0) box = shrink(Math.min(w, d) * 0.11 * i);
-      const hh = h * share[i];
-      tier(box[0], box[1], box[2], box[3], y, hh);
-      y += hh;
-    }
-    crown = box;
-    top = y;
-  } else if (variant === 'slab') {
-    tier(m.minX, m.maxX, m.minZ, m.maxZ, base, h);
-    // A lit spine running the full height of one street face.
-    const dirs: Array<[number, number]> = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ];
-    const [dx, dz] = dirs[Math.floor(rng() * 4)];
-    const faceX = dx === 1 ? m.maxX : dx === -1 ? m.minX : cx + (rng() - 0.5) * w * 0.5;
-    const faceZ = dz === 1 ? m.maxZ : dz === -1 ? m.minZ : cz + (rng() - 0.5) * d * 0.5;
-    const c = accent(zone, rng);
-    b.neonPulse.color(c, 0.85);
-    b.neonPulse.tube(faceX + dx * 0.3, base + 2.5, faceZ + dz * 0.3, faceX + dx * 0.3, top - 1, faceZ + dz * 0.3, 0.32);
-    halo(b, faceX + dx * 0.7, (base + top) / 2, faceZ + dz * 0.7, 6, top - base - 2, dx !== 0 ? Math.PI / 2 : 0, c, 0.12);
-  } else {
-    // Shabby: the box, and everything bolted to it since.
-    tier(m.minX, m.maxX, m.minZ, m.maxZ, base, h);
-    const cages = 2 + Math.floor(rng() * 3);
-    for (let i = 0; i < cages; i++) {
-      const onX = rng() < 0.5;
-      const side = rng() < 0.5 ? -1 : 1;
-      const px = onX ? (side > 0 ? m.maxX : m.minX) : m.minX + 1.5 + rng() * (w - 3);
-      const pz = onX ? m.minZ + 1.5 + rng() * (d - 3) : side > 0 ? m.maxZ : m.minZ;
-      const py = base + 2.6 + rng() * Math.max(1, h - 4);
-      const balcony = rng() < 0.4;
-      b.props.color(balcony ? PAL.rust : PAL.metalDark, 0.8 + rng() * 0.4);
-      const out = balcony ? 1.1 : 0.7;
-      const len = balcony ? 2.4 + rng() * 1.6 : 0.9;
-      const tall = balcony ? 0.5 : 0.9;
-      b.props.box(px + (onX ? side * out * 0.5 : 0), py, pz + (onX ? 0 : side * out * 0.5), onX ? out : len, tall, onX ? len : out);
-      if (balcony && rng() < 0.5) {
-        b.neonFlicker.color(PAL.winWarm, 0.7);
-        b.neonFlicker.box(px + (onX ? side * out : 0), py + 0.9, pz + (onX ? 0 : side * out), 0.3, 0.3, 0.3);
-      }
-    }
-    // A shack and a water tank on legs up top.
-    if (rng() < 0.7) {
-      const sw = Math.min(3.2, w * 0.4);
-      const sd = Math.min(2.6, d * 0.4);
-      b.props.color(PAL.rust, 0.9);
-      b.props.box(m.minX + sw / 2 + 0.5, top + 1.2, m.minZ + sd / 2 + 0.5, sw, 2.4, sd);
-    }
-    if (rng() < 0.6 && w > 6 && d > 6) {
-      const tx = m.maxX - 2.2;
-      const tz = m.maxZ - 2.2;
-      b.props.color(PAL.metalDark, 0.75);
-      for (const [ox, oz] of [
-        [-0.6, -0.6],
-        [0.6, -0.6],
-        [0.6, 0.6],
-        [-0.6, 0.6],
-      ]) {
-        b.props.box(tx + ox, top + 0.9, tz + oz, 0.14, 1.8, 0.14);
-      }
-      b.props.color(PAL.rust, 1);
-      b.props.box(tx, top + 2.7, tz, 1.8, 1.8, 1.8);
-    }
-    // Awnings over the ground floor, lit from underneath.
-    if (rng() < 0.6) awning(b, m, base, rng);
+function buildPlot(b: EnvBuilders, p: Plot): void {
+  const rng = makeRng(p.seed ^ 0x9e3779b9);
+  const bld = buildBuilding(b, p, p.spec, rng);
+  p.top = bld.top;
+  p.dark = bld.dark;
+  const h = bld.top - p.spec.base;
+  const m: Module = { minX: p.minX, maxX: p.maxX, minZ: p.minZ, maxZ: p.maxZ, height: h };
+  // A big screen standing on the roof, facing the street, on some of the taller buildings.
+  if (!bld.dark && h > 24 && rng() < 0.22) rooftopSign(b, m, p.inner, bld.top, rng);
+  // Street facades: shopfront bands, signs, the district's screens.
+  if (!bld.dark) {
+    tryFacade(b, p.blk, p.inner, m, 1, 0, rng);
+    tryFacade(b, p.blk, p.inner, m, -1, 0, rng);
+    tryFacade(b, p.blk, p.inner, m, 0, 1, rng);
+    tryFacade(b, p.blk, p.inner, m, 0, -1, rng);
   }
-
-  // Roof clutter on the top tier: plant boxes, vents and the occasional mast.
-  const [tx0, tx1, tz0, tz1] = crown;
-  const tw = tx1 - tx0;
-  const td = tz1 - tz0;
-  const tcx = (tx0 + tx1) / 2;
-  const tcz = (tz0 + tz1) / 2;
-  const clutter = 1 + Math.floor(rng() * 3);
-  for (let i = 0; i < clutter; i++) {
-    const bw = 1.6 + rng() * Math.min(5, tw * 0.35);
-    const bd = 1.6 + rng() * Math.min(5, td * 0.35);
-    const bh = 0.8 + rng() * 2.6;
-    b.props.color(PAL.metalDark, 0.7 + rng() * 0.6);
-    b.props.box(tx0 + bw / 2 + rng() * Math.max(0, tw - bw), top + bh / 2, tz0 + bd / 2 + rng() * Math.max(0, td - bd), bw, bh, bd);
-  }
-  // Masts are common, but a lit beacon on top is rare: a skyline peppered with blinking dots
-  // is the single busiest thing a night city can do.
-  if (variant !== 'skyscraper' && h > 20 && rng() < 0.45) {
-    const mh = 4 + rng() * 9;
-    b.props.color(PAL.metalDark, 0.6);
-    b.props.box(tcx, top + mh / 2, tcz, 0.35, mh, 0.35);
-    if (rng() < 0.16) {
-      b.neonFlicker.color(PAL.neonMagenta, 0.8);
-      b.neonFlicker.box(tcx, top + mh, tcz, 0.7, 0.7, 0.7);
-      halo(b, tcx, top + mh, tcz, 5, 5, 0, PAL.neonMagenta, 0.12);
-    }
-  }
-  // Neon roof rim, the cheapest way to read a silhouette against a dark sky.
-  if (variant !== 'tower' && variant !== 'skyscraper' && rng() < 0.24) {
-    const c = accent(zone, rng);
-    const y = top + 0.25;
-    const t = rng() < 0.5 ? b.neon : b.neonPulse;
-    t.color(c, 1);
-    t.tube(tx0, y, tz0, tx1, y, tz0, 0.25);
-    t.tube(tx0, y, tz1, tx1, y, tz1, 0.25);
-    t.tube(tx0, y, tz0, tx0, y, tz1, 0.25);
-    t.tube(tx1, y, tz0, tx1, y, tz1, 0.25);
-  }
-  // A big screen standing on the roof, facing the street, on the taller buildings.
-  if (h > 24 && rng() < 0.3) rooftopSign(b, m, inner, top, rng);
-
-  // Street facades.
-  tryFacade(b, blk, inner, m, 1, 0, rng);
-  tryFacade(b, blk, inner, m, -1, 0, rng);
-  tryFacade(b, blk, inner, m, 0, 1, rng);
-  tryFacade(b, blk, inner, m, 0, -1, rng);
 }
 
-/** An awning over the ground floor with a warm tube under it: the cosy note of the old town. */
-function awning(b: EnvBuilders, m: Module, base: number, rng: () => number): void {
-  const w = m.maxX - m.minX;
-  const d = m.maxZ - m.minZ;
-  const cx = (m.minX + m.maxX) / 2;
-  const cz = (m.minZ + m.maxZ) / 2;
-  const c = rng() < 0.55 ? PAL.neonAmber : rng() < 0.5 ? PAL.winWarm : PAL.neonPink;
-  const onX = w >= d;
-  const len = (onX ? w : d) * (0.4 + rng() * 0.4);
-  const ax = onX ? cx + (rng() - 0.5) * (w - len) : m.maxX + 0.7;
-  const az = onX ? m.maxZ + 0.7 : cz + (rng() - 0.5) * (d - len);
-  b.props.color(PAL.rust, 1.1);
-  b.props.box(ax, base + 3.1, az, onX ? len : 1.4, 0.16, onX ? 1.4 : len);
-  b.neon.color(c, 0.7);
-  if (onX) b.neon.tube(ax - len / 2, base + 2.95, az, ax + len / 2, base + 2.95, az, 0.12);
-  else b.neon.tube(ax, base + 2.95, az - len / 2, ax, base + 2.95, az + len / 2, 0.12);
-  groundGlow(b, onX ? ax : ax + 3, onX ? az + 3 : az, onX ? len * 1.2 : 8, onX ? 8 : len * 1.2, c, 0.1);
+/** Enclosed bridges between neighbouring towers on one block. */
+function buildLinks(b: EnvBuilders, plots: Plot[]): void {
+  let made = 0;
+  for (let i = 0; i < plots.length && made < BLOCKS.linkMax; i++) {
+    const a = plots[i];
+    if (!a.top || a.dark || a.top < 30) continue;
+    for (let j = i + 1; j < plots.length && made < BLOCKS.linkMax; j++) {
+      const c = plots[j];
+      if (c.blk !== a.blk || !c.top || c.dark || c.top < 30) continue;
+      const gapX = Math.max(c.minX - a.maxX, a.minX - c.maxX);
+      const gapZ = Math.max(c.minZ - a.maxZ, a.minZ - c.maxZ);
+      const overlapX = Math.min(a.maxX, c.maxX) - Math.max(a.minX, c.minX);
+      const overlapZ = Math.min(a.maxZ, c.maxZ) - Math.max(a.minZ, c.minZ);
+      const sideBySide = (gapX > 0.3 && gapX < 6 && overlapZ >= 5) || (gapZ > 0.3 && gapZ < 6 && overlapX >= 5);
+      if (!sideBySide) continue;
+      const rng = makeRng((a.seed ^ c.seed) >>> 0);
+      if (rng() > BLOCKS.linkChance) continue;
+      const y = a.spec.base + snapFloors(Math.min(a.top, c.top) * (0.4 + rng() * 0.3));
+      buildLink(b, a, c, y, a.blk.zone, rng);
+      made++;
+    }
+  }
+}
+
+function buildBlocks(b: EnvBuilders): void {
+  const plots: Plot[] = [];
+  for (const blk of b.plan.blocks) plots.push(...planBlock(b, blk));
+  assignLandmarks(plots);
+  for (const p of plots) buildPlot(b, p);
+  buildLinks(b, plots);
 }
 
 /** A billboard on the roof edge, turned toward whichever side has a street below. */
@@ -685,10 +517,11 @@ function tryFacade(
   const districts = b.plan.neonDistricts ?? [];
   let inDistrict = false;
   for (const r of districts) if (inRect(r, faceX, faceZ)) inDistrict = true;
-  if (inDistrict) {
-    // Up the whole face on a tall building: the wall of screens in the reference.
-    const count = m.height > 60 ? 5 : m.height > 30 ? 4 : 2 + Math.floor(rng() * 2);
-    let sy = 8 + rng() * 3;
+  if (inDistrict && rng() < BLOCKS.districtScreens.faceChance) {
+    // A couple of big screens up the face, never a wall of them: the buildings behind them
+    // now carry their own patterns and light, and the screens are the accents.
+    const count = m.height > 30 ? BLOCKS.districtScreens.perFace : 1;
+    let sy = 8 + rng() * 6;
     for (let k = 0; k < count; k++) {
       const sw = Math.min(width * 0.86, 7 + rng() * 9);
       const sh = sw * (0.5 + rng() * 0.45);
@@ -775,14 +608,15 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
       if (dt && x > dt.minX - 30 && x < dt.maxX + 30 && z < dt.maxZ) h = 50 + rng() * 60;
       const bw = horizontal ? len - 1.5 : depth;
       const bd = horizontal ? depth : len - 1.5;
-      facadeBuilder(b, zone).box(x, 0.22 + h / 2, z, bw, h, bd, {
-        top: false,
-        tileW: FACADE_TILE_W,
-        tileH: FACADE_TILE_H,
-        uOffset: Math.floor(rng() * 4) * 0.25,
-      });
-      b.roof.color(PAL.concrete, 0.7 + rng() * 0.5);
-      b.roof.planeY(x, 0.22 + h, z, bw, bd);
+      // The same kit as the blocks, at the middle level of detail: massing, bands and a
+      // crown, none of the street furniture. Only the face toward the city meets a street.
+      const street: [boolean, boolean, boolean, boolean] = horizontal ? [false, false, inward > 0, inward < 0] : [inward > 0, inward < 0, false, false];
+      buildBuilding(
+        b,
+        { minX: x - bw / 2, maxX: x + bw / 2, minZ: z - bd / 2, maxZ: z + bd / 2 },
+        { zone, massing: massingFor(h), height: h, base: 0.22, detail: 'mid', street },
+        makeRng(plotSeed(x, z)),
+      );
       if (rng() < 0.28) {
         const c2 = accent(zone, rng);
         const [nx2, nz2] = along(t + len / 2, 3.3);
@@ -805,27 +639,17 @@ function buildSkyline(b: EnvBuilders, rng: () => number): void {
   const halfW = (bounds.maxX - bounds.minX) / 2;
   const halfD = (bounds.maxZ - bounds.minZ) / 2;
 
-  const place = (x: number, z: number, w: number, d: number, h: number): void => {
-    // The backdrop takes the zone of the city edge it stands behind.
+  let hero = 0;
+  const place = (x: number, z: number, w: number, d: number, h: number, landmark?: number): void => {
+    // The backdrop takes the zone of the city edge it stands behind, and the kit's far level
+    // of detail: a silhouette with a top band and maybe a mast, nothing the haze would hide.
     const zone = b.plan.zoneAt(cx + (x - cx) * 0.4, cz + (z - cz) * 0.4);
-    facadeBuilder(b, zone).box(x, h / 2, z, w, h, d, {
-      top: false,
-      tileW: 10,
-      tileH: 8.5,
-      uOffset: Math.floor(rng() * 4) * 0.25,
-    });
-    b.roof.color(PAL.concrete, 0.6);
-    b.roof.planeY(x, h, z, w, d);
-    if (h > 62) {
-      const mh = 6 + rng() * 14;
-      b.props.color(PAL.metalDark, 0.5);
-      b.props.box(x, h + mh / 2, z, 0.6, mh, 0.6);
-      // Only the true hero towers get a beacon; the backdrop stays a silhouette in haze.
-      if (h > 105 && rng() < 0.4) {
-        b.neonFlicker.color(PAL.neonMagenta, 0.7);
-        b.neonFlicker.box(x, h + mh, z, 1.4, 1.4, 1.4);
-      }
-    }
+    buildBuilding(
+      b,
+      { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 },
+      { zone, massing: massingFor(h), height: h, base: 0, detail: 'far', ...(landmark !== undefined ? { landmark } : {}) },
+      makeRng(plotSeed(x, z) ^ 0x51ab),
+    );
   };
 
   // Across the bay the far shore is its own skyline: further out, bigger, taller. Behind
@@ -851,8 +675,14 @@ function buildSkyline(b: EnvBuilders, rng: () => number): void {
       else place(cx + out, cz + along, w, d, h);
     }
   }
-  // A couple of hero towers to anchor the horizon, as in the approved reference.
-  place(cx - 52, cz - halfD - 94, 30, 30, 150);
-  place(cx + 38, cz - halfD - 118, 26, 26, 128);
-  place(cx + halfW + 86, cz + 64, 28, 28, 118);
+  // A few hero towers to anchor the horizon, as in the approved reference: the kit's
+  // landmark silhouettes, one each.
+  place(cx - 52, cz - halfD - 94, 30, 30, 150, hero++);
+  place(cx + 38, cz - halfD - 118, 26, 26, 128, hero++);
+  place(cx + halfW + 86, cz + 64, 28, 28, 118, hero++);
+}
+
+/** The massing band a free-standing height falls in, for buildings the plan did not band. */
+function massingFor(h: number): 1 | 2 | 3 | 4 {
+  return h < 16 ? 1 : h < 36 ? 2 : h < 66 ? 3 : 4;
 }

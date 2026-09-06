@@ -2,7 +2,8 @@ import type { RingBillboardDef, SkybridgeDef, TowerDef } from '../../../world/ci
 import { PAL, zoneAccent } from './palette';
 import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
-import { blockSetback, facadeBuilder } from './cityBuilder';
+import { blockSetback } from './cityBuilder';
+import { facadeCell } from './facadeAtlas';
 import { lampPost } from './propsBuilder';
 import { rollLampFault } from './lampFaults';
 
@@ -481,8 +482,11 @@ function buildSkybridge(b: EnvBuilders, s: SkybridgeDef, rng: () => number): voi
   const cz = (s.az + s.bz) / 2;
   const y0 = s.y - s.height / 2;
   const y1 = s.y + s.height / 2;
-  // Body in the district's window texture, floor and roof slabs in dark metal.
-  facadeBuilder(b, s.zone).orientedBox(cx, cz, dx, dz, len, s.width, y0 + 0.35, y1 - 0.35);
+  // Body as one ribbon of windows in the district's light, floor and roof slabs in dark metal.
+  const cell = facadeCell('ribbon');
+  const lights = s.zone === 'corporate' ? PAL.windowsCorp : s.zone === 'jdm' ? PAL.windowsJdm : PAL.windowsUrban;
+  b.facade.color(lights[Math.floor(rng() * lights.length)], 0.9).cell(cell.u0, cell.v0, 0.9);
+  b.facade.orientedBox(cx, cz, dx, dz, len, s.width, y0 + 0.35, y1 - 0.35);
   b.props.color(PAL.metalDark, 0.85);
   b.props.orientedBox(cx, cz, dx, dz, len, s.width + 0.5, y0 - 0.1, y0 + 0.35);
   b.props.orientedBox(cx, cz, dx, dz, len, s.width + 0.5, y1 - 0.35, y1 + 0.1);

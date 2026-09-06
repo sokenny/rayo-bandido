@@ -10,6 +10,8 @@ import { buildLandmarks } from '../src/render/scene/env/landmarksBuilder';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
+import { SIDEWALK_Y } from '../src/world/cityPlan';
+import { KERB_HEIGHT, KERB_RAMP } from '../src/world/kerbs';
 import { CITY_QUAY_Z, VIADUCT_Y } from '../src/world/citySpec';
 import { createProjection, maxGrade, offsetAtStation, projectOntoPath } from '../src/world/track';
 
@@ -272,6 +274,108 @@ describe('city in the simulation', () => {
     overhead.y = overhead.prevY = 0;
     stepGame(state, cmd, layout, SIM_STEP);
     expect(state.lightning.acquiredTargetId).toBe(0);
+  });
+});
+
+describe('city kerbs', () => {
+  const kerbs = plan.kerbs!;
+  /** A paved stretch of street, well clear of any junction: the segment and the side to test. */
+  const spot = (() => {
+    for (const rb of ground) {
+      if (rb.kind === 'alley') continue;
+      const samples = rb.path.samples;
+      for (let i = 2; i < samples.length - 2; i++) {
+        if (!kerbs.paved(rb, i, 1) || !kerbs.paved(rb, i - 1, 1) || !kerbs.paved(rb, i + 1, 1)) continue;
+        const a = samples[i];
+        const c = samples[i + 1];
+        return { rb, i, x: (a.x + c.x) / 2, z: (a.z + c.z) / 2, tx: a.tx, tz: a.tz, halfWidth: a.halfWidth };
+      }
+    }
+    throw new Error('no paved stretch found');
+  })();
+  /** The surface height `off` metres to the right of the centreline there. */
+  const at = (off: number, yHint = 0): number => {
+    layout.surface!.sample(spot.x + -spot.tz * off, spot.z + spot.tx * off, yHint, SAMPLE);
+    return SAMPLE.y;
+  };
+  const width = kerbs.widthAt(spot.rb, spot.i);
+
+  it('leaves the asphalt flat and raises the pavement beside it by a full step', () => {
+    expect(width).toBeGreaterThan(0.8);
+    expect(at(0)).toBe(0);
+    expect(at(spot.halfWidth - 0.5)).toBe(0);
+    // The kerb face climbs over its own short run, then the pavement runs flat to the blocks.
+    expect(at(spot.halfWidth + KERB_RAMP / 2)).toBeCloseTo(KERB_HEIGHT / 2, 3);
+    expect(at(spot.halfWidth + KERB_RAMP + 0.1)).toBeCloseTo(KERB_HEIGHT, 3);
+    expect(at(spot.halfWidth + width - 0.1)).toBeCloseTo(KERB_HEIGHT, 3);
+    expect(KERB_HEIGHT).toBe(SIDEWALK_Y);
+  });
+
+  it('tips a car climbing the face and levels it once it is up', () => {
+    at(spot.halfWidth + KERB_RAMP / 2);
+    // The grade points away from the road, and is the face's own rise per metre.
+    expect(Math.hypot(SAMPLE.gx, SAMPLE.gz)).toBeCloseTo(KERB_HEIGHT / KERB_RAMP, 3);
+    expect(SAMPLE.gx * -spot.tz + SAMPLE.gz * spot.tx).toBeGreaterThan(0);
+    at(spot.halfWidth + KERB_RAMP + 0.5);
+    expect(Math.hypot(SAMPLE.gx, SAMPLE.gz)).toBe(0);
+  });
+
+  it('never lifts a car that is still on the asphalt', () => {
+    // The pavement stops at every junction mouth, so no point on a street is ever raised.
+    let checked = 0;
+    for (const rb of ground) {
+      for (const sm of rb.path.samples) {
+        for (const off of [0, 0.5, 0.9]) {
+          for (const side of [-1, 1]) {
+            const d = sm.halfWidth * off * side;
+            expect(kerbs.heightAt(sm.x + -sm.tz * d, sm.z + sm.tx * d, SAMPLE)).toBe(0);
+            checked++;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+  });
+
+  it('paves the back alleys flush: no kerb to trip a car in a lane that narrow', () => {
+    /** True when only the alley's own pavement reaches this point (no street's beside it). */
+    const alleyOnly = (x: number, z: number): boolean =>
+      ground.every((rb) => {
+        if (rb.kind === 'alley') return true;
+        projectOntoPath(rb.path, x, z, PROJ);
+        return PROJ.dist > PROJ.halfWidth + 12;
+      });
+    let checked = 0;
+    for (const alley of ground.filter((rb) => rb.kind === 'alley')) {
+      const samples = alley.path.samples;
+      for (let i = 1; i < samples.length - 1; i++) {
+        const sm = samples[i];
+        for (const side of [-1, 1]) {
+          if (!kerbs.paved(alley, i, side)) continue;
+          const d = (sm.halfWidth + 1) * side;
+          const x = sm.x + -sm.tz * d;
+          const z = sm.z + sm.tx * d;
+          if (!alleyOnly(x, z)) continue;
+          expect(kerbs.heightAt(x, z, SAMPLE)).toBe(0);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(4);
+  });
+
+  it('leaves the mouth of a crossing street bare, and the deck above alone', () => {
+    // Where the main avenue meets a cross street, the avenue's pavement gives way to asphalt.
+    const av = ground.find((rb) => rb.tag === 'av-main')!;
+    const cross = ground.find((rb) => rb.tag === 'st-n2')!;
+    projectOntoPath(av.path, 0, -60, PROJ);
+    const mouth = { x: PROJ.x, z: PROJ.z, halfWidth: PROJ.halfWidth };
+    expect(cross.path.samples[0].halfWidth).toBeGreaterThan(4);
+    expect(kerbs.heightAt(mouth.x + mouth.halfWidth + 1, mouth.z, SAMPLE)).toBe(0);
+    expect(kerbs.heightAt(mouth.x - mouth.halfWidth - 1, mouth.z, SAMPLE)).toBe(0);
+    // A car on the viaduct is on the viaduct: the kerbs below are not in its way.
+    layout.surface!.sample(spot.x, spot.z, VIADUCT_Y, SAMPLE);
+    expect(SAMPLE.y).toBeLessThan(KERB_HEIGHT);
   });
 });
 

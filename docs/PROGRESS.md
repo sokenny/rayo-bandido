@@ -1057,3 +1057,48 @@ no console errors. Downtown: 5 skyscrapers and 13 pencil towers on 18 plots, 168
 **Measured.** 351 tests green. Art: ~141k triangles, 15 environment draw calls. Browser
 (`?mode=city`): 39 targets, 8 of them on the deck, no console errors; sim about 1 ms and
 render about 3 ms a frame with the full field.
+
+### 2026-09-06 (night) — Buildings: a modular kit and one facade atlas for the whole city
+
+The city read as one box stamped over and over: every block a grid of equal 17 m modules,
+every wall in a zone the same 256 px window tile at the same lit fraction, six silhouettes
+that were all setbacks on a box. Replaced by:
+
+- **`env/facadeAtlas.ts`** — one 1024 px atlas of sixteen facade styles (grid, ribbon, vertical
+  strips, lit clusters, service band, sparse groups, lit corners, inset panels, near-dark,
+  curtain wall, louvres, mixed, lit stripe, stacked strips, balconies, big panels). Panes are
+  drawn white; every wall quad carries `aFacadeCell` (which style, how bright the concrete)
+  and a vertex colour (the glass tint, from the zone's palette of window lights). The
+  material patches `map_fragment` / `emissivemap_fragment` to tile the wall's UV inside its
+  cell with `texture2DGradEXT`, so there is no mip seam at the wrap. One texture, one
+  material, one draw call for every facade in the city (was three); `windowActivity` sits
+  on the same material unchanged (grid now 8 x 4 per 12 m tile).
+- **`env/buildingKit.ts`** — eleven massing archetypes (tower, slab, podium + tower, stepped,
+  offset stack with overhangs, cantilever, recessed centre, twin towers with a link, low,
+  shabby, landmark: spire / crown / blade / twins / pagoda), chamfered corners on some
+  towers, facade BANDS per volume (lit lobby or blank plinth, body pattern, dark service
+  floor part-way up, a second pattern for the top storeys, a sparser pattern on the walls
+  away from the street), one building in ten dark with navigation lights only, crowns (rim,
+  frame, fins, spire, floating ring), mechanical blocks, antennas, rare beacons, corner light
+  strips, lit setback edges. Three levels of detail: near (blocks), mid (perimeter band),
+  far (backdrop skyline). All knobs in `KIT`.
+- **`env/cityBuilder.ts`** — blocks are cut into plots of uneven size (`subdividePlot`), a
+  smooth skyline field swings heights ±25 % so districts rise and fall, on a block of several
+  plots the street edge drops and the plots behind rise, six landmark anchors (the biggest
+  tower plots, 90 m apart) get the kit's silhouettes at 1.45x height, enclosed links between
+  neighbouring towers on a block, downtown screens cut to a couple per face. All knobs in
+  `BLOCKS`. Every plot seeds its own rng from its position: the city is the same on every
+  machine and a block does not reshuffle when its neighbour changes.
+
+**Measured** (`scripts/perf-probe.mjs --mode city`, dev server, same machine, same scene):
+env draw calls 15 -> 13; env triangles 153.0k -> 156.5k (city), 14.3k -> 18.1k (arena),
+42.7k -> 49.5k (circuit); steady GPU 2.0 ms -> 1.6 ms, drive 2.0 -> 1.4 ms; main thread
+unchanged (~0.3 + 0.9 ms); 29 programs before and after, none compiled mid-play; no console
+errors on a fresh load; 403 tests green (12 new in `tests/buildingKit.test.ts`: every
+archetype draws, determinism, floor snapping, ≥ 6 archetypes and ≥ 10 styles across the
+city, atlas cells, shader anchors). Texture memory: one 1024² atlas replaces three 256²
+tiles (+~4.5 MB with mips).
+
+**Known gaps.** Runtime LOD is still not possible with everything merged per material;
+detail reduction is at build time (far ring simpler). The far ring beyond the 300 m fog is a
+flat cutout as before. Chamfered roofs use two degenerate triangles per corner.

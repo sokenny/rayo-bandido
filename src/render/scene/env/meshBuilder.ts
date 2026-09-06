@@ -19,16 +19,22 @@ export class MeshBuilder {
   readonly uvs: number[] = [];
   readonly colors: number[] = [];
   readonly faults: number[] = [];
+  readonly cells: number[] = [];
   private readonly withColor: boolean;
   private readonly withFault: boolean;
+  private readonly withCell: boolean;
   private r = 1;
   private g = 1;
   private b = 1;
   private fa = 0;
+  private cu = 0;
+  private cv = 0;
+  private cw = 1;
 
-  constructor(withColor = false, withFault = false) {
+  constructor(withColor = false, withFault = false, withCell = false) {
     this.withColor = withColor;
     this.withFault = withFault;
+    this.withCell = withCell;
   }
 
   /** Sets the vertex colour used by subsequent primitives. `mul` scales brightness. */
@@ -46,6 +52,17 @@ export class MeshBuilder {
    */
   fault(seed: number): this {
     this.fa = seed;
+    return this;
+  }
+
+  /**
+   * Tags subsequent primitives with a facade atlas cell (see `facadeAtlas`): the cell's
+   * origin in the atlas, and how bright the wall between the windows is drawn.
+   */
+  cell(u0: number, v0: number, wall = 1): this {
+    this.cu = u0;
+    this.cv = v0;
+    this.cw = wall;
     return this;
   }
 
@@ -107,6 +124,10 @@ export class MeshBuilder {
     if (this.withFault) {
       const fl = this.faults;
       for (let i = 0; i < 6; i++) fl.push(this.fa);
+    }
+    if (this.withCell) {
+      const ce = this.cells;
+      for (let i = 0; i < 6; i++) ce.push(this.cu, this.cv, this.cw);
     }
   }
 
@@ -315,6 +336,7 @@ export class MeshBuilder {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
     if (this.withColor) geo.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
     if (this.withFault) geo.setAttribute('aLampFault', new THREE.Float32BufferAttribute(this.faults, 1));
+    if (this.withCell) geo.setAttribute('aFacadeCell', new THREE.Float32BufferAttribute(this.cells, 3));
     geo.computeBoundingSphere();
     return geo;
   }

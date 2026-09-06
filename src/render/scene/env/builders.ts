@@ -5,7 +5,7 @@ export { SIDEWALK_Y } from '../../../world/cityPlan';
 
 /**
  * One MeshBuilder per material. Every piece of the city lands in one of these, so the whole
- * environment renders in roughly twenty draw calls no matter how much clutter we add.
+ * environment renders in about a dozen draw calls no matter how much clutter we add.
  *
  * The plan rides along: every builder function reads roads, blocks and the three placement
  * predicates (`isRoad`, `isSolid`, `padY`) from `b.plan`, so the same code dresses the test
@@ -19,10 +19,11 @@ export interface EnvBuilders {
   lane: MeshBuilder;
   /** Ground plane, sidewalks, curbs, perimeter walls. */
   concrete: MeshBuilder;
-  /** Facades, one builder per window texture. */
-  corp: MeshBuilder;
-  urban: MeshBuilder;
-  jdm: MeshBuilder;
+  /**
+   * Every facade in the city: vertex colour = the building's window tint, `aFacadeCell` =
+   * which atlas style the wall samples (`facadeAtlas.ts`). One builder, one material.
+   */
+  facade: MeshBuilder;
   /** Flat roofs (dark, no windows). */
   roof: MeshBuilder;
   /** Painted metal: barriers, containers, poles, pipes, AC units, roof boxes. */
@@ -48,9 +49,7 @@ export function createBuilders(plan: CityPlan): EnvBuilders {
     road: new MeshBuilder(true),
     lane: new MeshBuilder(true),
     concrete: new MeshBuilder(true),
-    corp: new MeshBuilder(false),
-    urban: new MeshBuilder(false),
-    jdm: new MeshBuilder(false),
+    facade: new MeshBuilder(true, false, true),
     roof: new MeshBuilder(true),
     props: new MeshBuilder(true),
     neon: new MeshBuilder(true, true),

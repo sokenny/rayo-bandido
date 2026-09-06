@@ -35,6 +35,7 @@ import {
   VIADUCT_SPEC,
   VIADUCT_Y,
 } from './citySpec';
+import { createKerbField } from './kerbs';
 import { createSurfaceField } from './surface';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, projectOntoPath, type TrackPath } from './track';
 
@@ -150,6 +151,10 @@ export function createCityWorld(): World {
   const blocks = generateBlocks(inner, ribbons, zoneAt, CITY_BLOCK_OPTIONS);
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const solids: Rect[] = [...blocks, ...perimeter];
+  const shoulders = { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder };
+  // The pavement beside the streets stands a step proud of them, for the art and the car alike.
+  const kerbs = createKerbField(ribbons, shoulders);
+  const kerbGrade = { gx: 0, gz: 0 };
 
   const onGroundRoad = (x: number, z: number, pad: number): boolean => {
     for (const rb of ground) if (isOnPath(rb.path, x, z, pad)) return true;
@@ -297,7 +302,7 @@ export function createCityWorld(): World {
     cruiseRoute,
     colliders,
     walls,
-    surface: createSurfaceField(elevated.map((rb) => rb.path)),
+    surface: createSurfaceField(elevated.map((rb) => rb.path), 1.5, kerbs),
     race: null,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },
@@ -350,7 +355,8 @@ export function createCityWorld(): World {
     ringBillboards: RING_BILLBOARDS.map((r) => ({ ...r })),
     skybridges,
     neonDistricts: NEON_DISTRICTS.map((r) => ({ ...r })),
-    shoulders: { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder },
+    shoulders,
+    kerbs,
     water,
     plaza: null,
     wantedBoard: null,
@@ -367,7 +373,7 @@ export function createCityWorld(): World {
     },
     padY(x, z) {
       for (const b of solids) if (inRect(b, x, z)) return SIDEWALK_Y;
-      return 0;
+      return kerbs.heightAt(x, z, kerbGrade);
     },
   };
 

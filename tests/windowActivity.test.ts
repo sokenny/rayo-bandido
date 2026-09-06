@@ -49,11 +49,19 @@ describe('window activity anchors', () => {
   });
 
   it('emits float literals: `1` where GLSL wants a float will not compile', () => {
-    const body = patch().fragmentShader.slice(patch().fragmentShader.indexOf('vec2 winCell'));
+    const shader = patch().fragmentShader;
+    const body = shader.slice(shader.indexOf('vec2 winUv'));
     // Every constant spliced in carries a decimal point.
-    for (const value of Object.values(A)) {
+    for (const value of Object.values(A).flat()) {
       expect(body).toContain(Number.isInteger(value) ? `${value}.0` : `${value}`);
     }
+  });
+
+  it('leaves the concrete and the dark panes alone', () => {
+    const body = patch().fragmentShader;
+    // Everything is behind the glass mask; without it the facade itself would lift.
+    expect(body).toContain('float glass = smoothstep(');
+    expect(body).toContain('mix(vec3(1.0), amount * tint, glass)');
   });
 
   it('drives every patched material off one clock', () => {
@@ -94,102 +102,178 @@ describe('window activity anchors', () => {
 });
 
 /**
- * A mirror of the per-window factor computed in the shader. It is a second copy of the maths,
- * which is the price of being able to say anything about how the city behaves over an hour
- * without a GPU; it reads the same constants, so tuning cannot drift out from under it.
+ * A mirror of the per-window factor computed in the shader, including where in the pane the
+ * sample sits. It is a second copy of the maths, which is the price of being able to say
+ * anything about how a window behaves over an hour without a GPU; it reads the same
+ * constants, so tuning cannot drift out from under it.
  */
-function level(wa: number, wb: number, wc: number, wf: number, t: number): number {
-  const breath = 1 - A.breathDepth * (0.5 + 0.5 * Math.sin(t * (A.breathRateMin + A.breathRateSpan * wa) + wb * 6.2831));
-  const cycle = Math.sin(t * (A.cycleRateMin + A.cycleRateSpan * wb) + wc * 6.2831 + wf * 1.7);
-  const bias = A.biasMin + A.biasSpan * wa;
-  const x = Math.max(0, Math.min(1, (cycle - (bias - A.edge)) / (2 * A.edge)));
-  const occupied = x * x * (3 - 2 * x);
+interface Window {
+  wa: number;
+  wb: number;
+  wc: number;
+  wd: number;
+  we: number;
+  wg: number;
+  wf: number;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function level(w: Window, t: number, subX: number, subY: number): number {
+  const room = A.baseMin + A.baseSpan * w.wd;
+  const breath =
+    1 - A.breathDepth * (0.5 + 0.5 * Math.sin(t * (A.breathRateMin + A.breathRateSpan * w.wa) + w.wb * 6.2831));
+
+  const saw = (t * (A.walkRateMin + A.walkRateSpan * w.wc) + w.wb) % 1;
+  const walk = saw / A.walkSpan;
+  const dx = (subX - (0.12 + 0.76 * walk)) / A.walkWidth;
+  let body = Math.max(0, 1 - dx * dx) ** 2;
+  body *= smoothstep(0, 0.15, walk) * smoothstep(1, 0.85, walk);
+  body *= 0.55 + 0.45 * smoothstep(0.78, 0.22, subY);
+  const here = (walk <= 1 ? 1 : 0) * (w.wg <= A.presenceChance ? 1 : 0);
+  const shadow = 1 - here * A.walkDepth * body;
+
+  const wave =
+    0.6 * Math.sin(t * (4 + 2.6 * w.wa) + w.wb * 6.2831) + 0.4 * Math.sin(t * (1.7 + 1.3 * w.wc) + w.wa * 6.2831);
+  const tv = 1 + (w.we >= 1 - A.tvChance ? 1 : 0) * A.tvDepth * wave * (0.55 + 0.9 * subX);
+
+  const cycle = Math.sin(t * (A.cycleRateMin + A.cycleRateSpan * w.wb) + w.wc * 6.2831 + w.wf * 1.7);
+  const bias = A.biasMin + A.biasSpan * w.wa;
+  const occupied = smoothstep(bias - A.edge, bias + A.edge, cycle);
   const lit = A.offLevel + (1 - A.offLevel) * occupied;
-  const tv =
-    1 +
-    (wc >= 1 - A.tvChance ? 1 : 0) *
-      A.tvDepth *
-      Math.sin(t * (0.45 + 0.4 * wa) + 1.2 * Math.sin(t * (0.25 + 0.2 * wb)));
-  return A.norm * breath * lit * tv;
+
+  return Math.min(A.cap, A.norm * room * breath * lit * tv * shadow);
 }
 
-/** Four hundred windows, sampled ten times a second for an hour. */
-const STEP = 0.1;
-
-function survey(): number[][] {
-  const values: number[][] = [];
-  for (let i = 0; i < 400; i++) {
-    // Irrational strides: an even spread of the four hashes without a repeating pattern.
-    const wa = (i * 0.6180339887) % 1;
-    const wb = (i * 0.7548776662) % 1;
-    const wc = (i * 0.5698402909) % 1;
-    const wf = (i * 0.8191725134) % 1;
-    const series: number[] = [];
-    for (let t = 0; t < 3600; t += STEP) series.push(level(wa, wb, wc, wf, t));
-    values.push(series);
+/** Two hundred windows, spread evenly over the hash space. */
+function windows(): Window[] {
+  const out: Window[] = [];
+  for (let i = 0; i < 200; i++) {
+    // Irrational strides: an even spread of the hashes without a repeating pattern.
+    out.push({
+      wa: (i * 0.6180339887) % 1,
+      wb: (i * 0.7548776662) % 1,
+      wc: (i * 0.5698402909) % 1,
+      wd: (i * 0.8191725134) % 1,
+      we: (i * 0.430159709) % 1,
+      wg: (i * 0.3247179572) % 1,
+      wf: (i * 0.2360679775) % 1,
+    });
   }
-  return values;
+  return out;
 }
 
-function stats(values: number[][]): { mean: number; min: number; max: number; darkFraction: number } {
-  let sum = 0;
-  let n = 0;
-  let min = Infinity;
-  let max = -Infinity;
-  let dark = 0;
-  for (const series of values) {
-    for (const v of series) {
-      sum += v;
-      n++;
-      if (v < min) min = v;
-      if (v > max) max = v;
-      if (v < 0.4) dark++;
-    }
-  }
-  return { mean: sum / n, min, max, darkFraction: dark / n };
-}
+const STEP = 0.05;
+const SAMPLES: [number, number][] = [
+  [0.25, 0.4],
+  [0.5, 0.5],
+  [0.75, 0.6],
+];
 
 describe('what a window does', () => {
-  const values = survey();
-  const { mean, min, max, darkFraction } = stats(values);
+  const all = windows();
 
   it('leaves the city at the brightness the palette was drawn for', () => {
-    expect(mean).toBeGreaterThan(0.97);
-    expect(mean).toBeLessThan(1.03);
+    let sum = 0;
+    let n = 0;
+    for (const w of all) {
+      for (const [x, y] of SAMPLES) {
+        for (let t = 0; t < 600; t += 0.25) {
+          sum += level(w, t, x, y);
+          n++;
+        }
+      }
+    }
+    expect(sum / n).toBeGreaterThan(0.96);
+    expect(sum / n).toBeLessThan(1.04);
   });
 
   it('never goes fully dark and never blows out', () => {
-    expect(min).toBeGreaterThan(0.05);
-    expect(max).toBeLessThan(1.35);
-  });
-
-  it('moves slowly: nothing changes by a quarter of its brightness in a second', () => {
-    let worst = 0;
-    for (const series of values) {
-      for (let i = 1; i < series.length; i++) worst = Math.max(worst, Math.abs(series[i] - series[i - 1]) / STEP);
+    let min = Infinity;
+    let max = -Infinity;
+    for (const w of all) {
+      for (const [x, y] of SAMPLES) {
+        for (let t = 0; t < 600; t += STEP) {
+          const v = level(w, t, x, y);
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
     }
-    expect(worst).toBeLessThan(0.25);
+    expect(min).toBeGreaterThan(0.02);
+    expect(max).toBeLessThanOrEqual(A.cap);
   });
 
-  it('keeps most rooms lit, with about one in nine dark at any moment', () => {
-    expect(darkFraction).toBeGreaterThan(0.06);
-    expect(darkFraction).toBeLessThan(0.18);
+  it('gives every lit window something to do inside a minute', () => {
+    // The complaint this whole file exists to answer: a pane that just sits there.
+    const still = all.filter((w) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let t = 0; t < 60; t += STEP) {
+        const v = level(w, t, 0.5, 0.5);
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      return hi - lo < 0.12;
+    });
+    expect(still).toHaveLength(0);
   });
 
-  it('gives every window something to do over an hour', () => {
-    const still = values.filter((series) => Math.max(...series) - Math.min(...series) < 0.05).length;
-    expect(still).toBe(0);
-  });
-
-  it('switches often enough to notice, rarely enough to ignore', () => {
-    // One room going dark or coming back, per window, per hour. A facade in view holds
-    // hundreds of windows, so a handful an hour each is a change every second or so somewhere.
-    let crossings = 0;
-    for (const series of values) {
-      for (let i = 1; i < series.length; i++) if (series[i - 1] < 0.55 !== series[i] < 0.55) crossings++;
+  it('walks a shadow across the pane rather than dimming it whole', () => {
+    const w = all.find((x) => x.wg <= A.presenceChance);
+    expect(w).toBeDefined();
+    if (!w) return;
+    // Where the darkest point sits, left to right, as one crossing plays out.
+    const period = 1 / (A.walkRateMin + A.walkRateSpan * w.wc);
+    const start = (1 - w.wb) * period;
+    const columns = [0.2, 0.35, 0.5, 0.65, 0.8];
+    const darkestAt: number[] = [];
+    for (let f = 0.2; f <= 0.8; f += 0.15) {
+      const t = start + f * A.walkSpan * period;
+      let best = 0;
+      let bestValue = Infinity;
+      for (const c of columns) {
+        const v = level(w, t, c, 0.5);
+        if (v < bestValue) {
+          bestValue = v;
+          best = c;
+        }
+      }
+      darkestAt.push(best);
     }
-    const perWindowPerHour = crossings / values.length;
-    expect(perWindowPerHour).toBeGreaterThan(4);
-    expect(perWindowPerHour).toBeLessThan(20);
+    // It sweeps: each sample is at or to the right of the last, and it covers ground.
+    for (let i = 1; i < darkestAt.length; i++) expect(darkestAt[i]).toBeGreaterThanOrEqual(darkestAt[i - 1]);
+    expect(darkestAt[darkestAt.length - 1] - darkestAt[0]).toBeGreaterThan(0.3);
+  });
+
+  it('darkens the glass enough for the pass to be visible', () => {
+    const w = all.find((x) => x.wg <= A.presenceChance);
+    expect(w).toBeDefined();
+    if (!w) return;
+    let lit = 0;
+    let shaded = Infinity;
+    for (let t = 0; t < 120; t += STEP) {
+      const v = level(w, t, 0.5, 0.5);
+      if (v > lit) lit = v;
+      if (v < shaded) shaded = v;
+    }
+    expect(shaded).toBeLessThan(lit * 0.7);
+  });
+
+  it('keeps most rooms lit, with about one in twelve dark at any moment', () => {
+    let dark = 0;
+    let n = 0;
+    for (const w of all) {
+      for (let t = 0; t < 600; t += 0.25) {
+        const v = level(w, t, 0.5, 0.5);
+        if (v < 0.3) dark++;
+        n++;
+      }
+    }
+    expect(dark / n).toBeGreaterThan(0.03);
+    expect(dark / n).toBeLessThan(0.16);
   });
 });

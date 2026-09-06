@@ -63,6 +63,9 @@ export function createAudioCore(): AudioCore | null {
 
   const noise = makeNoiseBuffer(ctx, 2);
   let muted = false;
+  // `resume()` rejects when it is called without a user gesture behind it. Since `update` now
+  // calls this every frame, an in-flight/failed attempt must not spam unhandled rejections.
+  let resuming = false;
 
   return {
     ctx,
@@ -72,7 +75,16 @@ export function createAudioCore(): AudioCore | null {
       return ctx.currentTime;
     },
     resume() {
-      if (ctx.state === 'suspended') void ctx.resume();
+      if (resuming || ctx.state !== 'suspended') return;
+      resuming = true;
+      ctx.resume().then(
+        () => {
+          resuming = false;
+        },
+        () => {
+          resuming = false;
+        },
+      );
     },
     setMuted(next: boolean) {
       muted = next;

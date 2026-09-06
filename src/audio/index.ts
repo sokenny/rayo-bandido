@@ -70,13 +70,19 @@ export function createAudio(targetCount: number): AudioSystem {
   const hums = createElectricHums(core, targetCount);
   const oneShots = createOneShots(core);
 
-  // Resume on the first real user gesture (browser autoplay policy).
+  // Resume on the first real user gesture (browser autoplay policy). A context can also be
+  // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
+  // it every frame as well, and coming back to the tab counts as another chance to resume.
   const resume = (): void => core.resume();
   const gestures: Array<keyof WindowEventMap> = ['keydown', 'pointerdown', 'touchstart'];
   for (const g of gestures) window.addEventListener(g, resume, { passive: true });
+  document.addEventListener('visibilitychange', resume);
 
   return {
     update(dt, engineInput, listener, targets, skid) {
+      // Cheap no-op once running; the one case that matters is a context that fell back to
+      // 'suspended' while the game kept rendering, which is silence with no other symptom.
+      core.resume();
       engine.update(dt, engineInput);
       tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin), skid.speed);
       hums.update(dt, listener, targets);
@@ -132,6 +138,7 @@ export function createAudio(targetCount: number): AudioSystem {
 
     dispose() {
       for (const g of gestures) window.removeEventListener(g, resume);
+      document.removeEventListener('visibilitychange', resume);
       engine.dispose();
       tires.dispose();
       hums.dispose();

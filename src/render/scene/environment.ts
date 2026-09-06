@@ -8,15 +8,8 @@ import { buildLandmarks } from './env/landmarksBuilder';
 import { buildProps } from './env/propsBuilder';
 import { buildTrack } from './env/trackBuilder';
 import { createWantedBillboard } from './env/wantedBillboard';
-import {
-  makeAsphaltTexture,
-  makeBillboardTexture,
-  makeEnvTexture,
-  makeGlowTexture,
-  makeSignAtlas,
-  makeSkyTexture,
-  makeWindowTexture,
-} from './env/textures';
+import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeSkyTexture } from './env/textures';
+import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
 import type { MeshBuilder } from './env/meshBuilder';
 import { createWindowActivity } from './env/windowActivity';
 import { createLampFaults } from './env/lampFaults';
@@ -29,8 +22,9 @@ import { createLampFaults } from './env/lampFaults';
  * only two lights in the game.
  *
  * HOW IT STAYS CHEAP
- * - Everything is merged into fifteen BufferGeometries, one per material: fifteen draw calls
- *   for the whole city (see `env/builders.ts`).
+ * - Everything is merged into thirteen BufferGeometries, one per material: thirteen draw
+ *   calls for the whole city (see `env/builders.ts`). Every facade in the city is one of
+ *   them: one atlas of window patterns, tint and pattern chosen per wall (`env/facadeAtlas.ts`).
  * - All lighting is baked into emissive textures and unlit neon. One hemisphere light and one
  *   directional light do the rest; there are no point lights and no shadow maps.
  * - Textures are drawn procedurally into small canvases at start-up. Nothing is loaded.
@@ -85,51 +79,18 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   /* ---------------------------------------------------------------- textures */
 
   const asphaltTex = makeAsphaltTexture(PAL.asphalt, 7);
-  // Fewer, larger, softer windows. A tower should read as a couple of glowing bands seen
-  // through haze, not as a hundred individual pixels fighting each other for attention.
-  // The grids are shared with `windowActivity` below, which needs the same cells to find one
-  // window in the shader; they must not drift apart.
-  const corpGrid = { cols: 5, rows: 5 };
-  const urbanGrid = { cols: 4, rows: 4 };
-  const jdmGrid = { cols: 4, rows: 3 };
-  const winCorp = makeWindowTexture({
-    facade: PAL.facadeCorp,
-    lights: PAL.windowsCorp,
-    ...corpGrid,
-    lit: 0.2 * PAL.litGain,
-    seed: 11,
-  });
-  const winUrban = makeWindowTexture({
-    facade: PAL.facadeUrban,
-    lights: PAL.windowsUrban,
-    ...urbanGrid,
-    lit: 0.26 * PAL.litGain,
-    seed: 23,
-  });
-  const winJdm = makeWindowTexture({
-    facade: PAL.facadeJdm,
-    lights: PAL.windowsJdm,
-    ...jdmGrid,
-    lit: 0.18 * PAL.litGain,
-    seed: 37,
-  });
+  // Every facade pattern in the city on one atlas (`env/facadeAtlas.ts`): ribbons, strips,
+  // clusters, service bands, sparse groups, lit corners, inset panels, dark towers. Which
+  // pattern a wall shows and what colour its glass is are per-vertex, so one texture and one
+  // material draw every building in the city.
+  const facadeTex = makeFacadeAtlas();
   const signTex = makeSignAtlas();
   const glowTex = makeGlowTexture();
   const billTexA = makeBillboardTexture(0);
   const billTexB = makeBillboardTexture(1);
-  const textures = [skyTex, envTex, asphaltTex, winCorp, winUrban, winJdm, signTex, glowTex, billTexA, billTexB];
+  const textures = [skyTex, envTex, asphaltTex, facadeTex, signTex, glowTex, billTexA, billTexB];
 
   /* ---------------------------------------------------------------- materials */
-
-  const facade = (map: THREE.Texture, intensity: number): THREE.MeshStandardMaterial =>
-    new THREE.MeshStandardMaterial({
-      map,
-      emissive: 0xffffff,
-      emissiveMap: map,
-      emissiveIntensity: intensity,
-      roughness: 0.82,
-      metalness: 0.08,
-    });
 
   const roadMat = new THREE.MeshStandardMaterial({
     map: asphaltTex,
@@ -141,14 +102,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   });
   const laneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04 });
-  const corpMat = facade(winCorp, 0.85 * PAL.windowGain);
-  const urbanMat = facade(winUrban, 0.9 * PAL.windowGain);
-  const jdmMat = facade(winJdm, 0.75 * PAL.windowGain);
   // Rooms behind the panes: each window drifts, and now and then one goes dark or comes back.
   const windows = createWindowActivity();
-  windows.apply(corpMat, corpGrid.cols, corpGrid.rows, 2.7);
-  windows.apply(urbanMat, urbanGrid.cols, urbanGrid.rows, 8.3);
-  windows.apply(jdmMat, jdmGrid.cols, jdmGrid.rows, 14.9);
+  const facadeMat = createFacadeMaterial(facadeTex, windows, 0.85 * PAL.windowGain);
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
   const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -183,9 +139,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     roadMat,
     laneMat,
     concreteMat,
-    corpMat,
-    urbanMat,
-    jdmMat,
+    facadeMat,
     roofMat,
     propsMat,
     neonMat,
@@ -221,9 +175,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   add(b.concrete, concreteMat, 'env-concrete');
   add(b.road, roadMat, 'env-road');
   add(b.lane, laneMat, 'env-lanes');
-  add(b.corp, corpMat, 'env-facade-corporate');
-  add(b.urban, urbanMat, 'env-facade-urban');
-  add(b.jdm, jdmMat, 'env-facade-jdm');
+  add(b.facade, facadeMat, 'env-facade');
   add(b.roof, roofMat, 'env-roofs');
   add(b.props, propsMat, 'env-props');
   add(b.signs, signMat, 'env-signs', 1);

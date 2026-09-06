@@ -8,7 +8,9 @@ import { signCell } from './textures';
  * Viaducts: the parts of an elevated ribbon that are not the asphalt itself (which
  * `trackBuilder.ts` lays at the samples' own height).
  *
- * Per segment off the ground: a slab skirt either side with a lighter fascia, an underside,
+ * Per segment off the ground: a slab skirt either side, banded light-to-dark down its height
+ * and capped by a pale fascia with a marker line let into it — that top edge is what keeps a
+ * deck from reading as a black cut-out against the towers behind it — then an underside,
  * and under it the structure that makes the underside a place rather than a ceiling — an
  * edge beam under each fascia, a centre beam, two pipe runs, a lit strip along every bay,
  * and a hanging sign now and then. Where the deck is too low to drive under, the skirt runs
@@ -76,26 +78,54 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number): void {
     const nx = -dz;
     const nz = dx;
 
+    // Per-segment wear, walked off the segment index so it does not disturb `rng`: two
+    // consecutive casting panels sit a few percent apart in tone, which is what makes the
+    // deck's joints — and so its length — legible from the road below.
+    const wear = 0.94 + ((i * 5) % 7) * 0.024;
+    // The face is read as three tones down its height: a pale fascia at the parapet where
+    // the deck's own lighting spills over, the skirt under it, and, on an embankment only,
+    // a foot that falls away into the dark. Concrete, not shadow — the slab is the biggest
+    // silhouette in the city and has to catch enough light to show its edges.
+    const fasciaA = topA - 0.55;
+    const fasciaC = topC - 0.55;
+    const upperA = Math.max(bottomA, fasciaA - 1.8);
+    const upperC = Math.max(bottomC, fasciaC - 1.8);
     // Skirts: left face outward is -normal (the left side), right face outward is +normal.
-    b.concrete.color(PAL.concrete, 0.92);
-    b.concrete.quad(clx, bottomC, clz, alx, bottomA, alz, alx, topA, alz, clx, topC, clz);
-    b.concrete.quad(arx, bottomA, arz, crx, bottomC, crz, crx, topC, crz, arx, topA, arz);
+    if (upperA > bottomA + 0.05 || upperC > bottomC + 0.05) {
+      b.concrete.color(PAL.concrete, 0.95 * wear);
+      b.concrete.quad(clx, bottomC, clz, alx, bottomA, alz, alx, upperA, alz, clx, upperC, clz);
+      b.concrete.quad(arx, bottomA, arz, crx, bottomC, crz, crx, upperC, crz, arx, upperA, arz);
+    }
+    b.concrete.color(PAL.curb, 1.0 * wear);
+    b.concrete.quad(clx, upperC, clz, alx, upperA, alz, alx, fasciaA, alz, clx, fasciaC, clz);
+    b.concrete.quad(arx, upperA, arz, crx, upperC, crz, crx, fasciaC, crz, arx, fasciaA, arz);
     // Fascia: a lighter band at the top edge, so the deck edge draws a clean line at night.
-    b.concrete.color(PAL.curb, 1.05);
-    b.concrete.quad(clx - a.tz * 0.02, topC - 0.4, clz + a.tx * 0.02, alx - a.tz * 0.02, topA - 0.4, alz + a.tx * 0.02, alx - a.tz * 0.02, topA + 0.02, alz + a.tx * 0.02, clx - a.tz * 0.02, topC + 0.02, clz + a.tx * 0.02);
-    b.concrete.quad(arx + a.tz * 0.02, topA - 0.4, arz - a.tx * 0.02, crx + a.tz * 0.02, topC - 0.4, crz - a.tx * 0.02, crx + a.tz * 0.02, topC + 0.02, crz - a.tx * 0.02, arx + a.tz * 0.02, topA + 0.02, arz - a.tx * 0.02);
+    // It stands 2 cm PROUD of the skirt; inset, the slab simply swallows it.
+    const fx = a.tz * 0.02;
+    const fz = -a.tx * 0.02;
+    b.concrete.color(PAL.curb, 1.75 * wear);
+    b.concrete.quad(clx + fx, fasciaC, clz + fz, alx + fx, fasciaA, alz + fz, alx + fx, topA + 0.02, alz + fz, clx + fx, topC + 0.02, clz + fz);
+    b.concrete.quad(arx - fx, fasciaA, arz - fz, crx - fx, fasciaC, crz - fz, crx - fx, topC + 0.02, crz - fz, arx - fx, topA + 0.02, arz - fz);
+    // A pale marker line let into each fascia, running the whole length of the deck: the
+    // highway draws its own silhouette instead of reading as a hole in the skyline.
+    const lx = a.tz * 0.05;
+    const lz = -a.tx * 0.05;
+    b.neon.color(PAL.neonWhite, 0.24);
+    b.neon.quad(clx + lx, topC - 0.48, clz + lz, alx + lx, topA - 0.48, alz + lz, alx + lx, topA - 0.3, alz + lz, clx + lx, topC - 0.3, clz + lz);
+    b.neon.quad(arx - lx, topA - 0.48, arz - lz, crx - lx, topC - 0.48, crz - lz, crx - lx, topC - 0.3, crz - lz, arx - lx, topA - 0.3, arz - lz);
 
     if (a.y < EMBANKMENT_BELOW && c.y < EMBANKMENT_BELOW) continue;
     const bottom = my - DECK_THICKNESS;
     // Underside, facing down: left-forward-right winding, the mirror of the road surface's,
     // or the slab is invisible from under the deck.
-    b.concrete.color(PAL.concrete, 0.5);
+    b.concrete.color(PAL.concrete, 0.82 * wear);
     b.concrete.quad(alx, bottomA, alz, clx, bottomC, clz, crx, bottomC, crz, arx, bottomA, arz);
     // The structure under the slab: an edge beam under each fascia, a centre beam, and pipes.
-    b.concrete.color(PAL.concrete, 0.7);
+    // Lighter than the soffit they hang off, so the ribs read from the street below.
+    b.concrete.color(PAL.curb, 0.8);
     b.concrete.orientedBox(mx + nx * (a.halfWidth - 0.7), mz + nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom, { bottom: true });
     b.concrete.orientedBox(mx - nx * (a.halfWidth - 0.7), mz - nz * (a.halfWidth - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.9, bottom, { bottom: true });
-    b.concrete.color(PAL.concrete, 0.62);
+    b.concrete.color(PAL.concrete, 0.95);
     b.concrete.orientedBox(mx, mz, dx, dz, len + 0.05, 1.1, bottom - 1.1, bottom, { bottom: true });
     b.props.color(PAL.metalDark, 0.9);
     for (const off of [-a.halfWidth * 0.42, a.halfWidth * 0.36]) {
@@ -109,6 +139,12 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number): void {
     b.neon.color(strip, 0.3);
     b.neon.tube(alx, bottomA + 0.3, alz, clx, bottomC + 0.3, clz, 0.16);
     b.neon.tube(arx, bottomA + 0.3, arz, crx, bottomC + 0.3, crz, 0.16);
+    // Every other bay, a faint wash down the outside of the skirt: the marker line above it
+    // pooling on the concrete, so the face is lit rather than merely a lighter grey.
+    if (bay % 2 === 0) {
+      halo(b, mx - nx * (a.halfWidth + 0.25), my - 1.1, mz - nz * (a.halfWidth + 0.25), len * 2.4, 3.4, Math.atan2(-nx, -nz), PAL.neonWhite, 0.05);
+      halo(b, mx + nx * (a.halfWidth + 0.25), my - 1.1, mz + nz * (a.halfWidth + 0.25), len * 2.4, 3.4, Math.atan2(nx, nz), PAL.neonWhite, 0.05);
+    }
     if (bay % 2 === 1) {
       const pipe = rng() < 0.6 ? PAL.neonCyan : PAL.neonAmber;
       b.neonFlicker.color(pipe, 0.35);
@@ -154,7 +190,7 @@ function buildPillar(b: EnvBuilders, p: PillarDef, rng: () => number): void {
   for (const side of [-1, 1]) {
     const cx = p.x + nx * out * side;
     const cz = p.z + nz * out * side;
-    b.concrete.color(PAL.curb, 1.0 + rng() * 0.15);
+    b.concrete.color(PAL.curb, 1.2 + rng() * 0.2);
     b.concrete.box(cx, (base + top) / 2, cz, 1.7, top - base, 1.7, { top: false });
     if (side === litSide && !p.wet) {
       const c = rng() < 0.6 ? PAL.neonCyan : rng() < 0.5 ? PAL.neonAmber : PAL.neonMagenta;
