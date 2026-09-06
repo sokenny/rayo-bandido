@@ -21,20 +21,24 @@ import { createTargets, resetTargets, stepTargets } from './targets';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
+import { settleVehicle } from './surface';
 
 /**
  * Simulation orchestrator. Pure data in, pure data out; no Three.js, no DOM.
  * Fixed order per tick so every rule sees a consistent view of the world.
  */
 
-export function createVehicleState(x: number, z: number, heading: number): VehicleState {
+export function createVehicleState(x: number, z: number, heading: number, y = 0): VehicleState {
   return {
     x,
     z,
+    y,
     heading,
     prevX: x,
     prevZ: z,
+    prevY: y,
     prevHeading: heading,
+    pitch: 0,
     vx: 0,
     vz: 0,
     yawRate: 0,
@@ -84,7 +88,7 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     transmission,
     time: 0,
     tick: 0,
-    vehicle: createVehicleState(s.x, s.z, s.heading),
+    vehicle: createVehicleState(s.x, s.z, s.heading, s.y ?? 0),
     drift: createDriftState(),
     nitro: createNitroState(),
     lightning: createLightningState(),
@@ -101,7 +105,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   const s = layout.playerSpawn;
   state.time = 0;
   state.tick = 0;
-  state.vehicle = createVehicleState(s.x, s.z, s.heading);
+  state.vehicle = createVehicleState(s.x, s.z, s.heading, s.y ?? 0);
   state.drift = createDriftState();
   state.nitro = createNitroState();
   state.lightning = createLightningState();
@@ -189,6 +193,9 @@ export function stepGame(
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
+  // Which level the car is on decides which walls are walls for it, so the road height is
+  // read before the collision pass.
+  settleVehicle(state.vehicle, layout);
   resolveCollisions(state.vehicle, layout, state.events, dt);
   if (rivals) resolveRivalCollisions(state.vehicle, rivals, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);

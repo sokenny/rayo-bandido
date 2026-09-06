@@ -245,6 +245,40 @@ export class MeshBuilder {
     this.quad(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
   }
 
+  /**
+   * Like `orientedBox`, but the base runs from `ya` at the start to `yb` at the end and the
+   * box is `height` tall above it: a guardrail or a kerb that climbs a ramp without steps.
+   * Four sides, a top and both end caps.
+   */
+  slopedBox(ax: number, az: number, bx: number, bz: number, ya: number, yb: number, thick: number, height: number): void {
+    let dx = bx - ax;
+    let dz = bz - az;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len;
+    dz /= len;
+    const nx = -dz;
+    const nz = dx;
+    const ht = thick / 2;
+    // Left (-normal) and right (+normal) edges at both ends.
+    const alx = ax - nx * ht;
+    const alz = az - nz * ht;
+    const arx = ax + nx * ht;
+    const arz = az + nz * ht;
+    const blx = bx - nx * ht;
+    const blz = bz - nz * ht;
+    const brx = bx + nx * ht;
+    const brz = bz + nz * ht;
+    const ya1 = ya + height;
+    const yb1 = yb + height;
+    // Left face (outward = -normal), right face, top, and the two caps.
+    this.quad(blx, yb, blz, alx, ya, alz, alx, ya1, alz, blx, yb1, blz);
+    this.quad(arx, ya, arz, brx, yb, brz, brx, yb1, brz, arx, ya1, arz);
+    this.quad(alx, ya1, alz, arx, ya1, arz, brx, yb1, brz, blx, yb1, blz);
+    this.quad(alx, ya, alz, blx, yb, blz, brx, yb, brz, arx, ya, arz);
+    this.quad(arx, ya, arz, alx, ya, alz, alx, ya1, alz, arx, ya1, arz);
+    this.quad(blx, yb, blz, brx, yb, brz, brx, yb1, brz, blx, yb1, blz);
+  }
+
   build(): THREE.BufferGeometry {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));

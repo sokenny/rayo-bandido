@@ -12,7 +12,7 @@ export interface MainMenu {
   dispose(): void;
 }
 
-/** The two single-player worlds, plus the lobby. */
+/** The three single-player worlds, plus the lobby. */
 export type MenuChoice = GameMode | 'multiplayer';
 
 interface MenuEntry {
@@ -26,10 +26,22 @@ interface MenuEntry {
 
 const ENTRIES: MenuEntry[] = [
   {
-    mode: 'test',
+    mode: 'city',
     kicker: 'FREE ROAM',
+    name: 'CITY',
+    desc: 'Bandido Bay. Viaducts, ramps, the skyway, the square, the water. Get lost.',
+    spec: [
+      ['ZONE', 'BANDIDO BAY'],
+      ['SIZE', '540 x 550 M'],
+      ['ROADS', 'VIADUCT · SKYWAY · ALLEYS'],
+      ['CLOCK', 'NONE'],
+    ],
+  },
+  {
+    mode: 'test',
+    kicker: 'TEST BLOCK',
     name: 'TEST',
-    desc: 'The city block. Drift, charge, hunt electric cars.',
+    desc: 'The original city block. Drift, charge, hunt electric cars.',
     spec: [
       ['ZONE', 'CITY BLOCK'],
       ['OBJECTIVE', 'HUNT EV TARGETS'],

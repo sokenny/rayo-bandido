@@ -6,7 +6,10 @@ city, drift to charge lightning, fire it at the electric cars that replaced ever
 Desktop browser with a keyboard or a pad — and a phone, held sideways, with the on-screen pad
 (see [Phones](#phones)). Three ways in from the main menu:
 
-- **Test** — the free-roam city block: drift plaza, highway, JDM alley, six patrolling electric cars.
+- **City** — Bandido Bay, the big free-roam city: a viaduct on pillars round the whole map and out
+  over the bay, four ramps, a skyway that climbs to 24 m between the towers, a diagonal avenue,
+  alleys, a screen-covered square, thirteen electric cars (four of them lapping the viaduct).
+- **Test** — the original free-roam city block: drift plaza, highway, JDM alley, six patrolling electric cars.
 - **Race** — the *Bandido Loop*, a 1.4 km street circuit for 2-lap races of about a minute and a
   half: a highway straight to empty the nitro on, chained sweepers to drift through (no corner
   sharper than 60 degrees, none tighter than 36 m), two city "bays" with tighter streets, and two
@@ -25,8 +28,8 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173 for the main menu. The chosen world lives in the URL (`?mode=test`,
-`?mode=race`, or `?mp=1` for multiplayer), so a world can be opened directly and a room link can
+Open http://127.0.0.1:5173 for the main menu. The chosen world lives in the URL (`?mode=city`,
+`?mode=test`, `?mode=race`, or `?mp=1` for multiplayer), so a world can be opened directly and a room link can
 be shared — `?mp=1` alone opens the room browser, `?mp=1&room=K7QP` goes straight into a room.
 Append `?debug=1` to start with the performance overlay open, and `?scale=1` (any 0.7-1.5) to pin
 the render scale instead of letting the resolution governor pick it. For multiplayer use

@@ -56,6 +56,7 @@ export function stepVehicle(
 ): void {
   v.prevX = v.x;
   v.prevZ = v.z;
+  v.prevY = v.y;
   v.prevHeading = v.heading;
   v.collided = false;
   v.collisionImpact = 0;
@@ -206,6 +207,11 @@ export function stepVehicle(
   }
 
   if (manual && speed > gearTop) speed = Math.max(gearTop, speed - DRIVETRAIN.limiterDecel * dt);
+
+  // Hills. A climb leans on the engine and a descent pushes the car along: a fraction of
+  // gravity along the road's grade (`pitch` is last tick's, read off the surface under the
+  // car). Arcade-scaled so a ramp is felt without ever stalling a car on it.
+  if (v.pitch !== 0) speed -= VEHICLE.gradeGravity * 9.81 * Math.sin(v.pitch) * dt;
 
   absSpeed = speed < 0 ? -speed : speed;
   const coasting = throttle <= 0.01 && brake <= 0.01;

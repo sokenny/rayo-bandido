@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { SILENT_MUSIC, type MusicBands } from '../../core/types';
 import { RENDER, THEME } from '../../config/tuning';
 import type { CityPlan } from '../../world/cityPlan';
-import { PAL } from './env/palette';
+import { applyPalette, PAL } from './env/palette';
 import { createBuilders } from './env/builders';
 import { buildCity } from './env/cityBuilder';
+import { buildLandmarks } from './env/landmarksBuilder';
 import { buildProps } from './env/propsBuilder';
 import { buildTrack } from './env/trackBuilder';
 import { createWantedBillboard } from './env/wantedBillboard';
@@ -57,6 +58,8 @@ export interface EnvironmentVisual {
 }
 
 export function createEnvironment(scene: THREE.Scene, plan: CityPlan): EnvironmentVisual {
+  // Every builder and texture below reads `PAL`; the world chooses which script fills it.
+  applyPalette(plan.palette ?? 'arena');
   const root = new THREE.Group();
   root.name = 'environment';
   scene.add(root);
@@ -71,14 +74,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // Enough to give the wet asphalt a sheen and to keep the blue in the shadows.
   scene.environmentIntensity = 0.95;
   // The haze starts close and closes fast: distance should dissolve into blue, not into black.
-  scene.fog = new THREE.Fog(PAL.fog, RENDER.fogNear, RENDER.fogFar);
+  // A world may ask for more reach (the big city has a skyline to see across the bay).
+  scene.fog = new THREE.Fog(PAL.fog, plan.fog?.near ?? RENDER.fogNear, plan.fog?.far ?? RENDER.fogFar);
 
   // Deep teal sky bounce over a blue-grey ground bounce. This is the "not pitch dark" light:
   // it never goes to black underneath anything, so shadowed geometry still reads as blue.
-  const hemi = new THREE.HemisphereLight(0x5aa0d4, 0x2a3f50, 2.5);
+  const hemi = new THREE.HemisphereLight(PAL.hemiSky, PAL.hemiGround, PAL.hemiIntensity);
   root.add(hemi);
   // A single cold key from high north-west; no shadows, they are not worth the frame time.
-  const key = new THREE.DirectionalLight(0x8fb8e8, 0.5);
+  const key = new THREE.DirectionalLight(PAL.keyColor, PAL.keyIntensity);
   key.position.set(-70, 110, -50);
   root.add(key);
 
@@ -89,26 +93,26 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // through haze, not as a hundred individual pixels fighting each other for attention.
   const winCorp = makeWindowTexture({
     facade: PAL.facadeCorp,
-    lights: [PAL.winCold, PAL.winCyan, PAL.winCold],
+    lights: PAL.windowsCorp,
     cols: 5,
     rows: 5,
-    lit: 0.2,
+    lit: 0.2 * PAL.litGain,
     seed: 11,
   });
   const winUrban = makeWindowTexture({
     facade: PAL.facadeUrban,
-    lights: [PAL.winWarm, PAL.winCyan, PAL.winCold],
+    lights: PAL.windowsUrban,
     cols: 4,
     rows: 4,
-    lit: 0.26,
+    lit: 0.26 * PAL.litGain,
     seed: 23,
   });
   const winJdm = makeWindowTexture({
     facade: PAL.facadeJdm,
-    lights: [PAL.winWarm, PAL.winCyan],
+    lights: PAL.windowsJdm,
     cols: 4,
     rows: 3,
-    lit: 0.18,
+    lit: 0.18 * PAL.litGain,
     seed: 37,
   });
   const signTex = makeSignAtlas();
@@ -139,9 +143,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   });
   const laneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04 });
-  const corpMat = facade(winCorp, 0.85);
-  const urbanMat = facade(winUrban, 0.9);
-  const jdmMat = facade(winJdm, 0.75);
+  const corpMat = facade(winCorp, 0.85 * PAL.windowGain);
+  const urbanMat = facade(winUrban, 0.9 * PAL.windowGain);
+  const jdmMat = facade(winJdm, 0.75 * PAL.windowGain);
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
   const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -162,6 +166,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const signMat = new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false });
   const billMatA = new THREE.MeshBasicMaterial({ map: billTexA, toneMapped: false });
   const billMatB = new THREE.MeshBasicMaterial({ map: billTexB, toneMapped: false });
+  signMat.color.setScalar(PAL.screenGain);
+  billMatA.color.setScalar(PAL.screenGain);
+  billMatB.color.setScalar(PAL.screenGain);
   const materials = [
     roadMat,
     laneMat,
@@ -186,6 +193,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   buildCity(b);
   buildProps(b);
   buildTrack(b);
+  buildLandmarks(b);
 
   const geometries: THREE.BufferGeometry[] = [];
   const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
@@ -215,6 +223,29 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   add(b.neonPulse, neonPulseMat, 'env-neon-pulse', 1);
   add(b.neonFlicker, neonFlickerMat, 'env-neon-flicker', 1);
   add(b.glow, glowMat, 'env-glow', 2);
+
+  /* ------------------------------------------------- water */
+
+  // One flat, glossy plane: the sky and the environment map do the reflecting, the additive
+  // streaks the landmarks builder lays on it do the neon. Its own material, one draw call.
+  if (plan.water) {
+    const r = plan.water.rect;
+    const geo = new THREE.PlaneGeometry(r.maxX - r.minX, r.maxZ - r.minZ);
+    geo.rotateX(-Math.PI / 2);
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: PAL.water,
+      roughness: 0.16,
+      metalness: 0.6,
+      envMapIntensity: 1.5,
+    });
+    const water = new THREE.Mesh(geo, waterMat);
+    water.name = 'env-water';
+    water.position.set((r.minX + r.maxX) / 2, -0.55, (r.minZ + r.maxZ) / 2);
+    water.frustumCulled = false;
+    root.add(water);
+    geometries.push(geo);
+    materials.push(waterMat);
+  }
 
   /* ------------------------------------------------- wanted billboard */
 
@@ -256,11 +287,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
       // BASS — the main neon mass (static signs, tubes, window strips) is what actually lights
       // this world, so it takes the kick: a hard punch that hangs for about half a second.
-      neonMat.color.setScalar(1 + THEME.neonDepth * music.bass);
+      neonMat.color.setScalar(PAL.neonGain * (1 + THEME.neonDepth * music.bass));
 
       // MIDS — breathing neon: vertical signs, gate bars, hanging tubes. Its own slow sine
       // breath, scaled by the mid swell, so it drifts against the bass instead of with it.
-      neonPulseMat.color.setScalar((0.68 + 0.32 * Math.sin(time * 1.7)) * (1 + THEME.signDepth * music.mid));
+      neonPulseMat.color.setScalar(PAL.neonGain * (0.68 + 0.32 * Math.sin(time * 1.7)) * (1 + THEME.signDepth * music.mid));
 
       // HIGHS — stuttering neon: broken alley tubes and aircraft beacons on the towers. The
       // slot-based stutter stays lazy (fast stutter is the quickest way to make a night scene
@@ -271,13 +302,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
         const h = Math.abs(Math.sin(slot * 12.9898) * 43758.5453) % 1;
         flickerValue = h < 0.1 ? 0.45 : h < 0.2 ? 0.75 : 1;
       }
-      neonFlickerMat.color.setScalar(flickerValue * (1 + THEME.flickerDepth * music.high));
+      neonFlickerMat.color.setScalar(PAL.neonGain * flickerValue * (1 + THEME.flickerDepth * music.high));
 
       // Wet reflections and light pools: a gentle shimmer in opacity with a hi-hat tick on top,
       // while the additive glow blooms on the kick with the neon it belongs to (via colour, so
       // it is not clamped by the opacity cap).
       glowMat.opacity = Math.min(1, 0.86 + 0.1 * Math.sin(time * 0.8) + 0.06 * music.high);
-      glowMat.color.setScalar(1 + THEME.glowDepth * music.bass);
+      glowMat.color.setScalar(PAL.glowGain * (1 + THEME.glowDepth * music.bass));
       // Holographic billboards scroll in opposite directions.
       billTexA.offset.y = (billTexA.offset.y + frameDt * 0.035) % 1;
       billTexB.offset.y = (billTexB.offset.y - frameDt * 0.026 + 1) % 1;

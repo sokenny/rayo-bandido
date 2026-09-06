@@ -85,6 +85,6 @@ export function resolveRivalCollisions(v: VehicleState, rivals: readonly RivalCa
     const rz = Math.sin(v.heading);
     v.speed = v.vx * fx + v.vz * fz;
     v.lateralSpeed = v.vx * rx + v.vz * rz;
-    events.push({ type: 'collision', x: hitX, z: hitZ, impact });
+    events.push({ type: 'collision', x: hitX, y: v.y, z: hitZ, impact });
   }
 }

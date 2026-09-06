@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTrackPath,
   createProjection,
+  easedRise,
+  isElevated,
   isOnPath,
   longestStraight,
   maxCornerAngle,
+  maxGrade,
+  maxHeight,
   minCornerRadius,
   pointAtStation,
   projectOntoPath,
@@ -117,5 +121,64 @@ describe('track geometry', () => {
     expect(last.z).toBeCloseTo(-40, 6);
     // Length: two legs shortened by the tangent length t = 12, plus a quarter circle.
     expect(open.length).toBeCloseTo(28 + 28 + (Math.PI / 2) * 12, 0);
+  });
+});
+
+describe('heights', () => {
+  it('eases a rise in and out and never overshoots', () => {
+    expect(easedRise(0)).toBe(0);
+    expect(easedRise(1)).toBe(1);
+    let last = 0;
+    for (let u = 0; u <= 1.0001; u += 0.01) {
+      const y = easedRise(u);
+      expect(y).toBeGreaterThanOrEqual(last - 1e-9);
+      expect(y).toBeLessThanOrEqual(1 + 1e-9);
+      last = y;
+    }
+    // Flat at both ends, steeper than the average in the middle.
+    expect(easedRise(0.02)).toBeLessThan(0.02);
+    expect(easedRise(0.98)).toBeGreaterThan(0.98);
+    expect(easedRise(0.5)).toBeCloseTo(0.5, 6);
+  });
+
+  it('interpolates between anchored nodes and holds the ends of an open path', () => {
+    const spec: TrackSpec = {
+      closed: false,
+      nodes: [
+        { x: 0, z: 0, r: 0, width: 10, zone: 'urban', y: 0 },
+        { x: 0, z: -100, r: 0, width: 10, zone: 'urban' },
+        { x: 0, z: -200, r: 0, width: 10, zone: 'urban', y: 20 },
+        { x: 0, z: -260, r: 0, width: 10, zone: 'urban' },
+      ],
+    };
+    const path = buildTrackPath(spec);
+    expect(path.samples[0].y).toBe(0);
+    expect(maxHeight(path)).toBe(20);
+    expect(isElevated(path)).toBe(true);
+    // One smooth run from the first anchor to the second, no kink at the unmarked node.
+    const mid = path.samples.find((s) => Math.abs(s.z + 100) < 1e-6)!;
+    expect(mid.y).toBeCloseTo(10, 3);
+    // Held at 20 past the last anchor.
+    expect(path.samples[path.samples.length - 1].y).toBe(20);
+    expect(maxGrade(path)).toBeLessThan(0.14);
+    expect(maxGrade(path)).toBeGreaterThan(0.1);
+    // Projections carry the height too.
+    const p = projectOntoPath(path, 3, -50, createProjection());
+    expect(p.y).toBeGreaterThan(0);
+    expect(p.y).toBeLessThan(10);
+  });
+
+  it('is flat when no node carries a height', () => {
+    const path = buildTrackPath({
+      closed: true,
+      nodes: [
+        { x: 0, z: 0, r: 10, width: 8, zone: 'urban' },
+        { x: 100, z: 0, r: 10, width: 8, zone: 'urban' },
+        { x: 100, z: 100, r: 10, width: 8, zone: 'urban' },
+        { x: 0, z: 100, r: 10, width: 8, zone: 'urban' },
+      ],
+    });
+    for (const s of path.samples) expect(s.y).toBe(0);
+    expect(isElevated(path)).toBe(false);
   });
 });

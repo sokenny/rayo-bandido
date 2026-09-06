@@ -17,7 +17,7 @@ const RING_Y = 0.06;
 
 export interface ShockRings {
   object: THREE.InstancedMesh;
-  spawn(x: number, z: number): void;
+  spawn(x: number, y: number, z: number): void;
   update(dt: number): void;
   reset(): void;
   dispose(): void;
@@ -51,12 +51,13 @@ export function createShockRings(parent: THREE.Object3D): ShockRings {
 
   const timers = new Float32Array(RING_SLOTS);
   const posX = new Float32Array(RING_SLOTS);
+  const posY = new Float32Array(RING_SLOTS);
   const posZ = new Float32Array(RING_SLOTS);
   let head = 0;
 
-  function writeSlot(i: number, scale: number, x: number, z: number, brightness: number): void {
+  function writeSlot(i: number, scale: number, x: number, y: number, z: number, brightness: number): void {
     matrix.makeScale(scale, scale, scale);
-    matrix.setPosition(x, RING_Y, z);
+    matrix.setPosition(x, y + RING_Y, z);
     object.setMatrixAt(i, matrix);
     color.setRGB(brightness * 0.35, brightness * 0.95, brightness);
     object.setColorAt(i, color);
@@ -76,13 +77,14 @@ export function createShockRings(parent: THREE.Object3D): ShockRings {
 
   return {
     object,
-    spawn(x, z) {
+    spawn(x, y, z) {
       const i = head;
       head = ringNext(head, RING_SLOTS);
       timers[i] = RING_LIFE;
       posX[i] = x;
+      posY[i] = y;
       posZ[i] = z;
-      writeSlot(i, RING_START_RADIUS, x, z, 1);
+      writeSlot(i, RING_START_RADIUS, x, y, z, 1);
       object.instanceMatrix.needsUpdate = true;
       if (object.instanceColor) object.instanceColor.needsUpdate = true;
       object.visible = true;
@@ -103,7 +105,7 @@ export function createShockRings(parent: THREE.Object3D): ShockRings {
         const k = next / RING_LIFE; // 1 -> 0
         const grow = 1 - k;
         const radius = RING_START_RADIUS + (RING_END_RADIUS - RING_START_RADIUS) * grow * (2 - grow);
-        writeSlot(i, radius, posX[i], posZ[i], k * k * 1.6);
+        writeSlot(i, radius, posX[i], posY[i], posZ[i], k * k * 1.6);
         active++;
       }
       object.instanceMatrix.needsUpdate = true;

@@ -1,6 +1,7 @@
 import type { GameEvent, NearMissPass, NearMissState, TargetState, VehicleState } from '../core/types';
 import { NEAR_MISS } from '../config/tuning';
 import { clamp01 } from '../core/math';
+import { LEVEL_GAP } from './collision';
 
 /**
  * Near miss scoring: points for shaving past an electric car at speed without touching it.
@@ -128,8 +129,9 @@ export function stepNearMiss(
     const p = n.passes[i];
     if (!p) continue;
 
-    if (t.status !== 'active') {
-      // The car is gone mid-pass (shot, or waiting to respawn): drop it, no award.
+    if (t.status !== 'active' || Math.abs(t.y - v.y) > LEVEL_GAP) {
+      // The car is gone mid-pass (shot, or waiting to respawn), or it is on another level
+      // altogether — the viaduct overhead is not a near miss: drop it, no award.
       resetPass(p);
       continue;
     }
@@ -168,6 +170,7 @@ export function stepNearMiss(
           type: 'nearMiss',
           targetId: t.id,
           x: t.x,
+          y: t.y,
           z: t.z,
           points,
           quality: nearMissQuality(points),

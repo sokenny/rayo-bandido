@@ -24,6 +24,8 @@ export interface TireSmoke {
   emit(
     dt: number,
     intensity: number,
+    /** Height of the road under the car (m). */
+    baseY: number,
     leftX: number,
     leftZ: number,
     rightX: number,
@@ -60,7 +62,7 @@ export function createTireSmoke(parent: THREE.Object3D, textures: FxTextures): T
 
   return {
     object: pool.object,
-    emit(dt, intensity, leftX, leftZ, rightX, rightZ, carVx, carVz) {
+    emit(dt, intensity, baseY, leftX, leftZ, rightX, rightZ, carVx, carVz) {
       if (intensity <= 0) {
         accumulator = 0;
         return;
@@ -76,7 +78,7 @@ export function createTireSmoke(parent: THREE.Object3D, textures: FxTextures): T
         const cz = wheelToggle === 0 ? leftZ : rightZ;
         const x = cx + (Math.random() - 0.5) * 0.34;
         const z = cz + (Math.random() - 0.5) * 0.34;
-        const y = 0.1 + Math.random() * 0.16;
+        const y = baseY + 0.1 + Math.random() * 0.16;
         // Inherit a little of the car's motion, drift up and spread sideways.
         const vx = carVx * 0.2 + (Math.random() - 0.5) * 1.6;
         const vz = carVz * 0.2 + (Math.random() - 0.5) * 1.6;

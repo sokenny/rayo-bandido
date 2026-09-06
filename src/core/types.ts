@@ -6,7 +6,10 @@
  * - Nothing in here may import Three.js or touch the DOM. Simulation state is plain data
  *   so it can later be serialized for multiplayer.
  * - Coordinate system (matches Three.js world space, Y up):
- *     * The world is planar. Positions are (x, z); y = 0 is the road surface.
+ *     * The simulation runs on the XZ plane. Positions are (x, z); y = 0 is the ground.
+ *       A world may carry elevated roads (`ArenaLayout.surface`): the car and the traffic
+ *       then also carry a `y`, the height of the road under them, but nothing about the
+ *       handling model changes — a car on a viaduct steers exactly like one on the street.
  *     * `heading` is a compass-style yaw in radians, CLOCKWISE when viewed from above.
  *       heading 0 points toward -Z (the Three.js "forward" convention).
  *     * forward = (sin(heading), -cos(heading)),  right = (cos(heading), sin(heading)).
@@ -20,8 +23,8 @@
 
 import type { TrackPath } from '../world/track';
 
-/** Which world is loaded: the free-roam test city or the racing circuit. */
-export type GameMode = 'test' | 'race';
+/** Which world is loaded: the free-roam test city, the racing circuit or the big city. */
+export type GameMode = 'test' | 'race' | 'city';
 
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {
@@ -56,11 +59,19 @@ export type Transmission = 'auto' | 'manual';
 export interface VehicleState {
   x: number;
   z: number;
+  /** Height of the road surface under the car (m). 0 on a flat world. See `src/sim/surface.ts`. */
+  y: number;
   heading: number;
   /** Pose at the start of the current tick, for render interpolation. */
   prevX: number;
   prevZ: number;
+  prevY: number;
   prevHeading: number;
+  /**
+   * Grade of the road along the heading, as an angle (rad, positive = climbing). The body
+   * tilts by it, and step 4 of `src/sim/vehicle.ts` feels a fraction of gravity along it.
+   */
+  pitch: number;
   /** World-space velocity in m/s. */
   vx: number;
   vz: number;
@@ -167,9 +178,12 @@ export interface TargetState {
   id: number;
   x: number;
   z: number;
+  /** Height of the road under the car (m), see `VehicleState.y`. */
+  y: number;
   heading: number;
   prevX: number;
   prevZ: number;
+  prevY: number;
   prevHeading: number;
   /** World-space knockback velocity (m/s) from being bumped by the player. Decays to 0. */
   vx: number;
@@ -310,13 +324,14 @@ export type GameEvent =
   | { type: 'driftEnd'; duration: number; chain: number }
   | { type: 'nitroStart' }
   | { type: 'nitroEnd' }
-  | { type: 'lightningFired'; targetId: number; fromX: number; fromZ: number; toX: number; toZ: number }
+  | { type: 'lightningFired'; targetId: number; fromX: number; fromY: number; fromZ: number; toX: number; toY: number; toZ: number }
   | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' }
-  | { type: 'targetDestroyed'; targetId: number; x: number; z: number; reward: number }
-  | { type: 'nearMiss'; targetId: number; x: number; z: number; points: number; quality: number }
+  | { type: 'targetDestroyed'; targetId: number; x: number; y: number; z: number; reward: number }
+  | { type: 'nearMiss'; targetId: number; x: number; y: number; z: number; points: number; quality: number }
   | {
       type: 'collision';
       x: number;
+      y: number;
       z: number;
       impact: number;
       /** Set when the other party was an electric car: its id and the knock velocity it was given. */
@@ -351,25 +366,36 @@ export interface GameState {
   events: GameEvent[];
 }
 
-/** Axis-aligned obstacle in world space. Buildings, barriers and arena walls. */
+/**
+ * Axis-aligned obstacle in world space. Buildings, barriers and arena walls.
+ *
+ * `minY` / `maxY` bound the heights at which the obstacle is solid: a viaduct pillar only
+ * stops a car on the ground, a building only reaches as high as its roof, and a car on the
+ * deck above sails past both. Either bound left out is open-ended.
+ */
 export interface ObstacleBox {
   minX: number;
   maxX: number;
   minZ: number;
   maxZ: number;
+  minY?: number;
+  maxY?: number;
   /** Optional tag for debugging / presentation. */
   tag?: string;
 }
 
 /**
  * Wall segment collider from a to b, for tracks with curves and diagonals that boxes cannot
- * follow. Solid on both sides; the car (a circle) is pushed off the segment.
+ * follow. Solid on both sides; the car (a circle) is pushed off the segment. The height
+ * bounds work as on `ObstacleBox`: a guardrail on a viaduct is not a wall for the street below.
  */
 export interface ObstacleWall {
   ax: number;
   az: number;
   bx: number;
   bz: number;
+  minY?: number;
+  maxY?: number;
   tag?: string;
 }
 
@@ -377,6 +403,28 @@ export interface SpawnPoint {
   x: number;
   z: number;
   heading: number;
+  /** Height of the road at the spawn (m). Missing = the ground. */
+  y?: number;
+}
+
+/** Height and slope of the drivable surface under a point. Written by `SurfaceField.sample`. */
+export interface SurfaceSample {
+  y: number;
+  /** Rise of the surface per metre of +x / +z travel. */
+  gx: number;
+  gz: number;
+}
+
+/**
+ * The drivable surface of a world with elevated roads. `sample` answers with the highest
+ * surface at (x, z) that a body at height `yHint` can step onto: an overpass and the street
+ * under it share an (x, z), a body keeps the level it is on because its own height is the
+ * hint, and a ramp carries it up because each tick the ramp is only a few centimetres higher.
+ * The ground (y 0, flat) is always a candidate. Allocation-free; called for every moving body
+ * every tick.
+ */
+export interface SurfaceField {
+  sample(x: number, z: number, yHint: number, out: SurfaceSample): void;
 }
 
 /** A line across the track. Crossing it in the direction (fx, fz) counts. */
@@ -416,7 +464,9 @@ export interface MinimapData {
   /** Axis-aligned road rectangles. */
   rects: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
   /** Roads as centreline polylines with a width. `hidden` ribbons (shortcuts) are not drawn. */
-  ribbons: Array<{ points: Array<{ x: number; z: number }>; width: number; closed: boolean; hidden: boolean }>;
+  ribbons: Array<{ points: Array<{ x: number; z: number }>; width: number; closed: boolean; hidden: boolean; elevated?: boolean }>;
+  /** Water, drawn under the roads. */
+  water?: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
 }
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
@@ -433,6 +483,8 @@ export interface ArenaLayout {
   colliders: ObstacleBox[];
   /** Segment colliders (guardrails, alley walls). Empty on the box-only test city. */
   walls: ObstacleWall[];
+  /** Drivable heights, when the world has roads off the ground. Null = everything at y 0. */
+  surface: SurfaceField | null;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
   minimap: MinimapData;

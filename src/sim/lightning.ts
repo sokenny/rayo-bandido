@@ -23,7 +23,7 @@ export function stepLightning(
   if (l.cooldown > 0) l.cooldown = Math.max(0, l.cooldown - dt);
   if (l.arcTimer > 0) l.arcTimer = Math.max(0, l.arcTimer - dt);
 
-  l.acquiredTargetId = selectTarget(v.x, v.z, v.heading, targets);
+  l.acquiredTargetId = selectTarget(v.x, v.z, v.heading, targets, LIGHTNING.range, LIGHTNING.coneHalfAngle, v.y);
 
   if (!cmd.fire) return;
   if (l.charge < LIGHTNING.cost) {
@@ -49,9 +49,18 @@ export function stepLightning(
   l.lastTargetId = target.id;
   target.status = 'destroyed';
   target.hitTime = time;
-  events.push({ type: 'lightningFired', targetId: target.id, fromX: v.x, fromZ: v.z, toX: target.x, toZ: target.z });
-  events.push({ type: 'targetDestroyed', targetId: target.id, x: target.x, z: target.z, reward: 0 });
-  l.acquiredTargetId = selectTarget(v.x, v.z, v.heading, targets);
+  events.push({
+    type: 'lightningFired',
+    targetId: target.id,
+    fromX: v.x,
+    fromY: v.y,
+    fromZ: v.z,
+    toX: target.x,
+    toY: target.y,
+    toZ: target.z,
+  });
+  events.push({ type: 'targetDestroyed', targetId: target.id, x: target.x, y: target.y, z: target.z, reward: 0 });
+  l.acquiredTargetId = selectTarget(v.x, v.z, v.heading, targets, LIGHTNING.range, LIGHTNING.coneHalfAngle, v.y);
 }
 
 export function findTarget(targets: TargetState[], id: number): TargetState | undefined {

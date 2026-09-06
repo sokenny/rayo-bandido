@@ -188,6 +188,7 @@ export function createArenaLayout(): ArenaLayout {
     cruiseRoute: CRUISE_ROUTE.map((p) => ({ x: p.x, z: p.z })),
     colliders,
     walls: [],
+    surface: null,
     race: null,
     minimap: {
       bounds: { minX: -RING, maxX: RING, minZ: -RING, maxZ: RING },

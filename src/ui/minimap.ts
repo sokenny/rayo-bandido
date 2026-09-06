@@ -133,7 +133,15 @@ function drawBase(
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
+  // The bay, under everything.
+  if (data.water) {
+    const w = data.water;
+    ctx.fillStyle = 'rgba(36, 92, 140, 0.35)';
+    ctx.fillRect(px(w.minX), pz(w.minZ), (w.maxX - w.minX) * scale, (w.maxZ - w.minZ) * scale);
+  }
+
   // Road body, then a thin cold outline so the network reads against the dark panel.
+  // Viaducts and the skyway are drawn last, in magenta, so they read as a layer above.
   const passes: Array<{ stroke: string; widen: number }> = [
     { stroke: 'rgba(79, 243, 255, 0.35)', widen: 1.6 * dpr },
     { stroke: 'rgba(214, 232, 255, 0.55)', widen: 0 },
@@ -149,7 +157,7 @@ function drawBase(
       ctx.fillRect(x - pass.widen / 2, z - pass.widen / 2, w + pass.widen, h + pass.widen);
     }
     for (const rb of data.ribbons) {
-      if (rb.hidden || rb.points.length < 2) continue;
+      if (rb.hidden || rb.elevated || rb.points.length < 2) continue;
       ctx.lineWidth = Math.max(1.5 * dpr, rb.width * scale + pass.widen);
       ctx.beginPath();
       ctx.moveTo(px(rb.points[0].x), pz(rb.points[0].z));
@@ -157,6 +165,16 @@ function drawBase(
       if (rb.closed) ctx.closePath();
       ctx.stroke();
     }
+  }
+  for (const rb of data.ribbons) {
+    if (rb.hidden || !rb.elevated || rb.points.length < 2) continue;
+    ctx.strokeStyle = 'rgba(255, 61, 240, 0.85)';
+    ctx.lineWidth = Math.max(1.5 * dpr, rb.width * scale * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(px(rb.points[0].x), pz(rb.points[0].z));
+    for (let i = 1; i < rb.points.length; i++) ctx.lineTo(px(rb.points[i].x), pz(rb.points[i].z));
+    if (rb.closed) ctx.closePath();
+    ctx.stroke();
   }
 
   if (!race) return;

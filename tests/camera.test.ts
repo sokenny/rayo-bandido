@@ -18,8 +18,10 @@ function press(target: Window, code: string): void {
 function poseAt(x = 0, z = 0, heading = 0, extra: Partial<CameraPose> = {}): CameraPose {
   return {
     x,
+    y: 0,
     z,
     heading,
+    roadPitch: 0,
     vx: 0,
     vz: 0,
     speed: 0,

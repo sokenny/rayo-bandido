@@ -27,6 +27,10 @@ function toTexture(cv: HTMLCanvasElement, repeat = false): THREE.CanvasTexture {
   return tex;
 }
 
+function rgba(c: number, a: number): string {
+  return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
+}
+
 function hex(c: number): string {
   return `#${c.toString(16).padStart(6, '0')}`;
 }
@@ -467,7 +471,7 @@ export function makeSkyTexture(): THREE.CanvasTexture {
     const r = 90 + rng() * 150;
     const rg = ctx.createRadialGradient(x, H * 0.94, 0, x, H * 0.94, r);
     const c = rng();
-    rg.addColorStop(0, c < 0.62 ? 'rgba(60,140,200,0.20)' : 'rgba(170,60,150,0.18)');
+    rg.addColorStop(0, rgba(c < 0.62 ? PAL.neonCyan : PAL.neonMagenta, c < 0.62 ? 0.16 : 0.14));
     rg.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = rg;
     ctx.fillRect(x - r, H * 0.94 - r, r * 2, r * 2);
@@ -487,10 +491,10 @@ export function makeEnvTexture(): THREE.CanvasTexture {
   const H = 128;
   const { cv, ctx } = canvas(W, H);
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0e1c2a');
-  g.addColorStop(0.55, '#1b3245');
-  g.addColorStop(0.72, '#31607f');
-  g.addColorStop(1, '#16283a');
+  g.addColorStop(0, hex(PAL.night));
+  g.addColorStop(0.55, hex(PAL.fog));
+  g.addColorStop(0.72, hex(PAL.skyHorizon));
+  g.addColorStop(1, hex(PAL.night));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
   const rng = makeRng(31337);

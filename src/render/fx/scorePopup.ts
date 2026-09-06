@@ -114,13 +114,15 @@ export function popupRise(k: number): number {
 }
 
 export interface ScorePopups {
-  spawn(x: number, z: number, amount: number, style?: ScorePopupStyle): void;
+  spawn(x: number, y: number, z: number, amount: number, style?: ScorePopupStyle): void;
   update(dt: number): void;
   reset(): void;
   dispose(): void;
 }
 
 interface Slot {
+  /** Height of the road the pop rises from (m). */
+  y: number;
   sprite: THREE.Sprite;
   material: THREE.SpriteMaterial;
   texture: THREE.CanvasTexture;
@@ -219,6 +221,7 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
       ctx: canvas.getContext('2d'),
       timer: 0,
       x: 0,
+      y: 0,
       z: 0,
       scale: 1,
     });
@@ -232,7 +235,7 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
   }
 
   return {
-    spawn(x, z, amount, style = POPUP_KILL) {
+    spawn(x, y, z, amount, style = POPUP_KILL) {
       const slot = slots[head];
       head = ringNext(head, SCORE_POPUP_SLOTS);
       if (slot.ctx) {
@@ -241,10 +244,11 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
       }
       slot.timer = LIFE;
       slot.x = x + (Math.random() - 0.5) * 2 * SCATTER;
+      slot.y = y;
       slot.z = z + (Math.random() - 0.5) * 2 * SCATTER;
       slot.scale = style.scale ?? 1;
       const scale = popupScale(0) * slot.scale;
-      slot.sprite.position.set(slot.x, START_Y, slot.z);
+      slot.sprite.position.set(slot.x, slot.y + START_Y, slot.z);
       slot.sprite.scale.set(TEXT_HEIGHT * TEXT_ASPECT * scale, TEXT_HEIGHT * scale, 1);
       slot.material.opacity = popupAlpha(0);
       slot.sprite.visible = true;
@@ -262,7 +266,7 @@ export function createScorePopups(parent: THREE.Object3D): ScorePopups {
         slot.timer = next;
         const k = 1 - next / LIFE;
         const scale = popupScale(k) * slot.scale;
-        slot.sprite.position.set(slot.x, START_Y + popupRise(k), slot.z);
+        slot.sprite.position.set(slot.x, slot.y + START_Y + popupRise(k), slot.z);
         slot.sprite.scale.set(TEXT_HEIGHT * TEXT_ASPECT * scale, TEXT_HEIGHT * scale, 1);
         slot.material.opacity = popupAlpha(k);
       }

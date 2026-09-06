@@ -9,7 +9,7 @@ import type { TargetState } from '../src/core/types';
 const DT = 1 / 60;
 
 function makeTarget(id: number, x: number, z: number, status: TargetState['status'] = 'active'): TargetState {
-  return { id, x, z, heading: 0, prevX: x, prevZ: z, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, rewarded: false };
+  return { id, x, z, y: 0, heading: 0, prevX: x, prevZ: z, prevY: 0, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, rewarded: false };
 }
 
 describe('targeting cone', () => {

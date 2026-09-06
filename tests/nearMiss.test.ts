@@ -14,7 +14,7 @@ import { createPlayerCommand } from '../src/core/input/keyboard';
 import type { GameEvent, TargetState, VehicleState } from '../src/core/types';
 
 function makeTarget(id: number, x: number, z: number, status: TargetState['status'] = 'active'): TargetState {
-  return { id, x, z, heading: 0, prevX: x, prevZ: z, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, rewarded: false };
+  return { id, x, z, y: 0, heading: 0, prevX: x, prevZ: z, prevY: 0, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, rewarded: false };
 }
 
 /** Moves the car to (x, z) with the given world velocity, keeping prev* as the last pose. */

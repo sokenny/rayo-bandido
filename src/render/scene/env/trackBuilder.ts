@@ -1,8 +1,10 @@
 import type { RailDef, RibbonDef, TrackLineDef } from '../../../world/cityPlan';
-import { isOnPath, offsetAtStation, segmentCount } from '../../../world/track';
+import { onRibbonAtLevel } from '../../../world/cityGen';
+import { createProjection, offsetAtStation, projectOntoPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
+import { buildViaducts } from './elevatedBuilder';
 import { lampColor, lampPost } from './propsBuilder';
 import { PAINT_Y, ROAD_TILE, roadTint } from './cityBuilder';
 import { signCell } from './textures';
@@ -21,12 +23,19 @@ import { signCell } from './textures';
  *    checkpoint arches, and the flickering signs that mark an alley mouth.
  *
  * Everything goes into the shared per-material builders; no new draw calls.
+ *
+ * Heights: every sample carries the road's `y`, so the same code lays a street, a ramp and a
+ * viaduct deck; the rails climb with the road (`slopedBox`), the lamps stand on it, and the
+ * paint stops where another road crosses AT THE SAME LEVEL only — a street under a viaduct
+ * does not break the viaduct's centre line. `elevatedBuilder.ts` adds the slab under a deck.
  */
 export function buildTrack(b: EnvBuilders): void {
   const rng = makeRng(0x7ac4);
   for (const rb of b.plan.ribbons) buildRibbon(b, rb);
+  if (b.plan.shoulders) for (const rb of b.plan.ribbons) if (!rb.elevated) buildShoulders(b, rb);
   for (const rb of b.plan.ribbons) if (rb.kind === 'track') buildLanePaint(b, rb);
   buildRails(b, b.plan.rails, rng);
+  buildViaducts(b, rng);
   for (const rb of b.plan.ribbons) buildRibbonLamps(b, rb, rng);
   for (const rb of b.plan.ribbons) if (rb.kind === 'alley') buildAlleyDressing(b, rb, rng);
   if (b.plan.startLine) buildStartLine(b, b.plan.startLine);
@@ -35,16 +44,22 @@ export function buildTrack(b: EnvBuilders): void {
 
 /* ------------------------------------------------------------------ asphalt */
 
+/** Height the asphalt is drawn above the samples: alleys a hair up so their mouths never z-fight. */
+function liftOf(rb: RibbonDef): number {
+  return rb.lift ?? (rb.kind === 'alley' ? 0.006 : 0);
+}
+
 function buildRibbon(b: EnvBuilders, rb: RibbonDef): void {
   const samples = rb.path.samples;
   const segs = segmentCount(rb.path);
-  // Alleys sit a hair above the main road so the overlap at their mouths never z-fights.
-  const y = rb.kind === 'alley' ? 0.006 : 0;
+  const lift = liftOf(rb);
   const bright = rb.kind === 'alley' ? 0.72 : 1;
   for (let i = 0; i < segs; i++) {
     const a = samples[i];
     const c = samples[(i + 1) % samples.length];
     const sc = i === segs - 1 && rb.path.closed ? rb.path.length : c.s;
+    const ay = a.y + lift;
+    const cy = c.y + lift;
     b.road.color(roadTint(a.zone), bright);
     // Left/right edge points; u runs across the road in texture tiles, v along the station.
     const alx = a.x + a.tz * a.halfWidth;
@@ -58,16 +73,79 @@ function buildRibbon(b: EnvBuilders, rb: RibbonDef): void {
     const u0 = -a.halfWidth / ROAD_TILE;
     const u1 = a.halfWidth / ROAD_TILE;
     // Winding: back-left, back-right, front-right, front-left gives a +Y normal (see planeY).
-    b.road.quad(alx, y, alz, arx, y, arz, crx, y, crz, clx, y, clz, u0, a.s / ROAD_TILE, u1, sc / ROAD_TILE);
+    b.road.quad(alx, ay, alz, arx, ay, arz, crx, cy, crz, clx, cy, clz, u0, a.s / ROAD_TILE, u1, sc / ROAD_TILE);
+  }
+}
+
+/**
+ * Pavement from the road's edge out to where the blocks start, with a kerb line at the
+ * edge. Flat, so the car that strays onto it is not seen sinking in. Stops at junctions.
+ */
+function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
+  const shoulders = b.plan.shoulders!;
+  const samples = rb.path.samples;
+  const segs = segmentCount(rb.path);
+  const lift = liftOf(rb) + 0.012;
+  for (let i = 0; i < segs; i++) {
+    const a = samples[i];
+    const c = samples[(i + 1) % samples.length];
+    const width = rb.kind === 'alley' ? shoulders.alley : shoulders[a.zone];
+    if (width < 0.8) continue;
+    for (const side of [-1, 1]) {
+      // Skip the stretch if another road runs through it: that is a junction.
+      const mx = (a.x + c.x) / 2 + -a.tz * (a.halfWidth + width / 2) * side;
+      const mz = (a.z + c.z) / 2 + a.tx * (a.halfWidth + width / 2) * side;
+      let crossing = false;
+      for (const other of b.plan.ribbons) {
+        if (other !== rb && onRibbonAtLevel(other, mx, mz, a.y, 0.6)) {
+          crossing = true;
+          break;
+        }
+      }
+      if (crossing) continue;
+      const ax0 = a.x + -a.tz * a.halfWidth * side;
+      const az0 = a.z + a.tx * a.halfWidth * side;
+      const ax1 = a.x + -a.tz * (a.halfWidth + width) * side;
+      const az1 = a.z + a.tx * (a.halfWidth + width) * side;
+      const cx0 = c.x + -c.tz * c.halfWidth * side;
+      const cz0 = c.z + c.tx * c.halfWidth * side;
+      const cx1 = c.x + -c.tz * (c.halfWidth + width) * side;
+      const cz1 = c.z + c.tx * (c.halfWidth + width) * side;
+      b.concrete.color(PAL.sidewalk, rb.kind === 'alley' ? 0.75 : 0.92);
+      // Winding depends on the side so the face always looks up.
+      if (side > 0) b.concrete.quad(ax0, lift, az0, ax1, lift, az1, cx1, lift, cz1, cx0, lift, cz0);
+      else b.concrete.quad(ax1, lift, az1, ax0, lift, az0, cx0, lift, cz0, cx1, lift, cz1);
+      if (rb.kind === 'alley') continue;
+      // Kerb line.
+      const kx0 = a.x + -a.tz * (a.halfWidth + 0.3) * side;
+      const kz0 = a.z + a.tx * (a.halfWidth + 0.3) * side;
+      const kx1 = c.x + -c.tz * (c.halfWidth + 0.3) * side;
+      const kz1 = c.z + c.tx * (c.halfWidth + 0.3) * side;
+      b.lane.color(PAL.curb, 0.85);
+      if (side > 0) b.lane.quad(ax0, lift + 0.004, az0, kx0, lift + 0.004, kz0, kx1, lift + 0.004, kz1, cx0, lift + 0.004, cz0);
+      else b.lane.quad(kx0, lift + 0.004, kz0, ax0, lift + 0.004, az0, cx0, lift + 0.004, cz0, kx1, lift + 0.004, kz1);
+    }
   }
 }
 
 /* ------------------------------------------------------------------ paint */
 
-/** True when (x, z) lies on a ribbon other than `self` (a junction), so paint stops there. */
-function onOtherRoad(b: EnvBuilders, self: RibbonDef, x: number, z: number): boolean {
+/** True when (x, z) at height `y` lies on a ribbon other than `self` at that level (a junction), so paint stops there. */
+function onOtherRoad(b: EnvBuilders, self: RibbonDef, x: number, z: number, y: number): boolean {
   for (const rb of b.plan.ribbons) {
-    if (rb !== self && isOnPath(rb.path, x, z, 1.2)) return true;
+    if (rb !== self && onRibbonAtLevel(rb, x, z, y, 1.2)) return true;
+  }
+  return false;
+}
+
+const LAMP_PROJ = createProjection();
+
+/** True when another road passes overhead within lamp height of (x, z, y): no post there. */
+function coveredAbove(b: EnvBuilders, x: number, z: number, y: number): boolean {
+  for (const rb of b.plan.ribbons) {
+    if (!rb.elevated) continue;
+    const p = projectOntoPath(rb.path, x, z, LAMP_PROJ);
+    if (p.dist <= p.halfWidth + 2.5 && p.y > y + 1 && p.y < y + 16) return true;
   }
   return false;
 }
@@ -86,21 +164,24 @@ function paintStripe(
 ): void {
   const path = rb.path;
   const step = dashLen + gapLen;
+  const lift = liftOf(rb) + PAINT_Y;
   b.lane.color(color, bright);
   const end = path.closed ? path.length : path.length - 2;
   for (let s = 1; s + dashLen < end; s += step) {
     const mid = offsetAtStation(path, s + dashLen / 2, offset);
     if (onlyWhere && !onlyWhere(mid.halfWidth)) continue;
-    if (onOtherRoad(b, rb, mid.x, mid.z)) continue;
+    if (onOtherRoad(b, rb, mid.x, mid.z, mid.y)) continue;
     // A dash is one quad following the road: sample its two ends on the curve.
     const p0 = offsetAtStation(path, s, offset);
     const p1 = offsetAtStation(path, s + dashLen, offset);
     const hw = width / 2;
+    const y0 = p0.y + lift;
+    const y1 = p1.y + lift;
     b.lane.quad(
-      p0.x + p0.tz * hw, PAINT_Y, p0.z - p0.tx * hw,
-      p0.x - p0.tz * hw, PAINT_Y, p0.z + p0.tx * hw,
-      p1.x - p1.tz * hw, PAINT_Y, p1.z + p1.tx * hw,
-      p1.x + p1.tz * hw, PAINT_Y, p1.z - p1.tx * hw,
+      p0.x + p0.tz * hw, y0, p0.z - p0.tx * hw,
+      p0.x - p0.tz * hw, y0, p0.z + p0.tx * hw,
+      p1.x - p1.tz * hw, y1, p1.z + p1.tx * hw,
+      p1.x + p1.tz * hw, y1, p1.z - p1.tx * hw,
     );
   }
 }
@@ -110,6 +191,7 @@ function buildLanePaint(b: EnvBuilders, rb: RibbonDef): void {
   // Width varies along the lap, so stripes are placed by the local half width at each dash.
   // Edge lines: continuous-looking (long dashes with a hair of gap).
   const worn = (hw: number): boolean => samples.length > 0 && hw < 6.8;
+  const lift = liftOf(rb) + PAINT_Y;
   const paintEdges = (side: number): void => {
     // Placed one metre inside the local edge; `offset` has to follow the width, so we walk
     // stations ourselves and evaluate the width per dash.
@@ -122,15 +204,17 @@ function buildLanePaint(b: EnvBuilders, rb: RibbonDef): void {
       const color = isWorn ? PAL.laneWorn : PAL.laneWhite;
       b.lane.color(color, (isWorn ? 0.55 : 1) * 0.85);
       const m = offsetAtStation(path, s + 3.5, off);
-      if (onOtherRoad(b, rb, m.x, m.z)) continue;
+      if (onOtherRoad(b, rb, m.x, m.z, m.y)) continue;
       const p0 = offsetAtStation(path, s, off);
       const p1 = offsetAtStation(path, s + 7, off);
       const hw = 0.09;
+      const y0 = p0.y + lift;
+      const y1 = p1.y + lift;
       b.lane.quad(
-        p0.x + p0.tz * hw, PAINT_Y, p0.z - p0.tx * hw,
-        p0.x - p0.tz * hw, PAINT_Y, p0.z + p0.tx * hw,
-        p1.x - p1.tz * hw, PAINT_Y, p1.z + p1.tx * hw,
-        p1.x + p1.tz * hw, PAINT_Y, p1.z - p1.tx * hw,
+        p0.x + p0.tz * hw, y0, p0.z - p0.tx * hw,
+        p0.x - p0.tz * hw, y0, p0.z + p0.tx * hw,
+        p1.x - p1.tz * hw, y1, p1.z + p1.tx * hw,
+        p1.x + p1.tz * hw, y1, p1.z - p1.tx * hw,
       );
     }
   };
@@ -148,16 +232,18 @@ function buildLanePaint(b: EnvBuilders, rb: RibbonDef): void {
     for (const side of [-1, 1]) {
       const off = (side * c.halfWidth) / 2;
       const m = offsetAtStation(path, s + 1.6, off);
-      if (onOtherRoad(b, rb, m.x, m.z)) continue;
+      if (onOtherRoad(b, rb, m.x, m.z, m.y)) continue;
       b.lane.color(PAL.laneWhite, 1);
       const p0 = offsetAtStation(path, s, off);
       const p1 = offsetAtStation(path, s + 3.2, off);
       const hw = 0.1;
+      const y0 = p0.y + lift;
+      const y1 = p1.y + lift;
       b.lane.quad(
-        p0.x + p0.tz * hw, PAINT_Y, p0.z - p0.tx * hw,
-        p0.x - p0.tz * hw, PAINT_Y, p0.z + p0.tx * hw,
-        p1.x - p1.tz * hw, PAINT_Y, p1.z + p1.tx * hw,
-        p1.x + p1.tz * hw, PAINT_Y, p1.z - p1.tx * hw,
+        p0.x + p0.tz * hw, y0, p0.z - p0.tx * hw,
+        p0.x - p0.tz * hw, y0, p0.z + p0.tx * hw,
+        p1.x - p1.tz * hw, y1, p1.z + p1.tx * hw,
+        p1.x + p1.tz * hw, y1, p1.z - p1.tx * hw,
       );
     }
   }
@@ -177,44 +263,54 @@ function buildRails(b: EnvBuilders, rails: RailDef[], rng: () => number): void {
     dz /= len;
     const cx = (r.ax + r.bx) / 2;
     const cz = (r.az + r.bz) / 2;
+    // Overshoot the ends a touch so consecutive segments on a curve leave no seam.
+    const ox = dx * 0.025;
+    const oz = dz * 0.025;
+    const ax = r.ax - ox;
+    const az = r.az - oz;
+    const bx = r.bx + ox;
+    const bz = r.bz + oz;
+    const ya = r.ay;
+    const yb = r.by;
+    const ym = (ya + yb) / 2;
     if (r.kind === 'wall') {
       // Alley: a tall concrete wall with a tired magenta tube along the top.
       b.concrete.color(PAL.concrete, 1.05);
-      b.concrete.orientedBox(cx, cz, dx, dz, len + 0.05, 0.5, 0, 2.7);
+      b.concrete.slopedBox(ax, az, bx, bz, ya, yb, 0.5, 2.7);
       b.neonFlicker.color(PAL.neonMagenta, 0.55);
-      b.neonFlicker.tube(r.ax, 2.8, r.az, r.bx, 2.8, r.bz, 0.14);
+      b.neonFlicker.tube(r.ax, ya + 2.8, r.az, r.bx, yb + 2.8, r.bz, 0.14);
       if (rng() < 0.2) {
         b.props.color(PAL.rust, 0.9);
-        b.props.orientedBox(cx, cz, dx, dz, 0.6, 0.6, 2.7, 3.1);
+        b.props.orientedBox(cx, cz, dx, dz, 0.6, 0.6, ym + 2.7, ym + 3.1);
       }
       continue;
     }
     if (r.zone === 'corporate') {
       // Highway guardrail: low base, a top rail, an even cyan reflector line.
       b.props.color(PAL.sidewalk, 1.15);
-      b.props.orientedBox(cx, cz, dx, dz, len + 0.05, 0.5, 0, 0.68);
+      b.props.slopedBox(ax, az, bx, bz, ya, yb, 0.5, 0.68);
       b.props.color(PAL.sidewalk, 0.95);
-      b.props.orientedBox(cx, cz, dx, dz, len + 0.05, 0.28, 0.68, 0.98);
+      b.props.slopedBox(ax, az, bx, bz, ya + 0.68, yb + 0.68, 0.28, 0.3);
       b.neon.color(PAL.neonCyan, 0.3);
-      b.neon.tube(r.ax, 1.0, r.az, r.bx, 1.0, r.bz, 0.14);
+      b.neon.tube(r.ax, ya + 1.0, r.az, r.bx, yb + 1.0, r.bz, 0.14);
       if (rng() < 0.08) {
         b.props.color(PAL.rust, 1);
-        b.props.orientedBox(cx, cz, dx, dz, 0.5, 0.5, 0.98, 1.34);
+        b.props.orientedBox(cx, cz, dx, dz, 0.5, 0.5, ym + 0.98, ym + 1.34);
       }
     } else if (r.zone === 'urban') {
       // City street: jersey barrier with a cyan/magenta strip alternating per stretch.
       b.props.color(PAL.concrete, 1.1);
-      b.props.orientedBox(cx, cz, dx, dz, len + 0.05, 0.55, 0, 0.9);
+      b.props.slopedBox(ax, az, bx, bz, ya, yb, 0.55, 0.9);
       const c = Math.floor(i / 6) % 2 === 0 ? PAL.neonCyan : PAL.neonMagenta;
       b.neon.color(c, 0.32);
-      b.neon.tube(r.ax, 0.94, r.az, r.bx, 0.94, r.bz, 0.13);
+      b.neon.tube(r.ax, ya + 0.94, r.az, r.bx, yb + 0.94, r.bz, 0.13);
     } else {
       // Old town: striped barrier, magenta every other segment, pink reflector.
       const hot = i % 2 === 0;
       b.props.color(hot ? PAL.neonMagenta : PAL.sidewalk, hot ? 0.5 : 1.1);
-      b.props.orientedBox(cx, cz, dx, dz, len + 0.05, 0.55, 0, 0.8);
+      b.props.slopedBox(ax, az, bx, bz, ya, yb, 0.55, 0.8);
       b.neon.color(PAL.neonPink, 0.3);
-      b.neon.tube(r.ax, 0.84, r.az, r.bx, 0.84, r.bz, 0.13);
+      b.neon.tube(r.ax, ya + 0.84, r.az, r.bx, yb + 0.84, r.bz, 0.13);
     }
   }
 }
@@ -229,18 +325,29 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
   for (let s = step / 2; s < path.length - (path.closed ? 0 : 4); s += step) {
     side = -side;
     const c = offsetAtStation(path, s, 0);
-    const off = c.halfWidth + (alley ? 0.9 : 1.9);
+    const deck = rb.elevated && c.y > 0.5;
+    // On a deck the post hangs off the fascia just outside the rail; on the ground it stands
+    // on the pavement beyond the kerb.
+    const off = c.halfWidth + (deck ? 0.45 : alley ? 0.9 : 1.9);
     const p = offsetAtStation(path, s, side * off);
-    // Never plant a post where another road runs through (an alley mouth).
-    if (b.plan.isRoad(p.x, p.z, 0.4)) continue;
+    // Never plant a post where another road runs through at this level (an alley mouth, a
+    // merge), nor under a deck that would swallow its head.
+    let blocked = false;
+    for (const other of b.plan.ribbons) {
+      if (other !== rb && onRibbonAtLevel(other, p.x, p.z, c.y, 0.4)) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked || coveredAbove(b, p.x, p.z, c.y)) continue;
     const zone = c.zone;
     const color = lampColor(zone, rng);
-    const y0 = b.plan.padY(p.x, p.z);
+    const y0 = deck ? c.y - 0.4 : rb.elevated ? c.y : b.plan.padY(p.x, p.z);
     // Arm points back toward the road: the opposite of the offset direction.
     const dx = -side * -c.tz;
     const dz = -side * c.tx;
-    const poleH = alley ? 4.4 : zone === 'corporate' ? 8.2 : 7.2;
-    const arm = alley ? 0.9 : zone === 'corporate' ? 4.6 : 3.6;
+    const poleH = deck ? 7 : alley ? 4.4 : zone === 'corporate' ? 8.2 : 7.2;
+    const arm = deck ? 3.4 : alley ? 0.9 : zone === 'corporate' ? 4.6 : 3.6;
     lampPost(b, p.x, p.z, y0, dx, dz, arm, poleH, color, off + 4);
   }
 }

@@ -25,8 +25,8 @@ const MARK_Y = 0.02;
 
 export interface SkidMarks {
   object: THREE.Mesh;
-  /** Feed both rear contact patches every frame. `laying` gates whether marks are written. */
-  track(laying: boolean, leftX: number, leftZ: number, rightX: number, rightZ: number): void;
+  /** Feed both rear contact patches every frame. `laying` gates whether marks are written; `y` is the road height. */
+  track(laying: boolean, y: number, leftX: number, leftZ: number, rightX: number, rightZ: number): void;
   /** Upload whatever `track` touched this frame. */
   flush(): void;
   reset(): void;
@@ -88,7 +88,7 @@ export function createSkidMarks(parent: THREE.Object3D): SkidMarks {
     if (last > dirtyMaxVert) dirtyMaxVert = last;
   }
 
-  function step(wheel: number, x: number, z: number): void {
+  function step(wheel: number, y: number, x: number, z: number): void {
     if (!anchored[wheel]) {
       anchored[wheel] = true;
       lastX[wheel] = x;
@@ -109,7 +109,7 @@ export function createSkidMarks(parent: THREE.Object3D): SkidMarks {
     const nx = -dz * inv;
     const nz = dx * inv;
     const quad = wheel * SKID_QUADS_PER_WHEEL + heads[wheel];
-    writeQuad(positions, quad, lastX[wheel], lastZ[wheel], x, z, nx, nz, HALF_WIDTH, MARK_Y);
+    writeQuad(positions, quad, lastX[wheel], lastZ[wheel], x, z, nx, nz, HALF_WIDTH, y + MARK_Y);
     markDirty(quad);
     heads[wheel] = ringNext(heads[wheel], SKID_QUADS_PER_WHEEL);
     lastX[wheel] = x;
@@ -118,14 +118,14 @@ export function createSkidMarks(parent: THREE.Object3D): SkidMarks {
 
   return {
     object,
-    track(laying, leftX, leftZ, rightX, rightZ) {
+    track(laying, y, leftX, leftZ, rightX, rightZ) {
       if (!laying) {
         anchored[0] = false;
         anchored[1] = false;
         return;
       }
-      step(0, leftX, leftZ);
-      step(1, rightX, rightZ);
+      step(0, y, leftX, leftZ);
+      step(1, y, rightX, rightZ);
     },
     flush() {
       if (dirtyMaxVert < 0) return;

@@ -32,7 +32,7 @@ export interface LightningArc {
   core: THREE.Line;
   glow: THREE.Points;
   branches: THREE.LineSegments;
-  fire(fromX: number, fromZ: number, toX: number, toZ: number): void;
+  fire(fromX: number, fromY: number, fromZ: number, toX: number, toY: number, toZ: number): void;
   update(dt: number): void;
   reset(): void;
   dispose(): void;
@@ -107,8 +107,10 @@ export function createLightningArc(parent: THREE.Object3D, textures: FxTextures)
   let timer = 0;
   let regenTimer = 0;
   let fromX = 0;
+  let fromY = 0;
   let fromZ = 0;
   let toX = 0;
+  let toY = 0;
   let toZ = 0;
   let flicker = 1;
 
@@ -124,10 +126,10 @@ export function createLightningArc(parent: THREE.Object3D, textures: FxTextures)
       boltPositions,
       BOLT_SEGMENTS,
       fromX,
-      BOLT_FROM_Y,
+      fromY + BOLT_FROM_Y,
       fromZ,
       toX,
-      BOLT_TO_Y,
+      toY + BOLT_TO_Y,
       toZ,
       amplitude,
       amplitude * 0.55,
@@ -171,10 +173,12 @@ export function createLightningArc(parent: THREE.Object3D, textures: FxTextures)
     core,
     glow,
     branches,
-    fire(x0, z0, x1, z1) {
+    fire(x0, y0, z0, x1, y1, z1) {
       fromX = x0;
+      fromY = y0;
       fromZ = z0;
       toX = x1;
+      toY = y1;
       toZ = z1;
       timer = duration;
       regenTimer = regenInterval;

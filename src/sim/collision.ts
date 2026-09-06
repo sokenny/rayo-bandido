@@ -6,6 +6,8 @@ import { forwardX, forwardZ, rightX, rightZ, wrapAngle } from '../core/math';
 export interface CircleBody {
   x: number;
   z: number;
+  /** Height of the road under the body (m). Decides which obstacles are solid for it. */
+  y: number;
   prevX: number;
   prevZ: number;
   vx: number;
@@ -35,6 +37,12 @@ export interface Contact {
 /** Reused across ticks: `resolveCollisions` is the only caller that asks for contacts. */
 const CONTACT: Contact = { nx: 0, nz: 0, count: 0 };
 
+/**
+ * Height difference (m) beyond which two cars are on different levels and cannot touch,
+ * shoot or shave each other. Shared by the near-miss and targeting rules.
+ */
+export const LEVEL_GAP = 3.5;
+
 /** The player's car against the world. */
 const WALL: WallResponse = {
   restitution: VEHICLE.restitution,
@@ -63,7 +71,7 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
     const rz = Math.sin(v.heading);
     v.speed = v.vx * fx + v.vz * fz;
     v.lateralSpeed = v.vx * rx + v.vz * rz;
-    events.push({ type: 'collision', x: v.x, z: v.z, impact });
+    events.push({ type: 'collision', x: v.x, y: v.y, z: v.z, impact });
   }
 }
 
@@ -94,9 +102,14 @@ export function pushOutOfWorld(
     contact.nz = 0;
     contact.count = 0;
   }
+  const y = v.y;
   const boxes = layout.colliders;
   for (let i = 0; i < boxes.length; i++) {
     const b = boxes[i];
+    // An obstacle above or below the body's level is not in its way (a viaduct pillar seen
+    // from the deck, a low roof seen from a bridge).
+    if (b.maxY !== undefined && y > b.maxY) continue;
+    if (b.minY !== undefined && y < b.minY) continue;
     // Closest point on the box to the car center.
     const cx = v.x < b.minX ? b.minX : v.x > b.maxX ? b.maxX : v.x;
     const cz = v.z < b.minZ ? b.minZ : v.z > b.maxZ ? b.maxZ : v.z;
@@ -149,6 +162,8 @@ export function pushOutOfWorld(
   const walls = layout.walls;
   for (let i = 0; i < walls.length; i++) {
     const w = walls[i];
+    if (w.maxY !== undefined && y > w.maxY) continue;
+    if (w.minY !== undefined && y < w.minY) continue;
     const ex = w.bx - w.ax;
     const ez = w.bz - w.az;
     const len2 = ex * ex + ez * ez;
@@ -300,6 +315,8 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
     if (t.status !== 'active') continue;
+    // A car on the deck overhead is not in the way.
+    if (Math.abs(t.y - v.y) > LEVEL_GAP) continue;
     let dx = t.x - v.x;
     let dz = t.z - v.z;
     const dist2 = dx * dx + dz * dz;
@@ -344,7 +361,7 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
     if (approach > k.minImpact) {
       bumped = true;
       // The event names the car and the knock, so a multiplayer client can tell the host.
-      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ });
+      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, y: v.y, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ });
     }
   }
 

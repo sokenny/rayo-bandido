@@ -2,7 +2,8 @@ import type { ArenaLayout, ObstacleBox, ObstacleWall, RaceCourse, RaceGate, Race
 import { RACE } from '../config/tuning';
 import { PAL } from '../render/scene/env/palette';
 import type { World } from './arenaWorld';
-import { inRect, SIDEWALK_Y, type BlockRect, type CityPlan, type RailDef, type Rect, type RibbonDef, type WallRect, type ZoneId } from './cityPlan';
+import { inRect, SIDEWALK_Y, type CityPlan, type Rect, type RibbonDef, type WallRect, type ZoneId } from './cityPlan';
+import { buildRails, createRandom, generateBlocks, railBounds } from './cityGen';
 import { RACE_BOUNDS, RACE_GATES, RACE_SHORTCUTS, RACE_SPEC } from './raceSpec';
 import {
   buildTrackPath,
@@ -10,7 +11,6 @@ import {
   isOnPath,
   offsetAtStation,
   projectOntoPath,
-  segmentCount,
   type TrackPath,
   type TrackSample,
   type TrackZone,
@@ -38,9 +38,6 @@ const WALL_BAND = 12;
 /** Shoulder between the road edge and the first building, per zone (m). */
 const SHOULDER: Record<TrackZone, number> = { corporate: 9, urban: 3.6, jdm: 3 };
 const ALLEY_SHOULDER = 1.2;
-/** Coarsest / finest block cell (m). */
-const CELL = 46;
-const MIN_CELL = 11;
 /** Lateral offset of the electric cars' patrol lane (m); which side is drawn per car. */
 const PATROL_LANE = 3.4;
 const TARGET_COUNT = 12;
@@ -56,172 +53,7 @@ const TRAFFIC_CLEAR_AHEAD = 80;
 /** How far into its slot a car may be jittered, as a fraction of the slot (0..0.5). */
 const TRAFFIC_JITTER = 0.4;
 
-/** mulberry32: small, fast, and the same sequence for the same seed on every machine. */
-function createRandom(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 export const RACE_LAPS = RACE.laps;
-
-/* ------------------------------------------------------------------ geometry helpers */
-
-function segmentRectDistance(ax: number, az: number, bx: number, bz: number, r: Rect): number {
-  // Any endpoint inside, or the segment crossing an edge, means contact.
-  if (inRect(r, ax, az) || inRect(r, bx, bz)) return 0;
-  const corners: Array<[number, number]> = [
-    [r.minX, r.minZ],
-    [r.maxX, r.minZ],
-    [r.maxX, r.maxZ],
-    [r.minX, r.maxZ],
-  ];
-  for (let i = 0; i < 4; i++) {
-    const [cx, cz] = corners[i];
-    const [dx, dz] = corners[(i + 1) % 4];
-    if (segmentsIntersect(ax, az, bx, bz, cx, cz, dx, dz)) return 0;
-  }
-  let best = Infinity;
-  best = Math.min(best, pointRectDistance(ax, az, r), pointRectDistance(bx, bz, r));
-  for (const [cx, cz] of corners) best = Math.min(best, pointSegmentDistance(cx, cz, ax, az, bx, bz));
-  return best;
-}
-
-function segmentsIntersect(ax: number, az: number, bx: number, bz: number, cx: number, cz: number, dx: number, dz: number): boolean {
-  const d1 = (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
-  const d2 = (bx - ax) * (dz - az) - (bz - az) * (dx - ax);
-  const d3 = (dx - cx) * (az - cz) - (dz - cz) * (ax - cx);
-  const d4 = (dx - cx) * (bz - cz) - (dz - cz) * (bx - cx);
-  return d1 * d2 < 0 && d3 * d4 < 0;
-}
-
-function pointRectDistance(x: number, z: number, r: Rect): number {
-  const dx = Math.max(r.minX - x, 0, x - r.maxX);
-  const dz = Math.max(r.minZ - z, 0, z - r.maxZ);
-  return Math.hypot(dx, dz);
-}
-
-function pointSegmentDistance(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
-  const dx = bx - ax;
-  const dz = bz - az;
-  const len2 = dx * dx + dz * dz;
-  let t = len2 > 0 ? ((px - ax) * dx + (pz - az) * dz) / len2 : 0;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return Math.hypot(ax + dx * t - px, az + dz * t - pz);
-}
-
-/** Smallest clearance between the rect and any ribbon, minus that ribbon's width and shoulder. */
-function rectClearance(r: Rect, ribbons: RibbonDef[]): number {
-  let best = Infinity;
-  for (const rb of ribbons) {
-    const samples = rb.path.samples;
-    const segs = segmentCount(rb.path);
-    for (let i = 0; i < segs; i++) {
-      const a = samples[i];
-      const b = samples[(i + 1) % samples.length];
-      const shoulder = rb.kind === 'alley' ? ALLEY_SHOULDER : SHOULDER[a.zone];
-      const d = segmentRectDistance(a.x, a.z, b.x, b.z, r) - Math.max(a.halfWidth, b.halfWidth) - shoulder;
-      if (d < best) best = d;
-    }
-  }
-  return best;
-}
-
-/* ------------------------------------------------------------------ blocks */
-
-/**
- * Recursive grid: a cell that a road runs through is split in four until it is clear or too
- * small to matter. What survives is the city.
- */
-function generateBlocks(inner: Rect, ribbons: RibbonDef[], zoneAt: (x: number, z: number) => ZoneId): BlockRect[] {
-  const blocks: BlockRect[] = [];
-  const cols = Math.max(1, Math.round((inner.maxX - inner.minX) / CELL));
-  const rows = Math.max(1, Math.round((inner.maxZ - inner.minZ) / CELL));
-  const cw = (inner.maxX - inner.minX) / cols;
-  const ch = (inner.maxZ - inner.minZ) / rows;
-  let n = 0;
-
-  const visit = (r: Rect, depth: number): void => {
-    const clear = rectClearance(r, ribbons);
-    if (clear >= 0) {
-      const w = r.maxX - r.minX;
-      const d = r.maxZ - r.minZ;
-      if (w < MIN_CELL * 0.6 || d < MIN_CELL * 0.6) return;
-      const cx = (r.minX + r.maxX) / 2;
-      const cz = (r.minZ + r.maxZ) / 2;
-      const zone = zoneAt(cx, cz);
-      const small = w < 20 || d < 20;
-      const massing: 1 | 2 | 3 = small ? 1 : zone === 'corporate' ? 3 : zone === 'urban' ? 2 : 1;
-      blocks.push({ tag: `blk-${n++}`, minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, zone, massing });
-      return;
-    }
-    const w = r.maxX - r.minX;
-    const d = r.maxZ - r.minZ;
-    if (w <= MIN_CELL && d <= MIN_CELL) return;
-    // Split the longer axis (both when the cell is still big).
-    const splitX = w > MIN_CELL && (w >= d || d <= MIN_CELL);
-    const splitZ = d > MIN_CELL && (d >= w || w <= MIN_CELL);
-    const mx = (r.minX + r.maxX) / 2;
-    const mz = (r.minZ + r.maxZ) / 2;
-    const xs = splitX ? [r.minX, mx, r.maxX] : [r.minX, r.maxX];
-    const zs = splitZ ? [r.minZ, mz, r.maxZ] : [r.minZ, r.maxZ];
-    for (let i = 0; i < xs.length - 1; i++) {
-      for (let j = 0; j < zs.length - 1; j++) {
-        visit({ minX: xs[i], maxX: xs[i + 1], minZ: zs[j], maxZ: zs[j + 1] }, depth + 1);
-      }
-    }
-  };
-
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      visit(
-        { minX: inner.minX + cw * i, maxX: inner.minX + cw * (i + 1), minZ: inner.minZ + ch * j, maxZ: inner.minZ + ch * (j + 1) },
-        0,
-      );
-    }
-  }
-  return blocks;
-}
-
-/* ------------------------------------------------------------------ rails */
-
-/** Edge segments of every ribbon, with gaps wherever another ribbon runs through. */
-function buildRails(ribbons: RibbonDef[]): RailDef[] {
-  const rails: RailDef[] = [];
-  for (const rb of ribbons) {
-    const samples = rb.path.samples;
-    const segs = segmentCount(rb.path);
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < segs; i++) {
-        const a = samples[i];
-        const b = samples[(i + 1) % samples.length];
-        const ax = a.x + -a.tz * a.halfWidth * side;
-        const az = a.z + a.tx * a.halfWidth * side;
-        const bx = b.x + -b.tz * b.halfWidth * side;
-        const bz = b.z + b.tx * b.halfWidth * side;
-        const mx = (ax + bx) / 2;
-        const mz = (az + bz) / 2;
-        let open = false;
-        for (const other of ribbons) {
-          if (other === rb) continue;
-          // The gap is a little wider than the other road so the corner posts stay clear of it.
-          if (isOnPath(other.path, mx, mz, 1.6)) {
-            open = true;
-            break;
-          }
-        }
-        if (open) continue;
-        rails.push({ ax, az, bx, bz, kind: rb.kind === 'alley' ? 'wall' : 'rail', zone: a.zone });
-      }
-    }
-  }
-  return rails;
-}
 
 /* ------------------------------------------------------------------ world */
 
@@ -348,7 +180,7 @@ export function createRaceWorld(seed: number = (Math.random() * 0xffffffff) >>> 
   const colliders: ObstacleBox[] = [];
   for (const w of perimeter) colliders.push({ minX: w.minX, maxX: w.maxX, minZ: w.minZ, maxZ: w.maxZ, tag: w.tag });
   for (const b of blocks) colliders.push({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, tag: b.tag });
-  const walls: ObstacleWall[] = rails.map((r) => ({ ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, tag: r.kind }));
+  const walls: ObstacleWall[] = rails.map((r) => ({ ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, ...railBounds(r), tag: r.kind }));
 
   const layout: ArenaLayout = {
     bounds,
@@ -358,6 +190,7 @@ export function createRaceWorld(seed: number = (Math.random() * 0xffffffff) >>> 
     cruiseRoute,
     colliders,
     walls,
+    surface: null,
     race: course,
     minimap: {
       bounds: inner,

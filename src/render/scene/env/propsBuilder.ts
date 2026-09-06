@@ -155,8 +155,8 @@ function buildBarriers(b: EnvBuilders, rng: () => number): void {
  */
 export function lampColor(zone: ZoneId, rng: () => number): number {
   if (zone === 'corporate') return rng() < 0.8 ? PAL.winCold : PAL.neonCyan;
-  if (zone === 'jdm') return rng() < 0.6 ? PAL.winWarm : PAL.neonPink;
-  return rng() < 0.65 ? PAL.winCold : PAL.winWarm;
+  if (zone === 'jdm') return rng() < 0.7 ? PAL.lampWarm : PAL.neonPink;
+  return rng() < 0.55 ? PAL.winCold : PAL.lampWarm;
 }
 
 /**
@@ -418,6 +418,20 @@ function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
           b.props.color(PAL.rust, 0.8);
           b.props.box(x + 0.6, y0 + 1.5, z - 0.3, 1.4, 0.8, 1.2);
         }
+      } else if (r < 0.22 && r >= 0.12 && zone === 'urban') {
+        // A street stall under an awning, lit warm from underneath: the cosy note.
+        const warm = rng() < 0.75 ? PAL.neonAmber : PAL.neonPink;
+        b.props.color(PAL.rust, 1.05);
+        b.props.box(x, y0 + 1.1, z, along === 'x' ? 3 : 1.8, 2.2, along === 'x' ? 1.8 : 3);
+        b.props.color(PAL.rust, 0.8);
+        b.props.box(x + dx * 0.7, y0 + 2.35, z + dz * 0.7, along === 'x' ? 3.6 : 3.2, 0.14, along === 'x' ? 3.2 : 3.6);
+        b.neon.color(warm, 0.8);
+        if (along === 'x') b.neon.tube(x - 1.5, y0 + 2.2, z + dz * 1.5, x + 1.5, y0 + 2.2, z + dz * 1.5, 0.12);
+        else b.neon.tube(x + dx * 1.5, y0 + 2.2, z - 1.5, x + dx * 1.5, y0 + 2.2, z + 1.5, 0.12);
+        halo(b, x + dx * 1.6, y0 + 1.4, z + dz * 1.6, 5, 3.4, rotY, warm, 0.18);
+        groundGlow(b, x + dx * 3.2, z + dz * 3.2, 10, 10, warm, 0.13);
+        b.props.color(PAL.metalDark, 0.8);
+        b.props.box(x + (along === 'x' ? 2.2 : 0), y0 + 0.45, z + (along === 'x' ? 0 : 2.2), 0.8, 0.9, 0.8);
       } else if (r < 0.12) {
         // Vending machines and kiosks glowing on the sidewalk. Rare enough to be a landmark.
         const c = zone === 'corporate' ? PAL.neonCyan : rng() < 0.5 ? PAL.neonMagenta : PAL.winWarm;

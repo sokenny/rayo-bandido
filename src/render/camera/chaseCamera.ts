@@ -47,8 +47,12 @@ type Mount = (typeof CAMERA.mounts)[keyof typeof CAMERA.mounts];
 
 export interface CameraPose {
   x: number;
+  /** Height of the road under the car (m). Everything below is relative to it. */
+  y: number;
   z: number;
   heading: number;
+  /** Grade of the road along the heading (rad, positive = climbing). The look point follows it. */
+  roadPitch: number;
   vx: number;
   vz: number;
   speed: number;
@@ -82,7 +86,7 @@ export interface ChaseCamera {
 const CHASE_NEAR = 0.3;
 
 export function createChaseCamera(aspect: number): ChaseCamera {
-  const camera = new THREE.PerspectiveCamera(CAMERA.fov, aspect, CHASE_NEAR, 400);
+  const camera = new THREE.PerspectiveCamera(CAMERA.fov, aspect, CHASE_NEAR, CAMERA.far);
   const pos = new THREE.Vector3();
   const look = new THREE.Vector3();
   let followHeading = 0;
@@ -124,8 +128,11 @@ export function createChaseCamera(aspect: number): ChaseCamera {
         ? CAMERA.reverseLookAhead
         : Math.min(CAMERA.lookAhead + pose.speed * CAMERA.lookAheadPerSpeed, CAMERA.lookAheadMax);
     const dist = CAMERA.distance + CAMERA.nitroPullback * clamp01(pose.nitro);
-    pos.set(pose.x - fx * dist + rx * lagOffset, CAMERA.height, pose.z - fz * dist + rz * lagOffset);
-    look.set(pose.x + fx * ahead, CAMERA.lookHeight, pose.z + fz * ahead);
+    pos.set(pose.x - fx * dist + rx * lagOffset, pose.y + CAMERA.height, pose.z - fz * dist + rz * lagOffset);
+    // On a ramp the road ahead is higher (or lower) than the car: aim where it is going, so
+    // the crest does not fill the frame on the way up and the drop is visible on the way down.
+    const rise = Math.tan(pose.roadPitch) * ahead * CAMERA.pitchFollow;
+    look.set(pose.x + fx * ahead, pose.y + CAMERA.lookHeight + rise, pose.z + fz * ahead);
   }
 
   /** Resolve a mount's car-local offsets into the world `pos` / `look` scratch vectors. */
@@ -137,12 +144,12 @@ export function createChaseCamera(aspect: number): ChaseCamera {
     const rz = rightZ(h);
     pos.set(
       pose.x + fx * mount.ahead + rx * mount.side,
-      mount.height,
+      pose.y + mount.height,
       pose.z + fz * mount.ahead + rz * mount.side,
     );
     look.set(
       pose.x + fx * mount.lookAhead + rx * mount.lookSide,
-      mount.lookHeight,
+      pose.y + mount.lookHeight,
       pose.z + fz * mount.lookAhead + rz * mount.lookSide,
     );
   }

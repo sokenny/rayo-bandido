@@ -1,6 +1,7 @@
 import type { TargetState } from '../core/types';
 import { LIGHTNING } from '../config/tuning';
 import { forwardX, forwardZ } from '../core/math';
+import { LEVEL_GAP } from './collision';
 
 /**
  * Forward-cone auto-aim. Returns the id of the nearest active target within `range`
@@ -14,6 +15,7 @@ export function selectTarget(
   targets: TargetState[],
   range = LIGHTNING.range,
   coneHalfAngle = LIGHTNING.coneHalfAngle,
+  y = 0,
 ): number {
   const fx = forwardX(heading);
   const fz = forwardZ(heading);
@@ -23,6 +25,8 @@ export function selectTarget(
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
     if (t.status !== 'active') continue;
+    // A car on another level (the viaduct overhead, the street below) cannot be aimed at.
+    if (Math.abs(t.y - y) > LEVEL_GAP) continue;
     const dx = t.x - x;
     const dz = t.z - z;
     const d2 = dx * dx + dz * dz;

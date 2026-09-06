@@ -2,6 +2,7 @@ import type { ArenaLayout, TargetState } from '../core/types';
 import { TARGETS } from '../config/tuning';
 import { wrapAngle } from '../core/math';
 import { pushOutOfWorld, type WallResponse } from './collision';
+import { settleTarget } from './surface';
 
 /**
  * Electric-car targets. Each target starts at a spawn point and optionally patrols a loop
@@ -23,9 +24,11 @@ export function createTargets(layout: ArenaLayout): TargetState[] {
       id: i,
       x: s.x,
       z: s.z,
+      y: s.y ?? 0,
       heading: s.heading,
       prevX: s.x,
       prevZ: s.z,
+      prevY: s.y ?? 0,
       prevHeading: s.heading,
       vx: 0,
       vz: 0,
@@ -47,9 +50,11 @@ function respawnTarget(t: TargetState, layout: ArenaLayout): void {
   const s = layout.targetSpawns[t.id];
   t.x = s.x;
   t.z = s.z;
+  t.y = s.y ?? 0;
   t.heading = s.heading;
   t.prevX = s.x;
   t.prevZ = s.z;
+  t.prevY = t.y;
   t.prevHeading = s.heading;
   t.vx = 0;
   t.vz = 0;
@@ -68,6 +73,7 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
     const t = targets[i];
     t.prevX = t.x;
     t.prevZ = t.z;
+    t.prevY = t.y;
     t.prevHeading = t.heading;
     if (t.status !== 'active') {
       if (respawn && TARGETS.respawnDelay >= 0 && t.hitTime >= 0 && time - t.hitTime >= TARGETS.respawnDelay) {
@@ -93,13 +99,17 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
     }
 
     const patrol = layout.targetPatrols[t.id];
-    if (!patrol || patrol.length < 2) continue;
+    if (!patrol || patrol.length < 2) {
+      settleTarget(t, layout);
+      continue;
+    }
     const wp = patrol[t.patrolIndex % patrol.length];
     const dx = wp.x - t.x;
     const dz = wp.z - t.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < TARGETS.waypointRadius) {
       t.patrolIndex = (t.patrolIndex + 1) % patrol.length;
+      settleTarget(t, layout);
       continue;
     }
     const desired = Math.atan2(dx, -dz);
@@ -109,5 +119,7 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
     const step = Math.min(dist, t.patrolSpeed * dt);
     t.x += Math.sin(t.heading) * step;
     t.z += -Math.cos(t.heading) * step;
+    // The road under the car may be climbing: follow it.
+    settleTarget(t, layout);
   }
 }

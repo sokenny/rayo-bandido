@@ -18,8 +18,8 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 }
 
 /**
- * What to load comes from the URL: `?mode=test` (the free-roam city), `?mode=race` (the
- * circuit on your own), or `?mp=1` (multiplayer). Without any of them the main menu is shown
+ * What to load comes from the URL: `?mode=city` (the big free-roam city), `?mode=test` (the
+ * original test block), `?mode=race` (the circuit on your own), or `?mp=1` (multiplayer). Without any of them the main menu is shown
  * and the choice is written into the URL, so a world is always one reload away.
  *
  * MULTIPLAYER ADDRESSES. One server holds many rooms, so `?mp=1` alone means "show me the
@@ -38,7 +38,7 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  */
 function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
-  return mode === 'test' || mode === 'race' ? mode : null;
+  return mode === 'test' || mode === 'race' || mode === 'city' ? mode : null;
 }
 
 /** This page with `mode`, `mp` and the room parameters replaced by whatever is asked for. */

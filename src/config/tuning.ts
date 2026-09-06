@@ -160,6 +160,11 @@ export const VEHICLE = {
   collisionRadius: 1.1,
   /** Wheel radius (m). */
   wheelRadius: 0.33,
+  /**
+   * Fraction of gravity felt along a road's grade (0 = hills are free, 1 = real). Kept low:
+   * the ramps onto the viaducts should cost a gear, not the run.
+   */
+  gradeGravity: 0.45,
 };
 
 /**
@@ -479,6 +484,10 @@ export const CAMERA = {
   maxYawRate: 2.6,
   /** FOV smoothing rate (1/s). */
   fovDamping: 5,
+  /** Far clip plane (m). Past the fog everything is fog colour anyway; this only has to reach the skyline. */
+  far: 900,
+  /** How much of the road's grade ahead the chase camera's look point follows (0..1). */
+  pitchFollow: 0.7,
   /** Shake amplitude on nitro (m). */
   shakeNitro: 0.03,
   /** Shake amplitude on lightning (m). */

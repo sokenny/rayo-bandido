@@ -13,8 +13,11 @@
 
 - Build only the day-one vertical slice described in `docs/MVP_SPEC.md`, plus the race circuit
   and the multiplayer racing on it (both delivered after the day-one session — see
-  `docs/PROGRESS.md`).
-- Do not add accounts, an open world, garage UI, story, police AI or multiple playable cars.
+  `docs/PROGRESS.md`), plus the City: the free-roam proof of concept Juan asked for on
+  2026-09-06 (`src/world/citySpec.ts`), which is built in layers — layout, elevation and
+  lighting first; textures and detailed props are a later pass of his own.
+- Do not add accounts, garage UI, story, police AI or multiple playable cars. The City is the
+  one open-world exception, and it stays a proof of concept until Juan says otherwise.
 - Multiplayer is rooms of up to four cars on the circuit — a player opens a room and hands out
   its code — and the server is a relay: no game rules, no physics and no knowledge of the track
   live in `server/`. Keep it that way. A room is chosen once, at `hello`, and never changes for

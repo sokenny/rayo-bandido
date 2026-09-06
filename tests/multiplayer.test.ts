@@ -241,6 +241,7 @@ function trafficLayout(): ArenaLayout {
     cruiseRoute: [],
     colliders: [],
     walls: [],
+    surface: null,
     race: null,
     minimap: { bounds: { minX: -100, maxX: 100, minZ: -100, maxZ: 100 }, rects: [], ribbons: [] },
   };

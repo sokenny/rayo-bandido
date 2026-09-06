@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
+import { createCityWorld } from './world/cityWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot, Transmission } from './core/types';
 import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
@@ -94,7 +95,7 @@ export function createGame(
   // layout (colliders, spawns, patrols, the race course) and the renderer a plan (the art).
   // In a match every client must generate the same traffic, so the match id is the seed;
   // alone, `createRaceWorld` picks its own and the traffic is laid out differently each race.
-  const world = mode === 'race' ? createRaceWorld(options.net?.match?.raceId) : createArenaWorld();
+  const world = mode === 'race' ? createRaceWorld(options.net?.match?.raceId) : mode === 'city' ? createCityWorld() : createArenaWorld();
   const layout = world.layout;
 
   /* ------------------------------------------------------------- multiplayer */
@@ -212,8 +213,8 @@ export function createGame(
     applyPixelRatio(governor.ratio);
   }
 
-  const pose: InterpolatedPose = { x: 0, z: 0, heading: 0 };
-  const cameraPose: CameraPose = { x: 0, z: 0, heading: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false, roll: 0, pitch: 0 };
+  const pose: InterpolatedPose = { x: 0, y: 0, z: 0, heading: 0 };
+  const cameraPose: CameraPose = { x: 0, y: 0, z: 0, heading: 0, roadPitch: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false, roll: 0, pitch: 0 };
   const snapshot: HudSnapshot = {
     speedKmh: 0,
     nitro: 1,
@@ -425,6 +426,8 @@ export function createGame(
     // Past the gate rather than on it, so driving away cannot re-trigger the crossing.
     v.x = v.prevX = (gate.ax + gate.bx) / 2 + gate.fx * RESPAWN_AHEAD;
     v.z = v.prevZ = (gate.az + gate.bz) / 2 + gate.fz * RESPAWN_AHEAD;
+    v.y = v.prevY = 0;
+    v.pitch = 0;
     v.heading = v.prevHeading = Math.atan2(gate.fx, -gate.fz);
     v.vx = 0;
     v.vz = 0;
@@ -446,12 +449,12 @@ export function createGame(
     audio.onEvent(ev);
     switch (ev.type) {
       case 'lightningFired':
-        effects.lightning(ev.fromX, ev.fromZ, ev.toX, ev.toZ);
+        effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
         chase.shake(CAMERA.shakeLightning);
         break;
       case 'targetDestroyed':
-        effects.explosion(ev.x, ev.z);
-        if (ev.reward > 0) effects.scorePopup(ev.x, ev.z, ev.reward);
+        effects.explosion(ev.x, ev.y, ev.z);
+        if (ev.reward > 0) effects.scorePopup(ev.x, ev.y, ev.z, ev.reward);
         // The kill happened here, but the host is the one everybody believes about traffic:
         // tell the host, and do not let its next few reports bring the car back meanwhile.
         if (net && trafficSync && !ownsTraffic) {
@@ -466,10 +469,10 @@ export function createGame(
         }
         break;
       case 'nearMiss':
-        effects.nearMissPopup(ev.x, ev.z, ev.points);
+        effects.nearMissPopup(ev.x, ev.y, ev.z, ev.points);
         break;
       case 'collision':
-        effects.collision(ev.x, ev.z, ev.impact);
+        effects.collision(ev.x, ev.y, ev.z, ev.impact);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
         // Shoved an electric car: the shove is real here now, and the host is asked to
         // repeat it so it is real everywhere. Same hold as a kill, so the host's reports do
@@ -498,8 +501,10 @@ export function createGame(
     const v = state.vehicle;
     interpolateVehicle(v, alpha, pose);
     cameraPose.x = pose.x;
+    cameraPose.y = pose.y;
     cameraPose.z = pose.z;
     cameraPose.heading = pose.heading;
+    cameraPose.roadPitch = v.pitch;
     cameraPose.vx = v.vx;
     cameraPose.vz = v.vz;
     cameraPose.speed = v.speed;
@@ -530,14 +535,14 @@ export function createGame(
         pendingTraffic = null;
         for (let i = 0; i < newlyDestroyed.length; i++) {
           const t = state.targets[newlyDestroyed[i]];
-          effects.explosion(t.x, t.z);
+          effects.explosion(t.x, t.y, t.z);
         }
       }
       while (ownsTraffic && pendingHits.length > 0) {
         const id = pendingHits.shift() as number;
         if (trafficSync.destroy(state.targets, id, state.time)) {
           const t = state.targets[id];
-          effects.explosion(t.x, t.z);
+          effects.explosion(t.x, t.y, t.z);
         }
       }
       while (ownsTraffic && pendingBumps.length > 0) {
@@ -838,10 +843,12 @@ export function createGame(
       return state.time;
     },
     /** Put the car at a pose (heading in radians, 0 = north) at rest, and snap the camera to it. */
-    teleport(x: number, z: number, heading: number) {
+    teleport(x: number, z: number, heading: number, y = 0) {
       const v = state.vehicle;
       v.x = v.prevX = x;
       v.z = v.prevZ = z;
+      v.y = v.prevY = y;
+      v.pitch = 0;
       v.heading = v.prevHeading = heading;
       v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
       if (cruising) cruiseControl.reset(v);

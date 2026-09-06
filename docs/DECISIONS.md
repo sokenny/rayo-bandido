@@ -184,3 +184,48 @@ separable, and only one of them was worth keeping.
 | The gearbox stays | Gears, rpm, the auto/manual toggle, the per-gear limiter and lugging all remain (`src/sim/drivetrain.ts`) | It is a good system on its own: the tacho became an instrument, the engine note got a reason to drop on a shift, and holding a gear through a corner is a real choice. None of that needs the drift model |
 | The drift model goes back | Self-steer/counter-steer at the wheel, wheelspin holding the slide, the slip-relative bicycle model, the power yaw kick, the over-rev penalties (grip, drive, stability, yaw) and the donut drift-validity rule are all removed | It made the car a simulator to hold sideways — the throttle had to be tapped to keep the needle in a band, and holding the arrow spun you — against the stated goal of being *more* forgiving than NFSU2. The left-foot-brake behaviour from `256fbdc` is the drift feel this game wants |
 | The gearbox must not touch the slide | `stepVehicle` no longer reads `wheelspin`, `limiterPenalty` or the over-rev constants; the drivetrain gets `slide` as an input and gives nothing back to handling | Keeping the coupling one-directional is what makes the two systems separable at all — it is why the gearbox survived this revert, and it should survive the next tuning pass the same way |
+
+## The City: a free-roam proof of concept with elevation (2026-09-06)
+
+Juan asked for a city at least four times the test arena, built from Cyberpunk-style night
+references: viaducts high in the air and between buildings, roads that climb and dip, curved
+avenues, alleys off the big streets, a square of screens, radio masts, a huge drum of screens,
+a waterfront. Asked and answered before the work started: the elevation is **drivable** (not
+scenery), the traffic is the existing electric cars reused as they are, the south edge is
+water, and nothing of the test block (plaza, WANTED board) carries over — a fresh start.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Scope | A third single-player world, `city`, beside `test` and `race`; the test block stays as it is | The arena is pinned by tests and the drift plaza; the PoC should not be judged against it yet. Recorded in `AGENTS.md` as the one open-world exception |
+| Elevation | The simulation stays planar in its handling; bodies gain a `y` read off a surface field (`src/world/surface.ts`) that answers with the level nearest the height the body already has. Colliders carry optional height bounds | The car on a viaduct steers exactly like the car on the street; no gravity or jump physics. An overpass and the street under it share an (x, z) and each keeps its own walls |
+| Heights in data | Road nodes carry an optional `y`; unmarked nodes interpolate between anchors with an eased grade (`GRADE_EASE`) | A curved ramp climbs in one run; tests pin the steepest grade under 17 % and every street crossing to 5.5 m of clearance |
+| Blocks | Cells are split along straight roads and the leftover staircase along the diagonal is merged back into strips (`cityGen.ts`: `axisSplit`, `mergeUpTo`); the circuit keeps its old behaviour | The old quartering left a city of 11 m huts; a grid wants real blocks |
+| Phases | Layout, elevation, lighting and low-poly variety now; textures and detailed props later, by Juan | His explicit request: no tokens on textures in this pass |
+| Budget | 15 environment draw calls, ~83k triangles, fog pushed to 340 m for this world only, camera far plane 900 m | Under the 200k rule with room for the texture pass |
+
+## The City's colours are Juan's references, not the arena's two hues (2026-09-06, afternoon)
+
+Juan's first look: "you did not use the color palette from my images, I specifically mentioned
+the colors", the ground floor of the viaducts was empty, the city needed to feel cosier and
+foggier, and a district with the skyscraper density of his Cyberpunk screenshot.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Palette | `src/render/scene/env/palette.ts` now holds two scripts. `arena` is the two-hue rule of `docs/VISUAL_DIRECTION.md`, unchanged for Test and Race. `bay` is read off the references for the City: near-black navy shadows, a saturated deep-blue sky, dense blue fog, teal-cyan and magenta neon, violet in the towers, and a warm amber for lamps, stalls, old-town windows and the pools under the viaduct. A world names its palette in its plan; the environment fills the live `PAL` before it builds | The references have amber and violet in them and a far deeper night than the arena's lifted haze. The arena keeps its approved look |
+| Fog | The City runs fog from 10 m to 300 m | Cosy and foggy was the brief; the far towers are shapes in blue, the neon does the rest |
+| Downtown | `DOWNTOWN` in `citySpec.ts`: a fourth massing band (70-140 m skyscrapers with setbacks, corner light strips, building-sized screens, a lit crown), the whole district a wall of screens, the perimeter and the skyline behind it grown to match, skybridges high between the towers | The second reference: a wall of towers you look up at |
+| Under the viaduct | Columns every 12 m (was 24), beams and pipes under the slab, a lit strip on every bay, hanging signs, a barrier ring and a lit edge on the columns, chain-link fences between two bays out of three (walls for the street; the third bay stays open so the corridor is still driven into), stalls and posters on the fences, a floor with pools of light | "The bottom floor of the highways looks empty" |
+| Street life | Stalls with amber light on urban ledges, palms on the old-town ledges and thick along the waterfront | The cosy note the references have and the block did not |
+
+## Third look: teal, not violet; green everywhere; three times the traffic (2026-09-06, evening)
+
+Juan's third reference (a Cyberpunk street: teal-grey haze, green-grey pavement, cold white
+and pale-teal windows and lamps, a red corporate billboard, yellow crossings) with "right now
+it's too violetish", palms and bushes "around all of the city", and traffic at three times the
+density.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Palette | The `bay` script is re-read off the new reference: teal-grey fog and sky, green-grey pavement, grey-teal facades, cold white / pale-teal windows, amber lamps, yellow centre lines; the hot family is red and coral instead of pink and purple, and violet is gone (pale blue-teal where the arena has violet). The sign atlas and the holographic screens follow, so they come out red and teal | His words: too violet. The reference has no violet at all |
+| Greenery | Hedges (two stacked boxes) and low-poly palms on every block ledge that faces a street, in every zone — thickest along the quay, sparse downtown — and hedges against the viaduct fences. All on the pavement inside the block colliders | Palms and bushes around the whole city, as in the reference |
+| Traffic | 39 electric cars (was 13): nine rectangles of streets with three or four cars each, spread evenly round the rectangle, and eight lapping the viaduct. The cars themselves, their rules and their audio are untouched | Three times the density, with the existing traffic reused as he asked |

@@ -17,6 +17,13 @@ export type TrackZone = 'corporate' | 'urban' | 'jdm';
 export interface TrackNode {
   x: number;
   z: number;
+  /**
+   * Height of the road surface at this node (m). A node without one is not an anchor: the
+   * height there is interpolated between the nearest anchors either side, so a curved ramp
+   * with an unmarked middle node climbs in one smooth run instead of two. All nodes unmarked
+   * = a flat road at y 0. Between anchors the grade eases in and out (`GRADE_EASE`).
+   */
+  y?: number;
   /** Fillet radius at this corner (m). Ignored at the two ends of an open path. */
   r: number;
   /** Full width of the road from here to the next node (m). Interpolated along straights. */
@@ -39,6 +46,8 @@ export interface TrackSpec {
 export interface TrackSample {
   x: number;
   z: number;
+  /** Height of the road surface here (m). 0 on a flat road. */
+  y: number;
   /** Unit tangent along the direction of travel. */
   tx: number;
   tz: number;
@@ -85,14 +94,104 @@ export interface PathProjection {
   /** The projected point itself, on the centreline. */
   x: number;
   z: number;
+  /** Height of the road surface at the projected point (m). */
+  y: number;
 }
 
 export function createProjection(): PathProjection {
-  return { index: 0, t: 0, s: 0, lateral: 0, dist: 0, halfWidth: 0, tx: 0, tz: -1, x: 0, z: 0 };
+  return { index: 0, t: 0, s: 0, lateral: 0, dist: 0, halfWidth: 0, tx: 0, tz: -1, x: 0, z: 0, y: 0 };
 }
 
 const DEFAULT_STRAIGHT_STEP = 8;
 const DEFAULT_ARC_STEP = 3;
+/**
+ * Fraction of the run between two height anchors over which the grade builds up and, at the
+ * other end, dies away. The grade is a trapezoid: linear in, flat, linear out, so a ramp has
+ * no kink at either end and its steepest part is 1 / (1 - GRADE_EASE) times the average.
+ */
+export const GRADE_EASE = 0.22;
+
+/** Fraction of a rise completed at fraction `u` of the run, with the trapezoid grade profile. */
+export function easedRise(u: number, e = GRADE_EASE): number {
+  if (u <= 0) return 0;
+  if (u >= 1) return 1;
+  const g = 1 / (1 - e);
+  if (u <= e) return (g * u * u) / (2 * e);
+  if (u <= 1 - e) return g * (e / 2 + (u - e));
+  const r = 1 - u;
+  return 1 - (g * r * r) / (2 * e);
+}
+
+/**
+ * Writes `y` onto every sample from the node heights. Anchors are the nodes that carry a
+ * `y`, placed at the station where their section begins; between two anchors the height
+ * follows `easedRise`. Open paths hold the first / last anchor's height beyond it; closed
+ * paths wrap. No anchors at all is a flat road.
+ */
+function assignHeights(samples: TrackSample[], nodes: TrackNode[], closed: boolean, length: number): void {
+  const n = nodes.length;
+  const anchors: Array<{ s: number; y: number }> = [];
+  for (let k = 0; k < n; k++) {
+    const y = nodes[k].y;
+    if (y === undefined) continue;
+    // The anchor sits at the sample nearest the node: exactly on a plain node, and in the
+    // middle of the turn on a filleted one. The two ends of an open path are its ends.
+    let st: number;
+    if (!closed && k === 0) st = 0;
+    else if (!closed && k === n - 1) st = length;
+    else {
+      let best = Infinity;
+      st = 0;
+      for (const s of samples) {
+        const d = (s.x - nodes[k].x) ** 2 + (s.z - nodes[k].z) ** 2;
+        if (d < best) {
+          best = d;
+          st = s.s;
+        }
+      }
+    }
+    anchors.push({ s: st, y });
+  }
+  if (anchors.length === 0) {
+    for (const s of samples) s.y = 0;
+    return;
+  }
+  anchors.sort((a, b) => a.s - b.s);
+  if (anchors.length === 1) {
+    for (const s of samples) s.y = anchors[0].y;
+    return;
+  }
+  const first = anchors[0];
+  const last = anchors[anchors.length - 1];
+  for (const smp of samples) {
+    const st = smp.s;
+    let a: { s: number; y: number };
+    let b: { s: number; y: number };
+    if (st < first.s) {
+      if (!closed) {
+        smp.y = first.y;
+        continue;
+      }
+      a = { s: last.s - length, y: last.y };
+      b = first;
+    } else if (st >= last.s) {
+      if (!closed) {
+        smp.y = last.y;
+        continue;
+      }
+      a = last;
+      b = { s: first.s + length, y: first.y };
+    } else {
+      let i = 0;
+      while (i < anchors.length - 2 && anchors[i + 1].s <= st) i++;
+      a = anchors[i];
+      b = anchors[i + 1];
+    }
+    const run = b.s - a.s;
+    const u = run > 1e-6 ? (st - a.s) / run : 1;
+    smp.y = a.y + (b.y - a.y) * easedRise(u);
+  }
+}
 
 function pushSample(
   out: TrackSample[],
@@ -107,7 +206,7 @@ function pushSample(
 ): void {
   const prev = out[out.length - 1];
   const s = prev ? prev.s + Math.hypot(x - prev.x, z - prev.z) : 0;
-  out.push({ x, z, tx, tz, s, halfWidth, zone, curvature, node });
+  out.push({ x, z, y: 0, tx, tz, s, halfWidth, zone, curvature, node });
 }
 
 /**
@@ -249,6 +348,7 @@ export function buildTrackPath(spec: TrackSpec): TrackPath {
     // Zone/width bookkeeping for the closing piece.
     const closing = samples[samples.length - 1];
     const length = closing.s + Math.hypot(first.x - closing.x, first.z - closing.z);
+    assignHeights(samples, nodes, true, length);
     return { samples, closed: true, length, pieces };
   }
 
@@ -267,6 +367,7 @@ export function buildTrackPath(spec: TrackSpec): TrackPath {
     if (fj) arc(fj, vj.width, vj.zone, j);
   }
   const last = samples[samples.length - 1];
+  assignHeights(samples, nodes, false, last.s);
   return { samples, closed: false, length: last.s, pieces };
 }
 
@@ -336,6 +437,7 @@ export function projectOntoPath(
   out.tz = tz;
   out.x = px;
   out.z = pz;
+  out.y = a.y + (b.y - a.y) * bestT;
   return out;
 }
 
@@ -387,7 +489,37 @@ export function pointAtStation(path: TrackPath, s: number, out: PathProjection):
   out.tz = dz / len;
   out.x = a.x + dx * t;
   out.z = a.z + dz * t;
+  out.y = a.y + (b.y - a.y) * t;
   return out;
+}
+
+/** Largest height on the path (m). 0 for a flat road. */
+export function maxHeight(path: TrackPath): number {
+  let y = 0;
+  for (const s of path.samples) if (s.y > y) y = s.y;
+  return y;
+}
+
+/** True when any part of the path is off the ground. */
+export function isElevated(path: TrackPath): boolean {
+  for (const s of path.samples) if (s.y > 0.05) return true;
+  return false;
+}
+
+/** Steepest grade between two consecutive samples (rise over run). */
+export function maxGrade(path: TrackPath): number {
+  const samples = path.samples;
+  const segs = segmentCount(path);
+  let g = 0;
+  for (let i = 0; i < segs; i++) {
+    const a = samples[i];
+    const b = samples[(i + 1) % samples.length];
+    const run = Math.hypot(b.x - a.x, b.z - a.z);
+    if (run < 1e-6) continue;
+    const grade = Math.abs(b.y - a.y) / run;
+    if (grade > g) g = grade;
+  }
+  return g;
 }
 
 /**
@@ -398,11 +530,12 @@ export function offsetAtStation(
   path: TrackPath,
   s: number,
   lateral: number,
-): { x: number; z: number; tx: number; tz: number; halfWidth: number; zone: TrackZone } {
+): { x: number; z: number; y: number; tx: number; tz: number; halfWidth: number; zone: TrackZone } {
   const p = pointAtStation(path, s, SCRATCH);
   return {
     x: p.x + -p.tz * lateral,
     z: p.z + p.tx * lateral,
+    y: p.y,
     tx: p.tx,
     tz: p.tz,
     halfWidth: p.halfWidth,

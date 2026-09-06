@@ -21,7 +21,7 @@ Open http://127.0.0.1:5173 (add `?debug=1` for the performance overlay).
 | --- | --- |
 | `npm run dev` | Vite dev server on 127.0.0.1:5173 |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest, 53 tests in 7 files (math, rules, vehicle, drift, fx, vehicleVisual, arena) |
+| `npm test` | Vitest, 24 files: the gameplay rules, the three worlds' contracts (arena, race circuit, the City), track geometry and heights, net protocol |
 | `npm run build` | Typecheck + production build to `dist/` (606 kB JS, 165 kB gzip) |
 | `npm run preview` | Serve `dist/` on 127.0.0.1:4173 |
 | `npm run qa` | Headless Chrome drive of the whole loop; writes `artifacts/*.png` and `artifacts/qa-metrics.json` (needs the dev server running) |
@@ -954,3 +954,106 @@ held button offered the text callout.
 tap passes and a second within 320 ms is cancelled; `touchmove` over the canvas and
 `gesturestart` are cancelled; `contextmenu` is refused. The rotated landscape layer and the pad
 are unchanged. Suite: 348 tests in 23 files, all passing; `tsc --noEmit` clean.
+
+### 2026-09-06 — The City: a free-roam proof of concept with drivable elevation
+
+Juan's brief: a city at least four times the test arena, after Cyberpunk night-street
+references — viaducts high in the air and running between buildings, roads that climb and
+dip, curved avenues, alleys, a square of screens, radio masts, a huge drum of screens, water.
+Layout, elevation, light and low-poly variety now; textures and detailed props are his own
+later pass. Decisions in `docs/DECISIONS.md`; the scope exception in `AGENTS.md`.
+
+**Elevation in the simulation** (the one architectural change). The world used to be planar.
+Now:
+- `src/world/track.ts`: a node may carry a height `y`; unmarked nodes interpolate between the
+  nearest anchors with an eased grade (`easedRise`, `GRADE_EASE`), so a curved ramp climbs in
+  one run. Every sample and projection carries `y`; `maxGrade`, `maxHeight`, `isElevated`.
+- `src/world/surface.ts`: the surface field. At (x, z) it answers with the highest road a body
+  can step onto from the height it already has (`STEP_UP`, 0.6 m). A car on the deck stays on
+  the deck over the street, a car on the street stays under it, and a car at the foot of a
+  ramp is carried up — each tick the ramp is a few centimetres higher than where it was.
+- `src/sim/surface.ts` settles the car and every electric car onto that surface after they
+  move, and writes the road grade along the heading as `VehicleState.pitch`. Step 4 of the
+  vehicle feels `VEHICLE.gradeGravity` (0.45 g) along it; the body tilts by it (`sync.ts`,
+  root rotation order YXZ); the chase camera aims up the slope (`CAMERA.pitchFollow`).
+- Colliders carry optional height bounds (`ObstacleBox` / `ObstacleWall` `minY` / `maxY`):
+  a viaduct's guardrail is a wall for the deck and nothing for the street below; a pillar is
+  a wall for the street and nothing for the deck. `LEVEL_GAP` (3.5 m) keeps cars on different
+  levels from touching, shaving or shooting each other. Events carry `y` so every effect
+  (arc, explosion, sparks, pops, smoke, skid marks) lands on the road it happened on.
+
+**The world** (`src/world/citySpec.ts` data, `src/world/cityWorld.ts` builder, shared block and
+rail generation moved to `src/world/cityGen.ts` and reused by the circuit unchanged):
+- 540 x 550 m: five avenues and streets each way, an S-shaped diagonal, five alleys, a
+  waterfront boulevard, water behind a quay along the south edge.
+- The viaduct: an 18 m closed highway 15 m up round the whole city and out over the bay, four
+  ramps (two on, two off, 9-15 % grade, each merging parallel to the deck), 93 pillar pairs
+  wherever the deck is over open ground or water, never over a street or a lower deck.
+- The skyway: an open bridge road that climbs to 24 m up the west side, runs the north edge
+  between the towers, crosses the viaduct twice, and comes down onto the centre boulevard.
+- Blocks: cells split along straight roads (`axisSplit`) and the staircase the diagonal leaves
+  is merged back into strips (`mergeUpTo`) — 89 blocks from 11 to 77 m instead of 240 huts.
+- Traffic: the existing electric cars, untouched: nine on four rectangles of streets in the
+  right-hand lane, four lapping the viaduct at 15 m. Cruise mode drives the central rectangle.
+
+**The art** (all merged into the same 15 draw calls): viaduct slabs, skirts, undersides with
+lit strips, pillars with beams (`elevatedBuilder.ts`); sloped guardrails that climb the ramps
+and lamps hung off the deck fascia (`trackBuilder.ts`); five building silhouettes — podium
+towers with a lit crown, stepped tiers, slabs with a neon spine, plain, and shabby boxes with
+cages, awnings, tanks and shacks — rooftop screens, and a district where every facade is
+stacked with holographic screens (`cityBuilder.ts`); the quay, its railing and lamps, neon
+streaks on the water, four lattice radio masts, a power line of seven pylons across the bay,
+the 26 m drum of screens on a 55 m mast, enclosed skybridges between towers
+(`landmarksBuilder.ts`); the water plane and per-world fog (340 m here) in `environment.ts`;
+viaducts in magenta and the bay on the minimap.
+
+**Measured.** `tests/cityWorld.test.ts` (headless): every road clear of what is solid at its
+level; every street a deck crosses has 5.5 m under it; decks that cross leave 5.5 m; grades
+under 17 %; pillars off the streets; cruise mode drives the west ramp onto the deck with zero
+rail contacts and arrives at 15.0 m; a car overhead cannot be locked. Art: 83k triangles, 15
+draw calls; world build 0.4-1.0 s on this machine. **In the browser** (dev server, `?mode=city`,
+no console errors): 58 FPS in the embedded preview, GPU 3.7 ms, sim 0.5 ms, render 1.7 ms;
+the viaduct cars lap at 15 m; the race and test worlds unchanged.
+
+**Known gaps, for the next passes.** No textures beyond the procedural ones (by design). The
+ground under the viaduct corridor is bare. Ramps have no kerbs where they leave a street.
+Shoulders are flat pavement, not raised kerbs. The far-shore skyline is silhouettes only.
+The world build could be halved with a spatial index in `generateBlocks` if load time matters.
+
+### 2026-09-06 (afternoon) — City, second pass: the bay palette, downtown, the viaduct's ground floor
+
+Juan's feedback on the first look, all four points addressed (decisions in `docs/DECISIONS.md`):
+- **Colours from his references.** Two palettes now live in `palette.ts`; the City draws in
+  `bay` (deep navy night, saturated deep-blue sky, dense blue fog, teal / magenta / violet neon,
+  amber lamps and stalls, near-black facades so the windows and screens carry the light). The
+  arena and the circuit keep `arena`. Sky, reflection map, lights, window textures and lamp heads
+  all follow the live palette.
+- **The ground floor of the viaducts.** Columns every 12 m with barrier rings and lit edges,
+  edge and centre beams plus pipes under the slab, a lit strip on every bay, hanging signs,
+  fences between the columns (two bays in three; walls for the street, the open bay is the way
+  in), stalls, posters and junk against them, a floor with pools of light.
+- **Cosier, foggier.** Fog 10-300 m, amber pools, stalls on the urban ledges, palms in the old
+  town and along the quay.
+- **Downtown.** A skyscraper district in the north-west (70-140 m, setbacks, corner light
+  strips, building-sized screens, lit crowns, antennas), every facade a wall of screens, the
+  band behind it and the backdrop skyline grown to match, skybridges 22-52 m up.
+
+**Measured.** 351 tests green (the city contract suite now also pins the columns off the streets
+and off lower decks). Art: ~135k triangles, 15 environment draw calls (up from 83k; still under
+the 200k rule). Browser (dev server 5178, `?mode=city`): 120 FPS in the preview, GPU 0.5-1.0 ms,
+no console errors. Downtown: 5 skyscrapers and 13 pencil towers on 18 plots, 168 screens.
+
+### 2026-09-06 (evening) — City, third pass: teal palette, greenery, three times the traffic
+
+- The `bay` palette is now the teal night of Juan's third reference: teal-grey fog and sky,
+  green-grey pavement, grey-teal concrete, cold white and pale-teal windows, amber lamps, yellow
+  centre lines, red and coral for the hot notes, no violet anywhere. Water and foliage colours
+  joined the palette.
+- Hedges and palms on every block ledge facing a street in every zone (thickest on the quay,
+  sparse downtown) and hedges along the viaduct fences (`landmarksBuilder.ts`, `elevatedBuilder.ts`).
+- Traffic tripled to 39 cars: nine street rectangles spread evenly (`placeAlongLoop`), eight on
+  the viaduct. Nothing about the cars changed.
+
+**Measured.** 351 tests green. Art: ~141k triangles, 15 environment draw calls. Browser
+(`?mode=city`): 39 targets, 8 of them on the deck, no console errors; sim about 1 ms and
+render about 3 ms a frame with the full field.
