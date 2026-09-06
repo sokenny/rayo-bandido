@@ -177,7 +177,9 @@ export function stepVehicle(
   // at that speed. The automatic shifts up before this can bite, so it only ever acts on the
   // manual box — flat out in a gear, or after a downshift the road speed was too high for.
   const gearTop = gearTopSpeed(v.gear);
-  const limited = manual && fwdSpeed >= gearTop;
+  // The limiter cuts drive two ways: the gear is simply out of road speed, or the engine is
+  // banging off the rev limiter and this tick falls in a fuel cut.
+  const limited = manual && (fwdSpeed >= gearTop || v.limiterCut > 0);
 
   if (limited) {
     // Fuel cut: no drive, nitro included.

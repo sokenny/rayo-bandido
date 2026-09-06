@@ -267,6 +267,22 @@ export const DRIVETRAIN = {
   /** Deceleration that holds a locked gear at its top speed (m/s^2). */
   limiterDecel: 6,
   /**
+   * Banging off the limiter (manual box only — the automatic shifts up before it can happen).
+   * Pinned at redline the ECU cuts fuel in a square wave instead of holding a smooth note:
+   * `limiterCutHz` cycles a second, fuel off for `limiterCutDuty` of each one. That stutter is
+   * the "ta-ta-ta-ta-ta" — the cut kills drive, drops the needle by `limiterCutDip`, mutes the
+   * note and lights the exhaust, all off the one flag (`VehicleState.limiterCut`).
+   */
+  limiterCutRpm: 0.985,
+  /** Cuts per second. ~11 Hz is fast enough to machine-gun, slow enough to hear each one. */
+  limiterCutHz: 11,
+  /** Fraction of each cycle with the fuel off. */
+  limiterCutDuty: 0.45,
+  /** How far the needle drops on a cut (rpm01): the bounce off the limiter. */
+  limiterCutDip: 0.05,
+  /** Throttle below which the limiter just backs off quietly instead of banging. */
+  limiterCutThrottle: 0.2,
+  /**
    * Drive left at idle in a tall gear (fraction): a manual box lugging in third at walking
    * pace pulls weakly until the revs come up. First gear is exempt (the clutch slips it away).
    */
@@ -575,6 +591,23 @@ export const CAMERA = {
   shakeDecay: 6,
 
   /**
+   * Click-and-drag look (chase view only). Dragging on the canvas orbits the camera around
+   * the car; letting go holds the new angle for `dragHold` seconds and then eases it back
+   * behind the car so normal driving never leaves you stuck looking sideways.
+   */
+  dragYawPerPixel: 0.005,
+  dragPitchPerPixel: 0.004,
+  /** Vertical look limits (rad): a little under the car, well above it. */
+  dragPitchMin: (-25 * Math.PI) / 180,
+  dragPitchMax: (70 * Math.PI) / 180,
+  /** Seconds the look angle is held after the drag ends before it recenters. */
+  dragHold: 0.7,
+  /** Recentring rate once the hold expires (1/s). */
+  dragRecenterDamping: 3.5,
+  /** Look offset (rad) at which the camera is fully aimed at the car instead of down the road. */
+  dragLookBlend: 0.35,
+
+  /**
    * Bolted-on camera views, cycled with P (chase -> front -> side -> chase). Unlike the chase
    * camera these are rigid mounts: the pose is written straight onto the camera with no
    * damping or lag, because a camera bolted to the bodywork should not trail the car — the
@@ -728,6 +761,14 @@ export const AUDIO = {
    */
   backfireVolume: 0.9,
   /**
+   * How far a limiter fuel cut ducks the engine note (0..1, 1 = silent). The gaps are what the
+   * ear hears as separate hits, so this wants to be deep — but not total: a fully silenced
+   * engine between cracks reads as a dropout rather than as a car fighting its own ECU.
+   */
+  limiterCutDuck: 0.72,
+  /** Strength of the exhaust bang fired on each limiter cut. */
+  limiterCutBang: 0.45,
+  /**
    * Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke.
    * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
    * there and not from this knob — raising this only makes a slide loud.
@@ -794,6 +835,44 @@ export const THEME = {
     mid: { loHz: 260, hiHz: 1800, gain: 20, attack: 0.2, release: 0.045, baselineRate: 0.04 },
     /** Hats, rides, transients. Nearly instant both ways, so it reads as a tick, not a pulse. */
     high: { loHz: 2600, hiHz: 9000, gain: 15, attack: 0.9, release: 0.34, baselineRate: 0.09 },
+  },
+  /**
+   * The dashboard spectrum analyser: the bar display in the car's cabin
+   * (`src/render/scene/vehicles/interior.ts`).
+   *
+   * This is a different read of the same FFT than `bands` above. The bands answer "did
+   * something just hit?" and are baseline-relative, which is right for lights but wrong for a
+   * meter: a meter has to sit at a height that means something even while nothing changes. So
+   * each bar reports its own window's absolute level, tilted upward with frequency to undo the
+   * natural roll-off of a mix (without the tilt the right-hand half of the display never
+   * leaves the floor), then smoothed with a fast attack and a slow fall — the drop is what
+   * makes it read as a sound system rather than a noise plot.
+   */
+  spectrum: {
+    /** Number of bars. Matches the instance count of the display mesh. */
+    bars: 14,
+    /** Frequency span covered, split into `bars` logarithmically spaced windows. */
+    loHz: 55,
+    hiHz: 9000,
+    /** Correction applied to a window's raw level, at the low end of the display and at the
+     *  high end: a mix rolls off toward the treble, and without this the right-hand third of
+     *  the display never leaves the floor. */
+    tiltLo: 1,
+    tiltHi: 1.9,
+    /** How much of a bar's height is its window's own level. This is the display's *shape* —
+     *  tall at the bass end, falling toward the treble — and it is all that is left of a bar
+     *  when the music holds still. */
+    shape: 0.45,
+    /** ...and how hard the excess over that window's own rolling average is amplified on top.
+     *  This is the display's *movement*: a loud mix pins a level meter near its ceiling and
+     *  stops saying anything, so what dances here is the part that just changed. */
+    punch: 3.2,
+    /** How fast a window forgets its recent average (per frame). Slow enough to sit under a
+     *  bar of music, fast enough to follow a drop. */
+    baselineRate: 0.05,
+    /** Per-frame smoothing of a bar climbing to a louder level, and falling away from one. */
+    attack: 0.55,
+    release: 0.12,
   },
   /** Mean bin level (0..255) across the mix treated as `energy` 1.0. */
   energyFull: 96,
@@ -867,4 +946,31 @@ export const CRUISE = {
   stuckTime: 1.2,
   /** Seconds spent reversing on opposite lock when the stuck guard fires. */
   reverseTime: 1,
+};
+
+/**
+ * The city's buses. Deliberately slow and heavy: a bus is a rolling piece of the city, an
+ * obstacle to read the street by, not another car in the traffic. Its size is the one the
+ * collider and the model are both cut from.
+ */
+export const BUSES = {
+  /** Buses on each route. Two is a service; one reads as a stray. */
+  perRoute: 2,
+  /** Length, width and height of the articulated body (m). */
+  length: 13.6,
+  width: 2.6,
+  height: 3.75,
+  /** Cruising speed between stops (m/s). About 40 km/h. */
+  cruiseSpeed: 11,
+  /** Acceleration and braking (m/s^2). A bus does neither in a hurry. */
+  accel: 1.6,
+  brake: 3.2,
+  /** Distance out from a stop over which it eases off (m). */
+  brakeDistance: 26,
+  /** Seconds standing at a stop, doors open. */
+  dwell: 6,
+  /** Seconds the doors take to open, and to close again at the end of the wait. */
+  doorTime: 1.2,
+  /** How fast it can swing its nose round a corner (rad/s). */
+  turnRate: 0.9,
 };

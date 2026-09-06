@@ -124,6 +124,14 @@ export interface VehicleState {
   wheelspin: number;
   /** Seconds the engine has been against the limiter; its penalties ramp in over `overRevGrace`. */
   limiterTime: number;
+  /**
+   * Fuel cut this tick on the manual box's rev limiter (0 = firing, 1 = cut). Square-waved at
+   * `DRIVETRAIN.limiterCutHz` while the needle is pinned at redline: the "ta-ta-ta-ta" of a car
+   * banging off the limiter. Kills drive, dips the needle, mutes the note and spits a bang.
+   */
+  limiterCut: number;
+  /** Phase (0..1) of that cut cycle. 0 whenever the engine is off the limiter. */
+  limiterPhase: number;
   /** Seconds the automatic still refuses to shift down after a rev-triggered upshift. */
   shiftHold: number;
   /**
@@ -196,6 +204,34 @@ export interface TargetState {
   patrolSpeed: number;
   /** Whether a reward has already been paid for this target. Guards against duplicate money. */
   rewarded: boolean;
+}
+
+/**
+ * A bus on its route. Unlike an electric car it is not a target: it cannot be shot, shoved
+ * or destroyed, and the player bounces off it as off a wall (`ArenaLayout.walls` carries four
+ * segments per bus, rewritten as it moves). That is also what keeps it cheap to reason about
+ * — nothing the player does changes a bus, so every screen draws it in the same place.
+ */
+export interface BusState {
+  id: number;
+  /** Which route in `ArenaLayout.busRoutes` it runs. */
+  route: number;
+  x: number;
+  z: number;
+  heading: number;
+  prevX: number;
+  prevZ: number;
+  prevHeading: number;
+  /** Distance travelled along the route loop (m). */
+  station: number;
+  /** Current speed (m/s): eased down into a stop and back up out of it. */
+  speed: number;
+  /** Seconds left standing at a stop; 0 when running. */
+  dwell: number;
+  /** Index into the route's `stops` of the one it is driving at. */
+  nextStop: number;
+  /** 0..1, how far the doors are open. Drawn, not simulated. */
+  doors: number;
 }
 
 /** One in-flight "pass" of a single target: the player is inside the near-miss radius of it. */
@@ -357,6 +393,8 @@ export interface GameState {
   nitro: NitroState;
   lightning: LightningState;
   targets: TargetState[];
+  /** Buses on their routes. Empty in a world without them. */
+  buses: BusState[];
   nearMiss: NearMissState;
   economy: EconomyState;
   /** Present in race mode only. */
@@ -487,7 +525,22 @@ export interface ArenaLayout {
   surface: SurfaceField | null;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
+  /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
+  busRoutes?: BusRoute[];
   minimap: MinimapData;
+}
+
+/**
+ * One bus route: a closed loop of waypoints along street centrelines, driven in the kerb
+ * lane, and the stations along it where the bus pulls in and waits.
+ *
+ * `stops` are distances from the start of the loop, in metres, already in the order the bus
+ * meets them. The route is the same object the shelters were placed against, so a bus only
+ * ever pulls in where there is a shelter to pull in at.
+ */
+export interface BusRoute {
+  points: Array<{ x: number; z: number }>;
+  stops: number[];
 }
 
 /** Read-only view of the state that the HUD needs. Built by `src/game.ts`. */

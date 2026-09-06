@@ -286,7 +286,9 @@ function buildGates(b: EnvBuilders): void {
 
 function buildBillboards(b: EnvBuilders): void {
   for (const d of b.plan.billboards) {
-    const target = d.variant === 0 ? b.billA : b.billB;
+    // 0 and 1 scroll the hologram atlas; 2 is the portrait BADKALA WANTED ad, which owns a
+    // whole texture rather than a strip of one, so it takes the full UV rect.
+    const target = d.variant === 0 ? b.billA : d.variant === 1 ? b.billB : b.badkala;
     target.panel(d.x, d.y, d.z, d.w, d.h, d.rotY);
     // Frame + masts.
     const nx = Math.sin(d.rotY);

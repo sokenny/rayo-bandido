@@ -205,5 +205,23 @@ export const TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
 /** Cars patrolling the viaduct itself. */
 export const VIADUCT_CARS = 8;
 
+/**
+ * Bus routes: rectangles of boulevard centrelines, driven clockwise in the kerb lane —
+ * `cityWorld.ts` puts each leg in the lane that street's own width allows, and calls at the
+ * shelters that stand on that kerb.
+ *
+ * Only the wide boulevards are used. A 2.6 m bus in the kerb lane of a 13 m street would
+ * stand in the electric cars' lane, and the traffic does not steer round anything.
+ * Both rectangles run the same way for the same reason: two routes sharing a street would
+ * otherwise share one lane head-on.
+ *
+ * Together they cover the grid from the north edge to the waterfront: the northern one round
+ * downtown and the middle, the southern one down to the bay.
+ */
+export const BUS_ROUTE_LOOPS: Rect[] = [
+  { minX: -70, maxX: 110, minZ: -160, maxZ: 60 },
+  { minX: -70, maxX: 110, minZ: 60, maxZ: 186 },
+];
+
 /** The car starts on the main avenue, pointed at the square. */
 export const CITY_SPAWN = { x: -66, z: -20, heading: 0 };

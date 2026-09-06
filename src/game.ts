@@ -3,7 +3,7 @@ import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot, Transmission } from './core/types';
-import { SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
+import { AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -21,9 +21,10 @@ import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
 import { createEnvironment } from './render/scene/environment';
 import { createCarVisual } from './render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
+import { createBusVisual, type BusVisual } from './render/scene/busVisual';
 import { createChaseCamera, type CameraPose, type CameraView } from './render/camera/chaseCamera';
 import { createEffects } from './render/fx';
-import { interpolateVehicle, syncCar, syncTargets, type InterpolatedPose } from './render/sync';
+import { interpolateVehicle, syncBuses, syncCar, syncTargets, type InterpolatedPose } from './render/sync';
 import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
 import { compileScene, warmRender } from './render/warmup';
@@ -146,6 +147,14 @@ export function createGame(
     const vis = createElectricCarVisual(i);
     scene.add(vis.root);
     targetVisuals.push(vis);
+  }
+  // The city's buses. Nothing shoots or shoves them, so unlike the electric cars they are
+  // plain scenery that happens to move: no status, no acquisition ring.
+  const busVisuals: BusVisual[] = [];
+  for (let i = 0; i < state.buses.length; i++) {
+    const vis = createBusVisual();
+    scene.add(vis.root);
+    busVisuals.push(vis);
   }
   // One car per rival, in grid order, added now so the warm-up compiles them too — a rival
   // appearing in your mirrors must not be the frame that compiles its shader.
@@ -271,6 +280,8 @@ export function createGame(
   let ready = false;
   // Exhaust pops. One trigger feeds both the bang and the flame so they land on the same frame.
   const backfire = createBackfireTrigger();
+  /** Last frame's `limiterCut`, so each fuel cut cracks the exhaust once on its leading edge. */
+  let prevLimiterCut = 0;
 
   /**
    * Cruise mode (C): the autopilot replaces the keyboard as the command source, so the car is
@@ -444,6 +455,7 @@ export function createGame(
     bodyGear = v.gear;
     effects.reset();
     backfire.reset();
+    prevLimiterCut = 0;
     fillCameraPose(1);
     chase.snap(cameraPose);
   }
@@ -490,6 +502,7 @@ export function createGame(
       case 'restart':
         effects.reset();
         backfire.reset();
+    prevLimiterCut = 0;
         car.resetBody();
         bodyGear = state.vehicle.gear;
         // The car is back at the spawn: pick up the route from there.
@@ -609,6 +622,9 @@ export function createGame(
     car.setBrakeLights(v.brakeApplied > 0 && v.speed > 0.5);
     car.setReverseLights(v.speed < -0.5);
     car.setBodyAccel(v.latAccel, v.longAccel);
+    // The cabin's spectrum display. `theme.spectrum` is one array mutated in place, so this
+    // is a reference hand-off, not a copy, and it stays live for every later frame.
+    car.setMusic(theme.spectrum);
     if (v.gear !== bodyGear) {
       car.shiftKick(shiftKickStrength(v, bodyGear));
       bodyGear = v.gear;
@@ -616,6 +632,7 @@ export function createGame(
     car.update(frameDt, simTime);
     syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
+    syncBuses(busVisuals, state.buses, alpha);
     // Rivals carry their own interpolation (on the network clock), so unlike everything else
     // here they are not blended by `alpha` — they are re-placed for this very frame instead,
     // which is what keeps them moving every frame on a display faster than the simulation.
@@ -631,14 +648,27 @@ export function createGame(
     chase.update(cameraPose, frameDt);
     audio.update(
       frameDt,
-      { rpm01: v.rpm01, speed: v.speed, throttle: v.throttleApplied, brake: v.brakeApplied, nitro: state.nitro.active },
+      {
+        rpm01: v.rpm01,
+        speed: v.speed,
+        throttle: v.throttleApplied,
+        brake: v.brakeApplied,
+        nitro: state.nitro.active,
+        limiterCut: v.limiterCut,
+      },
       pose,
       state.targets,
       { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin },
     );
 
-    // Pops and bangs: one decision, fired into the audio and the tailpipes together.
-    const bang = backfire.tick(frameDt, v.speed, v.rpm01, v.throttleApplied, state.nitro.active);
+    // Pops and bangs: one decision, fired into the audio and the tailpipes together. Banging
+    // off the limiter owns the exhaust while it lasts: every fuel cut spits its own crack, on
+    // the same frame the note is gated, and the ordinary backfire trigger stays out of the way.
+    const cutBang = v.limiterCut > 0 && prevLimiterCut === 0 ? AUDIO.limiterCutBang : 0;
+    prevLimiterCut = v.limiterCut;
+    // `tick` is still advanced every frame so its lift-off detector never sees a stale throttle.
+    const trigger = backfire.tick(frameDt, v.speed, v.rpm01, v.throttleApplied, state.nitro.active);
+    const bang = Math.max(cutBang, trigger);
     if (bang > 0) {
       audio.backfire(bang);
       effects.backfire(bang);
@@ -717,6 +747,45 @@ export function createGame(
   }
   window.addEventListener('resize', onResize);
 
+  // Click-and-drag look. Dragging on the canvas orbits the chase camera around the car; the
+  // angle is held briefly after release and then recentres (see `chaseCamera.look`). Touch
+  // drags are ignored so the on-screen driving controls keep their gestures.
+  let lookPointer: number | null = null;
+  let lookX = 0;
+  let lookY = 0;
+
+  function preventDefault(e: Event): void {
+    e.preventDefault();
+  }
+
+  function onLookDown(e: PointerEvent): void {
+    if (lookPointer !== null || e.pointerType === 'touch' || e.button > 1) return;
+    lookPointer = e.pointerId;
+    lookX = e.clientX;
+    lookY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    chase.setDragging(true);
+  }
+
+  function onLookMove(e: PointerEvent): void {
+    if (e.pointerId !== lookPointer) return;
+    chase.look(-(e.clientX - lookX) * CAMERA.dragYawPerPixel, (e.clientY - lookY) * CAMERA.dragPitchPerPixel);
+    lookX = e.clientX;
+    lookY = e.clientY;
+  }
+
+  function onLookUp(e: PointerEvent): void {
+    if (e.pointerId !== lookPointer) return;
+    lookPointer = null;
+    chase.setDragging(false);
+  }
+
+  canvas.addEventListener('pointerdown', onLookDown);
+  canvas.addEventListener('pointermove', onLookMove);
+  canvas.addEventListener('pointerup', onLookUp);
+  canvas.addEventListener('pointercancel', onLookUp);
+  canvas.addEventListener('contextmenu', preventDefault);
+
   // Initial camera placement.
   fillCameraPose(1);
   chase.snap(cameraPose);
@@ -764,6 +833,11 @@ export function createGame(
     dispose() {
       loop.stop();
       window.removeEventListener('resize', onResize);
+      canvas.removeEventListener('pointerdown', onLookDown);
+      canvas.removeEventListener('pointermove', onLookMove);
+      canvas.removeEventListener('pointerup', onLookUp);
+      canvas.removeEventListener('pointercancel', onLookUp);
+      canvas.removeEventListener('contextmenu', preventDefault);
       releaseLandscape();
       for (const off of netCleanup) off();
       netCleanup.length = 0;
@@ -777,6 +851,7 @@ export function createGame(
       audio.dispose();
       effects.dispose();
       for (const t of targetVisuals) t.dispose();
+      for (const b of busVisuals) b.dispose();
       disposeElectricCarResources();
       for (const r of rivalVisuals) r.dispose();
       disposeRivalCarResources();

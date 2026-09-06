@@ -5,6 +5,7 @@ import { createBodyAttitude } from './bodyAttitude';
 import { createLiveryTexture } from './vehicles/livery';
 import { slotColor, slotCss } from '../../core/playerColors';
 import { buildWheelGeometry } from './vehicles/wheel';
+import { createCabinInterior } from './vehicles/interior';
 
 /**
  * Player car visual: a stylized low-poly GT86-like drift coupe.
@@ -12,8 +13,8 @@ import { buildWheelGeometry } from './vehicles/wheel';
  * CONTRACT
  * - `root` origin is on the ground at the center of the wheelbase. The nose points toward
  *   local -Z. `src/render/sync.ts` sets `root.position` and `root.rotation.y`.
- * - Everything that rides on the springs (bodywork, glass, lights, exhaust and rocker glow)
- *   lives under `chassis`, which rolls and pitches about the root origin and shifts a
+ * - Everything that rides on the springs (bodywork, glass, cabin, lights, exhaust and rocker
+ *   glow) lives under `chassis`, which rolls and pitches about the root origin and shifts a
  *   centimetre or two fore-aft when the gearbox shoves it. The wheels and the
  *   ground light pool stay on `root` so they keep their contact with the road.
  * - `wheels` are ordered [front-left, front-right, rear-left, rear-right]. Sync rotates
@@ -26,8 +27,9 @@ import { buildWheelGeometry } from './vehicles/wheel';
  *   drives are transform carriers; `update()` bakes `steer.matrix * spin.matrix` into the
  *   instance matrices, so `update()` must run every frame after `syncCar()` (`src/game.ts`
  *   already does).
- * - Nine draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
- *   ground light pool, underglow, wheels. The chassis group costs nothing extra.
+ * - Twelve draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
+ *   ground light pool, underglow, wheels, and the cabin's three (trim, light strips, spectrum
+ *   bars — see `vehicles/interior.ts`). The chassis group costs nothing extra.
  */
 export interface CarVisualOptions {
   /**
@@ -49,6 +51,12 @@ export interface CarVisual {
   setNitro(intensity: number): void;
   /** 0..1 cyan underglow / electric charge glow. */
   setCharge(level: number): void;
+  /**
+   * The music the cabin's spectrum display runs on: `ThemeAudio.spectrum`, one 0..1 level per
+   * bar, low frequencies first. Held by reference, so passing it once is enough; with nothing
+   * passed the display simply rests on its floor line.
+   */
+  setMusic(spectrum: ArrayLike<number>): void;
   /**
    * Accelerations the body is under this frame (m/s^2, car local frame): `VehicleState`'s
    * `latAccel` and `longAccel`. Drives body roll and dive/squat; `update()` integrates it.
@@ -83,6 +91,10 @@ const FRONT_HALF_TRACK = VEHICLE.trackWidth / 2;
 const REAR_HALF_TRACK = VEHICLE.trackWidth / 2 + 0.02;
 const HALF_BASE = VEHICLE.wheelbase / 2;
 
+/** Vertex alpha of the player's rear screen, on top of the glass material's own opacity.
+ *  Low enough to see the cabin through, high enough that the pane still reads as glass. */
+const REAR_GLASS_ALPHA = 0.52;
+
 const TAIL_RED = new THREE.Color(0xff1a2e);
 const TAIL_MAGENTA = new THREE.Color(0xff33d6);
 
@@ -116,7 +128,7 @@ function glowDisc(radius: number, segments: number): THREE.BufferGeometry {
  * colours (`src/render/scene/rivalCarVisual.ts`) and build this once to share between them.
  * The player's own car keeps its own copy: it is the only one that needs the livery map.
  */
-export function buildBodyGeometry(): THREE.BufferGeometry {
+export function buildBodyGeometry(openCabin = false): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
   // Main hull: wide low nose, long hood, rising beltline, tucked tail.
@@ -137,14 +149,22 @@ export function buildBodyGeometry(): THREE.BufferGeometry {
   );
 
   // Greenhouse: raked windshield, short cabin set back, fastback into a short deck.
+  //
+  // `openCabin` leaves the windscreen and backlight panels out, so those two are real holes
+  // with the cabin behind them (`vehicles/interior.ts`) rather than paint under a pane of
+  // glass. Only the player's own car takes it: a rival carries no cabin, and an empty opening
+  // would be a window straight through the car.
   parts.push(
     part(
-      loft([
-        { z: -0.74, bottomY: 0.8, topY: 0.87, bottomHalfWidth: 0.76, topHalfWidth: 0.76 },
-        { z: -0.06, bottomY: 0.84, topY: 1.3, bottomHalfWidth: 0.74, topHalfWidth: 0.62 },
-        { z: 0.62, bottomY: 0.84, topY: 1.31, bottomHalfWidth: 0.74, topHalfWidth: 0.62 },
-        { z: 1.58, bottomY: 0.84, topY: 0.93, bottomHalfWidth: 0.78, topHalfWidth: 0.72 },
-      ]),
+      loft(
+        [
+          { z: -0.74, bottomY: 0.8, topY: 0.87, bottomHalfWidth: 0.76, topHalfWidth: 0.76 },
+          { z: -0.06, bottomY: 0.84, topY: 1.3, bottomHalfWidth: 0.74, topHalfWidth: 0.62 },
+          { z: 0.62, bottomY: 0.84, topY: 1.31, bottomHalfWidth: 0.74, topHalfWidth: 0.62 },
+          { z: 1.58, bottomY: 0.84, topY: 0.93, bottomHalfWidth: 0.78, topHalfWidth: 0.72 },
+        ],
+        { openTop: openCabin ? [0, 2] : [] },
+      ),
       PAINT_ROOF,
     ),
   );
@@ -282,21 +302,26 @@ export function tintBody(material: THREE.MeshStandardMaterial, colour: THREE.Col
   material.emissive.copy(colour).multiplyScalar(0.06);
 }
 
-export function buildGlassGeometry(): THREE.BufferGeometry {
+/**
+ * `rearAlpha` scales the rear screen's opacity on top of the material's own, and nothing
+ * else: it is how the player's car gets a back window you can see the cabin through
+ * (`interior.ts`) while a rival, which has no cabin behind it, keeps the flat dark glass.
+ */
+export function buildGlassGeometry(rearAlpha = 1): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const windshield = box(1.2, 0.02, 0.78);
   windshield.rotateX(-0.564);
   windshield.translate(0, 1.1, -0.41);
-  parts.push(part(windshield, 0xffffff));
+  parts.push(partRGBA(windshield, 0xffffff, 1));
   const rearGlass = box(1.16, 0.02, 1.0);
   rearGlass.rotateX(0.377);
   rearGlass.translate(0, 1.137, 1.107);
-  parts.push(part(rearGlass, 0xffffff));
+  parts.push(partRGBA(rearGlass, 0xffffff, rearAlpha));
   for (const sign of [-1, 1]) {
     const side = box(0.02, 0.4, 0.68);
     side.rotateZ(sign * 0.26);
     side.translate(sign * 0.7, 1.07, 0.3);
-    parts.push(part(side, 0xffffff));
+    parts.push(partRGBA(side, 0xffffff, 1));
   }
   return mergeParts(parts);
 }
@@ -345,7 +370,7 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
     metalness: 0.28,
   });
   if (slotTint) tintBody(bodyMat, slotTint);
-  const bodyGeo = buildBodyGeometry();
+  const bodyGeo = buildBodyGeometry(true);
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.name = 'player-car-body';
   chassis.add(body);
@@ -371,7 +396,9 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   }
 
   /* ---------------------------------------------------------------- glass */
-  const glassGeo = buildGlassGeometry();
+  // The chase camera looks through the rear screen for the whole game, so on the player's own
+  // car that pane is left far clearer than the rest: it is the window onto the cabin.
+  const glassGeo = buildGlassGeometry(REAR_GLASS_ALPHA);
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x0b1c26,
     roughness: 0.06,
@@ -383,8 +410,14 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   });
   const glass = new THREE.Mesh(glassGeo, glassMat);
   glass.name = 'player-car-glass';
+  glass.renderOrder = 4; // After the cabin, which is what you are looking at through it.
   chassis.add(glass);
   disposables.push(glassGeo, glassMat);
+
+  /* ------------------------------------------------------------- interior */
+  const interior = createCabinInterior();
+  chassis.add(interior.group);
+  disposables.push(interior);
 
   /* ----------------------------------------------------------- head lights */
   const headParts: THREE.BufferGeometry[] = [];
@@ -587,6 +620,9 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
       charge = level < 0 ? 0 : level > 1 ? 1 : level;
       refreshUnderglow();
     },
+    setMusic(spectrum) {
+      interior.setMusic(spectrum);
+    },
     setBodyAccel(latAccel, longAccel) {
       attitude.setAccel(latAccel, longAccel);
     },
@@ -613,6 +649,7 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
       // The shell runs fore-aft on its mounts; the wheels below it never move.
       chassis.position.z = attitude.surge;
       syncWheelInstances();
+      interior.update(frameDt);
       if (charge > 0.6) {
         const t = time * 26;
         flicker = 1 + (Math.sin(t) + Math.sin(t * 2.7)) * 0.08 * (charge - 0.6) * 2.5;

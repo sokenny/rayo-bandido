@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createCarVisual } from '../src/render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources } from '../src/render/scene/electricCarVisual';
-import { BODY, VEHICLE } from '../src/config/tuning';
+import { BODY, THEME, VEHICLE } from '../src/config/tuning';
 
 interface Budget {
   triangles: number;
@@ -44,8 +44,9 @@ describe('player car visual', () => {
 
       const budget = measure(car.root);
       expect(budget.triangles).toBeLessThan(8000);
-      // body, glass, heads, tails, reverse, exhaust glow, ground pool, rocker glow, wheels.
-      expect(budget.drawCalls).toBeLessThanOrEqual(9);
+      // body, glass, heads, tails, reverse, exhaust glow, ground pool, rocker glow, wheels,
+      // plus the cabin's trim, light strips and spectrum bars.
+      expect(budget.drawCalls).toBeLessThanOrEqual(12);
     } finally {
       car.dispose();
     }
@@ -77,6 +78,75 @@ describe('player car visual', () => {
       expect(position.y).toBeCloseTo(VEHICLE.wheelRadius, 6);
       expect(position.x).toBeLessThan(0);
       expect(matrix.elements[0]).not.toBeCloseTo(1, 3);
+    } finally {
+      car.dispose();
+    }
+  });
+});
+
+describe('player car cabin display', () => {
+  const BARS = THEME.spectrum.bars;
+
+  /** Height of every spectrum bar, in metres: an instance's y scale, since the bar geometry
+   *  is one unit tall and stands on its own base. */
+  function barHeights(car: ReturnType<typeof createCarVisual>): number[] {
+    const bars = car.root.getObjectByName('player-car-eq') as THREE.InstancedMesh;
+    const matrix = new THREE.Matrix4();
+    const scale = new THREE.Vector3();
+    const out: number[] = [];
+    for (let i = 0; i < bars.count; i++) {
+      bars.getMatrixAt(i, matrix);
+      matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+      out.push(scale.y);
+    }
+    return out;
+  }
+
+  const run = (car: ReturnType<typeof createCarVisual>, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) car.update(1 / 60, i / 60);
+  };
+
+  it('rests flat with no music and rises only under the bands that are playing', () => {
+    const car = createCarVisual();
+    try {
+      run(car, 0.5);
+      const silent = barHeights(car);
+      expect(silent).toHaveLength(BARS);
+      for (const h of silent) expect(h).toBeLessThan(0.01);
+
+      // Bass only: the left of the display lifts, the right stays on the floor.
+      const levels = new Float32Array(BARS);
+      levels[0] = 1;
+      levels[1] = 1;
+      car.setMusic(levels);
+      run(car, 0.5);
+      const lit = barHeights(car);
+      expect(lit[0]).toBeGreaterThan(0.08);
+      expect(lit[1]).toBeGreaterThan(0.08);
+      expect(lit[BARS - 1]).toBeLessThan(0.01);
+
+      // And it falls back when the track drops out.
+      car.setMusic(new Float32Array(BARS));
+      run(car, 1);
+      for (const h of barHeights(car)) expect(h).toBeLessThan(0.012);
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('is unbothered by a spectrum that is the wrong length or out of range', () => {
+    const car = createCarVisual();
+    try {
+      car.setMusic([2, -1, 0.5]);
+      run(car, 0.5);
+      const heights = barHeights(car);
+      for (const h of heights) {
+        expect(Number.isFinite(h)).toBe(true);
+        expect(h).toBeGreaterThan(0);
+        // Never taller than the 0.15 m display face it stands on.
+        expect(h).toBeLessThan(0.15);
+      }
+      expect(heights[BARS - 1]).toBeLessThan(0.01); // never fed, so never lifted
     } finally {
       car.dispose();
     }

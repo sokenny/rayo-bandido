@@ -557,6 +557,9 @@ export class MeshBuilder {
    * Box of length `len` along the unit direction (dx, dz), `thick` across it and from y0 to
    * y1, centred at (cx, cz). Four sides and a top: guardrails, barriers and walls that follow
    * a curved or diagonal road. `bottom` adds the underside, for a box that hangs in the air.
+   *
+   * `tile` repeats the UVs by world size (metres per tile) instead of mapping each face to
+   * 0..1, so a textured run — a hedge, a wall — keeps one texture scale whatever its length.
    */
   orientedBox(
     cx: number,
@@ -567,8 +570,13 @@ export class MeshBuilder {
     thick: number,
     y0: number,
     y1: number,
-    opts?: { bottom?: boolean },
+    opts?: { bottom?: boolean; tile?: number },
   ): void {
+    const tile = opts?.tile ?? 0;
+    // Face extents in texture tiles: along the run, across it, and up it.
+    const uL = tile > 0 ? len / tile : 1;
+    const uT = tile > 0 ? thick / tile : 1;
+    const vY = tile > 0 ? (y1 - y0) / tile : 1;
     // Right-hand normal of the direction.
     const nx = -dz;
     const nz = dx;
@@ -584,13 +592,13 @@ export class MeshBuilder {
     const ex = cx - dx * hl + nx * ht;
     const ez = cz - dz * hl + nz * ht;
     // Left face (outward = -normal), right face, front, back, top.
-    this.face(bx, y0, bz, ax, y0, az, ax, y1, az, bx, y1, bz);
-    this.face(ex, y0, ez, qx, y0, qz, qx, y1, qz, ex, y1, ez);
-    this.face(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz);
-    this.face(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az);
-    this.face(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz);
+    this.face(bx, y0, bz, ax, y0, az, ax, y1, az, bx, y1, bz, 0, 0, uL, vY);
+    this.face(ex, y0, ez, qx, y0, qz, qx, y1, qz, ex, y1, ez, 0, 0, uL, vY);
+    this.face(qx, y0, qz, bx, y0, bz, bx, y1, bz, qx, y1, qz, 0, 0, uT, vY);
+    this.face(ax, y0, az, ex, y0, ez, ex, y1, ez, ax, y1, az, 0, 0, uT, vY);
+    this.face(ax, y1, az, ex, y1, ez, qx, y1, qz, bx, y1, bz, 0, 0, uT, uL);
     // Underside, facing -Y: only worth its triangles where the box is seen from below.
-    if (opts?.bottom) this.face(ax, y0, az, bx, y0, bz, qx, y0, qz, ex, y0, ez);
+    if (opts?.bottom) this.face(ax, y0, az, bx, y0, bz, qx, y0, qz, ex, y0, ez, 0, 0, uT, uL);
   }
 
   /**

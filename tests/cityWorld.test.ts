@@ -9,8 +9,11 @@ import { buildCity } from '../src/render/scene/env/cityBuilder';
 import { buildLandmarks } from '../src/render/scene/env/landmarksBuilder';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
+import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
-import { SIDEWALK_Y } from '../src/world/cityPlan';
+import { BUS_STOP, SIDEWALK_Y } from '../src/world/cityPlan';
+import { BUSES } from '../src/config/tuning';
+import { busWallIndex, createBuses, routeLength, stepBuses } from '../src/sim/buses';
 import { KERB_HEIGHT, KERB_RAMP } from '../src/world/kerbs';
 import { CITY_QUAY_Z, VIADUCT_Y } from '../src/world/citySpec';
 import { createProjection, maxGrade, offsetAtStation, projectOntoPath } from '../src/world/track';
@@ -379,17 +382,219 @@ describe('city kerbs', () => {
   });
 });
 
+describe('city bus network', () => {
+  const stops = plan.busStops ?? [];
+  const routes = layout.busRoutes ?? [];
+
+  it('puts shelters on both kerbs of the boulevards', () => {
+    expect(stops.length).toBeGreaterThanOrEqual(8);
+    // Both directions are served, and both axes of the grid.
+    expect(new Set(stops.map((s) => `${s.nx},${s.nz}`)).size).toBeGreaterThanOrEqual(3);
+    for (const s of stops) {
+      // Axis-aligned, so the collider round it is the shape of the thing and not a guess.
+      expect(Math.abs(s.tx) + Math.abs(s.tz)).toBeCloseTo(1, 3);
+      expect(s.tx * s.nx + s.tz * s.nz).toBeCloseTo(0, 6);
+      expect(s.y).toBe(SIDEWALK_Y);
+    }
+  });
+
+  it('gives every shelter a collider of its own size', () => {
+    const boxes = layout.colliders.filter((c) => c.tag === 'bus-stop');
+    expect(boxes.length).toBe(stops.length);
+    for (const s of stops) {
+      const shelter = boxes.find((c) => s.x >= c.minX && s.x <= c.maxX && s.z >= c.minZ && s.z <= c.maxZ);
+      expect(shelter, `no collider round the shelter at ${s.x}, ${s.z}`).toBeDefined();
+      const along = Math.max(shelter!.maxX - shelter!.minX, shelter!.maxZ - shelter!.minZ);
+      const across = Math.min(shelter!.maxX - shelter!.minX, shelter!.maxZ - shelter!.minZ);
+      expect(along).toBeCloseTo(BUS_STOP.length, 6);
+      expect(across).toBeCloseTo(BUS_STOP.depth, 6);
+      expect(shelter!.maxY).toBe(BUS_STOP.height);
+    }
+  });
+
+  it('keeps the shelter on the pavement and clear of every road and building', () => {
+    const kerbs = plan.kerbs!;
+    for (const s of stops) {
+      for (const d of [-BUS_STOP.length / 2 + 0.2, 0, BUS_STOP.length / 2 - 0.2]) {
+        const x = s.x + s.tx * d;
+        const z = s.z + s.tz * d;
+        expect(plan.isRoad(x, z), `shelter on the road at ${x}, ${z}`).toBe(false);
+        expect(kerbs.heightAt(x, z, SAMPLE), `shelter off the pavement at ${x}, ${z}`).toBeGreaterThan(0);
+        for (const blk of plan.blocks) {
+          const inside = x > blk.minX && x < blk.maxX && z > blk.minZ && z < blk.maxZ;
+          expect(inside, `shelter inside block ${blk.tag}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('runs the routes in the kerb lane, on the asphalt and outboard of the traffic', () => {
+    expect(routes.length).toBeGreaterThan(0);
+    for (const route of routes) {
+      expect(route.points.length).toBe(4);
+      for (let i = 0; i < route.points.length; i++) {
+        const a = route.points[i];
+        const b = route.points[(i + 1) % route.points.length];
+        const len = Math.hypot(b.x - a.x, b.z - a.z);
+        for (let t = 6; t < len - 6; t += 3) {
+          const x = a.x + ((b.x - a.x) * t) / len;
+          const z = a.z + ((b.z - a.z) * t) / len;
+          // On a real street, with the whole width of the bus on the asphalt.
+          expect(plan.isRoad(x, z, -BUSES.width / 2), `bus lane off the road at ${x.toFixed(0)}, ${z.toFixed(0)}`).toBe(true);
+          // And clear of everything a bus could not drive through. Other buses excepted:
+          // their own wall segments live on this lane, which is the whole point of them.
+          const hit = blockedAt(layout, x, z, 0, BUSES.width / 2);
+          expect(hit === null || hit === 'bus', `bus lane blocked by ${hit} at ${x.toFixed(0)}, ${z.toFixed(0)}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('calls only at shelters that stand on the kerb it drives along', () => {
+    let called = 0;
+    for (const route of routes) {
+      called += route.stops.length;
+      // In order round the loop, and each one beside a shelter facing the bus.
+      for (let i = 1; i < route.stops.length; i++) expect(route.stops[i]).toBeGreaterThan(route.stops[i - 1]);
+      for (const station of route.stops) {
+        const at = pointOnRoute(route, station);
+        const near = stops.filter((s) => Math.hypot(s.x - at.x, s.z - at.z) < BUS_STOP.depth + BUSES.width + 2);
+        expect(near.length, `no shelter at station ${station.toFixed(0)}`).toBeGreaterThan(0);
+        // The shelter faces the bus: its normal points back at the lane.
+        const s = near[0];
+        expect((at.x - s.x) * s.nx + (at.z - s.z) * s.nz).toBeGreaterThan(0);
+      }
+    }
+    expect(called, 'no route calls anywhere').toBeGreaterThan(2);
+  });
+
+  it('drives the buses round their loops, calling at every stop on the way', () => {
+    const buses = createBuses(layout);
+    expect(buses.length).toBe(routes.length * BUSES.perRoute);
+    const travelled = buses.map(() => 0);
+    const calls = buses.map(() => 0);
+    let last = buses.map((b) => b.station);
+    let dwelling = buses.map(() => false);
+    // Five minutes: several laps of either loop, dwells included.
+    for (let i = 0; i < 60 * 300; i++) {
+      stepBuses(buses, layout, SIM_STEP);
+      for (let k = 0; k < buses.length; k++) {
+        const b = buses[k];
+        expect(Number.isFinite(b.x) && Number.isFinite(b.z)).toBe(true);
+        expect(b.speed).toBeGreaterThanOrEqual(0);
+        expect(b.speed).toBeLessThanOrEqual(BUSES.cruiseSpeed + 1e-6);
+        const length = routeLength(routes[b.route]);
+        let step = b.station - last[k];
+        if (step < -length / 2) step += length;
+        expect(step, 'a bus went backwards').toBeGreaterThanOrEqual(-1e-9);
+        travelled[k] += step;
+        last[k] = b.station;
+        if (b.dwell > 0 && !dwelling[k]) calls[k]++;
+        dwelling[k] = b.dwell > 0;
+      }
+    }
+    for (let k = 0; k < buses.length; k++) {
+      const length = routeLength(routes[buses[k].route]);
+      expect(travelled[k], `bus ${k} never got round its loop`).toBeGreaterThan(length);
+      // A lap calls at every stop on the route, so several laps call at several times that.
+      const onRoute = routes[buses[k].route].stops.length;
+      expect(calls[k], `bus ${k} skipped stops`).toBeGreaterThanOrEqual(onRoute);
+    }
+  });
+
+  it('bounces the car off a bus instead of letting it through', () => {
+    const state = createInitialGameState(layout);
+    const buses = state.buses;
+    // Settle the buses onto their routes, then aim the car at the flank of one.
+    for (let i = 0; i < 120; i++) stepBuses(buses, layout, SIM_STEP);
+    const bus = buses[0];
+    const rx = Math.cos(bus.heading);
+    const rz = Math.sin(bus.heading);
+    // Twelve metres off its left flank, driving straight at it.
+    Object.assign(state.vehicle, {
+      x: bus.x - rx * 12,
+      z: bus.z - rz * 12,
+      prevX: bus.x - rx * 12,
+      prevZ: bus.z - rz * 12,
+      heading: Math.atan2(rx, -rz),
+      speed: 18,
+      vx: rx * 18,
+      vz: rz * 18,
+    });
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    let hit = false;
+    for (let i = 0; i < 90; i++) {
+      stepGame(state, cmd, layout, SIM_STEP);
+      if (state.events.some((e) => e.type === 'collision')) hit = true;
+      // Never inside the bus: measured in the bus's own frame, against its own box.
+      const dx = state.vehicle.x - buses[0].x;
+      const dz = state.vehicle.z - buses[0].z;
+      const bfx = Math.sin(buses[0].heading);
+      const bfz = -Math.cos(buses[0].heading);
+      const along = Math.abs(dx * bfx + dz * bfz);
+      const across = Math.abs(dx * Math.cos(buses[0].heading) + dz * Math.sin(buses[0].heading));
+      expect(
+        along < BUSES.length / 2 - 0.5 && across < BUSES.width / 2 - 0.5,
+        `the car went through a bus at tick ${i}`,
+      ).toBe(false);
+    }
+    expect(hit, 'driving into a bus was not a collision').toBe(true);
+  });
+
+  it('makes each bus solid with four wall segments that follow it', () => {
+    const buses = createBuses(layout);
+    const busWalls = layout.walls.filter((w) => w.tag === 'bus');
+    expect(busWalls.length).toBe(buses.length * 4);
+    stepBuses(buses, layout, SIM_STEP);
+    for (const b of buses) {
+      const base = busWallIndex(layout, b.id);
+      let perimeter = 0;
+      for (let i = 0; i < 4; i++) {
+        const w = layout.walls[base + i];
+        expect(w.tag).toBe('bus');
+        perimeter += Math.hypot(w.bx - w.ax, w.bz - w.az);
+        // Each segment ends where the next begins: a closed box round the bus.
+        const next = layout.walls[base + ((i + 1) % 4)];
+        expect(Math.hypot(next.ax - w.bx, next.az - w.bz)).toBeCloseTo(0, 6);
+      }
+      expect(perimeter).toBeCloseTo(2 * (BUSES.length + BUSES.width), 4);
+      // And it is where the bus is.
+      const mid = layout.walls[base];
+      expect(Math.hypot((mid.ax + layout.walls[base + 2].ax) / 2 - b.x, (mid.az + layout.walls[base + 2].az) / 2 - b.z)).toBeLessThan(0.001);
+    }
+  });
+});
+
+/** Point `station` metres round a route loop. Mirrors what `src/sim/buses.ts` does. */
+function pointOnRoute(route: { points: Array<{ x: number; z: number }> }, station: number): { x: number; z: number } {
+  let left = station;
+  const p = route.points;
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i];
+    const b = p[(i + 1) % p.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    if (left <= len || i === p.length - 1) {
+      const t = Math.min(1, left / len);
+      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+    }
+    left -= len;
+  }
+  return p[0];
+}
+
 describe('city art budget', () => {
   it('builds the whole city inside the triangle and draw-call budget', () => {
     const b = createBuilders(plan);
     buildCity(b);
     buildProps(b);
+    buildTransit(b);
     buildTrack(b);
     buildLandmarks(b);
     const { triangles, drawCalls } = builderStats(b);
     // The headroom above 157k is the vertical corner fillet every building now carries
     // (`buildingKit`'s `cornerFillet`): four extra wall strips a volume, ~3.6k triangles.
-    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(170000);
+    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(172000);
     expect(triangles, 'the city is not empty').toBeGreaterThan(40000);
     expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
   });

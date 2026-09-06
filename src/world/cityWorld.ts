@@ -1,14 +1,18 @@
-import type { ArenaLayout, ObstacleBox, ObstacleWall, SpawnPoint } from '../core/types';
+import type { ArenaLayout, BusRoute, ObstacleBox, ObstacleWall, SpawnPoint } from '../core/types';
+import { BUSES } from '../config/tuning';
 import { PAL } from '../render/scene/env/palette';
 import { HAZE } from '../render/scene/env/haze';
 import type { World } from './arenaWorld';
 import {
+  BUS_STOP,
   inRect,
   SIDEWALK_Y,
   type BlockRect,
+  type BusStopDef,
   type CityPlan,
   type FenceDef,
   type GateDef,
+  type KerbField,
   type PillarDef,
   type Rect,
   type RibbonDef,
@@ -22,6 +26,7 @@ import {
   CITY_BOUNDS,
   CITY_QUAY_Z,
   DOWNTOWN,
+  BUS_ROUTE_LOOPS,
   CITY_ROADS,
   CITY_SPAWN,
   CITY_WALL_BAND,
@@ -66,6 +71,26 @@ const PILLAR_HALF = 1.3;
 const LANE = 3.5;
 /** Quay wall segment length (m). */
 const QUAY_STEP = 8;
+
+/**
+ * Bus routes: the wide, straight, axis-aligned boulevards, which are the only streets with
+ * both a deep enough pavement for a shelter and enough asphalt to park a 13.6 m bus at the
+ * kerb without standing in the traffic's lane (which runs `LANE` m off the centreline).
+ */
+const BUS_ROUTES = ['av-main', 'blvd-north', 'av-east', 'blvd-center', 'blvd-water'];
+/** Least distance between stops on one route (m), and where the first one may stand. */
+const BUS_STOP_SPACING = 130;
+const BUS_STOP_FIRST = 60;
+/** How finely the route is searched for somewhere a stop fits (m). */
+const BUS_STOP_PROBE = 6;
+/** A stop needs this much road either side of the centreline (m): see `BUS_ROUTES`. */
+const BUS_STOP_MIN_HALF_WIDTH = 8;
+/** And this much pavement behind the kerb (m), or the shelter would stand in a facade. */
+const BUS_STOP_MIN_PAVEMENT = 2.6;
+/** Gap between the kerb and the shelter's near face (m). */
+const BUS_STOP_KERB_GAP = 0.35;
+/** Nothing parked within this of the player's spawn (m). */
+const BUS_STOP_SPAWN_CLEAR = 34;
 
 const CITY_BLOCK_OPTIONS: BlockOptions = {
   cell: 110,
@@ -244,6 +269,25 @@ export function createCityWorld(): World {
 
   const skybridges = findSkybridges(ground, elevated, blocks, zoneAt);
 
+  /* ---------------------------------------------------------- bus stops */
+
+  // The routes are laid out first: a shelter is put on the kerb a bus drives along wherever
+  // both kerbs would do, so the network is a network and not two unrelated things.
+  const lanes = busLanes(ground);
+  const busStops = placeBusStops(
+    ground,
+    elevated,
+    kerbs,
+    shoulders,
+    (x, z, pad) => {
+      for (const b of solids) if (inRect(b, x, z, pad)) return true;
+      return false;
+    },
+    lanes,
+  );
+  const busRoutes: BusRoute[] = lanes.map((points) => ({ points, stops: callingPoints(points, busStops) }));
+
+
   /* ---------------------------------------------------------- traffic, cruise */
 
   const targetSpawns: SpawnPoint[] = [];
@@ -291,9 +335,24 @@ export function createCityWorld(): World {
       colliders.push({ minX: cx - PILLAR_HALF, maxX: cx + PILLAR_HALF, minZ: cz - PILLAR_HALF, maxZ: cz + PILLAR_HALF, maxY: p.y - 1.2, tag: 'pillar' });
     }
   }
+  // Shelters: axis-aligned, so one exact box each. `BUS_STOP` is the only place their size is
+  // written down, and `transitBuilder.ts` draws them from the same numbers.
+  for (const st of busStops) {
+    const alongX = Math.abs(st.tx) > 0.5;
+    const hx = alongX ? BUS_STOP.length / 2 : BUS_STOP.depth / 2;
+    const hz = alongX ? BUS_STOP.depth / 2 : BUS_STOP.length / 2;
+    colliders.push({ minX: st.x - hx, maxX: st.x + hx, minZ: st.z - hz, maxZ: st.z + hz, maxY: BUS_STOP.height, tag: 'bus-stop' });
+  }
   const walls: ObstacleWall[] = rails.map((r) => ({ ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, ...railBounds(r), tag: r.kind }));
   walls.push(...quay);
   for (const f of fences) walls.push({ ax: f.ax, az: f.az, bx: f.bx, bz: f.bz, maxY: f.y - 1.4, tag: 'fence' });
+  // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
+  // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
+  // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
+  const PARKED = CITY_BOUNDS.minZ - 1000;
+  for (let i = 0; i < busRoutes.length * BUSES.perRoute * 4; i++) {
+    walls.push({ ax: 0, az: PARKED, bx: 0, bz: PARKED, maxY: BUSES.height, tag: 'bus' });
+  }
 
   const layout: ArenaLayout = {
     bounds,
@@ -305,6 +364,7 @@ export function createCityWorld(): World {
     walls,
     surface: createSurfaceField(elevated.map((rb) => rb.path), 1.5, kerbs),
     race: null,
+    busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },
       rects: [],
@@ -347,6 +407,11 @@ export function createCityWorld(): World {
       { variant: 1, x: 150, y: 26, z: bounds.minZ + 0.6, w: 26, h: 15, rotY: 0, color: PAL.neonMagenta },
       { variant: 0, x: bounds.minX + 0.6, y: 28, z: -20, w: 30, h: 17, rotY: Math.PI / 2, color: PAL.neonCyan },
       { variant: 1, x: bounds.maxX - 0.6, y: 26, z: 100, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonMagenta },
+      // The BADKALA WANTED campaign: portrait boards, so they read as an ad column between
+      // the landscape holograms rather than as a fourth data wall.
+      { variant: 2, x: 40, y: 30, z: bounds.minZ + 0.6, w: 14, h: 28, rotY: 0, color: PAL.neonMagenta },
+      { variant: 2, x: bounds.minX + 0.6, y: 30, z: 150, w: 14, h: 28, rotY: Math.PI / 2, color: PAL.neonMagenta },
+      { variant: 2, x: bounds.maxX - 0.6, y: 28, z: -110, w: 13, h: 26, rotY: -Math.PI / 2, color: PAL.neonMagenta },
     ],
     cableRuns: cableRuns(ground, CITY_BLOCK_OPTIONS),
     pylons: [],
@@ -356,6 +421,7 @@ export function createCityWorld(): World {
     powerLines,
     ringBillboards: RING_BILLBOARDS.map((r) => ({ ...r })),
     skybridges,
+    busStops,
     neonDistricts: NEON_DISTRICTS.map((r) => ({ ...r })),
     shoulders,
     kerbs,
@@ -417,6 +483,193 @@ function loopWaypoints(r: Rect, d: number): Array<{ x: number; z: number }> {
     { x: r.maxX - d, z: r.maxZ - d },
     { x: r.minX + d, z: r.maxZ - d },
   ];
+}
+
+/**
+ * Bus stops along the boulevards: a shelter on the pavement, and at every other one a bus
+ * parked at the kerb in front of it.
+ *
+ * A stop is placed only where the whole thing is honest. The street must be one of the wide
+ * axis-aligned boulevards (so the colliders are exact boxes and the bus clears the traffic
+ * lane), the pavement behind the kerb must be deep enough to hold the shelter clear of the
+ * facades, and over the bus's whole length there must be no crossing road, no missing kerb
+ * (a junction mouth) and nothing solid — checked at three stations, not just the middle,
+ * because a 13.6 m bus is longer than most of what could go wrong under it.
+ */
+function placeBusStops(
+  ground: RibbonDef[],
+  elevated: RibbonDef[],
+  kerbs: KerbField,
+  shoulders: NonNullable<CityPlan['shoulders']>,
+  isSolid: (x: number, z: number, pad: number) => boolean,
+  lanes: Array<Array<{ x: number; z: number }>>,
+): BusStopDef[] {
+  const stops: BusStopDef[] = [];
+  const grade = { gx: 0, gz: 0 };
+  /** Half the bus's length: the reach of every clearance test below. */
+  const reach = BUSES.length / 2;
+  let route = 0;
+  for (const tag of BUS_ROUTES) {
+    const rb = ground.find((g) => g.tag === tag);
+    if (!rb) continue;
+    const path = rb.path;
+    let side = 1;
+    let last = -Infinity;
+    // Searched finely and taken greedily rather than stepped at a fixed stride: a fixed
+    // stride lands a third of its stops in a junction and simply loses them.
+    for (let s = BUS_STOP_FIRST; s < path.length - BUS_STOP_FIRST; s += BUS_STOP_PROBE) {
+      if (s - last < BUS_STOP_SPACING) continue;
+      const c = offsetAtStation(path, s, 0);
+      if (c.halfWidth < BUS_STOP_MIN_HALF_WIDTH) continue;
+      // Axis-aligned only: a fattened box round a shelter on the diagonal would be a wall
+      // across the pavement that nothing on screen accounts for.
+      if (Math.abs(c.tx) < 0.999 && Math.abs(c.tz) < 0.999) continue;
+      const pave = shoulders[c.zone];
+      if (pave < BUS_STOP_MIN_PAVEMENT || pave < BUS_STOP_KERB_GAP + BUS_STOP.depth) continue;
+      // The shelter stands just past the kerb, facing the lane a bus would pull into.
+      const shelterOut = c.halfWidth + BUS_STOP_KERB_GAP + BUS_STOP.depth / 2;
+      // Alternate sides down the route, so a street reads as served in both directions —
+      // but take the other kerb rather than lose the stop, which is what a junction on one
+      // side of a street would otherwise do to the whole of that stretch of the route.
+      // Prefer whichever kerb a bus route actually drives along: a shelter no bus can pull
+      // in at is scenery, and the routes are laid out before the stops for exactly this.
+      const served = (trySide: number): boolean => {
+        const a = offsetAtStation(path, s, trySide * shelterOut);
+        for (const lane of lanes) if (stationOnLane(lane, a.x, a.z, c.tz * trySide, -c.tx * trySide) >= 0) return true;
+        return false;
+      };
+      const order = served(side) && !served(-side) ? [side, -side] : [-side, side];
+      let placed = 0;
+      for (const trySide of order) {
+        let ok = true;
+        for (const d of [-reach, 0, reach]) {
+          const a = offsetAtStation(path, s + d, trySide * shelterOut);
+          if (Math.hypot(a.x - CITY_SPAWN.x, a.z - CITY_SPAWN.z) < BUS_STOP_SPAWN_CLEAR) ok = false;
+          // A crossing road reaches out over the pavement: no shelter in a junction.
+          for (const other of ground) if (isOnPath(other.path, a.x, a.z, 1)) ok = false;
+          if (isSolid(a.x, a.z, 0.4)) ok = false;
+          // No pavement here means a junction mouth, whatever the roads say.
+          if (kerbs.heightAt(a.x, a.z, grade) <= 0) ok = false;
+          // A deck overhead swallows the shelter's roof, and its pillars stand under it.
+          for (const e of elevated) if (isOnPath(e.path, a.x, a.z, 10)) ok = false;
+          if (!ok) break;
+        }
+        if (!ok) continue;
+        const p = offsetAtStation(path, s, trySide * shelterOut);
+        stops.push({
+          x: p.x,
+          z: p.z,
+          y: SIDEWALK_Y,
+          tx: c.tx,
+          tz: c.tz,
+          // The normal points back at the road the bus pulls in from.
+          nx: c.tz * trySide,
+          nz: -c.tx * trySide,
+          zone: c.zone,
+          route: route % 3,
+        });
+        placed = trySide;
+        break;
+      }
+      if (placed === 0) continue;
+      side = placed;
+      last = s;
+    }
+    route++;
+  }
+  return stops;
+}
+
+/**
+ * The bus routes: each rectangle in `BUS_ROUTE_LOOPS` turned into a closed loop of waypoints
+ * in the kerb lane, plus the stations along it where a shelter stands on that kerb.
+ *
+ * The lane is worked out per leg from the street's own width rather than set once for the
+ * rectangle, because the boulevards are not all the same width: the bus hugs the kerb of
+ * whichever street it is on, which is both what a bus does and what keeps it outboard of the
+ * electric cars' lane (they run `LANE` m off the centreline and steer round nothing).
+ */
+function busLanes(ground: RibbonDef[]): Array<Array<{ x: number; z: number }>> {
+  const proj = createProjection();
+  /** How far off the centreline the kerb lane is on the street under (x, z). */
+  const laneAt = (x: number, z: number): number => {
+    let best = Infinity;
+    let halfWidth = 8;
+    for (const rb of ground) {
+      if (rb.kind === 'alley') continue;
+      projectOntoPath(rb.path, x, z, proj);
+      if (proj.dist < best) {
+        best = proj.dist;
+        halfWidth = proj.halfWidth;
+      }
+    }
+    return Math.max(LANE + 1.6, halfWidth - BUSES.width / 2 - 0.7);
+  };
+
+  const lanes: Array<Array<{ x: number; z: number }>> = [];
+  for (const rect of BUS_ROUTE_LOOPS) {
+    // Clockwise: north leg first, and the inset toward the middle of the rectangle is the
+    // right-hand side of travel on every leg (see `loopWaypoints`).
+    const dN = laneAt((rect.minX + rect.maxX) / 2, rect.minZ);
+    const dE = laneAt(rect.maxX, (rect.minZ + rect.maxZ) / 2);
+    const dS = laneAt((rect.minX + rect.maxX) / 2, rect.maxZ);
+    const dW = laneAt(rect.minX, (rect.minZ + rect.maxZ) / 2);
+    lanes.push([
+      { x: rect.minX + dW, z: rect.minZ + dN },
+      { x: rect.maxX - dE, z: rect.minZ + dN },
+      { x: rect.maxX - dE, z: rect.maxZ - dS },
+      { x: rect.minX + dW, z: rect.maxZ - dS },
+    ]);
+  }
+  return lanes;
+}
+
+/**
+ * How far round `lane` a shelter at (x, z) facing (nx, nz) is called at, or -1 if the bus
+ * passes it: a shelter on the far kerb belongs to the service coming the other way.
+ */
+function stationOnLane(lane: Array<{ x: number; z: number }>, x: number, z: number, nx: number, nz: number): number {
+  let base = 0;
+  for (let i = 0; i < lane.length; i++) {
+    const a = lane[i];
+    const b = lane[(i + 1) % lane.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    if (len < 1) continue;
+    const tx = (b.x - a.x) / len;
+    const tz = (b.z - a.z) / len;
+    // Heading atan2(tx, -tz) has right = (cos h, sin h) = (-tz, tx).
+    const rx = -tz;
+    const rz = tx;
+    const along = (x - a.x) * tx + (z - a.z) * tz;
+    const across = (x - a.x) * rx + (z - a.z) * rz;
+    if (
+      along >= BUS_STOP.length &&
+      along <= len - BUS_STOP.length &&
+      across >= 1 &&
+      across <= BUS_STOP.depth + BUSES.width + 2 &&
+      // Facing back at the lane, and along the street the lane is on.
+      nx * rx + nz * rz < -0.9
+    ) {
+      return base + along;
+    }
+    base += len;
+  }
+  return -1;
+}
+
+/**
+ * Stations round a loop where a shelter stands on the bus's right, in the order it meets
+ * them. A shelter on the far kerb is passed, not called at: its bus is the one coming the
+ * other way, on the other route or the other side of the same street.
+ */
+function callingPoints(lane: Array<{ x: number; z: number }>, stops: readonly BusStopDef[]): number[] {
+  const found: number[] = [];
+  for (const st of stops) {
+    const at = stationOnLane(lane, st.x, st.z, st.nx, st.nz);
+    if (at >= 0) found.push(at);
+  }
+  found.sort((p, q) => p - q);
+  return found;
 }
 
 /** Neon route gates over the boulevards, at fixed stations. */

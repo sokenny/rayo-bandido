@@ -1,7 +1,7 @@
 import type { FenceDef, PillarDef, RibbonDef } from '../../../world/cityPlan';
 import { isOnPath, segmentCount } from '../../../world/track';
 import { PAL, zoneAccent } from './palette';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { FOLIAGE_TILE, groundGlow, halo, type EnvBuilders } from './builders';
 import { signCell } from './textures';
 
 /**
@@ -282,8 +282,10 @@ function buildFence(b: EnvBuilders, f: FenceDef, rng: () => number): void {
     // A hedge along the fence, on the street side.
     const inward = fenceInward(b, f);
     const hl = Math.min(len - 4, 3 + rng() * 4);
-    b.props.color(PAL.foliage, 0.9 + rng() * 0.3);
-    b.props.orientedBox(cx - nx * 0.8 * inward, cz - nz * 0.8 * inward, dx, dz, hl, 1.0, 0.05, 1.1 + rng() * 0.4);
+    b.foliage.color(PAL.foliage, 0.9 + rng() * 0.3);
+    b.foliage.orientedBox(cx - nx * 0.8 * inward, cz - nz * 0.8 * inward, dx, dz, hl, 1.0, 0.05, 1.1 + rng() * 0.4, {
+      tile: FOLIAGE_TILE,
+    });
   } else if (r < 0.74) {
     // Junk against the fence.
     const inward = fenceInward(b, f);

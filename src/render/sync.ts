@@ -1,7 +1,8 @@
-import type { TargetState, VehicleState } from '../core/types';
+import type { BusState, TargetState, VehicleState } from '../core/types';
 import { lerp, lerpAngle } from '../core/math';
 import type { CarVisual } from './scene/carVisual';
 import type { ElectricCarVisual } from './scene/electricCarVisual';
+import type { BusVisual } from './scene/busVisual';
 
 /**
  * Simulation -> Three.js synchronization. This is the only module that maps the sim's
@@ -58,5 +59,19 @@ export function syncTargets(
     vis.root.rotation.y = -lerpAngle(t.prevHeading, t.heading, alpha);
     vis.setStatus(t.status, t.hitTime >= 0 ? time - t.hitTime : 0);
     vis.setAcquired(t.id === acquiredId && t.status === 'active');
+  }
+}
+
+/**
+ * The buses. They keep the road's height (the routes are all at street level), so unlike a
+ * target there is nothing to settle: position, yaw and how far the doors are open.
+ */
+export function syncBuses(visuals: BusVisual[], buses: BusState[], alpha: number): void {
+  for (let i = 0; i < buses.length && i < visuals.length; i++) {
+    const b = buses[i];
+    const vis = visuals[i];
+    vis.root.position.set(lerp(b.prevX, b.x, alpha), 0, lerp(b.prevZ, b.z, alpha));
+    vis.root.rotation.y = -lerpAngle(b.prevHeading, b.heading, alpha);
+    vis.setDoors(b.doors);
   }
 }

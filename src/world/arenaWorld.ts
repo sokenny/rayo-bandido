@@ -51,6 +51,8 @@ export function createArenaWorld(): World {
       { variant: 0, x: 26, y: 24, z: -100.6, w: 26, h: 15, rotY: 0, color: PAL.neonCyan },
       { variant: 1, x: 100.6, y: 25, z: -34, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonMagenta },
       { variant: 1, x: -26, y: 21, z: 100.6, w: 24, h: 14, rotY: Math.PI, color: PAL.neonMagenta },
+      // The BADKALA WANTED ad, portrait, on the north wall beside the hologram.
+      { variant: 2, x: -30, y: 24, z: -100.6, w: 11, h: 22, rotY: 0, color: PAL.neonMagenta },
     ],
     cableRuns: arenaCableRuns(),
     pylons: [

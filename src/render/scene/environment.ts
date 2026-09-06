@@ -6,13 +6,16 @@ import { createBuilders } from './env/builders';
 import { buildCity } from './env/cityBuilder';
 import { buildLandmarks } from './env/landmarksBuilder';
 import { buildProps } from './env/propsBuilder';
+import { buildTransit } from './env/transitBuilder';
 import { buildTrack } from './env/trackBuilder';
 import { createWantedBillboard } from './env/wantedBillboard';
-import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeSkyTexture } from './env/textures';
+import { createBadkalaPoster } from './env/badkalaPoster';
+import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeSkyTexture, makeTransitAtlas } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
 import { applyHaze, HAZE } from './env/haze';
 import type { MeshBuilder } from './env/meshBuilder';
 import { createWindowActivity } from './env/windowActivity';
+import { attachTexture } from '../textures/load';
 import { createLampFaults } from './env/lampFaults';
 
 /**
@@ -28,7 +31,10 @@ import { createLampFaults } from './env/lampFaults';
  *   them: one atlas of window patterns, tint and pattern chosen per wall (`env/facadeAtlas.ts`).
  * - All lighting is baked into emissive textures and unlit neon. One hemisphere light and one
  *   directional light do the rest; there are no point lights and no shadow maps.
- * - Textures are drawn procedurally into small canvases at start-up. Nothing is loaded.
+ * - Textures are drawn procedurally into small canvases at start-up. The few that are art
+ *   files instead (the street surface, the two posters) are declared in
+ *   `render/textures/manifest.ts`, load in the background and fall back to the procedural
+ *   version, so nothing in the frame waits on the network.
  * - `update()` only nudges a handful of material colours and two texture offsets. No allocation.
  *
  * THE THREE ZONES (docs/VISUAL_DIRECTION.md)
@@ -93,21 +99,30 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // material draw every building in the city.
   const facadeTex = makeFacadeAtlas();
   const signTex = makeSignAtlas();
+  // Every printed and back-lit surface the bus network carries, on one atlas.
+  const transitTex = makeTransitAtlas();
   const glowTex = makeGlowTexture();
   const billTexA = makeBillboardTexture(0);
   const billTexB = makeBillboardTexture(1);
-  const textures = [skyTex, envTex, asphaltTex, facadeTex, signTex, glowTex, billTexA, billTexB];
+  // The one texture in the city that loads an image. It disposes itself, so it stays out of
+  // the `textures` list below.
+  const badkala = createBadkalaPoster();
+  const textures = [skyTex, envTex, asphaltTex, facadeTex, signTex, transitTex, glowTex, billTexA, billTexB];
 
   /* ---------------------------------------------------------------- materials */
 
   const roadMat = new THREE.MeshStandardMaterial({
-    map: asphaltTex,
     vertexColors: true,
     // Wetter than before: a low roughness smears the sky and the neon into long reflections,
     // which is what carries the mood in the reference instead of individual light sources.
     roughness: 0.24,
     metalness: 0.5,
   });
+  // The street surface is the one ground texture that is art rather than canvas work: a
+  // photographic asphalt tile out of `public/textures/road/`, graded into the night palette by
+  // the manifest. The procedural asphalt above stays as the fallback and is what is drawn
+  // while the file is in flight, so the road is never untextured and never blocks start-up.
+  const roadArt = attachTexture(roadMat, 'road/asphalt', asphaltTex);
   const laneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04 });
   // Rooms behind the panes: each window drifts, and now and then one goes dark or comes back.
@@ -115,6 +130,16 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const facadeMat = createFacadeMaterial(facadeTex, windows, 0.85 * PAL.windowGain);
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
+  // Greenery: leaves and bark, each its own material so the art on one never lands on a
+  // shipping container. Both are dry and matte — nothing in a hedge reflects the neon — and
+  // both start untextured, which is exactly how the palms looked before the art existed, so a
+  // missing file costs nothing but the detail. The vertex colours stay: they carry the palette
+  // tint and the per-frond shading the geometry was built around, and the map multiplies into
+  // them rather than replacing them.
+  const foliageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
+  const barkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+  const foliageArt = attachTexture(foliageMat, 'nature/foliage', null);
+  const barkArt = attachTexture(barkMat, 'nature/bark', null);
   const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   const neonPulseMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   const neonFlickerMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -137,11 +162,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   lampFaults.apply(neonMat);
   lampFaults.apply(glowMat);
   const signMat = new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false });
+  const transitMat = new THREE.MeshBasicMaterial({ map: transitTex, toneMapped: false });
   const billMatA = new THREE.MeshBasicMaterial({ map: billTexA, toneMapped: false });
   const billMatB = new THREE.MeshBasicMaterial({ map: billTexB, toneMapped: false });
+  const badkalaMat = new THREE.MeshBasicMaterial({ map: badkala.texture, toneMapped: false });
   signMat.color.setScalar(PAL.screenGain);
+  transitMat.color.setScalar(PAL.screenGain);
   billMatA.color.setScalar(PAL.screenGain);
   billMatB.color.setScalar(PAL.screenGain);
+  badkalaMat.color.setScalar(PAL.screenGain);
   neonMat.color.setScalar(PAL.neonGain);
   glowMat.color.setScalar(PAL.glowGain);
 
@@ -149,7 +178,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // after every other patch above — the window activity and the lamp faults each install
   // their own `onBeforeCompile`, and `applyHaze` composes with whatever it finds.
   applyHaze(facadeMat, { lightKeep: HAZE.facadeLightKeep });
-  for (const m of [neonMat, neonPulseMat, neonFlickerMat, signMat, billMatA, billMatB]) {
+  for (const m of [neonMat, neonPulseMat, neonFlickerMat, signMat, transitMat, billMatA, billMatB, badkalaMat]) {
     applyHaze(m, { strength: HAZE.neonStrength, lightKeep: HAZE.neonLightKeep });
   }
   applyHaze(glowMat, { strength: HAZE.glowStrength, additive: true });
@@ -160,13 +189,17 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     facadeMat,
     roofMat,
     propsMat,
+    foliageMat,
+    barkMat,
     neonMat,
     neonPulseMat,
     neonFlickerMat,
     glowMat,
     signMat,
+    transitMat,
     billMatA,
     billMatB,
+    badkalaMat,
   ];
 
   /* ---------------------------------------------------------------- geometry */
@@ -174,6 +207,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const b = createBuilders(plan);
   buildCity(b);
   buildProps(b);
+  buildTransit(b);
   buildTrack(b);
   buildLandmarks(b);
 
@@ -196,9 +230,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   add(b.facade, facadeMat, 'env-facade');
   add(b.roof, roofMat, 'env-roofs');
   add(b.props, propsMat, 'env-props');
+  add(b.bark, barkMat, 'env-bark');
+  add(b.foliage, foliageMat, 'env-foliage');
   add(b.signs, signMat, 'env-signs', 1);
+  add(b.transit, transitMat, 'env-transit', 1);
   add(b.billA, billMatA, 'env-billboard-a', 1);
   add(b.billB, billMatB, 'env-billboard-b', 1);
+  add(b.badkala, badkalaMat, 'env-badkala', 1);
   add(b.neon, neonMat, 'env-neon', 1);
   add(b.neonPulse, neonPulseMat, 'env-neon-pulse', 1);
   add(b.neonFlicker, neonFlickerMat, 'env-neon-flicker', 1);
@@ -236,10 +274,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
   let flickerSlot = -1;
   let flickerValue = 1;
+  // The BADKALA panels keep their own, lazier stutter, so the ad never blinks in time with
+  // the broken street tubes.
+  let adSlot = -1;
+  let adValue = 1;
 
   return {
     root,
-    ready: wantedBoard.ready,
+    ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
       // The rooms behind the windows and the failing street lamps keep their own clocks.
       windows.update(time);
@@ -263,11 +305,24 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       // Holographic billboards scroll in opposite directions.
       billTexA.offset.y = (billTexA.offset.y + frameDt * 0.035) % 1;
       billTexB.offset.y = (billTexB.offset.y - frameDt * 0.026 + 1) % 1;
+      // The BADKALA ad: a slow breath with the occasional dropped frame.
+      const ad = Math.floor(time * 3.1);
+      if (ad !== adSlot) {
+        adSlot = ad;
+        const h = Math.abs(Math.sin(ad * 78.233) * 43758.5453) % 1;
+        adValue = h < 0.05 ? 0.5 : h < 0.11 ? 0.82 : 1;
+      }
+      badkalaMat.color.setScalar(PAL.screenGain * adValue * (0.93 + 0.07 * Math.sin(time * 1.3)));
+
       // The plaza WANTED board strobes subtly.
       wantedBoard.update(time);
     },
     dispose() {
       wantedBoard.dispose();
+      badkala.dispose();
+      roadArt.dispose();
+      foliageArt.dispose();
+      barkArt.dispose();
       scene.remove(root);
       if (scene.background === skyTex) scene.background = null;
       if (scene.environment === envTex) scene.environment = null;

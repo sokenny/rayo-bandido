@@ -228,6 +228,8 @@ export function createRaceWorld(seed: number = (Math.random() * 0xffffffff) >>> 
       { variant: 1, x: 80, y: 25, z: inner.minZ + 0.6, w: 26, h: 15, rotY: 0, color: PAL.neonMagenta },
       { variant: 0, x: inner.maxX - 0.6, y: 25, z: 110, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonCyan },
       { variant: 1, x: -60, y: 21, z: inner.maxZ - 0.6, w: 24, h: 14, rotY: Math.PI, color: PAL.neonMagenta },
+      // The BADKALA WANTED ad, portrait, facing the cars down the back section.
+      { variant: 2, x: 20, y: 24, z: inner.minZ + 0.6, w: 11, h: 22, rotY: 0, color: PAL.neonMagenta },
     ],
     cableRuns: cableRuns(ribbons),
     pylons: [],

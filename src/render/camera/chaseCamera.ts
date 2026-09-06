@@ -73,6 +73,13 @@ export interface ChaseCamera {
   update(pose: CameraPose, frameDt: number): void;
   /** Add camera shake (meters of amplitude). Decays automatically. */
   shake(amount: number): void;
+  /**
+   * Drag-look: orbit the chase camera by these deltas (rad). Held while `dragging` is true
+   * and for `CAMERA.dragHold` after it goes false, then eased back behind the car.
+   */
+  look(dYaw: number, dPitch: number): void;
+  /** Whether a drag is in progress. Freezes the recentring while true. */
+  setDragging(active: boolean): void;
   resize(aspect: number): void;
   /** Which view is live. */
   readonly view: CameraView;
@@ -94,6 +101,11 @@ export function createChaseCamera(aspect: number): ChaseCamera {
   let shakeAmp = 0;
   let shakeT = 0;
   let lag = 0;
+  /** Drag-look orbit offsets around the follow heading (rad) and their recentre timer. */
+  let lookYaw = 0;
+  let lookPitch = 0;
+  let lookHold = 0;
+  let dragging = false;
   let view: CameraView = 'chase';
   /** Set by a view change: the next `update()` places the camera outright instead of damping. */
   let cut = false;
@@ -119,20 +131,36 @@ export function createChaseCamera(aspect: number): ChaseCamera {
   }
 
   function place(pose: CameraPose, h: number, lagOffset: number): void {
-    const fx = forwardX(h);
-    const fz = forwardZ(h);
-    const rx = rightX(h);
-    const rz = rightZ(h);
+    // Drag-look orbits the rig: the boom swings to `h + lookYaw` and tilts by `lookPitch`,
+    // and the aim slides from the road ahead onto the car itself as the offset grows, so a
+    // look to the side shows you the car and what is beside it rather than empty scenery.
+    const oh = h + lookYaw;
+    const fx = forwardX(oh);
+    const fz = forwardZ(oh);
+    const rx = rightX(oh);
+    const rz = rightZ(oh);
     const ahead =
       pose.speed < 0
         ? CAMERA.reverseLookAhead
         : Math.min(CAMERA.lookAhead + pose.speed * CAMERA.lookAheadPerSpeed, CAMERA.lookAheadMax);
     const dist = CAMERA.distance + CAMERA.nitroPullback * clamp01(pose.nitro);
-    pos.set(pose.x - fx * dist + rx * lagOffset, pose.y + CAMERA.height, pose.z - fz * dist + rz * lagOffset);
+    const flat = dist * Math.cos(lookPitch);
+    pos.set(
+      pose.x - fx * flat + rx * lagOffset,
+      pose.y + CAMERA.height + dist * Math.sin(lookPitch),
+      pose.z - fz * flat + rz * lagOffset,
+    );
     // On a ramp the road ahead is higher (or lower) than the car: aim where it is going, so
     // the crest does not fill the frame on the way up and the drop is visible on the way down.
     const rise = Math.tan(pose.roadPitch) * ahead * CAMERA.pitchFollow;
-    look.set(pose.x + fx * ahead, pose.y + CAMERA.lookHeight + rise, pose.z + fz * ahead);
+    const offset = Math.hypot(lookYaw, lookPitch);
+    const onCar = clamp01(offset / CAMERA.dragLookBlend);
+    const aim = ahead * (1 - onCar);
+    look.set(
+      pose.x + fx * aim,
+      pose.y + CAMERA.lookHeight + rise * (1 - onCar),
+      pose.z + fz * aim,
+    );
   }
 
   /** Resolve a mount's car-local offsets into the world `pos` / `look` scratch vectors. */
@@ -181,6 +209,9 @@ export function createChaseCamera(aspect: number): ChaseCamera {
     snap(pose) {
       followHeading = pose.heading;
       lag = 0;
+      lookYaw = 0;
+      lookPitch = 0;
+      lookHold = 0;
       shakeAmp = 0;
       cut = false;
       const mount = view === 'chase' ? null : CAMERA.mounts[view];
@@ -214,6 +245,21 @@ export function createChaseCamera(aspect: number): ChaseCamera {
         }
         applyLens(CAMERA.mountNear, mount.fov + CAMERA.mountFovNitro * clamp01(pose.nitro), dt, immediate);
         return;
+      }
+
+      // Drag-look holds its angle while the pointer is down and for a moment after, then
+      // eases back behind the car so you are never left driving sideways-on.
+      if (dragging) {
+        lookHold = CAMERA.dragHold;
+      } else if (lookHold > 0) {
+        lookHold = Math.max(0, lookHold - dt);
+      } else if (lookYaw !== 0 || lookPitch !== 0) {
+        lookYaw = damp(lookYaw, 0, CAMERA.dragRecenterDamping, dt);
+        lookPitch = damp(lookPitch, 0, CAMERA.dragRecenterDamping, dt);
+        if (Math.abs(lookYaw) < 1e-4 && Math.abs(lookPitch) < 1e-4) {
+          lookYaw = 0;
+          lookPitch = 0;
+        }
       }
 
       // Smooth follow, plus a hard rad/s cap so a violent flick can never whip the camera.
@@ -251,6 +297,16 @@ export function createChaseCamera(aspect: number): ChaseCamera {
     },
     shake(amount) {
       shakeAmp = Math.max(shakeAmp, amount);
+    },
+    look(dYaw, dPitch) {
+      if (view !== 'chase') return;
+      lookYaw = wrapAngle(lookYaw + dYaw);
+      lookPitch = clamp(lookPitch + dPitch, CAMERA.dragPitchMin, CAMERA.dragPitchMax);
+      lookHold = CAMERA.dragHold;
+    },
+    setDragging(active) {
+      dragging = active;
+      if (!active) lookHold = CAMERA.dragHold;
     },
     resize(a) {
       camera.aspect = a;

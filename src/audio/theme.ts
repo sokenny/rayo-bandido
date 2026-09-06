@@ -27,6 +27,12 @@ export interface ThemeAudio {
    * it, do not hold it expecting a snapshot.
    */
   readonly bands: MusicBands;
+  /**
+   * The bar display's levels: `THEME.spectrum.bars` values in 0..1, low frequencies first,
+   * one per logarithmically spaced window across the mix. Like `bands`, this is one array
+   * mutated in place every frame, so reading it costs nothing.
+   */
+  readonly spectrum: Float32Array;
   /** Playback state for QA/automation: 'unavailable' (no Web Audio), 'idle' (not started yet),
    *  or the live AudioContext state ('running' once the song is playing). */
   status(): 'unavailable' | 'idle' | AudioContextState;
@@ -63,6 +69,7 @@ function silentTheme(): ThemeAudio {
     arm() {},
     update() {},
     bands: SILENT_MUSIC,
+    spectrum: new Float32Array(THEME.spectrum.bars),
     status: () => 'unavailable',
     setMuted() {},
     isMuted: () => false,
@@ -119,6 +126,30 @@ export function createThemeAudio(): ThemeAudio {
   const mid = makeBand(THEME.bands.mid);
   const high = makeBand(THEME.bands.high);
   const bandList: Band[] = [bass, mid, high];
+
+  // The bar display's windows: `bars` logarithmically spaced slices of [loHz, hiHz], so each
+  // bar covers the same musical interval rather than the same number of Hz — an octave per
+  // bar or so, which is how the ear hears the split and how the display ends up even.
+  const spec = THEME.spectrum;
+  const barLo = new Int32Array(spec.bars);
+  const barHi = new Int32Array(spec.bars);
+  const barTilt = new Float32Array(spec.bars);
+  const ratio = spec.hiHz / spec.loHz;
+  for (let i = 0; i < spec.bars; i++) {
+    const edge = (k: number) => spec.loHz * Math.pow(ratio, k / spec.bars);
+    const lo = Math.max(1, Math.min(lastBin, Math.round(edge(i) / binHz)));
+    // Windows are half-open so two neighbouring bars never share a bin, but the lowest few
+    // slices are narrower than one bin, and a bar with no bins would sit dead: keep at least
+    // one, even where that means the bottom bars share the same fundamental.
+    const hi = Math.max(lo, Math.min(lastBin, Math.round(edge(i + 1) / binHz) - 1));
+    barLo[i] = lo;
+    barHi[i] = hi;
+    const t = spec.bars > 1 ? i / (spec.bars - 1) : 0;
+    barTilt[i] = spec.tiltLo + (spec.tiltHi - spec.tiltLo) * t;
+  }
+  const spectrum = new Float32Array(spec.bars);
+  /** Each bar's rolling average, the line its `punch` term is measured against. */
+  const barBaseline = new Float32Array(spec.bars);
 
   // Mutated in place every frame and handed out by reference, so the render loop allocates
   // nothing to read the music.
@@ -207,8 +238,24 @@ export function createThemeAudio(): ThemeAudio {
       bands.bass = bass.value;
       bands.mid = mid.value;
       bands.high = high.value;
+
+      // The bar display: the window's own level for the shape, plus its excess over its own
+      // rolling average for the movement, then attack/release smoothed like the bands.
+      for (let i = 0; i < spectrum.length; i++) {
+        const lo = barLo[i];
+        const hi = barHi[i];
+        let sum = 0;
+        for (let b = lo; b <= hi; b++) sum += bins[b];
+        const level = (sum / (hi - lo + 1) / 255) * barTilt[i];
+        barBaseline[i] += (level - barBaseline[i]) * spec.baselineRate;
+        const raw = level * spec.shape + (level - barBaseline[i]) * spec.punch;
+        const target = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+        const k = target > spectrum[i] ? spec.attack : spec.release;
+        spectrum[i] += (target - spectrum[i]) * k;
+      }
     },
     bands,
+    spectrum,
     status() {
       return started ? ctx.state : 'idle';
     },

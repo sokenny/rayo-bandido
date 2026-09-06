@@ -510,3 +510,310 @@ export function makeEnvTexture(): THREE.CanvasTexture {
   tex.mapping = THREE.EquirectangularReflectionMapping;
   return tex;
 }
+
+/* ------------------------------------------------------------------ transit atlas */
+
+/**
+ * Every printed and back-lit surface a bus stop or a bus carries, on one atlas: the route
+ * map and the name board behind the shelter's bench, the "BUS STOP" band on its fascia, the
+ * timetable and the poster in its side bay, and the destination roll, the flank ad strip and
+ * the route plate on the bus itself.
+ *
+ * Unlike the sign atlas this one is NOT a uniform grid — a 4:1 name board and a 1:1.5
+ * timetable drawn in square cells would both come out stretched — so the cells are named
+ * pixel rectangles and `transitCell` turns one into UVs. Everything on it is invented: made
+ * up street names, made up route numbers, made up products.
+ */
+const TRANSIT_W = 512;
+const TRANSIT_H = 704;
+const TRANSIT_CELLS = {
+  map: [0, 0, 512, 208],
+  board0: [0, 208, 352, 80],
+  board1: [0, 288, 352, 80],
+  board2: [0, 368, 352, 80],
+  times: [352, 208, 160, 240],
+  ad0: [0, 448, 160, 192],
+  ad1: [160, 448, 160, 192],
+  roll: [320, 448, 192, 64],
+  fleet: [320, 512, 192, 64],
+  plate: [320, 576, 192, 64],
+  band: [0, 640, 512, 64],
+} as const;
+
+export type TransitCell = keyof typeof TRANSIT_CELLS;
+
+/** UV rect of one named panel, inset by a texel so mipmaps cannot bleed its neighbours. */
+export function transitCell(name: TransitCell): { u0: number; v0: number; u1: number; v1: number } {
+  const [x, y, w, h] = TRANSIT_CELLS[name];
+  const px = 1 / TRANSIT_W;
+  const py = 1 / TRANSIT_H;
+  return {
+    u0: x * px + px,
+    u1: (x + w) * px - px,
+    // Canvas y grows downward, texture v grows upward.
+    v0: 1 - (y + h) * py + py,
+    v1: 1 - y * py - py,
+  };
+}
+
+/** The three routes the city runs: name board, number, and the poster that goes with it. */
+const TRANSIT_ROUTES = [
+  { name: 'UNION ST', number: '48' },
+  { name: 'KAIDO ST', number: '12' },
+  { name: 'BAY QUAY', number: '07' },
+];
+
+export function makeTransitAtlas(): THREE.CanvasTexture {
+  const { cv, ctx } = canvas(TRANSIT_W, TRANSIT_H);
+  ctx.fillStyle = '#04080a';
+  ctx.fillRect(0, 0, TRANSIT_W, TRANSIT_H);
+  const amber = hex(PAL.neonAmber);
+  const cold = hex(PAL.neonWhite);
+  const teal = hex(PAL.neonCyan);
+  const hot = hex(PAL.neonMagenta);
+
+  /** Draws into one named cell with the origin at its top-left corner and clipped to it. */
+  const cell = (name: TransitCell, draw: (w: number, h: number) => void): void => {
+    const [x, y, w, h] = TRANSIT_CELLS[name];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#05090c';
+    ctx.fillRect(0, 0, w, h);
+    draw(w, h);
+    ctx.restore();
+  };
+
+  const label = (s: string, color: string, size: number, x: number, y: number, align: CanvasTextAlign = 'center'): void => {
+    ctx.font = `700 ${size}px ${LATIN_FONT}`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    glow(ctx, color, size * 0.5);
+    ctx.fillStyle = color;
+    ctx.fillText(s, x, y);
+    clearGlow(ctx);
+  };
+
+  /** The diagonal hazard hatch that ties the whole family together. */
+  const hatch = (x: number, y: number, w: number, h: number, color: string): void => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    for (let t = -h; t < w + h; t += 18) {
+      ctx.beginPath();
+      ctx.moveTo(x + t, y + h);
+      ctx.lineTo(x + t + 9, y + h);
+      ctx.lineTo(x + t + 9 + h, y);
+      ctx.lineTo(x + t + h, y);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  };
+
+  /* ---- the route map: the network, drawn as a diagram, with this stop marked */
+
+  cell('map', (w, h) => {
+    ctx.fillStyle = '#03110f';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = teal;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.8;
+    ctx.strokeRect(6, 6, w - 12, h - 12);
+    ctx.globalAlpha = 1;
+    // Four routes of 45-degree dog-legs, the way a transit diagram is drawn.
+    const lines: Array<{ color: string; pts: Array<[number, number]> }> = [
+      { color: hot, pts: [[30, 150], [90, 150], [150, 90], [280, 90], [330, 140], [470, 140]] },
+      { color: hot, pts: [[60, 40], [140, 40], [200, 100], [200, 170], [250, 170], [420, 170]] },
+      { color: hex(PAL.neonBlue), pts: [[30, 96], [120, 96], [180, 36], [300, 36], [350, 86], [470, 86]] },
+      { color: hex(PAL.neonBlue), pts: [[100, 190], [100, 120], [160, 60], [240, 60], [240, 20]] },
+    ];
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const line of lines) {
+      ctx.strokeStyle = line.color;
+      ctx.lineWidth = 4;
+      glow(ctx, line.color, 10);
+      ctx.beginPath();
+      ctx.moveTo(line.pts[0][0], line.pts[0][1]);
+      for (const p of line.pts.slice(1)) ctx.lineTo(p[0], p[1]);
+      ctx.stroke();
+      clearGlow(ctx);
+      // Interchange dots at every bend.
+      ctx.fillStyle = cold;
+      for (const p of line.pts.slice(1, -1)) {
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], 3.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // You are here.
+    glow(ctx, amber, 18);
+    ctx.strokeStyle = amber;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(200, 100, 10, 0, Math.PI * 2);
+    ctx.stroke();
+    clearGlow(ctx);
+    label('YOU ARE HERE', amber, 13, 200, 124);
+  });
+
+  /* ---- the name boards: hatch, street, route number */
+
+  TRANSIT_ROUTES.forEach((r, i) => {
+    cell(`board${i}` as TransitCell, (w, h) => {
+      ctx.fillStyle = '#070d11';
+      ctx.fillRect(0, 0, w, h);
+      hatch(6, 10, 96, h - 20, amber);
+      label(r.name, cold, 44, 120, h / 2 - 4, 'left');
+      ctx.fillStyle = amber;
+      ctx.globalAlpha = 0.92;
+      ctx.fillRect(w - 78, 12, 66, h - 24);
+      ctx.globalAlpha = 1;
+      ctx.font = `700 40px ${LATIN_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#08110c';
+      ctx.fillText(r.number, w - 45, h / 2);
+      ctx.fillStyle = amber;
+      ctx.fillRect(112, h - 16, w - 200, 5);
+    });
+  });
+
+  /* ---- the timetable in the side bay */
+
+  cell('times', (w, h) => {
+    ctx.fillStyle = '#060e10';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = amber;
+    ctx.fillRect(0, 0, w, 26);
+    ctx.font = `700 17px ${LATIN_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#08110c';
+    ctx.fillText('BUS TIMES', w / 2, 14);
+    const rows = ['48  02', '12  06', '07  11', '48  17', '12  24', '07  31', '48  38', '12  45'];
+    ctx.font = `700 16px ${LATIN_FONT}`;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < rows.length; i++) {
+      const y = 46 + i * 24;
+      ctx.fillStyle = i % 2 === 0 ? teal : cold;
+      ctx.globalAlpha = 0.85;
+      ctx.fillText(rows[i], 14, y);
+      ctx.globalAlpha = 1;
+    }
+  });
+
+  /* ---- the two back-lit posters */
+
+  cell('ad0', (w, h) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#062a33');
+    g.addColorStop(1, '#031418');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = teal;
+    ctx.lineWidth = 4;
+    glow(ctx, teal, 16);
+    ctx.strokeRect(7, 7, w - 14, h - 14);
+    clearGlow(ctx);
+    label('BE SYNTHETIC', teal, 13, w / 2, 30);
+    label('SYNTPOWER', cold, 26, w / 2, 52);
+    // A figure with its arms thrown up: a silhouette, no face, no likeness.
+    ctx.strokeStyle = cold;
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    glow(ctx, teal, 20);
+    ctx.beginPath();
+    ctx.arc(w / 2, 92, 12, 0, Math.PI * 2);
+    ctx.moveTo(w / 2, 106);
+    ctx.lineTo(w / 2, 142);
+    ctx.moveTo(w / 2, 112);
+    ctx.lineTo(w / 2 - 34, 82);
+    ctx.moveTo(w / 2, 112);
+    ctx.lineTo(w / 2 + 34, 82);
+    ctx.moveTo(w / 2, 142);
+    ctx.lineTo(w / 2 - 20, 172);
+    ctx.moveTo(w / 2, 142);
+    ctx.lineTo(w / 2 + 20, 172);
+    ctx.stroke();
+    clearGlow(ctx);
+    label('BUY NOW', amber, 15, w / 2, h - 14);
+  });
+
+  cell('ad1', (w, h) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#2a1408');
+    g.addColorStop(1, '#150803');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = amber;
+    ctx.lineWidth = 4;
+    glow(ctx, amber, 16);
+    ctx.strokeRect(7, 7, w - 14, h - 14);
+    clearGlow(ctx);
+    label('HOSHI TEA', amber, 24, w / 2, 34);
+    ctx.font = `700 92px ${CJK_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    glow(ctx, hot, 26);
+    ctx.fillStyle = hot;
+    ctx.fillText('茶', w / 2, h / 2 + 6);
+    clearGlow(ctx);
+    label('COLD BREWED', cold, 13, w / 2, h - 22);
+  });
+
+  /* ---- what the bus itself carries */
+
+  cell('roll', (w, h) => {
+    ctx.fillStyle = '#050708';
+    ctx.fillRect(0, 0, w, h);
+    // A dot-matrix destination roll: the dots are the point.
+    ctx.fillStyle = amber;
+    ctx.globalAlpha = 0.12;
+    for (let y = 8; y < h - 6; y += 5) for (let x = 8; x < w - 6; x += 5) ctx.fillRect(x, y, 3, 3);
+    ctx.globalAlpha = 1;
+    label('48  UNION ST', amber, 30, w / 2, h / 2);
+  });
+
+  cell('fleet', (w, h) => {
+    // The strip of little ad screens along the roofline, as in the reference.
+    const colors = [hot, teal, amber, cold, hot];
+    const pad = 4;
+    const cw = (w - pad * (colors.length + 1)) / colors.length;
+    for (let i = 0; i < colors.length; i++) {
+      const x = pad + i * (cw + pad);
+      ctx.fillStyle = '#0a0f12';
+      ctx.fillRect(x, pad, cw, h - pad * 2);
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = colors[i];
+      ctx.fillRect(x + 3, pad + 3, cw - 6, h - pad * 2 - 6);
+      ctx.globalAlpha = 1;
+      glow(ctx, colors[i], 12);
+      ctx.fillStyle = '#02060a';
+      ctx.fillRect(x + 6, h / 2 - 4, cw - 12, 8);
+      clearGlow(ctx);
+    }
+  });
+
+  cell('plate', (w, h) => {
+    ctx.fillStyle = '#0a0603';
+    ctx.fillRect(0, 0, w, h);
+    hatch(w - 62, 8, 54, h - 16, amber);
+    label('M6117', amber, 38, 12, h / 2, 'left');
+  });
+
+  cell('band', (w, h) => {
+    hatch(0, 0, w, h, amber);
+    ctx.fillStyle = '#08100a';
+    ctx.fillRect(w * 0.28, 4, w * 0.44, h - 8);
+    label('- BUS STOP -', amber, 30, w / 2, h / 2 + 1);
+  });
+
+  return toTexture(cv);
+}

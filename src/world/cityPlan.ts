@@ -151,6 +151,59 @@ export interface SkybridgeDef {
   zone: ZoneId;
 }
 
+/**
+ * A bus stop: the shelter on the pavement, and which way it faces.
+ *
+ * Axis-aligned, because the collider is: `tx/tz` is the unit direction of the street it
+ * serves (always a world axis) and `nx/nz` points from the shelter out at the road, so the
+ * shelter's footprint is an exact box rather than a fattened one. The sizes live in
+ * `BUS_STOP` so the collider in `cityWorld.ts` and the geometry in `env/transitBuilder.ts`
+ * are cut from the same numbers. The buses that call here are not part of the shelter: they
+ * drive routes (`ArenaLayout.busRoutes`) and are simulated in `src/sim/buses.ts`.
+ */
+export interface BusStopDef {
+  /** Centre of the shelter (m). */
+  x: number;
+  z: number;
+  /** Height of the pavement it stands on (m). */
+  y: number;
+  /** Unit direction along the street. */
+  tx: number;
+  tz: number;
+  /** Unit normal from the shelter toward the road. */
+  nx: number;
+  nz: number;
+  zone: ZoneId;
+  /** Which route this stop belongs to: picks its name board and its poster. */
+  route: number;
+}
+
+/**
+ * The one description of a bus stop's size. Read by the collider (`cityWorld.ts`) and by the
+ * geometry (`env/transitBuilder.ts`), so what you can see and what you can hit are the same
+ * box, and by `inBusStop` below, which keeps lamp posts and palm trees out of the shelter.
+ */
+export const BUS_STOP = {
+  /** Shelter: along the street, across it, and to the top of the roof (m). */
+  length: 8,
+  depth: 2.2,
+  height: 3.05,
+} as const;
+
+/** True inside a shelter's footprint, grown by `pad`. The bus is on the road; this is not. */
+export function inBusStop(plan: CityPlan, x: number, z: number, pad = 0): boolean {
+  const stops = plan.busStops;
+  if (!stops) return false;
+  for (const st of stops) {
+    const dx = x - st.x;
+    const dz = z - st.z;
+    const along = Math.abs(dx * st.tx + dz * st.tz);
+    const across = Math.abs(dx * st.nx + dz * st.nz);
+    if (along <= BUS_STOP.length / 2 + pad && across <= BUS_STOP.depth / 2 + pad) return true;
+  }
+  return false;
+}
+
 /** Neon route gate spanning the road from (x0, z0) to (x1, z1). */
 export interface GateDef {
   x0: number;
@@ -165,7 +218,8 @@ export interface GateDef {
 }
 
 export interface BillboardDef {
-  variant: 0 | 1;
+  /** 0 and 1 are the scrolling holograms; 2 is the BADKALA WANTED ad, which is portrait. */
+  variant: 0 | 1 | 2;
   x: number;
   y: number;
   z: number;
@@ -226,6 +280,8 @@ export interface CityPlan {
   powerLines?: Array<[number, number]>;
   ringBillboards?: RingBillboardDef[];
   skybridges?: SkybridgeDef[];
+  /** Bus stops on the kerb, and the buses parked at them. */
+  busStops?: BusStopDef[];
   /** Districts where every street facade is stacked with screens. */
   neonDistricts?: Rect[];
   /**

@@ -18,6 +18,7 @@ import { stepDrift } from './drift';
 import { stepNitro } from './nitro';
 import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
+import { createBuses, resetBuses, stepBuses } from './buses';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
@@ -61,6 +62,8 @@ export function createVehicleState(x: number, z: number, heading: number, y = 0)
     spinRev: 0,
     wheelspin: 0,
     limiterTime: 0,
+    limiterCut: 0,
+    limiterPhase: 0,
     shiftHold: 0,
     counterSteer: 0,
   };
@@ -93,6 +96,7 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     nitro: createNitroState(),
     lightning: createLightningState(),
     targets: createTargets(layout),
+    buses: createBuses(layout),
     nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
     race: layout.race ? createRaceState(layout.race) : null,
@@ -110,6 +114,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   state.nitro = createNitroState();
   state.lightning = createLightningState();
   resetTargets(state.targets, layout);
+  resetBuses(state.buses, layout);
   resetNearMissState(state.nearMiss);
   state.economy = createEconomyState();
   if (state.race && layout.race) resetRaceState(state.race, layout.race);
@@ -193,6 +198,9 @@ export function stepGame(
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
+  // The buses are moving walls: they are stepped before the collision pass, so the car is
+  // pushed off where a bus IS this tick and not off where it was last tick.
+  stepBuses(state.buses, layout, dt);
   // Which level the car is on decides which walls are walls for it, so the road height is
   // read before the collision pass.
   settleVehicle(state.vehicle, layout);

@@ -39,14 +39,32 @@ function sectionCorners(s: LoftSection, out: Float32Array): void {
   out[11] = s.z;
 }
 
+/** How a lofted hull is closed up. */
+export interface LoftOptions {
+  /** Cap the first and last cross-sections. Default true. */
+  caps?: boolean;
+  /**
+   * Indices of segments (0 for the one between sections 0 and 1) whose TOP face is left out.
+   * That turns a panel into an aperture: it is how the coupe's fastback gets a real backlight
+   * opening to see the cabin through instead of paint with a pane of glass laid over it.
+   * Anything behind an opening has to supply its own inward-facing surfaces — a lofted hull
+   * is single-sided, so from inside, the rest of the shell is not there at all.
+   */
+  openTop?: readonly number[];
+}
+
 /**
  * Lofts a closed hull through a list of quad cross-sections ordered front (-Z) to rear (+Z).
- * Flat-shaded, outward facing, with optional end caps. 8 tris per segment + 4 for the caps.
+ * Flat-shaded, outward facing, with optional end caps. 8 tris per segment + 4 for the caps,
+ * less 2 for every segment left open.
  */
-export function loft(sections: LoftSection[], caps = true): THREE.BufferGeometry {
+export function loft(sections: LoftSection[], options: LoftOptions | boolean = true): THREE.BufferGeometry {
   if (sections.length < 2) throw new Error('loft() needs at least two sections');
+  const opts: LoftOptions = typeof options === 'boolean' ? { caps: options } : options;
+  const caps = opts.caps ?? true;
+  const openTop = opts.openTop ?? [];
   const segs = sections.length - 1;
-  const triCount = segs * 8 + (caps ? 4 : 0);
+  const triCount = segs * 8 + (caps ? 4 : 0) - openTop.length * 2;
   const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 9);
 
@@ -87,10 +105,14 @@ export function loft(sections: LoftSection[], caps = true): THREE.BufferGeometry
     p += 9;
   }
 
+  // Face k of a segment is the quad along the edge from corner k to corner k + 1, so with
+  // corners ordered bottom-left, bottom-right, top-right, top-left, face 2 is the top.
+  const TOP_FACE = 2;
   for (let i = 0; i < segs; i++) {
     sectionCorners(sections[i], a);
     sectionCorners(sections[i + 1], b);
     for (let k = 0; k < 4; k++) {
+      if (k === TOP_FACE && openTop.includes(i)) continue;
       const k0 = k * 3;
       const k1 = ((k + 1) % 4) * 3;
       emit(a[k0], a[k0 + 1], a[k0 + 2], a[k1], a[k1 + 1], a[k1 + 2], b[k1], b[k1 + 1], b[k1 + 2]);

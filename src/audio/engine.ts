@@ -17,6 +17,13 @@ export interface EngineInput {
   brake: number;
   /** Nitro boosting this frame. */
   nitro: boolean;
+  /**
+   * Fuel cut this frame off the rev limiter (0..1, `VehicleState.limiterCut`). Square-waved at
+   * ~11 Hz while the manual box is pinned at redline; it gates the note off and back on, which
+   * is the "ta-ta-ta-ta". Gated with a very short time constant on purpose — the usual ~50 ms
+   * smoothing would average the square wave into a wobble instead of a stutter.
+   */
+  limiterCut?: number;
 }
 
 export interface EngineVoice {
@@ -179,6 +186,8 @@ export function createEngine(core: AudioCore): EngineVoice {
     return lerp(AUDIO.engineIdleHz, AUDIO.engineRedlineHz, rpm01);
   }
 
+  let prevCut = 0;
+
   return {
     update(dt, input) {
       const t = ctx.currentTime;
@@ -208,9 +217,18 @@ export function createEngine(core: AudioCore): EngineVoice {
       const load = clamp01(0.3 + 0.5 * rpm01 + 0.45 * throttle + nitroBoost * 0.25);
       drive.gain.setTargetAtTime(lerp(1, 3.6, clamp01(0.35 * rpm01 + 0.65 * throttle)) + nitroBoost, t, 0.06);
 
-      // Loudness: idle floor + load, never fully silent, never past the mix level.
-      toneGain.gain.setTargetAtTime(AUDIO.engineVolume * (0.4 + 0.6 * load), t, 0.05);
-      combGain.gain.setTargetAtTime(AUDIO.engineVolume * (0.06 + 0.35 * throttle * rpm01), t, 0.05);
+      // Loudness: idle floor + load, never fully silent, never past the mix level. The limiter
+      // cut chops that down to a fraction and snaps it back, fast enough to read as separate hits.
+      const cut = clamp01(input.limiterCut ?? 0);
+      const gate = 1 - AUDIO.limiterCutDuck * cut;
+      const gainTc = cut > 0 || prevCut > 0 ? 0.006 : 0.05;
+      prevCut = cut;
+      toneGain.gain.setTargetAtTime(AUDIO.engineVolume * (0.4 + 0.6 * load) * gate, t, gainTc);
+      combGain.gain.setTargetAtTime(
+        AUDIO.engineVolume * (0.06 + 0.35 * throttle * rpm01) * gate,
+        t,
+        gainTc,
+      );
 
       // One boost model drives both the whine and the flutter, so they can never disagree about
       // how spooled the car is. The surge fires only on a closed throttle with pressure behind
@@ -252,6 +270,7 @@ export function createEngine(core: AudioCore): EngineVoice {
     },
 
     reset() {
+      prevCut = 0;
       const t = ctx.currentTime;
       flutter.reset();
       const rate = firingHzFor(0.18) / REF_FIRING_HZ;

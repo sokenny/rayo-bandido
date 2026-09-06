@@ -1,7 +1,7 @@
-import type { RingBillboardDef, SkybridgeDef, TowerDef } from '../../../world/cityPlan';
+import { inBusStop, type RingBillboardDef, type SkybridgeDef, type TowerDef } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { makeRng } from './meshBuilder';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { BARK_TILE, FOLIAGE_TILE, groundGlow, halo, type EnvBuilders } from './builders';
 import { blockSetback } from './cityBuilder';
 import { facadeCell } from './facadeAtlas';
 import { lampPost } from './propsBuilder';
@@ -34,10 +34,11 @@ export function buildLandmarks(b: EnvBuilders): void {
 function hedge(b: EnvBuilders, x: number, z: number, y0: number, len: number, along: 'x' | 'z', rng: () => number): void {
   const h = 1.0 + rng() * 0.5;
   const w = 0.9 + rng() * 0.3;
-  b.props.color(PAL.foliage, 0.85 + rng() * 0.3);
-  b.props.box(x, y0 + h / 2, z, along === 'x' ? len : w, h, along === 'x' ? w : len);
-  b.props.color(PAL.foliage, 1.05 + rng() * 0.25);
-  b.props.box(x, y0 + h + 0.2, z, along === 'x' ? len - 0.6 : w - 0.3, 0.4, along === 'x' ? w - 0.3 : len - 0.6);
+  const tile = { tileW: FOLIAGE_TILE, tileH: FOLIAGE_TILE };
+  b.foliage.color(PAL.foliage, 0.85 + rng() * 0.3);
+  b.foliage.box(x, y0 + h / 2, z, along === 'x' ? len : w, h, along === 'x' ? w : len, tile);
+  b.foliage.color(PAL.foliage, 1.05 + rng() * 0.25);
+  b.foliage.box(x, y0 + h + 0.2, z, along === 'x' ? len - 0.6 : w - 0.3, 0.4, along === 'x' ? w - 0.3 : len - 0.6, tile);
 }
 
 /** Cross-section corners, clockwise seen from above, so `shaft`'s side quads face outward. */
@@ -59,16 +60,23 @@ function shaft(
   z1: number,
   r1: number,
 ): void {
+  // The bark runs up the shaft in world metres, continuous from one segment to the next
+  // (v comes from the height, not from the segment index), and each of the four faces gets
+  // its own slice across, so the grain never wraps back on itself at a corner.
+  const u = (2 * r0) / BARK_TILE;
+  const v0 = y0 / BARK_TILE;
+  const v1 = y1 / BARK_TILE;
   for (let k = 0; k < 4; k++) {
     const ax = CORNERS[k][0];
     const az = CORNERS[k][1];
     const bx = CORNERS[(k + 1) % 4][0];
     const bz = CORNERS[(k + 1) % 4][1];
-    b.props.quad(
+    b.bark.quad(
       x0 + bx * r0, y0, z0 + bz * r0,
       x0 + ax * r0, y0, z0 + az * r0,
       x1 + ax * r1, y1, z1 + az * r1,
       x1 + bx * r1, y1, z1 + bz * r1,
+      k * u, v0, (k + 1) * u, v1,
     );
   }
 }
@@ -90,6 +98,10 @@ function blade(
   qw: number,
   nx: number,
   nz: number,
+  u0: number,
+  v0: number,
+  u1: number,
+  v1: number,
 ): void {
   const ax = px - nx * pw;
   const az = pz - nz * pw;
@@ -99,8 +111,8 @@ function blade(
   const cz = qz + nz * qw;
   const dx = qx - nx * qw;
   const dz = qz - nz * qw;
-  b.props.quad(ax, py + 0.02, az, bx, py + 0.02, bz, cx, qy + 0.02, cz, dx, qy + 0.02, dz);
-  b.props.quad(dx, qy - 0.02, dz, cx, qy - 0.02, cz, bx, py - 0.02, bz, ax, py - 0.02, az);
+  b.foliage.quad(ax, py + 0.02, az, bx, py + 0.02, bz, cx, qy + 0.02, cz, dx, qy + 0.02, dz, u0, v0, u1, v1);
+  b.foliage.quad(dx, qy - 0.02, dz, cx, qy - 0.02, cz, bx, py - 0.02, bz, ax, py - 0.02, az, u0, v0, u1, v1);
 }
 
 /**
@@ -144,7 +156,7 @@ function palm(
     const ny = y0 + h * u;
     const nr = r * (1.1 - 0.35 * u);
     // Alternating bands: the old leaf scars that ring a palm trunk.
-    b.props.color(PAL.bark, i % 2 ? 0.95 : 1.15);
+    b.bark.color(PAL.bark, i % 2 ? 0.95 : 1.15);
     shaft(b, px, py, pz, pr, nx, ny, nz, nr);
     px = nx;
     py = ny;
@@ -152,8 +164,8 @@ function palm(
     pr = nr;
   }
   // The boot: the stub of old fronds where the crown meets the trunk.
-  b.props.color(PAL.bark, 1.2);
-  b.props.box(topX, y0 + h + 0.15, topZ, r * 2.7, 0.8, r * 2.7);
+  b.bark.color(PAL.bark, 1.2);
+  b.bark.box(topX, y0 + h + 0.15, topZ, r * 2.7, 0.8, r * 2.7, { tileW: BARK_TILE, tileH: BARK_TILE });
 
   const fronds = 7 + Math.floor(rng() * 4);
   const phase = rng() * Math.PI * 2;
@@ -176,11 +188,19 @@ function palm(
     const ez = topZ + fz * len;
     const ey = cy - droop;
     const shade = 0.95 + rng() * 0.45;
-    b.props.color(PAL.foliage, shade);
-    blade(b, topX + fx * 0.25, cy, topZ + fz * 0.25, 0.14, mx, my, mz, 0.5, nx, nz);
+    // Each frond takes its own window into the leaf tile — a random third of it, across and
+    // down — so a crown of ten blades is ten different bits of foliage rather than the same
+    // photograph ten times. The blade's own length sets how much of the window it stretches
+    // over, which keeps the leaves roughly the size they are on a hedge.
+    const wu = 0.34;
+    const wv = Math.min(0.9, (len / FOLIAGE_TILE) * 0.34);
+    const u0 = rng() * (1 - wu);
+    const v0 = rng() * (1 - wv);
+    b.foliage.color(PAL.foliage, shade);
+    blade(b, topX + fx * 0.25, cy, topZ + fz * 0.25, 0.14, mx, my, mz, 0.5, nx, nz, u0, v0, u0 + wu, v0 + wv * 0.55);
     // The drooping half catches more of the sky, so it sits a touch brighter.
-    b.props.color(PAL.foliage, shade + 0.2);
-    blade(b, mx, my, mz, 0.5, ex, ey, ez, 0.1, nx, nz);
+    b.foliage.color(PAL.foliage, shade + 0.2);
+    blade(b, mx, my, mz, 0.5, ex, ey, ez, 0.1, nx, nz, u0, v0 + wv * 0.55, u0 + wu, v0 + wv);
   }
 }
 
@@ -211,6 +231,8 @@ function buildGreenery(b: EnvBuilders, rng: () => number): void {
       const off = Math.min(1.6, Math.max(0.7, pave * 0.5));
       const x = edgeX - outX * off;
       const z = edgeZ - outZ * off;
+      // Not through a bus shelter: it stands on the same strip of pavement.
+      if (inBusStop(b.plan, x, z, 1.2)) return;
       const y0 = b.plan.padY(x, z);
       const room = pave - off;
       const r = rng();

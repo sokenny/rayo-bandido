@@ -1,4 +1,4 @@
-import type { RailDef, RibbonDef, TrackLineDef } from '../../../world/cityPlan';
+import { inBusStop, type RailDef, type RibbonDef, type TrackLineDef } from '../../../world/cityPlan';
 import { onRibbonAtLevel } from '../../../world/cityGen';
 import { KERB_HEIGHT, KERB_RAMP } from '../../../world/kerbs';
 import { createProjection, offsetAtStation, projectOntoPath, segmentCount } from '../../../world/track';
@@ -347,7 +347,8 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
         break;
       }
     }
-    if (blocked || coveredAbove(b, p.x, p.z, c.y)) continue;
+    // A bus shelter stands exactly where this post wants to: it brings its own light.
+    if (blocked || coveredAbove(b, p.x, p.z, c.y) || inBusStop(b.plan, p.x, p.z, 1)) continue;
     const zone = c.zone;
     const color = lampColor(zone, rng);
     const y0 = deck ? c.y - 0.4 : rb.elevated ? c.y : b.plan.padY(p.x, p.z);

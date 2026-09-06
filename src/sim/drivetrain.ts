@@ -121,7 +121,23 @@ export function stepDrivetrain(
   if (target > v.spinRev) v.spinRev = Math.min(target, v.spinRev + DRIVETRAIN.revRiseRate * dt);
   else v.spinRev = Math.max(target, v.spinRev - DRIVETRAIN.revFallRate * dt);
 
-  v.rpm01 = Math.min(1, road + v.spinRev);
+  const rawRpm = Math.min(1, road + v.spinRev);
+  // Banging off the limiter: pinned at redline on the manual box with the throttle in, the ECU
+  // square-waves the fuel instead of holding the note. The cut only stutters what is already
+  // there — it never changes which gear or how fast — so everything downstream (drive in
+  // `stepVehicle`, the note, the bang) can read the one flag.
+  // Gated on *road* rpm, not on the excess: the gear being out of road speed is the case that
+  // was already a fuel cut in `stepVehicle`, so the stutter never adds a drive cut of its own —
+  // a rear over-revved in a slide keeps handling exactly as it did on the automatic.
+  if (manual && road >= DRIVETRAIN.limiterCutRpm && driving > DRIVETRAIN.limiterCutThrottle) {
+    v.limiterPhase = (v.limiterPhase + DRIVETRAIN.limiterCutHz * dt) % 1;
+    v.limiterCut = v.limiterPhase < DRIVETRAIN.limiterCutDuty ? 1 : 0;
+  } else {
+    v.limiterPhase = 0;
+    v.limiterCut = 0;
+  }
+
+  v.rpm01 = rawRpm - v.limiterCut * DRIVETRAIN.limiterCutDip;
   v.wheelspin = clamp01(v.spinRev / DRIVETRAIN.spinFull) * torqueGate(v.rpm01);
   // Time against the limiter builds while pinned and unwinds twice as fast once lifted.
   if (overRev(v.rpm01) > 0.5) v.limiterTime = Math.min(DRIVETRAIN.overRevGrace, v.limiterTime + dt);

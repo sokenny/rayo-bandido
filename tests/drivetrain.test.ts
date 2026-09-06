@@ -305,3 +305,60 @@ describe('gear-change body kick', () => {
     expect(lifted).toBeCloseTo(flat * DRIVETRAIN.shiftKickIdle, 6);
   });
 });
+
+describe('banging off the limiter', () => {
+  /** Hold a gear at its top speed on the manual box for `seconds` and log the fuel cut. */
+  const pinned = (seconds: number, gear = 2, throttle = 1) => {
+    const v = createVehicleState();
+    v.gear = gear;
+    const go = createPlayerCommand();
+    go.throttle = throttle;
+    const dt = 1 / 120;
+    const cuts: number[] = [];
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      v.speed = gearTopSpeed(gear);
+      stepDrivetrain(v, throttle, v.speed, true, 0, true, 0, dt);
+      cuts.push(v.limiterCut);
+    }
+    return { v, cuts };
+  };
+
+  it('square-waves the fuel at the limiter rate, flat out in a manual gear', () => {
+    const { cuts } = pinned(1);
+    let edges = 0;
+    for (let i = 1; i < cuts.length; i++) if (cuts[i] > 0 && cuts[i - 1] === 0) edges++;
+    // One second of it: roughly `limiterCutHz` cuts, allowing for where the window falls.
+    expect(edges).toBeGreaterThanOrEqual(DRIVETRAIN.limiterCutHz - 1);
+    expect(edges).toBeLessThanOrEqual(DRIVETRAIN.limiterCutHz + 1);
+    // It really is intermittent: fuel on for most of the cycle, off for the rest.
+    const off = cuts.filter((c) => c > 0).length / cuts.length;
+    expect(off).toBeCloseTo(DRIVETRAIN.limiterCutDuty, 1);
+  });
+
+  it('bounces the needle off redline instead of pinning it there', () => {
+    const v = createVehicleState();
+    v.gear = 2;
+    const dt = 1 / 120;
+    const rpms: number[] = [];
+    for (let i = 0; i < 120; i++) {
+      v.speed = gearTopSpeed(2);
+      stepDrivetrain(v, 1, v.speed, true, 0, true, 0, dt);
+      rpms.push(v.rpm01);
+    }
+    // Pinned in gear the needle would sit flat at 1; the cut drops it and lets it back up.
+    expect(Math.max(...rpms)).toBeCloseTo(1, 6);
+    expect(Math.min(...rpms)).toBeCloseTo(1 - DRIVETRAIN.limiterCutDip, 6);
+  });
+
+  it('stays quiet off the throttle and on the automatic', () => {
+    expect(pinned(1, 2, 0).cuts.every((c) => c === 0)).toBe(true);
+    const v = createVehicleState();
+    v.gear = 2;
+    const dt = 1 / 120;
+    for (let i = 0; i < 120; i++) {
+      v.speed = gearTopSpeed(2);
+      stepDrivetrain(v, 1, v.speed, true, 0, false, 0, dt);
+      expect(v.limiterCut).toBe(0);
+    }
+  });
+});

@@ -1102,3 +1102,63 @@ tiles (+~4.5 MB with mips).
 **Known gaps.** Runtime LOD is still not possible with everything merged per material;
 detail reduction is at build time (far ring simpler). The far ring beyond the 300 m fog is a
 flat cutout as before. Chamfered roofs use two degenerate triangles per corner.
+
+## City: the bus network (2026-09-06)
+
+Bus stops on the boulevards and articulated buses running routes between them, from Juan's
+two reference renders. Both are drawn in one livery — the amber of the shelters' fascia band
+— so a bus and the stop it pulls into read as the same network across a junction.
+
+**The stops.** `cityWorld.placeBusStops` walks the five wide boulevards and takes the first
+station every ~130 m where the whole thing fits: axis-aligned street, ≥ 8 m of asphalt either
+side of the centreline, enough pavement behind the kerb for the shelter, no crossing road, no
+missing kerb (a junction mouth), nothing solid, no deck within 10 m, and clear of the spawn.
+Every check is made at three stations over a bus's length, not just the middle. Sides
+alternate down a street, but a candidate that fails on one kerb tries the other before it is
+lost — and where both would do, the kerb a bus route drives along wins, which is why the
+routes are laid out *before* the stops. Thirteen stops in the city today.
+
+- `cityPlan.BusStopDef` + `BUS_STOP` — the one place a shelter's size is written down, read by
+  the collider in `cityWorld.ts` and the geometry in `env/transitBuilder.ts`. Axis-aligned, so
+  each shelter's box collider is the shape of the thing and not a fattened guess.
+- `cityPlan.inBusStop` keeps lamp posts (`trackBuilder`) and palms (`landmarksBuilder`) out of
+  a shelter: both used to stand exactly where one does.
+- `env/transitBuilder.ts` draws them: back wall, gabled roof, a row of strip lights under the
+  fascia, the amber "- BUS STOP -" band, the route map and name board behind a lit bench, and
+  a side bay with a back-lit poster and the timetable.
+- `textures.makeTransitAtlas` — a NON-uniform atlas (named pixel rects, not a grid: a 4:1 name
+  board and a 1:1.5 timetable drawn in square cells both come out stretched) carrying the map,
+  three name boards, the timetable, two posters, the hazard band, and what the bus wears: its
+  destination roll, its roofline ad strip and its route plate.
+
+**The buses.** `citySpec.BUS_ROUTE_LOOPS` — two rectangles of boulevard, both driven clockwise
+in the kerb lane. The lane is taken per leg from that street's own width, so the bus hugs
+whichever kerb it is on and stays outboard of the electric cars' lane (they run 3.5 m off the
+centreline and steer round nothing). Two rectangles rather than more because only five streets
+are wide enough, and two routes sharing a street would share one lane head-on.
+
+- `sim/buses.ts` — the whole behaviour is one scalar, how far round the loop it has driven:
+  ease down over 26 m into the next calling point, stand 6 s with the doors open, ease back up.
+  A bus is **not** a target: it cannot be shot, shoved or destroyed, so its position is a pure
+  function of how long the world has run, every screen agrees about it for free, and it needs
+  no bytes on the wire.
+- Solid via **four wall segments per bus**, reserved last in `ArenaLayout.walls` by the world
+  builder and rewritten in place each tick before the collision pass. Segments, not a box: an
+  axis-aligned box round a bus at 45° is a wall across half the street that nothing on screen
+  accounts for. Nothing in the step allocates.
+- `scene/busVisual.ts` — four merged meshes per bus (body, lit panels, transit-atlas panels,
+  additive glow) plus a per-instance door light. Under a hemisphere key a dark vertical slab is
+  a silhouette and nothing else, so what tells you this is a bus and how long it is are its
+  lit window panes, the roofline ad screens on both sections, and the amber line under the
+  skirt — not its shape.
+
+**Measured.** City runtime 31 -> 48 draw calls and 165.0k -> 170.8k triangles with four buses
+on screen (env builders unchanged at 14 draw calls / 163.3k, inside the 20-call budget); 72 FPS
+in the debug overlay driving beside one. 423 tests green (13 new in `tests/cityWorld.test.ts`:
+placement, shelter colliders, the lanes being on real asphalt and clear, calling only at
+shelters on the driven kerb, a five-minute drive of every loop, the four walls tracking the
+body, and the car bouncing off a bus instead of through it).
+
+**Known gaps.** The electric cars still steer round nothing, so at a junction one can cross a
+bus's lane and pass through it — the same thing they already do to each other. One route has
+only two calling points, because the shelters near its legs mostly landed on the far kerb.

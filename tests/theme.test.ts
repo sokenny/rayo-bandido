@@ -158,6 +158,56 @@ describe('theme band separation', () => {
   });
 });
 
+describe('theme spectrum display', () => {
+  const BARS = THEME.spectrum.bars;
+
+  it('is flat before the track starts', () => {
+    installFakeAudio();
+    const theme = createThemeAudio();
+    expect(theme.spectrum).toHaveLength(BARS);
+    theme.update(1 / 60);
+    for (const v of theme.spectrum) expect(v).toBe(0);
+  });
+
+  it('lifts the left of the display on a kick and the right on a hi-hat', () => {
+    const kick = startedTheme();
+    kick.feed(KICK, 30);
+    expect(kick.theme.spectrum[0]).toBeGreaterThan(0.5);
+    expect(kick.theme.spectrum[BARS - 1]).toBe(0);
+
+    const hat = startedTheme();
+    hat.feed(HAT, 30);
+    expect(hat.theme.spectrum[BARS - 1]).toBeGreaterThan(0.5);
+    expect(hat.theme.spectrum[0]).toBe(0);
+  });
+
+  it('fills the display on a loud mix, and every bar stays inside 0..1', () => {
+    const { theme, feed } = startedTheme();
+    feed(spectrum(40, 12000, 255), 60);
+    for (const v of theme.spectrum) {
+      expect(v).toBeGreaterThan(0.5);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    // A quiet mix must not pin the meter: the tilt corrects the roll-off, it does not fake it.
+    const quiet = startedTheme();
+    quiet.feed(spectrum(40, 12000, 12), 60);
+    for (const v of quiet.theme.spectrum) expect(v).toBeLessThan(0.5);
+  });
+
+  it('falls away more slowly than it rises, so a bar drops rather than blinks out', () => {
+    const { theme, feed } = startedTheme();
+    feed(spectrum(40, 12000, 220), 60);
+    const peak = theme.spectrum[4];
+    feed(SILENCE, 6);
+    // Six frames of silence barely dents the bar...
+    expect(theme.spectrum[4]).toBeGreaterThan(peak * 0.4);
+    // ...while six frames of the same music takes one from rest to nearly that peak.
+    const rising = startedTheme();
+    rising.feed(spectrum(40, 12000, 220), 6);
+    expect(rising.theme.spectrum[4]).toBeGreaterThan(peak * 0.9);
+  });
+});
+
 describe('theme band pacing', () => {
   /** Frames for a band to fall under half its peak once the sound stops. */
   function framesToHalfDecay(bins: Uint8Array<ArrayBuffer>, read: (b: { bass: number; mid: number; high: number }) => number): number {

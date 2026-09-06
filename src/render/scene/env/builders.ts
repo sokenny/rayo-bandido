@@ -28,6 +28,15 @@ export interface EnvBuilders {
   roof: MeshBuilder;
   /** Painted metal: barriers, containers, poles, pipes, AC units, roof boxes. */
   props: MeshBuilder;
+  /**
+   * Leaf mass: palm fronds and hedges. Its own builder rather than a corner of `props`
+   * because it samples a leaf texture (`textures/manifest.ts`, slot `nature/foliage`) that
+   * has no business on a shipping container. UVs are world-scaled, so a hedge and a frond
+   * show leaves of the same size.
+   */
+  foliage: MeshBuilder;
+  /** Palm trunks, sampling the bark texture (slot `nature/bark`) tiled up the shaft. */
+  bark: MeshBuilder;
   /** Unlit neon, always on — except the lamp heads tagged with a fault seed. */
   neon: MeshBuilder;
   /** Unlit neon that breathes. */
@@ -38,10 +47,24 @@ export interface EnvBuilders {
   glow: MeshBuilder;
   /** Sign panels sampling the neon atlas. */
   signs: MeshBuilder;
+  /** Bus-stop and bus panels sampling the transit atlas (`makeTransitAtlas`). */
+  transit: MeshBuilder;
   /** The two animated holographic billboards. */
   billA: MeshBuilder;
   billB: MeshBuilder;
+  /**
+   * Every surface carrying the BADKALA WANTED ad: the portrait city billboards and the
+   * poster bay of half the bus shelters, all sampling one texture (`badkalaPoster.ts`).
+   */
+  badkala: MeshBuilder;
 }
+
+/** Metres of leaf texture per tile. Shared by hedges and palm fronds, so a clipped bush and a
+ * palm crown are made of leaves the same size — roughly the span of the source photograph. */
+export const FOLIAGE_TILE = 1.3;
+
+/** Metres of bark texture per tile up a trunk. A palm's old scar rings are about this far apart. */
+export const BARK_TILE = 1.6;
 
 /**
  * Fillet radii (m) the shading suggests on box edges, per material. Bigger, softer objects
@@ -64,6 +87,10 @@ const SOFT_EDGE = {
   facade: 0.4,
   roof: 0.3,
   props: 0.15,
+  // A hedge is the softest thing on the street; a trunk is a stiff cylinder faked with four
+  // faces, and rounding its vertical corners is exactly the case the note above says a
+  // hemisphere light cannot see, so it is left sharp.
+  foliage: 0.3,
 } as const;
 
 /**
@@ -94,13 +121,17 @@ export function createBuilders(plan: CityPlan): EnvBuilders {
     facade: new MeshBuilder(true, false, true).soft(SOFT_EDGE.facade),
     roof: new MeshBuilder(true).soft(SOFT_EDGE.roof),
     props: new MeshBuilder(true).soft(SOFT_EDGE.props).chamfer(CHAMFER.props),
+    foliage: new MeshBuilder(true).soft(SOFT_EDGE.foliage),
+    bark: new MeshBuilder(true),
     neon: new MeshBuilder(true, true),
     neonPulse: new MeshBuilder(true),
     neonFlicker: new MeshBuilder(true),
     glow: new MeshBuilder(true, true),
     signs: new MeshBuilder(false),
+    transit: new MeshBuilder(false),
     billA: new MeshBuilder(false),
     billB: new MeshBuilder(false),
+    badkala: new MeshBuilder(false),
   };
 }
 
