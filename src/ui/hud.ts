@@ -4,6 +4,7 @@ import { createRingGauge } from './ringGauge';
 import { createSystemMessage } from './systemMessage';
 import { createWheelIndicator } from './wheelIndicator';
 import { createTacho } from './tacho';
+import { createRushOverlay, type RushOverlay } from './rushOverlay';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -32,6 +33,15 @@ export interface Hud {
   dispose(): void;
 }
 
+/**
+ * What the HUD needs from the game beyond a snapshot. Today that is only how the RAYO RUSH
+ * prompt reaches the simulation when it is clicked or tapped rather than triggered by the key.
+ */
+export interface HudOptions {
+  /** Raise `PlayerCommand.activate` on the next tick. Omitted in worlds with no activity. */
+  onActivate?: () => void;
+}
+
 /** Seconds of play after which the controls card fades away. */
 const CONTROLS_INTRO = 10;
 /** Seconds the controls card comes back for after a restart. */
@@ -57,6 +67,7 @@ const PAD_CONTROLS = [
   ['VIEW', 'cruise'],
   ['START', 'restart'],
   ['RB/LB', 'shift'],
+  ['R3', 'activity'],
 ];
 
 const CONTROLS = [
@@ -68,6 +79,7 @@ const CONTROLS = [
   ['C', 'cruise'],
   ['P', 'camera'],
   ['T', 'auto/manual'],
+  ['F', 'activity'],
   ['X/Z', 'shift'],
   ['ESC', 'menu'],
   ['F3', 'debug'],
@@ -105,7 +117,7 @@ function formatMoney(value: number): string {
   return out;
 }
 
-export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplayer = false): Hud {
+export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplayer = false, options: HudOptions = {}): Hud {
   root.innerHTML = '';
 
   const hud = document.createElement('div');
@@ -178,6 +190,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const tacho = createTacho();
   pick<HTMLElement>(hud, '.rb-stack--left .rb-slot').appendChild(chargeGauge.root);
   pick<HTMLElement>(hud, '.rb-cluster__slot').appendChild(tacho.root);
+
+  /**
+   * RAYO RUSH's screen furniture, composed in the way the tacho and the gauges are. Built only
+   * where the activity exists — `onActivate` is what says so, and it is the game that knows.
+   */
+  const rush: RushOverlay | null = options.onActivate ? createRushOverlay({ onActivate: options.onActivate }) : null;
+  if (rush) hud.appendChild(rush.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -354,6 +373,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       // A restart rewinds sim time; drop stale throttles so hints work again.
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
       if (s.race) updateRace(s.race);
+      if (rush && s.rush) rush.update(s.rush);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -494,6 +514,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     },
 
     onEvent(e) {
+      rush?.onEvent(e);
       if (e.type === 'nearMiss') {
         // Shares the money flash column with kill rewards, but cyan, labelled, and drifting
         // DOWN instead of up: passes are frequent, and rising past the counters the way a
@@ -548,6 +569,11 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         showCountdown(String(e.seconds), false);
       } else if (e.type === 'raceStart') {
         showCountdown('GO', true);
+      } else if (e.type === 'rushCountdown') {
+        // The same big centred number a race grid counts down on, reused: `3 - 2 - 1` and then
+        // the name of the thing, in the hot GO treatment.
+        if (e.seconds > 0) showCountdown(String(e.seconds), false);
+        else showCountdown('RAYO RUSH', true);
       } else if (e.type === 'checkpoint') {
         showNote(raceSplitEl, `CHECKPOINT ${e.index} · ${formatRaceTime(e.split)}`);
       } else if (e.type === 'lapComplete') {
@@ -580,6 +606,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
 
     dispose() {
       window.removeEventListener('gamepadconnected', onPadConnected);
+      rush?.dispose();
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();

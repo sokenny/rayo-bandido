@@ -3,15 +3,23 @@ import { MINIMAP } from '../config/tuning';
 import { slotCss } from '../core/playerColors';
 
 /**
- * Minimap: a north-up picture of the drivable roads with the player, the electric cars and,
- * on the circuit, the line and the checkpoints. The roads are drawn once into an offscreen
- * canvas; each frame only clears, blits it and draws a handful of dots. Hidden ribbons (the
- * shortcuts) are deliberately left off — they are for the player to find.
+ * Minimap: a north-up picture of the drivable roads with the player, the activity markers and,
+ * on the circuit, the line and the checkpoints. Electric cars are not shown — finding them is
+ * the game. The roads are drawn once into an offscreen canvas; each frame only clears, blits it
+ * and draws a handful of dots. Hidden ribbons (the shortcuts) are deliberately left off — they
+ * are for the player to find.
+ *
+ * WHAT IS AND IS NOT MARKED. The distinction is whether the thing is a destination. An electric
+ * car is quarry: a hundred white dots buried the player's own arrow and gave away a hunt that is
+ * the point of the mode. The RAYO RUSH circle is somewhere to GO, and one you cannot find is one
+ * that does not exist — so it is drawn, in the chrome's hazard yellow, which nothing else on
+ * this map uses. It goes into the base layer with the roads: it never moves, so it costs
+ * nothing per frame.
  *
  * Performance contract: no per-frame allocation, one 2D canvas of `MINIMAP.size` CSS pixels.
  */
 export interface Minimap {
-  /** `rivals` is empty outside a multiplayer race; each one is drawn in its slot colour. */
+  /** `targets` is accepted but not drawn; `rivals` is empty outside a multiplayer race. */
   update(
     playerX: number,
     playerZ: number,
@@ -68,20 +76,13 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const dotR = 2.2 * dpr;
 
   return {
-    update(playerX, playerZ, heading, targets, rivals) {
+    update(playerX, playerZ, heading, _targets, rivals) {
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(base, 0, 0);
 
-      // Electric cars: white dots, dimmed when disabled.
-      for (let i = 0; i < targets.length; i++) {
-        const t = targets[i];
-        if (t.status === 'destroyed') continue;
-        ctx.fillStyle = t.status === 'active' ? 'rgba(240, 248, 255, 0.95)' : 'rgba(240, 248, 255, 0.35)';
-        ctx.beginPath();
-        ctx.arc(px(t.x), pz(t.z), dotR, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // Electric cars are deliberately not drawn: a hundred-odd white dots buried the
+      // player's own arrow and the route. Hunting them is the game.
 
       // Rivals: a slightly bigger dot in each player's own colour, so a glance at the map
       // says who is where. Drawn under the player arrow, which always stays on top.
@@ -102,23 +103,83 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       const cz = pz(playerZ);
       ctx.save();
       ctx.translate(cx, cz);
+
+      // A soft halo behind the arrow: on a busy grid the eye finds the glow first, then
+      // reads the heading off the arrow inside it.
+      const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, 13 * dpr);
+      halo.addColorStop(0, 'rgba(255, 255, 255, 0.32)');
+      halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, 13 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.rotate(heading);
       ctx.fillStyle = selfColour;
+      ctx.strokeStyle = 'rgba(8, 12, 20, 0.95)';
+      ctx.lineWidth = 1.6 * dpr;
+      ctx.lineJoin = 'round';
       ctx.shadowColor = selfColour;
-      ctx.shadowBlur = 6 * dpr;
+      ctx.shadowBlur = 10 * dpr;
       ctx.beginPath();
-      ctx.moveTo(0, -5.5 * dpr);
-      ctx.lineTo(4 * dpr, 4.5 * dpr);
-      ctx.lineTo(0, 2.4 * dpr);
-      ctx.lineTo(-4 * dpr, 4.5 * dpr);
+      ctx.moveTo(0, -9 * dpr);
+      ctx.lineTo(6.4 * dpr, 7.2 * dpr);
+      ctx.lineTo(0, 3.8 * dpr);
+      ctx.lineTo(-6.4 * dpr, 7.2 * dpr);
       ctx.closePath();
       ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.stroke();
       ctx.restore();
     },
     dispose() {
       wrap.remove();
     },
   };
+}
+
+/**
+ * One activity marker: a ringed bolt in hazard yellow, on a dark disc so it reads over a road.
+ *
+ * Drawn at a FIXED PIXEL SIZE rather than to world scale. The circle it stands for is 7.5 m
+ * across in a city about 540 m wide, which on a 176 px map is under three pixels — a mark the
+ * player has to be able to spot has to be sized for the eye, not for the ground.
+ *
+ * The bolt is a stroked zigzag rather than the filled silhouette the HUD and the world marker
+ * share, because at ten pixels a filled bolt is a blob and three strokes still read as lightning.
+ */
+function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+  const r = 6.6 * dpr;
+  const YELLOW = '#fcee0a';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  // Dark disc, so the mark never has to compete with the road under it.
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = YELLOW;
+  ctx.shadowColor = YELLOW;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.lineWidth = 1.7 * dpr;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(1.4 * dpr, -3.4 * dpr);
+  ctx.lineTo(-1.3 * dpr, -0.2 * dpr);
+  ctx.lineTo(1.3 * dpr, 0.2 * dpr);
+  ctx.lineTo(-1.4 * dpr, 3.4 * dpr);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawBase(
@@ -177,14 +238,20 @@ function drawBase(
     ctx.stroke();
   }
 
-  if (!race) return;
-  // Checkpoints in cyan, the line in magenta, both drawn a little longer than the road.
-  race.gates.forEach((g, i) => {
-    ctx.strokeStyle = i === 0 ? '#ff3df0' : 'rgba(79, 243, 255, 0.9)';
-    ctx.lineWidth = (i === 0 ? 2.4 : 1.6) * dpr;
-    ctx.beginPath();
-    ctx.moveTo(px(g.ax), pz(g.az));
-    ctx.lineTo(px(g.bx), pz(g.bz));
-    ctx.stroke();
-  });
+  if (race) {
+    // Checkpoints in cyan, the line in magenta, both drawn a little longer than the road.
+    race.gates.forEach((g, i) => {
+      ctx.strokeStyle = i === 0 ? '#ff3df0' : 'rgba(79, 243, 255, 0.9)';
+      ctx.lineWidth = (i === 0 ? 2.4 : 1.6) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(px(g.ax), pz(g.az));
+      ctx.lineTo(px(g.bx), pz(g.bz));
+      ctx.stroke();
+    });
+  }
+
+  // Last, so nothing is drawn over the one mark on this map that is meant to be looked for.
+  if (data.activities) {
+    for (const a of data.activities) drawActivity(ctx, px(a.x), pz(a.z), dpr);
+  }
 }

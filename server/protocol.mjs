@@ -14,6 +14,11 @@ export const SNAPSHOT_HZ = 20;
 export const TRAFFIC_HZ = 10;
 export const NAME_MAX = 14;
 
+/* Ranked RAYO RUSH attempts per player per UTC day. Mirrors `RUSH.dailyRankedAttempts` in
+ * `src/config/tuning.ts`, which is where the client reads it from; it is repeated here (and
+ * checked by `tests/protocol.test.ts`) because the server is what enforces it. */
+export const RUSH_DAILY_ATTEMPTS = 3;
+
 /* Rooms. See the block comment in `src/net/protocol.ts` for what a room is. */
 export const ROOM_CODE_LEN = 4;
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

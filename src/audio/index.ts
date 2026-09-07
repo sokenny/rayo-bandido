@@ -22,8 +22,9 @@ export interface SkidInput {
  * - `update(dt, engine, listener, targets, skid)` every render frame: drives the continuous
  *   voices — the player's gas engine (+ turbo), the tire scrub while sliding, and each electric
  *   car's hover hum, spatialized to the listener.
- * - `onEvent(ev)` for every `GameEvent`: fires one-shots (lightning zap, nitro whoosh, and the
- *   electric-car power-down when a target is destroyed).
+ * - `onEvent(ev)` for every `GameEvent`: fires one-shots (lightning zap, nitro whoosh, the
+ *   electric-car power-down when a target is destroyed, and the pickup chime when the car rolls
+ *   onto an activity marker).
  * - `backfire(strength)` whenever the exhaust pops. The caller owns the trigger (see
  *   `audio/backfire.ts`) so the bang and the flame at the tailpipes land on the same frame.
  * - `reset()` on restart.
@@ -107,6 +108,10 @@ export function createAudio(targetCount: number): AudioSystem {
           break;
         case 'raceStart':
           oneShots.countdown(true);
+          break;
+        case 'rushPrompt':
+          // Only on the way in. Rolling off a marker is not an event worth a sound.
+          if (ev.on) oneShots.pickup();
           break;
         case 'restart':
           engine.reset();

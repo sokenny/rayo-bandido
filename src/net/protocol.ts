@@ -96,6 +96,29 @@ export const RIVAL_TIMEOUT_MS = 3000;
 export const NAME_MAX = 14;
 
 /**
+ * THE RAYO RUSH BOARD. Not part of the socket protocol at all — it is three plain HTTP routes
+ * on the same server (`server/leaderboard.mjs`), because a scoreboard is a request and a
+ * response, not a conversation, and it has to work for a player driving the city alone with no
+ * socket open at all.
+ *
+ *   GET  /leaderboard?board=rush&limit=20   the top rows
+ *   GET  /rush/attempts?cid=<client id>     what this player has left today, and their best
+ *   POST /rush/score                        file a run; spends one of the day's attempts
+ *
+ * `src/net/leaderboard.ts` is the only thing that speaks to them.
+ */
+export const LEADERBOARD_PATH = '/leaderboard';
+export const RUSH_ATTEMPTS_PATH = '/rush/attempts';
+export const RUSH_SCORE_PATH = '/rush/score';
+
+/**
+ * Ranked attempts one player may file per UTC day. `RUSH.dailyRankedAttempts` in
+ * `src/config/tuning.ts` is what the game plays by; this is the same number as the server
+ * enforces it, repeated for the same reason every other constant here is.
+ */
+export const RUSH_DAILY_ATTEMPTS = 3;
+
+/**
  * Where the match server listens in development, when the game is being served by Vite on a
  * different port. In production there is no second port to know about: one Node process
  * serves both the game and the socket. Overridden per page by `?server=ws://host:port/ws`.

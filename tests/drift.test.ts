@@ -110,7 +110,10 @@ describe('handbrake drift', () => {
     expect(activationTime).toBeGreaterThan(0);
     expect(activationTime).toBeLessThanOrEqual(0.8);
     expect(minSlip).toBeGreaterThan(12);
-    expect(maxSlip).toBeLessThan(50);
+    // 0.4 s is no longer a bare flick - the handbrake buys angle for as long as it is held,
+    // so this pull comes round further than it used to. Still a drift the throttle can hold,
+    // which is what the rest of this test checks, and nowhere near a spin.
+    expect(maxSlip).toBeLessThan(65);
     expect(alwaysActive).toBe(true);
     expect(state.drift.active).toBe(true);
     expect(state.drift.duration).toBeGreaterThanOrEqual(3);

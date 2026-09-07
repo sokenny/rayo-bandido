@@ -12,6 +12,7 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LEN,
   ROOM_LABEL_MAX,
+  RUSH_DAILY_ATTEMPTS,
   S2C,
   WORLD_ROOM_CODE,
   WORLD_ROOM_LABEL,
@@ -77,6 +78,7 @@ describe('wire protocol', () => {
     expect(constant('SNAPSHOT_HZ')).toBe(SNAPSHOT_HZ);
     expect(constant('TRAFFIC_HZ')).toBe(TRAFFIC_HZ);
     expect(constant('NAME_MAX')).toBe(NAME_MAX);
+    expect(constant('RUSH_DAILY_ATTEMPTS')).toBe(RUSH_DAILY_ATTEMPTS);
   });
 
   it('agrees on the room constants', () => {

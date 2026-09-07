@@ -49,6 +49,8 @@ const HOLD = 0.55;
 const ACID = '#a8ff3e';
 /** The near-miss colour, matching the cyan the HUD uses for a pass. */
 const CYAN = '#4ff3ff';
+/** The chrome's hazard yellow (`--rb-yellow`): in this game's palette, the system speaking. */
+const YELLOW = '#fcee0a';
 
 /**
  * What a pop looks like. Two exist, and they are deliberately unmistakable at a glance: a kill
@@ -71,6 +73,17 @@ export interface ScorePopupStyle {
 
 /** A destroyed target: acid green, no caption, the largest the canvas allows. */
 export const POPUP_KILL: ScorePopupStyle = { accent: ACID, midTone: '#e8ffb4' };
+
+/**
+ * A kill during a RAYO RUSH run: hazard yellow and captioned, so the points on screen are
+ * unmistakably the run's rather than the ¥ the same kill also paid. Same pool, same animation.
+ */
+export const POPUP_RUSH: ScorePopupStyle = {
+  accent: YELLOW,
+  midTone: '#fff8a8',
+  caption: 'EV DISABLED',
+  scale: 1.16,
+};
 
 /** A car shaved at speed: cyan, captioned, so it never reads as a kill. */
 export const POPUP_NEAR_MISS: ScorePopupStyle = {

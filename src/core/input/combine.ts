@@ -30,6 +30,7 @@ export function combineInputs(...sources: InputSource[]): InputSource {
         out.shiftUp = out.shiftUp || s.shiftUp;
         out.shiftDown = out.shiftDown || s.shiftDown;
         out.transmission = out.transmission || s.transmission;
+        out.activate = out.activate || s.activate;
       }
     },
     dispose() {

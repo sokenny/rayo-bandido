@@ -22,6 +22,7 @@ import { createBuses, resetBuses, stepBuses } from './buses';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
+import { createRushState, resetRushState, stepRush } from './rush';
 import { settleVehicle } from './surface';
 
 /**
@@ -54,6 +55,8 @@ export function createVehicleState(x: number, z: number, heading: number, y = 0)
     brakeApplied: 0,
     reverseArm: 0,
     handbrake: false,
+    handbrakeHold: 0,
+    handbrakeYaw: 0,
     collided: false,
     collisionImpact: 0,
     slide: 0,
@@ -100,6 +103,7 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
     race: layout.race ? createRaceState(layout.race) : null,
+    rush: layout.rushSite ? createRushState(layout.targetSpawns.length) : null,
     events: [],
   };
 }
@@ -118,6 +122,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   resetNearMissState(state.nearMiss);
   state.economy = createEconomyState();
   if (state.race && layout.race) resetRaceState(state.race, layout.race);
+  if (state.rush) resetRushState(state.rush);
   state.events.length = 0;
 }
 
@@ -139,6 +144,7 @@ const HOLD: PlayerCommand = {
   shiftUp: false,
   shiftDown: false,
   transmission: false,
+  activate: false,
 };
 
 /** What a multiplayer race adds to a tick. Absent in single player. */
@@ -153,6 +159,13 @@ export interface StepOptions {
   respawnTraffic?: boolean;
   /** Cruise mode is driving: a manual box shifts itself, the autopilot has no hands for it. */
   cruising?: boolean;
+  /**
+   * Whether a RAYO RUSH run started this tick would be one of the day's ranked attempts. Owned
+   * by the caller because the allowance lives outside the simulation
+   * (`src/net/leaderboard.ts`); defaults to true, which is what a world with no board would
+   * want. A run is identical either way — an unranked one simply is not submitted.
+   */
+  rushRanked?: boolean;
 }
 
 /**
@@ -193,6 +206,7 @@ export function stepGame(
   if (race && race.phase === 'countdown') {
     HOLD.steer = cmd.steer;
     HOLD.fire = cmd.fire;
+    HOLD.activate = cmd.activate;
     input = HOLD;
   }
 
@@ -213,4 +227,20 @@ export function stepGame(
   stepLightning(state.lightning, state.vehicle, state.targets, state.drift, input, state.time, dt, state.events);
   applyRewards(state.economy, state.targets, state.events);
   if (race && layout.race) stepRace(race, layout.race, state.vehicle, state.time, dt, state.events);
+  // Last, and deliberately so: the free-world activity scores what the tick already decided
+  // (`src/sim/rush.ts`). It reads the `targetDestroyed` events raised above and changes
+  // nothing about the car, the traffic or the weapon.
+  if (state.rush && layout.rushSite) {
+    stepRush(
+      state.rush,
+      layout.rushSite,
+      state.vehicle,
+      state.drift,
+      cmd,
+      state.targets,
+      options?.rushRanked ?? true,
+      dt,
+      state.events,
+    );
+  }
 }

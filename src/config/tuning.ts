@@ -8,12 +8,12 @@
 export const SIM_STEP = 1 / 60;
 
 export const VEHICLE = {
-  /** Peak forward speed without nitro (m/s). ~180 km/h. */
-  maxSpeed: 50,
+  /** Peak forward speed without nitro (m/s). ~205 km/h. */
+  maxSpeed: 57,
   /** Reverse speed cap (m/s). ~35 km/h. */
   maxReverseSpeed: 9.8,
-  /** Forward acceleration at zero speed (m/s^2). Tuned for 0-100 km/h in ~4 s. */
-  engineAccel: 8.8,
+  /** Forward acceleration at zero speed (m/s^2). Tuned for 0-100 km/h in ~2.7 s. */
+  engineAccel: 13.2,
   /** Braking deceleration (m/s^2). */
   brakeDecel: 26,
   /**
@@ -150,20 +150,57 @@ export const VEHICLE = {
   counterSteerAssist: 1.6,
   /** Handbrake longitudinal deceleration (m/s^2). */
   handbrakeDecel: 8,
-  /** Minimum speed for handbrake to kick the rear out (m/s). */
+  /**
+   * Fraction of that deceleration the locked rear also scrubs off sideways velocity (0..1).
+   * Kept well below 1 so a held pull still slides, but above 0 so a car sitting sideways on
+   * the handbrake actually bleeds speed instead of coasting across the junction.
+   */
+  handbrakeLateralShare: 0.12,
+  /** Minimum speed for handbrake to kick the rear out (m/s). Gates *starting* a pull. */
   handbrakeMinSpeed: 8,
-  /** Speed range above `handbrakeMinSpeed` over which the kick reaches full strength (m/s). */
+  /**
+   * Speed below which a pull already under way finally dies (m/s). Well under
+   * `handbrakeMinSpeed`: throwing the car at a junction is a decision made at speed, and a
+   * rotation that is already happening should not stop dead just because the scrub worked.
+   */
+  handbrakeHoldMinSpeed: 3,
+  /** Speed range above `handbrakeHoldMinSpeed` over which the kick reaches full strength (m/s). */
   handbrakeKickRamp: 4,
-  /** Yaw kick while the handbrake is held and the wheel is turned (rad/s). */
+  /** Yaw kick from a flick of the handbrake, before the hold ramp adds to it (rad/s). */
   handbrakeYawKick: 1.35,
-  /** Slip angle where the handbrake kick starts fading out (rad). */
-  handbrakeKickFadeStart: (18 * Math.PI) / 180,
-  /** Slip angle where the handbrake kick is fully gone (rad). Prevents handbrake spins. */
-  handbrakeKickFadeEnd: (42 * Math.PI) / 180,
-  /** Throttle effectiveness while fully sliding (0..1). Speed bleeds during a drift. */
-  driftThrottleScale: 0.5,
+  /** Yaw kick once the pull has been held long enough to reach full authority (rad/s). */
+  handbrakeHoldYawKick: 4,
+  /** Seconds a pull counts as a flick before the hold ramp starts. Below this, nothing changes. */
+  handbrakeTapTime: 0.14,
+  /** Seconds of holding, past `handbrakeTapTime`, to reach full pull authority. */
+  handbrakeHoldRamp: 0.5,
+  /**
+   * Rotation a flick of the handbrake is allowed to add before its kick fades out (rad). ~45
+   * deg: the old fixed slip fade, expressed as the angle it used to buy.
+   */
+  handbrakeTapAngle: (45 * Math.PI) / 180,
+  /**
+   * Rotation a fully held pull is allowed to add (rad). ~175 deg, so holding the button for
+   * about a second swings the nose all the way round - the reverse entry - and no further.
+   */
+  handbrakeHoldAngle: (175 * Math.PI) / 180,
+  /** Rotation over which the kick eases off as the budget above runs out (rad). */
+  handbrakeAngleFade: (30 * Math.PI) / 180,
+  /**
+   * Self-aligning rate left while a pull is at full authority (0..1). Locked rear tyres make
+   * no aligning force, so a held handbrake is what lets the nose keep coming round past the
+   * angle the spin guard would otherwise defend.
+   */
+  handbrakeAlignScale: 0.18,
+  /**
+   * Throttle effectiveness while fully sliding (0..1). Holding a drift is done on the power:
+   * sideways tyres scrub hard, and this is the drive that pays for it. It was half that while
+   * the body rotation was quietly manufacturing speed (see step 6 of `stepVehicle`); with that
+   * gone, the engine has to actually do the job or a drift just decays into a spin.
+   */
+  driftThrottleScale: 0.7,
   /** Longitudinal scrub per m/s of lateral speed while sliding (1/s). */
-  driftDrag: 0.22,
+  driftDrag: 0.14,
   /** Minimum speed to consider the car "moving" for direction/steering logic (m/s). */
   movingThreshold: 0.5,
   /** Collision restitution (0..1). */
@@ -524,7 +561,7 @@ export const NEAR_MISS = {
   /** Minimum speed for a pass to score at all (m/s). ~65 km/h. */
   minSpeed: 18,
   /** Speed at which the speed factor saturates (m/s). Above the un-boosted top speed on purpose. */
-  fullSpeed: 52,
+  fullSpeed: 59,
   /** Award floor for any qualifying pass. */
   minPoints: 10,
   /** Award ceiling. Only a paint-scraping pass on nitro gets here. */
@@ -991,6 +1028,12 @@ export const AUDIO = {
   /** Strength of the exhaust bang fired on each limiter cut. */
   limiterCutBang: 0.45,
   /**
+   * The chime when the car rolls onto a free-world activity marker. The arcade pickup idiom —
+   * short, bright, rising — so stepping on the circle is confirmed by ear before the prompt has
+   * finished animating in.
+   */
+  pickupVolume: 0.5,
+  /**
    * Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke.
    * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
    * there and not from this knob — raising this only makes a slide loud.
@@ -1195,4 +1238,88 @@ export const BUSES = {
   doorTime: 1.2,
   /** How fast it can swing its nose round a corner (rad/s). */
   turnRate: 0.9,
+};
+
+/**
+ * RAYO RUSH: the free-world time attack (`src/sim/rush.ts`).
+ *
+ * A two-minute run, started from a marker in the city, scored on electric cars disabled with
+ * the Rayo. Nothing about it is a separate mode: the same world keeps running, the same
+ * traffic patrols, the same drift charges the same weapon — the activity only watches what
+ * the player was going to do anyway and puts a clock and a score on it.
+ *
+ * EVERY number the rules read is here. `src/sim/rush.ts` imports this and nothing else, so
+ * the whole feel of the activity can be retuned without touching a rule.
+ */
+export const RUSH = {
+  /** Length of one run (s). The headline number in the prompt, which reads it from here. */
+  durationSeconds: 90,
+  /** `3 - 2 - 1 - RAYO RUSH` before the clock starts (s). */
+  countdownSeconds: 3,
+  /** Ranked attempts one player may submit to the global board per calendar day. */
+  dailyRankedAttempts: 3,
+
+  /**
+   * The activity marker in the world, and the prompt it raises.
+   *
+   * THE PAINTED CIRCLE IS THE TRIGGER. `promptRadius` is not a detection range that happens to
+   * sit near some art — it IS the ring stencilled on the road, which
+   * `src/render/scene/env/rushMarker.ts` reads this number to draw. So the prompt is up while
+   * the car is standing on the circle and gone the moment it rolls off, and there is no
+   * invisible catchment around it that keeps a sign on screen half a block later.
+   */
+  marker: {
+    /** Radius of the circle you have to be standing on (m). Also the radius it is painted at. */
+    promptRadius: 7.5,
+    /**
+     * And the radius at which it goes away again (m). Barely wider — enough that a car parked
+     * exactly on the line cannot flicker the prompt, and not enough to read as a lag.
+     */
+    exitRadius: 8.4,
+    /**
+     * Distance the player has to get from the marker after a run before it will offer another
+     * (m). Without it the results screen dismisses straight back into a live prompt.
+     */
+    rearmRadius: 18,
+  },
+
+  /**
+   * Which electric cars wear the target treatment. Everything alive and unscored is a legal
+   * kill; only the near ones are DRAWN as targets, because a marker on all ~126 cars in the
+   * city is both unreadable and a hundred draw calls nobody asked for.
+   */
+  targets: {
+    /** Marked out to here (m). Comfortably past `LIGHTNING.range`, so a target is seen coming. */
+    markRadius: 62,
+    /** Never more than this many marked at once, nearest first. */
+    maxMarked: 14,
+  },
+
+  /**
+   * Scoring. Readable on purpose: a kill is a round hundred, and everything else is a bonus
+   * printed next to it.
+   */
+  scoring: {
+    /** Points for disabling one electric car, before the streak multiplier. */
+    disable: 100,
+    /** Seconds after a kill in which the next one extends the streak. */
+    chainWindow: 5,
+    /** Multiplier added per link of the streak: x1, x1.5, x2, ... */
+    chainStep: 0.5,
+    /** Ceiling on the streak multiplier. */
+    chainMax: 5,
+    /** Flat bonus for a shot whose charge came out of a drift. */
+    driftChargeBonus: 50,
+    /**
+     * Seconds after a drift ends in which a shot still counts as drift-charged. The drift that
+     * paid for the shot is usually over by the time the car is pointed at anything.
+     */
+    driftChargeGrace: 1.2,
+    /** Extra points per second of that drift, on top of the flat bonus. */
+    driftBonusPerSecond: 15,
+    /** Seconds of drift past which the length bonus stops growing. */
+    driftBonusMaxSeconds: 4,
+    /** Extra on top again when the drift was clean: held from start to finish without a hit. */
+    cleanDriftBonus: 40,
+  },
 };

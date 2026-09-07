@@ -1459,3 +1459,137 @@ the real physics — up the ramp, over the bay, back down — and takes the flag
 found a bug in the harness rather than the game: `qa-mp.mjs` tested "inside a building" in two
 dimensions, which calls every car on the viaduct a car in a wall, so it now respects `maxY` the
 way `src/sim/collision.ts` does.
+
+## Rayo Rush: a free-world activity (2026-09-07)
+
+A ninety-second time attack you find in the city rather than pick off a menu. Drive into a marked
+patch of `blvd-center`, take it up, and the next ninety seconds of ordinary free roam are scored:
+every electric car you disable with the Rayo is worth points, chaining them multiplies those
+points, and drifting into the shot is worth more again. When the clock runs out you get a card
+and go back to driving.
+
+**It is not a mode.** No load, no separate map, no second simulation, nothing torn down at the
+end — the whole activity is one rules module (`src/sim/rush.ts`) that runs LAST in the tick and
+only watches. It never moves a car, never touches the lightning, never changes what the player
+may do. `stepGame` calls it after `stepLightning` and `applyRewards`, so it scores the
+`targetDestroyed` events the tick already raised, and the ¥ economy is untouched: a kill during
+a run still pays exactly the money it always did, and the run's score is a separate number.
+
+**What counts.** Only a kill made by this player's own Rayo — the only thing that raises
+`targetDestroyed` at all (a shove never destroys; another player's kill in the open world comes
+in through `src/sim/traffic.ts` and is not an event here). And only once per car, which is what
+`RushState.scored` is: one flag per electric car for the length of the run, so a car shot,
+respawned twelve seconds later and shot again is worth nothing the second time. With 126 cars in
+the city that is anti-farming, not a shortage.
+
+**Scoring**, all of it in `RUSH` in `src/config/tuning.ts` and nowhere else: 100 a kill; a chain
+window that multiplies x1, x1.5, x2 … to a x5 cap and drops to nothing if you take too long; a
+flat bonus plus per-second and clean-drift bonuses for a shot fired out of a slide. All charge
+comes from drifting, so "charged through drifting" had to mean something sharper than "had
+charge": it means the shot came out of a drift — during one, or inside a grace after it ended,
+because the slide is over by the time the nose is pointed at anything.
+
+**The marker** (`src/render/scene/env/rushMarker.ts`) is paint and a light, not an object in the
+road: a hazard ring stencilled on the asphalt, two chevrons pointing into it, and a glyph hung
+well over roof height. No collider. It warms and quickens as you close on it and drops to a trace
+while a run is on.
+
+The glyph started as a textured plane and Juan asked for it bigger and, if possible, 3D — which
+it should have been from the start, because a spinning plane is edge-on twice a turn and the
+thing vanished at exactly the moment the rotation was meant to be reading. It is now an extruded
+bolt (3.8 m tall, nearly a metre deep, so side-on it is a bar rather than a line) inside a broken
+torus tilted off vertical, the two counter-rotating at different rates. Its solidity is carried
+by VERTEX COLOUR, not by light: the city is hemisphere-dominated, so a lit material shades every
+vertical face identically and the extrusion would have read as flat as the plane it replaced —
+bright caps and deep sides put the contrast in the geometry, where a turn can show it. A
+back-facing shell scaled 1.09 gives the neon bleed round the silhouette. The wordmark came off
+the plate and became a `THREE.Sprite`, so it billboards itself and stays square to the driver
+while everything under it turns; it hangs below the halo rather than above because the chase
+camera looks slightly down and anything above ends up in the top of the frame where the controls
+card is. Eight draw calls and 978 triangles for the whole marker.
+
+**Marked cars** wear the electric car's OWN acquisition ring in the system's amber, held steady
+instead of pulsed — the cyan lock always wins when both apply. Only the nearest fourteen inside
+62 m, chosen by `markRushTargets`, which is the same predicate that decides what actually
+scores, so the ring and the rule cannot disagree. Measured in the browser: a live run costs 9
+extra draw calls and ~1.5k triangles over free roam, against ~130 draws and a hundred rings if
+every car were marked.
+
+**The prompt is the paint.** It first went up inside a 26 m catchment around a 7.2 m painted
+circle, so the sign hung around for half a block after you had left — Juan's note was that it
+should show when you step on the icon and go the moment you are not on it. So the trigger IS the
+circle now: `RUSH.marker.promptRadius` is 7.5 m, `rushMarker.ts` reads that same number to draw
+the ring, and there is nothing to keep in sync because there is only one number. `exitRadius` is
+8.4 — enough that a car parked on the line cannot flicker the prompt, not enough to read as a
+lag. Rolling onto the paint also raises a `rushPrompt` edge, which is what the chime listens to.
+
+**On the map.** The marker is drawn on the minimap in the chrome's hazard yellow — a ringed
+bolt on a dark disc, which is the only yellow anything on that map uses, so the eye finds it
+without being told to look. It rides in the base layer with the roads, because it never moves and
+so costs nothing per frame, and it is drawn at a fixed PIXEL size rather than to world scale: a
+7.5 m circle in a 540 m city is under three pixels on a 176 px map, and a mark the player is
+meant to spot has to be sized for the eye rather than for the ground. `MinimapData.activities`
+carries it, filled by `cityWorld.ts` from the same `RUSH_SITE` the rules and the art get, so the
+map cannot send anyone somewhere the marker is not. This is the opposite call to the one made
+about the electric cars, and deliberately: a car is quarry and hunting it is the game, whereas an
+activity is a destination, and a destination nobody can find does not exist.
+
+**The chime.** `oneShots.pickup()`, in the arcade pickup idiom Juan asked for (Vice City's money
+grab): three notes rising root-fourth-octave on triangle oscillators through a high lowpass, a
+quiet sine an octave over each for the glassy top, and a bright noise tick on the leading edge
+for the first note to land on. Over in a fifth of a second — it is a "you are standing on it",
+not a fanfare. Synthesized like everything else here; no asset. Only on the way in: rolling off a
+marker is not worth a sound.
+
+**Interface.** `src/ui/rushOverlay.ts` is a HUD sub-component, composed into `createHud` the way
+the tacho and the gauges are and under the same contract (built once, diffed writes, WAAPI
+flashes). The count-in is not its own element: `3 — 2 — 1 — RAYO RUSH` reuses the race
+countdown's. Prompt low and centred, clock/score/streak in the top gutter under the controls
+card, kill feed up the left edge, and only the results card takes the middle of the screen —
+`EV DISABLED +100`, `CHAIN x3`, `CLEAN DRIFT CHARGE BONUS +143`. One button does the whole
+activity (F, pad R3, or a click/tap on the prompt itself), and the marker stays quiet after a
+run until you have driven away and come back, so dismissing the card never drops you into a
+prompt for the run you just finished.
+
+**The board.** Three plain HTTP routes on the same server (`server/leaderboard.mjs`,
+`src/net/leaderboard.ts`) — not the socket, because a scoreboard is a request and a response and
+it has to work for someone driving the city alone. A small JSON document, debounced to disk
+under `RB_DATA_DIR` (or `.data/`, gitignored); point that at something that survives a deploy or
+the board resets with each release. One row per player, their best. Three ranked attempts per
+UTC day, enforced server-side and mirrored in localStorage so the prompt can say a number before
+the network answers. Identity is a random id the browser mints and keeps: no accounts, and
+clearing site data buys a fresh allowance — a known hole, and the same trust model
+`src/net/protocol.ts` already states. **The activity never waits on it.** Server down, no
+socket, opened off a file: you still get the marker, the countdown, the two minutes, the score
+and a personal best. You just lose the global board.
+
+**The sign's size.** It went up twice — 30% first, then "bigger, don't be shy" — which is what
+finally made it worth building properly. It is now one number, `--rb-prompt`, with the type
+inside in `em` against it and the box in `calc()`: one value moves the panel, every line, the
+padding and the key badge together. That number follows the WINDOW rather than sitting at a fixed
+px, because a sign sized for one monitor is the wrong size on every other one —
+`clamp(11.2px, 1.2vw, 17.6px)`, so it is the same share of the screen at 1280 as at 3440, with
+`max-width: 94vw` as the backstop where the longest line wraps (balanced) instead of running off
+a phone. It overshot at first and came back 20%; scaling the three numbers in that clamp by one
+factor is the whole retune, at every window width at once. Body text settled at 14.4px against
+the 9px it started at, a little over 1.5x.
+
+That change also turned up a real bug: the rule carried the usual `font: inherit` button reset
+AFTER the size, and the `font` shorthand resets `font-size` with everything else — so the sign
+was silently rendering at the browser's own 16px rather than at its own value. It is
+`font-family` and friends now, spelled out.
+
+**Duration.** It ran at two minutes first; Juan cut it to ninety seconds. A one-line change,
+because the length lives only in `RUSH.durationSeconds` — the prompt reads it to say what it is
+promising and the clock reads it to know where to start, so there was no second copy to go stale.
+
+**Tested.** 578 unit tests green (35 new: 25 rules, 10 board), typecheck green. `tests/rush.test.ts` pins the two
+things most worth pinning — a kill on the very last tick is paid and nothing after it is, and one
+car can never pay twice — plus the chain curve and its cap, the streak lapsing, the drift bonuses,
+the count-in, the re-arm, the prompt appearing and vanishing with the edge of the paint, and the
+marker standing on a road, clear of anything solid, with traffic around it. `tests/leaderboard.test.ts` starts a real server on a throwaway data dir and drives the
+three routes: the allowance, one row per player, refusing a spent day and refusing an implausible
+score without spending an attempt. In the browser at `?mode=city`: prompt, count-in, chains to x3,
+drift bonuses, the card with a new personal best, dismiss, and the same run again against a real
+server on 8088 — filed, ranked, and the prompt down to `NO RANKED ATTEMPTS LEFT TODAY · PRACTICE
+RUN` once the day was spent.

@@ -35,6 +35,7 @@ import {
   RADIO_TOWERS,
   RAMP_SPECS,
   RING_BILLBOARDS,
+  RUSH_SITE,
   SKYWAY_SPEC,
   TRAFFIC_LOOPS,
   VIADUCT_CARS,
@@ -396,6 +397,10 @@ export function createCityWorld(): World {
     walls,
     surface,
     race: null,
+    // The free-world activity marker. A point and a heading; the rules read it
+    // (`src/sim/rush.ts`) and the art stands on it (`env/rushMarker.ts`). No collider —
+    // the boulevard under it is still just a boulevard.
+    rushSite: { ...RUSH_SITE },
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },
@@ -408,6 +413,9 @@ export function createCityWorld(): World {
         elevated: !!rb.elevated,
       })),
       water: { minX: inner.minX, maxX: inner.maxX, minZ: CITY_QUAY_Z, maxZ: 270 },
+      // The same point the rules and the art are given, so the map cannot send the player
+      // somewhere the marker is not.
+      activities: [{ x: RUSH_SITE.x, z: RUSH_SITE.z }],
     },
   };
 
@@ -460,6 +468,7 @@ export function createCityWorld(): World {
     water,
     plaza: null,
     wantedBoard: null,
+    rushMarker: { ...RUSH_SITE },
     startLine: null,
     checkpoints: [],
     zoneAt,

@@ -1,7 +1,7 @@
 import type { GateDef, ZoneId } from '../../../world/cityPlan';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { groundGlow, halo, lampSparks, type EnvBuilders } from './builders';
 import { signCell } from './textures';
 import { rollLampFault } from './lampFaults';
 
@@ -364,6 +364,10 @@ export function lampPost(
   const lensY = headY - LAMP.lensDrop * s;
   b.neon.tube(hx - ax * lensHalf, lensY, hz - az * lensHalf, hx + ax * lensHalf, lensY, hz + az * lensHalf, LAMP.lensWidth * s);
   b.neon.fault(0);
+  // The bad connection into the lens, letting go every few seconds and raining down the pole's
+  // own height onto the pavement. At the lens, not at the pole: it is the same joint that makes
+  // the head strobe.
+  if (fault > 0) lampSparks(b, hx, lensY, hz, color, fault);
   // The boom is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
   halo(b, hx, lensY - 0.05, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2, fault);
   // The spill always lands on the asphalt, whatever the pole ended up standing on.

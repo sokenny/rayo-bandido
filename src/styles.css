@@ -2970,3 +2970,424 @@ body.rb-touch-pad .rb-minimap {
   font-size: 12px;
   opacity: 0.55;
 }
+
+/* ------------------------------------------------------- rayo rush (free-world activity)
+
+   The activity is the SYSTEM talking to the player, so it is hazard yellow throughout and the
+   game's own cyan / magenta / acid are left to the game. Same skin rules as everything else:
+   notched corners, 1px outlines, condensed display type for anything shouted and mono for
+   anything the machine is stating.
+
+   Layout rule: nothing here covers the road while the road still matters. The prompt sits low
+   and centred, the live readout takes the top-centre gutter between the money and the minimap,
+   the feed runs up the left edge above the drift line, and only the results card — shown once
+   the driving is over — takes the middle of the screen. */
+
+.rb-rush {
+  position: absolute;
+  inset: 0;
+  /* A layer, not a surface: only the two buttons inside it take a pointer. */
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- the prompt */
+
+/* Sized off one number. A card built out of a dozen loose px values is a card that drifts apart
+   the next time it is asked to move — so the type inside it is in `em` against this root size and
+   the box is in `calc()` against it. One value moves the sign, its type, its padding and its key
+   badge together.
+
+   And that number follows the WINDOW, because a sign sized for one monitor is the wrong size on
+   every other one: a fixed px value that reads boldly at 1400 is a postage stamp on an ultrawide
+   and overflows a laptop. `vw` between a floor and a ceiling means it is always about the same
+   share of the screen. `max-width` is the backstop for the narrowest phones, where the long
+   middle line wraps rather than running off the edge. */
+.rb-rush__prompt {
+  --rb-prompt: clamp(11.2px, 1.2vw, 17.6px);
+  max-width: 94vw;
+  box-sizing: border-box;
+  position: absolute;
+  left: 50%;
+  bottom: 20%;
+  transform: translate(-50%, 0);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--rb-prompt) * 0.67);
+  margin: 0;
+  font-size: var(--rb-prompt);
+  padding: calc(var(--rb-prompt) * 1.55) calc(var(--rb-prompt) * 3.33) calc(var(--rb-prompt) * 1.33);
+  border: 0;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-hairline), 0 0 40px rgba(0, 0, 0, 0.5);
+  clip-path: var(--rb-notch);
+  color: var(--rb-text);
+  /* `font-family`, not the `font` shorthand a button usually gets: the shorthand resets
+     `font-size` along with everything else, which would quietly throw away `--rb-prompt`
+     and leave the sign at the browser's own 16px. */
+  font-family: inherit;
+  font-weight: 400;
+  font-style: normal;
+  line-height: normal;
+  text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rb-rush__prompt.is-on {
+  display: flex;
+}
+
+.rb-rush__prompt-title {
+  padding: 0.27em 1.27em 0.18em;
+  background: var(--rb-yellow);
+  color: #05060a;
+  font-family: var(--rb-mono);
+  font-size: 1em;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+  transform: skewX(-7deg);
+}
+
+.rb-rush__prompt-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22em;
+  font-family: var(--rb-mono);
+  /* On a window narrow enough to make a line wrap, `balance` splits it evenly instead of
+     leaving one word stranded — the wrap then reads as a decision rather than as an accident. */
+  text-wrap: balance;
+  font-size: 0.82em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rb-dim);
+}
+
+.rb-rush__prompt-lines b {
+  color: var(--rb-yellow);
+  font-weight: 700;
+}
+
+.rb-rush__prompt-attempts {
+  font-family: var(--rb-mono);
+  font-size: 0.82em;
+  letter-spacing: 0.18em;
+  color: var(--rb-yellow-dim);
+}
+
+/* Out of ranked attempts: the run is still offered, it just will not count. Red, because that
+   is this skin's word for "this is not the thing you think it is". */
+.rb-rush__prompt-attempts.is-spent {
+  color: var(--rb-red);
+}
+
+.rb-rush__prompt-key {
+  margin-top: 0.22em;
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  font-size: 0.82em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--rb-dim);
+}
+
+/* The shared key badge is sized for the HUD's own 9px chrome; inside the sign it has to grow
+   with the line it sits on or it reads as a stray element from another screen. */
+.rb-rush__prompt-key .rb-key {
+  padding: 0.14em 0.7em;
+  font-size: 1em;
+}
+
+/* ----------------------------------------------------------------- live readout */
+
+/* Below the controls card, which runs along the very top edge and only fades after ten
+   seconds — a run started on a fresh session would otherwise begin with the clock sitting on
+   top of the key list. */
+.rb-rush__live {
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.rb-rush__live.is-on {
+  display: flex;
+}
+
+.rb-rush__clock {
+  font-family: var(--rb-display);
+  font-size: 42px;
+  font-weight: 700;
+  font-stretch: condensed;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--rb-yellow);
+  text-shadow: 0 0 18px rgba(252, 238, 10, 0.35), 0 2px 0 #05060a;
+}
+
+/* The last ten seconds. The clock is the pressure, so it is the clock that says so. */
+.rb-rush__clock.is-urgent {
+  color: var(--rb-red);
+  text-shadow: 0 0 18px rgba(255, 43, 61, 0.6), 0 2px 0 #05060a;
+  animation: rb-blink 0.9s ease-in-out infinite;
+}
+
+.rb-rush__score {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--rb-display);
+  font-size: 22px;
+  font-weight: 700;
+  font-stretch: condensed;
+  line-height: 1;
+  color: var(--rb-text);
+}
+
+.rb-rush__score-unit {
+  font-family: var(--rb-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--rb-dim);
+}
+
+.rb-rush__streak {
+  position: relative;
+  min-width: 54px;
+  padding-bottom: 4px;
+  opacity: 0;
+  text-align: center;
+  transition: opacity 160ms ease;
+}
+
+.rb-rush__streak.is-on {
+  opacity: 1;
+}
+
+.rb-rush__streak-value {
+  font-family: var(--rb-display);
+  font-size: 17px;
+  font-weight: 700;
+  font-stretch: condensed;
+  letter-spacing: 0.06em;
+  color: var(--rb-yellow);
+}
+
+/* The window the next kill has to land inside, draining left to right. */
+.rb-rush__streak-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--rb-yellow);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+/* ----------------------------------------------------------------- kill feed */
+
+.rb-rush__feed {
+  position: absolute;
+  left: 26px;
+  bottom: 232px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 3px;
+  width: 260px;
+}
+
+.rb-rush__line {
+  opacity: 0;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rb-text);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+.rb-rush__line.is-score {
+  color: var(--rb-yellow);
+}
+
+.rb-rush__line.is-chain {
+  color: var(--rb-magenta);
+}
+
+.rb-rush__line.is-style {
+  color: var(--rb-cyan);
+}
+
+/* ----------------------------------------------------------------- results card */
+
+.rb-rush__results {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 24px 40px 18px;
+  background: var(--rb-panel-solid);
+  box-shadow: inset 0 0 0 1px rgba(252, 238, 10, 0.5), 0 0 60px rgba(0, 0, 0, 0.6);
+  clip-path: var(--rb-notch);
+  --rb-n: 18px;
+  pointer-events: auto;
+}
+
+.rb-rush__results.is-on {
+  display: flex;
+}
+
+.rb-rush__results-head {
+  padding: 3px 14px 2px;
+  background: var(--rb-yellow);
+  color: #05060a;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+  transform: skewX(-7deg);
+}
+
+.rb-rush__results-score {
+  font-family: var(--rb-display);
+  font-size: 66px;
+  font-weight: 700;
+  font-stretch: condensed;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--rb-text);
+  text-shadow: 0 0 20px rgba(252, 238, 10, 0.4);
+}
+
+.rb-rush__results-best {
+  display: none;
+  padding: 2px 10px 1px;
+  box-shadow: inset 0 0 0 1px var(--rb-yellow);
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--rb-yellow);
+}
+
+.rb-rush__results-best.is-on {
+  display: block;
+  animation: rb-blink 1.4s ease-in-out infinite;
+}
+
+.rb-rush__results-rows {
+  margin: 6px 0 0;
+  display: grid;
+  gap: 3px;
+  min-width: 260px;
+}
+
+.rb-rush__results-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--rb-hairline-cold);
+}
+
+.rb-rush__results-rows dt {
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--rb-dim);
+}
+
+.rb-rush__results-rows dd {
+  margin: 0;
+  font-family: var(--rb-display);
+  font-size: 14px;
+  font-weight: 700;
+  font-stretch: condensed;
+  color: var(--rb-text);
+}
+
+.rb-rush__dismiss {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rb-hairline);
+  clip-path: var(--rb-notch);
+  --rb-n: 9px;
+  color: var(--rb-dim);
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rb-rush__dismiss:hover {
+  color: var(--rb-text);
+  box-shadow: inset 0 0 0 1px var(--rb-yellow);
+}
+
+/* Narrow or short windows: the readout shrinks and the feed comes up off the drift line,
+   which on a phone is much closer to the bottom of the screen. */
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-rush__clock {
+    font-size: 30px;
+  }
+
+  .rb-rush__score {
+    font-size: 16px;
+  }
+
+  .rb-rush__feed {
+    left: 14px;
+    bottom: 170px;
+    width: 200px;
+  }
+
+  .rb-rush__line {
+    font-size: 8px;
+    letter-spacing: 0.12em;
+  }
+
+  .rb-rush__results-score {
+    font-size: 46px;
+  }
+
+  .rb-rush__results-rows {
+    min-width: 200px;
+  }
+
+  .rb-rush__prompt {
+    bottom: 24%;
+    /* One number again: the whole sign comes down together on a phone or a short window. It
+       takes a bigger share of a small screen than of a large one (1.76vw against 1.2vw) but a
+       lower ceiling, because on a phone the sign has to leave some road visible behind it. */
+    --rb-prompt: clamp(9.6px, 1.76vw, 13.6px);
+  }
+
+  .rb-rush__prompt-lines {
+    letter-spacing: 0.1em;
+  }
+}

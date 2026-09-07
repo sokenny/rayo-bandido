@@ -13,6 +13,12 @@ export interface OneShots {
   nearMiss(quality: number): void;
   /** Race countdown tick; `go` is the longer, higher note on the lights going out. */
   countdown(go: boolean): void;
+  /**
+   * Rolling onto a free-world activity marker: the arcade pickup chime, a bright rising figure
+   * over in a fifth of a second. Confirms the circle by ear before the prompt has finished
+   * animating in, which is the whole job — it is a "you are standing on it", not a fanfare.
+   */
+  pickup(): void;
 }
 
 /**
@@ -128,6 +134,25 @@ export function createOneShots(core: AudioCore): OneShots {
       } else {
         playOsc('square', t, t + 0.19, 784, 784, 0.55 * v, 0.006, 2600);
       }
+    },
+
+    pickup() {
+      const t = ctx.currentTime;
+      const v = AUDIO.pickupVolume;
+      // A rising open figure — root, fourth, octave — rather than a chord: three quick notes
+      // read as "picked up", where a stack of them reads as an achievement.
+      const notes = [1046.5, 1396.9, 2093];
+      const step = 0.042;
+      for (let i = 0; i < notes.length; i++) {
+        const at = t + i * step;
+        const f = notes[i];
+        // Triangle through a high lowpass: a chime, not the square wave the countdown uses.
+        playOsc('triangle', at, at + 0.17, f, f, (0.5 - i * 0.07) * v, 0.003, 7000);
+        // An octave above, quiet: the glassy top that makes it read as metal rather than a beep.
+        playOsc('sine', at, at + 0.11, f * 2, f * 2, (0.14 - i * 0.03) * v, 0.003);
+      }
+      // A bright tick on the leading edge, so the first note has something to land on.
+      playNoise(t, t + 0.05, 'highpass', 5200, 5200, 0.8, 0.2 * v, 0.002);
     },
 
     shutdown() {

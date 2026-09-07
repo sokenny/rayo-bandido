@@ -6,7 +6,8 @@ import type { PlayerCommand } from '../types';
  *
  * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
  * E or mouse click fires lightning, R restarts, C toggles cruise mode, P cycles camera view,
- * X / Z shift up / down on a manual box, T toggles automatic / manual.
+ * X / Z shift up / down on a manual box, T toggles automatic / manual, F takes up (and
+ * afterwards dismisses) a free-world activity — the Rayo Rush marker.
  */
 export interface InputSource {
   /** Fill `out` with the current command. Edge-triggered flags are consumed. */
@@ -28,6 +29,7 @@ export function createPlayerCommand(): PlayerCommand {
     shiftUp: false,
     shiftDown: false,
     transmission: false,
+    activate: false,
   };
 }
 
@@ -40,6 +42,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   let shiftUpLatched = false;
   let shiftDownLatched = false;
   let transmissionLatched = false;
+  let activateLatched = false;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) {
@@ -54,6 +57,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
     if (e.code === 'KeyX') shiftUpLatched = true;
     if (e.code === 'KeyZ') shiftDownLatched = true;
     if (e.code === 'KeyT') transmissionLatched = true;
+    if (e.code === 'KeyF') activateLatched = true;
     if (isGameKey(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -100,6 +104,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.shiftUp = shiftUpLatched;
       out.shiftDown = shiftDownLatched;
       out.transmission = transmissionLatched;
+      out.activate = activateLatched;
       fireLatched = false;
       restartLatched = false;
       cruiseLatched = false;
@@ -107,6 +112,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       shiftUpLatched = false;
       shiftDownLatched = false;
       transmissionLatched = false;
+      activateLatched = false;
     },
     dispose() {
       target.removeEventListener('keydown', onKeyDown as EventListener);

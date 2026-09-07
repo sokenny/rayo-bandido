@@ -12,6 +12,7 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
+import { createRushMarker, type RushMarkerVisual } from './env/rushMarker';
 import { createBadkalaPoster } from './env/badkalaPoster';
 import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
@@ -55,6 +56,12 @@ export interface EnvironmentVisual {
   root: THREE.Group;
   /** The sky, the rain and the storm (`env/atmosphere.ts`). Exposed for live tuning. */
   atmosphere: AtmosphereVisual;
+  /**
+   * The RAYO RUSH marker, in a world that carries one; null everywhere else. Exposed because
+   * it is the one piece of scenery that answers the player: `src/game.ts` tells it how close
+   * the car is and whether a run is under way.
+   */
+  rushMarker: RushMarkerVisual | null;
   /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
   ready: Promise<void>;
   /** Called once per render frame for cheap animation (blinking signs, holograms). */
@@ -331,6 +338,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const wantedBoard = createWantedBillboard(plan.wantedBoard ?? { x: 0, z: -10_000, rotY: 0 });
   if (plan.wantedBoard) root.add(wantedBoard.group);
 
+  /* ------------------------------------------------- rayo rush marker */
+
+  const rushMarker = plan.rushMarker ? createRushMarker(plan.rushMarker) : null;
+  if (rushMarker) root.add(rushMarker.group);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -343,6 +355,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   return {
     root,
     atmosphere,
+    rushMarker,
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
       // The sky, the rain and the storm. First, because a strike rewrites the fog colour and
@@ -381,10 +394,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
       // The plaza WANTED board strobes subtly.
       wantedBoard.update(time);
+      // The activity marker breathes, and quickens as the player closes on it.
+      rushMarker?.update(time);
     },
     dispose() {
       atmosphere.dispose();
       wantedBoard.dispose();
+      rushMarker?.dispose();
       badkala.dispose();
       graffiti.dispose();
       roadArt.dispose();

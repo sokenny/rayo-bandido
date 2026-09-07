@@ -4,8 +4,17 @@ import { createCityWorld } from './world/cityWorld';
 import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
-import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot, Transmission } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
+import type {
+  GameEvent,
+  GameMode,
+  GameState,
+  HudSnapshot,
+  PlayerCommand,
+  RaceHudSnapshot,
+  RushHudSnapshot,
+  Transmission,
+} from './core/types';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, RUSH, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -17,6 +26,8 @@ import { createGamepadInput } from './core/input/gamepad';
 import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
+import { canStartRush, markRushTargets } from './sim/rush';
+import { createLeaderboard } from './net/leaderboard';
 import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
 import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
@@ -253,8 +264,37 @@ export function createGame(
   theme.arm(window);
   end();
 
+  /* --------------------------------------------------------------- rayo rush */
+
+  /**
+   * The free-world activity, in the worlds that carry a marker for it. Everything here is
+   * `null` elsewhere, and every use of it below is guarded — the game runs exactly as it did
+   * before the activity existed when there is no marker, which is what keeps one code path
+   * for both.
+   */
+  const rushSite = layout.rushSite ?? null;
+  // The global board and the day's allowance. It never blocks: `standing()` answers from
+  // localStorage at once and refreshes behind the frame (`src/net/leaderboard.ts`).
+  const leaderboard = rushSite ? createLeaderboard() : null;
+  /** One flag per electric car: whether it is drawn as a target this frame. */
+  const rushMarks = rushSite ? new Uint8Array(state.targets.length) : null;
+  /**
+   * A click or a tap on the prompt raises the same intent the F key does. It is queued rather
+   * than applied, because the command is only meaningful on a simulation tick.
+   */
+  let activateQueued = false;
+  /** What the last finished run was compared against, frozen before the board is told about it. */
+  let rushPreviousBest = -1;
+  let rushNewBest = false;
+
   end = measure('hud');
-  const hud = createHud(hudRoot, mode, !!net);
+  const hud = createHud(hudRoot, mode, !!net, {
+    onActivate: rushSite
+      ? () => {
+          activateQueued = true;
+        }
+      : undefined,
+  });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
   // line on the clipboard names the surface you were looking at, not just the ground under it.
@@ -332,7 +372,28 @@ export function createGame(
     counterSteer: 0,
     mode,
     race: null,
+    rush: null,
   };
+  const rushSnapshot: RushHudSnapshot = {
+    phase: 'idle',
+    countdown: 0,
+    timeLeft: 0,
+    score: 0,
+    disabled: 0,
+    chain: 0,
+    multiplier: 1,
+    chainFraction: 0,
+    bestChain: 0,
+    styleBonus: 0,
+    atMarker: false,
+    canStart: false,
+    attemptsLeft: -1,
+    ranked: true,
+    previousBest: -1,
+    results: null,
+    newBest: false,
+  };
+  if (state.rush) snapshot.rush = rushSnapshot;
   const raceSnapshot: RaceHudSnapshot = {
     phase: 'countdown',
     countdown: 0,
@@ -387,6 +448,20 @@ export function createGame(
     if (on) {
       cruiseControl.reset(state.vehicle);
       cruiseArmed = false;
+    }
+  }
+
+  /**
+   * What to call this player on the global board: the name they gave the lobby, or the same
+   * fallback the rest of the game uses. Read fresh each time, because it can change in
+   * another tab.
+   */
+  function playerName(): string {
+    if (net?.self?.name) return net.self.name;
+    try {
+      return localStorage.getItem('rb.name') || 'BANDIDO';
+    } catch {
+      return 'BANDIDO';
     }
   }
 
@@ -623,6 +698,27 @@ export function createGame(
       case 'nearMiss':
         effects.nearMissPopup(ev.x, ev.y, ev.z, ev.points);
         break;
+      case 'rushScore':
+        // The run's points, over the wreck, INSTEAD of the ¥ pop the same kill also earned —
+        // `targetDestroyed` runs first and has already spawned one, so it is replaced rather
+        // than joined. Two numbers over one car is one too many.
+        effects.rushPopup(ev.x, ev.y, ev.z, ev.points);
+        break;
+      case 'rushEnd':
+        // The clock has stopped and the card is already on screen; the board is told about it
+        // afterwards, and never waited on. A run that cannot be filed is still a run.
+        rushPreviousBest = leaderboard ? leaderboard.standing().best : -1;
+        rushNewBest = ev.results.score > rushPreviousBest;
+        if (leaderboard && ev.results.ranked) {
+          void leaderboard.submit(ev.results, playerName()).then((result) => {
+            // The server may know a better previous best than this browser did (the same
+            // player on another machine), so the card is corrected if the answer arrives
+            // while it is still up.
+            rushPreviousBest = result.previousBest;
+            rushNewBest = result.newBest;
+          });
+        }
+        break;
       case 'collision':
         effects.collision(ev.x, ev.y, ev.z, ev.impact);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
@@ -635,6 +731,8 @@ export function createGame(
         }
         break;
       case 'restart':
+        rushPreviousBest = -1;
+        rushNewBest = false;
         effects.reset();
         backfire.reset();
     prevLimiterCut = 0;
@@ -705,6 +803,15 @@ export function createGame(
       }
     }
 
+    // A tap or a click on the RAYO RUSH prompt is the F key by another route.
+    if (activateQueued) {
+      command.activate = true;
+      activateQueued = false;
+    }
+    // Asked every tick rather than captured: the day's allowance is spent by finishing runs,
+    // and the answer can also change when the board finally reports in.
+    if (leaderboard) stepOptions.rushRanked = leaderboard.canRank();
+
     if (command.pov) chase.cycleView();
     if (command.cruise) setCruise(!cruising);
     if (cruising) {
@@ -768,7 +875,11 @@ export function createGame(
       bodyGear = v.gear;
     }
     car.update(frameDt, simTime);
-    syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime);
+    // Which electric cars wear the target ring this frame. The nearest few only, and only
+    // while a run is on — `markRushTargets` answers with the same rule that decides what
+    // actually scores, so the two can never disagree.
+    if (state.rush && rushMarks) markRushTargets(state.rush, state.targets, v.x, v.z, rushMarks);
+    syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime, rushMarks);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
     syncBuses(busVisuals, state.buses, alpha);
     // Rivals carry their own interpolation (on the network clock), so unlike everything else
@@ -843,6 +954,39 @@ export function createGame(
     snapshot.steer = v.steerAngle / VEHICLE.maxSteerAngle;
     snapshot.counterSteer = v.counterSteer;
     lastNitroAmount = state.nitro.amount;
+    const rush = state.rush;
+    if (rush && rushSite) {
+      rushSnapshot.phase = rush.phase;
+      rushSnapshot.countdown = rush.countdown;
+      rushSnapshot.timeLeft = rush.timeLeft;
+      rushSnapshot.score = rush.score;
+      rushSnapshot.disabled = rush.disabled;
+      rushSnapshot.chain = rush.chain;
+      rushSnapshot.multiplier = rush.multiplier;
+      rushSnapshot.chainFraction = RUSH.scoring.chainWindow > 0 ? rush.chainWindow / RUSH.scoring.chainWindow : 0;
+      rushSnapshot.bestChain = rush.bestChain;
+      rushSnapshot.styleBonus = rush.styleBonus;
+      rushSnapshot.atMarker = rush.atMarker;
+      rushSnapshot.canStart = canStartRush(rush);
+      rushSnapshot.ranked = rush.ranked;
+      rushSnapshot.results = rush.results;
+      rushSnapshot.previousBest = rushPreviousBest;
+      rushSnapshot.newBest = rushNewBest;
+      // The board answers on its own schedule; the prompt shows whatever is known by now.
+      rushSnapshot.attemptsLeft = leaderboard ? leaderboard.standing().attemptsLeft : -1;
+
+      // The marker in the world answers the car before the prompt does: it warms and quickens
+      // over the last stretch of the approach.
+      const marker = environment.rushMarker;
+      if (marker) {
+        const dx = pose.x - rushSite.x;
+        const dz = pose.z - rushSite.z;
+        const reach = RUSH.marker.promptRadius * 3;
+        const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
+        marker.setProximity(near * near);
+        marker.setRunning(rush.phase === 'running' || rush.phase === 'countdown');
+      }
+    }
     const race = state.race;
     if (race) {
       raceSnapshot.phase = race.phase;
@@ -1122,6 +1266,28 @@ export function createGame(
       if (next) chase.setView(next);
       return chase.view;
     },
+    /**
+     * RAYO RUSH, for automation and for tuning with the game running. `state.rush` is the live
+     * rules state; `activate()` is the F key; `standing()` is what the board currently says.
+     *
+     *   __rb.rush.activate()        // take up the run (or dismiss the results card)
+     *   __rb.rush.state.timeLeft    // seconds on the clock
+     */
+    rush: rushSite
+      ? {
+          site: rushSite,
+          config: RUSH,
+          get state() {
+            return state.rush;
+          },
+          activate() {
+            activateQueued = true;
+          },
+          standing: () => leaderboard?.standing() ?? null,
+          top: (limit?: number) => leaderboard?.top(limit) ?? Promise.resolve([]),
+        }
+      : null,
+
     /** Cruise mode. Reads the flag with no argument, sets it with one. */
     cruise(on?: boolean) {
       if (on !== undefined) setCruise(on);

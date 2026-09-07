@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MeshBuilder } from '../src/render/scene/env/meshBuilder';
 import type { EnvBuilders } from '../src/render/scene/env/builders';
 import { lampPost } from '../src/render/scene/env/propsBuilder';
+import { LAMP_SPARKS, lampSparkSeed } from '../src/render/scene/env/lampFaults';
 
 /**
  * The street lamp fixture (`propsBuilder`'s `lampPost` and its `LAMP` proportions).
@@ -76,8 +77,31 @@ describe('the street lamp fixture', () => {
 
   it('takes the halo and the road pool down with the lens, so the light goes as one', () => {
     const b = build(0.7);
-    expect(b.glow.faults.length).toBeGreaterThan(0);
-    expect(b.glow.faults.every((f) => f === 0.7)).toBe(true);
+    const light = b.glow.faults.filter((f) => f >= 0);
+    expect(light.length).toBeGreaterThan(0);
+    expect(light.every((f) => f === 0.7)).toBe(true);
+  });
+
+  it('spits sparks off a broken head, and only off a broken one', () => {
+    const b = build(0.7);
+    const sparks = new Set(b.glow.faults.filter((f) => f < 0));
+    // One seed per speck, each carrying this lamp's own fault seed in its fraction.
+    expect(sparks).toEqual(
+      new Set(Array.from({ length: LAMP_SPARKS.count }, (_, i) => lampSparkSeed(0.7, i))),
+    );
+    expect(build(0).glow.faults.some((f) => f < 0)).toBe(false);
+  });
+
+  it('hangs the sparks on the head, not on the pole', () => {
+    const b = build(0.7);
+    const ys: number[] = [];
+    for (let i = 0; i < b.glow.faults.length; i++) {
+      if (b.glow.faults[i] < 0) ys.push(b.glow.positions[i * 3 + 1]);
+    }
+    // Under the lens and above head height: a spark falling to the pavement is a different
+    // effect, and one the car would drive through.
+    for (const y of ys) expect(y).toBeGreaterThan(Y0 + POLE_H * 0.7);
+    for (const y of ys) expect(y).toBeLessThan(Y0 + POLE_H);
   });
 
   it('leaves a healthy lamp untagged everywhere', () => {

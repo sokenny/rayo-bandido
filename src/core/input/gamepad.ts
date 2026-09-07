@@ -32,6 +32,8 @@ const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_BACK = 8;
 const BTN_START = 9;
+/** Right stick click. NFSU2 leaves it free, and the Rayo Rush marker takes it. */
+const BTN_R3 = 11;
 const BTN_DPAD_LEFT = 14;
 const BTN_DPAD_RIGHT = 15;
 
@@ -107,6 +109,7 @@ export function createGamepadInput(): InputSource {
         out.shiftUp = false;
         out.shiftDown = false;
         out.transmission = false;
+        out.activate = false;
         return;
       }
 
@@ -133,6 +136,7 @@ export function createGamepadInput(): InputSource {
       out.shiftUp = pressed(pad, BTN_RB);
       out.shiftDown = pressed(pad, BTN_LB);
       out.transmission = false;
+      out.activate = pressed(pad, BTN_R3);
     },
     dispose() {
       wasDown.clear();

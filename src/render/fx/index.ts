@@ -14,7 +14,7 @@ import {
 import { createLightningArc, BOLT_FROM_Y, BOLT_TO_Y } from './lightningArc';
 import { createSparkFx } from './sparks';
 import { createShockRings } from './explosion';
-import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS } from './scorePopup';
+import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS, POPUP_RUSH } from './scorePopup';
 
 /**
  * Pooled visual effects. Everything here is pre-allocated at creation; nothing allocates
@@ -68,6 +68,11 @@ export interface EffectsSystem {
    * approach, while that car is still alongside and on screen.
    */
   nearMissPopup(x: number, y: number, z: number, amount: number): void;
+  /**
+   * Floating yellow "EV DISABLED +X" over a wreck during a RAYO RUSH run. Replaces the ¥ pop
+   * for that kill rather than joining it: two numbers over one wreck is one too many.
+   */
+  rushPopup(x: number, y: number, z: number, amount: number): void;
   collision(x: number, y: number, z: number, impact: number): void;
   update(frameDt: number, time: number): void;
   reset(): void;
@@ -232,6 +237,10 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
     nearMissPopup(x, y, z, amount) {
       popups.spawn(x, y, z, amount, POPUP_NEAR_MISS);
+    },
+
+    rushPopup(x, y, z, amount) {
+      popups.spawn(x, y, z, amount, POPUP_RUSH);
     },
 
     collision(x, y, z, impact) {

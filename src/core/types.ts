@@ -52,6 +52,11 @@ export interface PlayerCommand {
   shiftDown: boolean;
   /** Toggle automatic / manual transmission. Edge-triggered. */
   transmission: boolean;
+  /**
+   * Take up whatever the world is offering here — today that is the Rayo Rush marker
+   * (`src/sim/rush.ts`). Edge-triggered, and ignored everywhere nothing is on offer.
+   */
+  activate: boolean;
 }
 
 export type Transmission = 'auto' | 'manual';
@@ -105,6 +110,18 @@ export interface VehicleState {
    */
   reverseArm: number;
   handbrake: boolean;
+  /**
+   * Seconds the current handbrake pull has been held with the rear actually loose. Resets to
+   * 0 the moment the button is released or the car is too slow to slide, so every pull starts
+   * fresh. It is what separates a flick from a held pivot: see `stepVehicle`.
+   */
+  handbrakeHold: number;
+  /**
+   * Radians of rotation the current pull's yaw kick has already spent (absolute). Measured
+   * against the pull's angle budget, which grows with `handbrakeHold` - holding the button
+   * keeps buying angle instead of the kick dying at a fixed slip.
+   */
+  handbrakeYaw: number;
   /** True on the tick a collision impulse was applied. Presentation uses it for feedback. */
   collided: boolean;
   /** Speed lost in the last collision (m/s), 0 when no collision this tick. */
@@ -264,6 +281,95 @@ export interface EconomyState {
   lastReward: number;
 }
 
+/**
+ * A thing to do in the free world, marked in it. One point on the ground with a radius round
+ * it: the simulation raises a prompt inside the radius, the renderer draws something there,
+ * and neither has to know what the other put at that spot.
+ */
+export interface ActivitySite {
+  x: number;
+  z: number;
+  /** Height of the road under it (m). */
+  y: number;
+  /** Which way the marker faces (rad), so its art can be squared up with the street. */
+  heading: number;
+}
+
+/**
+ * Rayo Rush (`src/sim/rush.ts`).
+ *
+ *   idle      - not running. The prompt may be up (`atMarker`), nothing is being scored.
+ *   countdown - 3, 2, 1. The player drives normally; the clock has not started.
+ *   running   - the two minutes.
+ *   results   - time is up, the run is frozen and the card is on screen until it is dismissed.
+ */
+export type RushPhase = 'idle' | 'countdown' | 'running' | 'results';
+
+/** What one finished run was worth. Frozen at the flag; read by the results card. */
+export interface RushResults {
+  score: number;
+  /** Electric cars disabled with the Rayo during the run. */
+  disabled: number;
+  /** Longest streak of eliminations inside the chain window. */
+  bestChain: number;
+  /** Everything the drifting paid on top of the base kills. */
+  styleBonus: number;
+  /** Whether this run was one of the day's ranked attempts. */
+  ranked: boolean;
+}
+
+export interface RushState {
+  phase: RushPhase;
+  /** Seconds left of `RUSH.countdownSeconds` while counting in; 0 otherwise. */
+  countdown: number;
+  /** Seconds left on the clock while running; 0 otherwise. */
+  timeLeft: number;
+  score: number;
+  disabled: number;
+  /** Eliminations chained so far (1 = the streak just started). */
+  chain: number;
+  /** What the next kill is multiplied by. 1 with no streak. */
+  multiplier: number;
+  /** Seconds left in which another kill extends the streak. 0 when there is no streak. */
+  chainWindow: number;
+  bestChain: number;
+  styleBonus: number;
+  /** True while the player is inside the marker and a run may be started. */
+  atMarker: boolean;
+  /**
+   * False once the marker has been used up for the day: the run still plays and still scores,
+   * it just is not submitted anywhere. Set by the caller before `activate`, never by the rules.
+   */
+  ranked: boolean;
+  /**
+   * True once the player has left the marker since the last run, so dismissing the results
+   * does not drop them straight back into a live prompt.
+   */
+  rearmed: boolean;
+  /**
+   * One flag per electric car: whether it has already paid out during THIS run. An EV that is
+   * shot, respawns and is shot again is worth nothing the second time. Sized to the traffic
+   * at creation and cleared at the start of every run; never grows.
+   */
+  scored: Uint8Array;
+  /**
+   * The drift that is paying for shots right now. All lightning charge comes from drifting,
+   * so "charged through drifting" has to mean the shot came OUT of a slide — during one, or
+   * within `RUSH.scoring.driftChargeGrace` of one ending, because the slide is over by the
+   * time the nose is pointed at anything. Kept here rather than in `DriftState` because it is
+   * a scoring concern: `src/sim/drift.ts` has no reason to remember a drift that has ended.
+   */
+  driftSeconds: number;
+  /** Whether that drift ran its whole length without a collision. */
+  driftClean: boolean;
+  /** Seconds of credit left. 0 = a shot fired now is not drift-charged. */
+  driftCredit: number;
+  /** Whether the drift being held right now has taken a hit. Armed between drifts. */
+  driftHeldClean: boolean;
+  /** The finished run, or null until there is one. */
+  results: RushResults | null;
+}
+
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 
 /**
@@ -382,7 +488,37 @@ export type GameEvent =
   | { type: 'lapComplete'; lap: number; time: number; best: boolean }
   | { type: 'raceFinish'; total: number; bestLap: number }
   | { type: 'wrongWay'; on: boolean }
-  | { type: 'transmission'; mode: Transmission };
+  | { type: 'transmission'; mode: Transmission }
+  /**
+   * The marker started or stopped offering a run — the car rolled onto the painted circle, or
+   * off it. Presentation only: the overlay reads `canStart` off the snapshot, and this is what
+   * lets the audio hear the EDGE rather than poll a boolean.
+   */
+  | { type: 'rushPrompt'; on: boolean }
+  | { type: 'rushStart'; ranked: boolean }
+  /** One tick of the count-in. `seconds` 0 is the GO beat, drawn as RAYO RUSH. */
+  | { type: 'rushCountdown'; seconds: number }
+  | {
+      type: 'rushScore';
+      targetId: number;
+      x: number;
+      y: number;
+      z: number;
+      /** What the kill was actually worth, multiplier and bonuses included. */
+      points: number;
+      /** Streak length after this kill, and the multiplier it was paid at. */
+      chain: number;
+      multiplier: number;
+      /** Style points inside `points`: 0 when the shot was not drift-charged. */
+      driftBonus: number;
+      /** Seconds of the drift that charged the shot (0 when it was not one). */
+      driftSeconds: number;
+      /** True when that drift ran from start to finish without a collision. */
+      cleanDrift: boolean;
+    }
+  | { type: 'rushEnd'; results: RushResults }
+  /** The results card was dismissed; the world is back to plain free roam. */
+  | { type: 'rushDismissed' };
 
 export interface GameState {
   /** Simulation time in seconds since the session started. */
@@ -399,6 +535,8 @@ export interface GameState {
   economy: EconomyState;
   /** Present in race mode only. */
   race: RaceState | null;
+  /** Rayo Rush. Present in worlds that carry an activity marker (`ArenaLayout.rushSite`). */
+  rush: RushState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -505,6 +643,14 @@ export interface MinimapData {
   ribbons: Array<{ points: Array<{ x: number; z: number }>; width: number; closed: boolean; hidden: boolean; elevated?: boolean }>;
   /** Water, drawn under the roads. */
   water?: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
+  /**
+   * Fixed things to go and do, marked on the map so they can be found rather than stumbled on.
+   * Today that is the RAYO RUSH marker; the array is what says a second one would not need a
+   * second field. Unlike the electric cars — which are deliberately NOT drawn, because hunting
+   * them is the game — an activity is a destination, and a destination the player cannot find
+   * is not a destination.
+   */
+  activities?: Array<{ x: number; z: number }>;
 }
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
@@ -525,6 +671,8 @@ export interface ArenaLayout {
   surface: SurfaceField | null;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
+  /** Where the Rayo Rush marker stands, in worlds that have one. Null everywhere else. */
+  rushSite?: ActivitySite | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   minimap: MinimapData;
@@ -592,6 +740,47 @@ export interface HudSnapshot {
   mode: GameMode;
   /** Race readout; null outside race mode. */
   race: RaceHudSnapshot | null;
+  /** Rayo Rush readout; null in a world without the activity. */
+  rush: RushHudSnapshot | null;
+}
+
+/**
+ * What the Rayo Rush overlay needs. A flattened read-only view of `RushState` plus the two
+ * things the rules cannot know: how many ranked attempts are left today and what the player's
+ * previous personal best was, both of which live outside the simulation (`src/net/leaderboard.ts`).
+ */
+export interface RushHudSnapshot {
+  phase: RushPhase;
+  /** Seconds left of the count-in. */
+  countdown: number;
+  /** Seconds left on the clock. */
+  timeLeft: number;
+  score: number;
+  disabled: number;
+  chain: number;
+  multiplier: number;
+  /** 0..1 of the chain window still open, for the streak's drain bar. */
+  chainFraction: number;
+  bestChain: number;
+  styleBonus: number;
+  /** True while the player is physically inside the marker. */
+  atMarker: boolean;
+  /**
+   * True when the marker is actually OFFERING a run (`canStartRush`). Not the same as being
+   * inside it: after a run the marker stays quiet until the player has driven away and come
+   * back, and the prompt follows this rather than `atMarker` so it never offers nothing.
+   */
+  canStart: boolean;
+  /** Ranked attempts left today, or -1 while that is still unknown. */
+  attemptsLeft: number;
+  /** True when starting now would be a ranked attempt. */
+  ranked: boolean;
+  /** Personal best before this run, or -1 when there is none. */
+  previousBest: number;
+  /** The finished run, or null. */
+  results: RushResults | null;
+  /** True when `results.score` beat `previousBest`. */
+  newBest: boolean;
 }
 
 export interface RaceHudSnapshot {

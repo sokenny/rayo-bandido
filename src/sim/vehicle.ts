@@ -33,8 +33,16 @@ import { gearTopSpeed, lugFactor, stepDrivetrain } from './drivetrain';
  *  4. Yaw = grip-limited bicycle yaw (+ handbrake kick) + a self-aligning term that rotates
  *     the nose back toward the velocity direction. The self-aligning term is what keeps
  *     slides stable instead of spinning: bigger slip angle => stronger counter-rotation.
- *  5. Lateral: rotating the body injects lateral velocity (`-speed * yaw * dt`, i.e. the
- *     velocity vector keeps its world direction), and lateral grip bleeds it off. High grip
+ *  4b. HANDBRAKE: the pull is an angle budget, not an event. `handbrakeHold` times how long the
+ *     button has been down and raises both the kick and the rotation the pull is allowed to
+ *     buy (`handbrakeTapAngle` -> `handbrakeHoldAngle`), while damping the aligning torque that
+ *     would fight it - locked rears make no aligning force. So a flick still flicks, and a pull
+ *     held for about a second swings the nose the better part of the way round. The pull also
+ *     survives the nose passing the velocity vector, which is what a reverse entry needs;
+ *     nothing here is written for that trick specifically, it falls out of the budget.
+ *  5. Lateral: rotating the body moves velocity between the forward and lateral axes (the
+ *     velocity vector keeps its world direction, so a rotation on its own never changes how
+ *     fast the car is going - see step 6), and lateral grip bleeds it off. High grip
  *     => the car follows its nose. Low grip => it slides. `slide` (0..1) blends between them
  *     and is driven by slip angle, handbrake and power-oversteer, so drifting is easy to
  *     start, easy to hold with throttle + steering, and regrips when inputs are released.
@@ -115,7 +123,24 @@ export function stepVehicle(
   // Forward weight transfer under braking (0..1). Drives the left-foot-brake behaviour used
   // in steps 3, 4 and 5: front loaded, rear light.
   const brakeLoad = forwardMotion ? brake * clamp01(absSpeed / VEHICLE.brakeLoadSpeed) : 0;
-  const handbrakeSlide = cmd.handbrake && forwardMotion && absSpeed > VEHICLE.handbrakeMinSpeed;
+  // A pull can only be *opened* while the car is going forwards, but once open it lives off
+  // total speed rather than forward speed, so it survives the nose swinging past the velocity
+  // vector. That is what a reverse entry is, and the old forward-only gate cut it dead at 90.
+  const velMag = Math.hypot(speed, lateral);
+  const handbrakeSlide =
+    cmd.handbrake &&
+    (v.handbrakeHold > 0
+      ? velMag > VEHICLE.handbrakeHoldMinSpeed
+      : forwardMotion && velMag > VEHICLE.handbrakeMinSpeed);
+  if (handbrakeSlide) {
+    v.handbrakeHold += dt;
+  } else {
+    v.handbrakeHold = 0;
+    v.handbrakeYaw = 0;
+  }
+  // How much authority this pull has earned: 0 for a flick, 1 once it has been held for
+  // `handbrakeTapTime + handbrakeHoldRamp`. Used by the kick below and by the aligning torque.
+  const holdT = clamp01((v.handbrakeHold - VEHICLE.handbrakeTapTime) / VEHICLE.handbrakeHoldRamp);
   // How loose the conditions *ask* the car to be this tick. The axle then ramps toward it
   // below rather than adopting it outright.
   let slideTarget = 0;
@@ -143,9 +168,11 @@ export function stepVehicle(
       if (rear > slideTarget) slideTarget = rear;
     }
 
-    if (handbrakeSlide) slideTarget = 1;
     slideTarget = clamp01(slideTarget);
   }
+  // A pull owns the axle outright, and it keeps owning it after the car has stopped pointing
+  // where it is going - otherwise the tyres would bite again halfway through the rotation.
+  if (handbrakeSlide) slideTarget = 1;
 
   // The rear does not let go in a single tick — that is what makes a step change here read as
   // arcade. `slide` chases its target through a rate-limited ramp, and on the way *out* of
@@ -229,9 +256,17 @@ export function stepVehicle(
     speed -= VEHICLE.reverseAccel * brake * dt;
   }
 
+  // Locked rears scrub the velocity vector, not the forward axis: a car sitting sideways on
+  // the handbrake has almost no forward speed left to take away, and it should still be
+  // slowing down. Sideways speed only pays `handbrakeLateralShare` of it so the slide lives.
   if (cmd.handbrake) {
-    const hb = VEHICLE.handbrakeDecel * dt;
-    speed = speed > 0 ? Math.max(0, speed - hb) : Math.min(0, speed + hb);
+    const vmag = Math.hypot(speed, lateral);
+    if (vmag > 1e-6) {
+      const dv = Math.min(vmag, VEHICLE.handbrakeDecel * dt);
+      speed -= (dv * speed) / vmag;
+      const latShare = (dv * lateral * VEHICLE.handbrakeLateralShare) / vmag;
+      lateral -= Math.abs(latShare) > Math.abs(lateral) ? lateral : latShare;
+    }
   }
 
   if (manual && speed > gearTop) speed = Math.max(gearTop, speed - DRIVETRAIN.limiterDecel * dt);
@@ -265,11 +300,21 @@ export function stepVehicle(
   const yawLimit = yawBudget / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
   let yaw = clamp(kinematicYaw, -yawLimit, yawLimit);
 
-  // Handbrake kick: snaps the rear out, then fades as the slide establishes itself.
+  // Handbrake kick. The pull has an angle *budget* rather than a fixed life: a flick buys
+  // `handbrakeTapAngle` of rotation and dies, and holding the button raises the budget toward
+  // `handbrakeHoldAngle` faster than the kick can spend it, so the nose keeps coming round for
+  // as long as the player keeps it up. `handbrakeYaw` is the running spend; once it reaches the
+  // budget the kick eases off over `handbrakeAngleFade` and the car simply keeps the angle it
+  // has. Direction is the wheel, so counter-steering with the button down stops the rotation.
+  let kickDir = 0;
   if (handbrakeSlide) {
-    const fade = 1 - smoothstep(VEHICLE.handbrakeKickFadeStart, VEHICLE.handbrakeKickFadeEnd, slipMag);
-    const ramp = clamp01((absSpeed - VEHICLE.handbrakeMinSpeed) / VEHICLE.handbrakeKickRamp);
-    yaw += VEHICLE.handbrakeYawKick * steerInput * fade * ramp;
+    const budget = lerp(VEHICLE.handbrakeTapAngle, VEHICLE.handbrakeHoldAngle, holdT);
+    const left = 1 - smoothstep(budget - VEHICLE.handbrakeAngleFade, budget, v.handbrakeYaw);
+    const ramp = clamp01((velMag - VEHICLE.handbrakeHoldMinSpeed) / VEHICLE.handbrakeKickRamp);
+    const kick =
+      lerp(VEHICLE.handbrakeYawKick, VEHICLE.handbrakeHoldYawKick, holdT) * steerInput * left * ramp;
+    kickDir = kick > 0 ? 1 : kick < 0 ? -1 : 0;
+    yaw += kick;
   }
 
   // Self-aligning torque: rotates the nose toward the velocity direction. Weak while
@@ -281,10 +326,20 @@ export function stepVehicle(
       lerp(VEHICLE.alignGrip, VEHICLE.driftStability, slide) * lerp(1, VEHICLE.brakeAlignScale, brakeLoad);
     const beyond = slipMag - VEHICLE.spinGuardSlip;
     if (beyond > 0) alignRate += beyond * VEHICLE.spinGuardGain;
+    // Locked rear tyres make no aligning force, so a held pull switches the straightening
+    // torque - spin guard included - almost off. Without this the guard simply out-muscles the
+    // kick past 55 degrees and no amount of holding could add angle.
+    alignRate *= lerp(1, VEHICLE.handbrakeAlignScale, holdT);
     alignRate *= lerp(1, VEHICLE.counterSteerAssist, counter);
     const fade = clamp01((speed - VEHICLE.alignMinSpeed) / VEHICLE.alignFadeSpeed);
     yaw += slip * alignRate * fade;
   }
+
+  // The pull's spend is the rotation the player actually got, measured along the way the kick
+  // is pushing — not the kick's own integral, which the aligning torque eats into and which
+  // would leave the budget promising more angle than it delivers. Rotation the other way pays
+  // it back, so opposite lock buys a pull its angle back and a pendulum can be worked.
+  if (kickDir !== 0) v.handbrakeYaw = Math.max(0, v.handbrakeYaw + kickDir * yaw * dt);
 
   v.yawRate = yaw;
   v.heading = wrapAngle(v.heading + yaw * dt);
@@ -293,7 +348,19 @@ export function stepVehicle(
   // Rotating the body leaves the velocity pointing where it was, which shows up as lateral
   // velocity; the grip term is the tyre force that pulls it back. That force is the only
   // real lateral acceleration the body feels, so it is what `latAccel` reports.
-  lateral -= speed * yaw * dt;
+  //
+  // The re-projection has to be the full rotation of BOTH components, not just the lateral
+  // one: turning the body moves velocity out of the forward axis and into the lateral axis in
+  // equal measure, and a rotation on its own cannot change how fast the car is going. Taking
+  // only the lateral half (`lateral -= speed * yaw * dt`) quietly manufactured speed —
+  // negligible at a few degrees of slip, and a catastrophe at ninety, where the car was flung
+  // sideways faster than its own top speed as if it were swinging around some distant anchor.
+  const spin = yaw * dt;
+  const spinCos = Math.cos(spin);
+  const spinSin = Math.sin(spin);
+  const spunSpeed = speed * spinCos + lateral * spinSin;
+  lateral = lateral * spinCos - speed * spinSin;
+  speed = spunSpeed;
   const latAbs = lateral < 0 ? -lateral : lateral;
   let latAccel = 0;
   if (latAbs > 1e-6) {

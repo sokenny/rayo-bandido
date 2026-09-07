@@ -5,6 +5,10 @@ dist
 .DS_Store
 artifacts
 
+# The RAYO RUSH board's local store (`server/leaderboard.mjs`). A running server's scores are
+# its own; `RB_DATA_DIR` moves them somewhere that survives a deploy.
+.data
+
 # Elastic Beanstalk Files
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml

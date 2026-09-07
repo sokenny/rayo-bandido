@@ -231,3 +231,18 @@ export const BUS_ROUTE_LOOPS: Rect[] = [
 
 /** The car starts on the main avenue, pointed at the square. */
 export const CITY_SPAWN = { x: -66, z: -20, heading: 0 };
+
+/**
+ * Where the RAYO RUSH marker stands: on `blvd-center`, a short block east of the `st-mid`
+ * crossing, facing along the boulevard.
+ *
+ * Chosen for what is AROUND it rather than for the spot itself. Three of the nine traffic
+ * rectangles meet here (`TRAFFIC_LOOPS` 2, 6 and 7), so there are electric cars in every
+ * direction the moment the clock starts, and the boulevard is wide enough to drift on with
+ * side streets close enough to chain into. It is roughly 120 m from the spawn — far enough
+ * that it is come across rather than handed over, close enough to find on a first drive.
+ *
+ * It is a mark on the road, not an object in it: nothing here is a collider, and the art
+ * (`src/render/scene/env/rushMarker.ts`) hangs its hologram well above roof height.
+ */
+export const RUSH_SITE = { x: 40, z: 60, y: 0, heading: Math.PI / 2 };

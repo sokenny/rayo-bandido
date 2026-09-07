@@ -1,4 +1,5 @@
 import { MeshBuilder } from './meshBuilder';
+import { LAMP_SPARKS, lampSparkSeed } from './lampFaults';
 import { createReclaimField, type ReclaimField } from './reclaim';
 import type { CityPlan } from '../../../world/cityPlan';
 
@@ -286,6 +287,50 @@ export function groundGlow(
   b.glow.color(color, strength).fault(fault);
   b.glow.planeY(x, y, z, sx, sz);
   b.glow.fault(0);
+}
+
+/**
+ * The shower of sparks off a faulty lamp head: `LAMP_SPARKS.count` specks clustered at the
+ * lens at (x, y, z), each a pair of crossed additive quads carrying its own spark seed.
+ *
+ * They are built STANDING STILL at the lens and go nowhere on the CPU. The lamp-fault vertex
+ * shader throws them: it reads the seed, dims the speck across its life and displaces it along
+ * a ballistic arc that ends on the pavement (`lampFaults.ts`). So the whole effect is geometry
+ * that already existed in the city mesh, and a burst costs exactly as much as a burst that is
+ * not happening.
+ *
+ * The cluster is tight and the specks are small — the throw is what reads, not the flash — and
+ * the scatter is derived from the lamp's own fault seed rather than an rng, so a lamp's sparks
+ * are a property of that lamp and every builder that places one gets them for free.
+ */
+export function lampSparks(
+  b: EnvBuilders,
+  x: number,
+  y: number,
+  z: number,
+  color: number,
+  fault: number,
+  strength = 1,
+): void {
+  for (let i = 0; i < LAMP_SPARKS.count; i++) {
+    // A hand's width of scatter around the lens: enough that the flash has a shape, small
+    // enough that the specks still read as leaving one point.
+    const sx = x + (sparkHash(fault, i * 4 + 1) * 2 - 1) * 0.16;
+    const sz = z + (sparkHash(fault, i * 4 + 2) * 2 - 1) * 0.16;
+    const sy = y - sparkHash(fault, i * 4 + 3) * 0.12;
+    const size = 0.1 + sparkHash(fault, i * 4 + 4) * 0.1;
+    b.glow.color(color, strength).fault(lampSparkSeed(fault, i));
+    // Crossed, because a glow panel is flat: one speck seen edge-on would simply not be there.
+    b.glow.panel(sx, sy, sz, size, size, 0);
+    b.glow.panel(sx, sy, sz, size, size, Math.PI / 2);
+  }
+  b.glow.fault(0);
+}
+
+/** Deterministic scatter for one spark off its lamp's fault seed. */
+function sparkHash(seed: number, i: number): number {
+  const v = Math.sin(seed * 91.7 + i * 17.31) * 43758.5453;
+  return v - Math.floor(v);
 }
 
 /** Additive halo standing in front of a sign or lamp. */

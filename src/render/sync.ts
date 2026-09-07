@@ -53,6 +53,11 @@ export function syncTargets(
   alpha: number,
   acquiredId: number,
   time: number,
+  /**
+   * One flag per car, from `markRushTargets`: whether it is worth points in the Rayo Rush run
+   * that is under way. Null (the usual case) marks nothing.
+   */
+  rushMarks: Uint8Array | null = null,
 ): void {
   for (let i = 0; i < targets.length && i < visuals.length; i++) {
     const t = targets[i];
@@ -61,6 +66,7 @@ export function syncTargets(
     vis.root.rotation.y = -lerpAngle(t.prevHeading, t.heading, alpha);
     vis.setStatus(t.status, t.hitTime >= 0 ? time - t.hitTime : 0);
     vis.setAcquired(t.id === acquiredId && t.status === 'active');
+    vis.setRushTarget(!!rushMarks && rushMarks[t.id] === 1);
   }
 }
 

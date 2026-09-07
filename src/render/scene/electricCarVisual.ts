@@ -12,6 +12,11 @@ import { attachTexture, type TextureHandle } from '../textures/load';
  * - `setStatus` is called every frame with the sim status and seconds since the hit
  *   (0 when never hit). 'destroyed' should read clearly: dark, sparking, tilted or sunk.
  * - `setAcquired(true)` is called when this target is the current auto-aim pick.
+ * - `setRushTarget(true)` marks this car as worth points during a RAYO RUSH run
+ *   (`src/sim/rush.ts`). Deliberately the SAME ring mesh the auto-aim lock uses, in the
+ *   system's hazard amber and held steady rather than pulsed — a car that is merely worth
+ *   points should read as noted, not as targeted, and the lock always wins when both apply.
+ *   It costs no extra geometry, material or draw call: the ring is already there, unlit.
  * - Share geometries/materials across instances; dispose shared resources once via
  *   `disposeElectricCarResources()`.
  *
@@ -21,6 +26,7 @@ export interface ElectricCarVisual {
   root: THREE.Group;
   setStatus(status: TargetStatus, timeSinceHit: number): void;
   setAcquired(acquired: boolean): void;
+  setRushTarget(marked: boolean): void;
   update(frameDt: number, time: number): void;
   dispose(): void;
 }
@@ -43,6 +49,9 @@ const BODY_COLORS = [
 ];
 const CHARRED_BODY = new THREE.Color(0x1d1b1a);
 const CLEAN_BAR = new THREE.Color(0x00e5ff);
+/** The lock ring's own cyan, and the quieter amber a Rayo Rush target wears instead. */
+const LOCK_RING = new THREE.Color(0x00e5ff);
+const RUSH_RING = new THREE.Color(0xfcee0a);
 const DEAD_BAR = new THREE.Color(0x0c0f12);
 
 /** Fall-over animation length after a hit, in seconds. */
@@ -270,6 +279,18 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
 
   let alive = true;
   let acquired = false;
+  let rushTarget = false;
+
+  /** Which of the two states the one ring is currently showing. */
+  const applyRing = (): void => {
+    const on = acquired || rushTarget;
+    ring.visible = on;
+    if (!on) {
+      ringMat.opacity = 0;
+      return;
+    }
+    ringMat.color.copy(acquired ? LOCK_RING : RUSH_RING);
+  };
 
   return {
     root,
@@ -303,9 +324,14 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       beacon.visible = false;
     },
     setAcquired(value) {
+      if (value === acquired) return;
       acquired = value;
-      ring.visible = value;
-      if (!value) ringMat.opacity = 0;
+      applyRing();
+    },
+    setRushTarget(value) {
+      if (value === rushTarget) return;
+      rushTarget = value;
+      applyRing();
     },
     update(_frameDt, time) {
       if (alive) {
@@ -319,6 +345,10 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       if (acquired) {
         ring.rotation.y = time * 0.9;
         ringMat.opacity = 0.55 + 0.35 * Math.sin(time * 6.5);
+      } else if (rushTarget) {
+        // A third of the lock's brightness and a fifth of its rate: present, not insistent.
+        ring.rotation.y = time * 0.18;
+        ringMat.opacity = 0.2 + 0.06 * Math.sin(time * 1.3);
       }
     },
     dispose() {

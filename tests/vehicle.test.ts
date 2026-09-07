@@ -20,7 +20,7 @@ function run(v: VehicleState, cmd: PlayerCommand, seconds: number, nitro = false
 }
 
 describe('vehicle acceleration', () => {
-  it('reaches 100 km/h from a standstill in 3 to 5 seconds of full throttle', () => {
+  it('reaches 100 km/h from a standstill in 2 to 3.5 seconds of full throttle', () => {
     const v = createVehicleState(0, 0, 0);
     const cmd = createPlayerCommand();
     cmd.throttle = 1;
@@ -32,18 +32,18 @@ describe('vehicle acceleration', () => {
         break;
       }
     }
-    expect(time).toBeGreaterThan(3);
-    expect(time).toBeLessThan(5);
+    expect(time).toBeGreaterThan(2);
+    expect(time).toBeLessThan(3.5);
   });
 
-  it('settles near 180 km/h without nitro and goes faster with it', () => {
+  it('settles near 205 km/h without nitro and goes faster with it', () => {
     const v = createVehicleState(0, 0, 0);
     const cmd = createPlayerCommand();
     cmd.throttle = 1;
     run(v, cmd, 40);
     const topKmh = v.speed * 3.6;
-    expect(topKmh).toBeGreaterThan(165);
-    expect(topKmh).toBeLessThanOrEqual(190);
+    expect(topKmh).toBeGreaterThan(190);
+    expect(topKmh).toBeLessThanOrEqual(215);
     expect(v.speed).toBeLessThanOrEqual(VEHICLE.maxSpeed + 1e-6);
 
     const boosted = createVehicleState(0, 0, 0);
@@ -381,5 +381,127 @@ describe('breaking traction', () => {
     const toGrip = back.findIndex((s) => s < 0.4);
     expect(toGrip).toBeGreaterThanOrEqual(0);
     expect(toGrip).toBeLessThan(toLoose);
+  });
+});
+
+/**
+ * The handbrake is an angle budget, not an event: how long the button is held decides how far
+ * the nose comes round. These lock the three things that makes playable — a flick stays a
+ * flick, a held pull buys real angle (enough for a reverse entry), and neither the budget nor
+ * the player's hands lose control of it.
+ */
+describe('handbrake angle', () => {
+  /**
+   * Accelerate to `target` m/s, then pull the handbrake with full lock for `hold` seconds.
+   * Returns the rotation the pull produced, tick by tick and unwrapped, so a swing past half a
+   * turn keeps counting up. Only the pull is measured (plus a tick of settle): held on full
+   * lock the car goes on cornering afterwards, and that turn is not the handbrake's doing.
+   */
+  function pull(hold: number, target: number, counterAt = -1): { turn: number[]; minSlide: number } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    for (let i = 0; i < 60 * 30 && v.speed < target; i++) stepVehicle(v, cmd, false, DT);
+
+    cmd.throttle = 0;
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    let heading = v.heading;
+    let turned = 0;
+    let minSlide = 1;
+    const turn: number[] = [];
+    for (let i = 0; i < Math.round((hold + 0.1) / DT); i++) {
+      const t = i * DT;
+      if (t >= hold) cmd.handbrake = false;
+      if (counterAt >= 0 && t >= counterAt) cmd.steer = -1;
+      stepVehicle(v, cmd, false, DT);
+      let step = v.heading - heading;
+      while (step > Math.PI) step -= 2 * Math.PI;
+      while (step < -Math.PI) step += 2 * Math.PI;
+      turned += step;
+      heading = v.heading;
+      turn.push(Math.abs(turned) * DEG);
+      if (cmd.handbrake && Math.abs(v.slipAngle) * DEG > 45) minSlide = Math.min(minSlide, v.slide);
+    }
+    return { turn, minSlide };
+  }
+
+  const peak = (r: { turn: number[] }): number => Math.max(...r.turn);
+
+  it('turns a held pull into angle a flick never reaches', () => {
+    const flick = peak(pull(0.12, 31));
+    const held = peak(pull(1, 31));
+    // A tap still just kicks the tail out.
+    expect(flick).toBeLessThan(30);
+    // A second on the button swings the nose most of the way round: the reverse entry.
+    expect(held).toBeGreaterThan(120);
+    expect(held).toBeGreaterThan(flick * 4);
+  });
+
+  it('gives more angle the longer the button is held', () => {
+    const short = peak(pull(0.35, 31));
+    const medium = peak(pull(0.7, 31));
+    const long = peak(pull(1.1, 31));
+    expect(medium).toBeGreaterThan(short + 20);
+    expect(long).toBeGreaterThan(medium + 20);
+  });
+
+  it('spends a budget: the kick is done long before the button is', () => {
+    const { turn } = pull(3, 31);
+    const at = (t: number): number => turn[Math.round(t / DT) - 1];
+    // Most of the swing is bought in the first second; leaning on the button after that adds
+    // little more than the cornering the wheel is asking for anyway.
+    expect(at(2.9) - at(2)).toBeLessThan(at(1) * 0.5);
+  });
+
+  it('keeps the axle loose while the nose comes past the velocity vector', () => {
+    // The old forward-speed gate let the tyres bite again halfway through the rotation.
+    expect(pull(1, 31).minSlide).toBeGreaterThan(0.9);
+  });
+
+  it('never manufactures speed out of the rotation itself', () => {
+    // Turning the body moves velocity between the forward and lateral axes; it cannot add any.
+    // Re-projecting only the lateral half used to pump the other one, which at ninety degrees
+    // of slip flung the car sideways faster than its own top speed - as if it were swinging
+    // around an anchor way outside the car - with the throttle shut and the handbrake on.
+    for (const target of [17, 31, 50]) {
+      const v = createVehicleState(0, 0, 0);
+      const cmd = createPlayerCommand();
+      cmd.throttle = 1;
+      for (let i = 0; i < 60 * 30 && v.speed < target; i++) stepVehicle(v, cmd, false, DT);
+
+      const entry = Math.hypot(v.vx, v.vz);
+      cmd.throttle = 0;
+      cmd.steer = 1;
+      cmd.handbrake = true;
+      for (let i = 0; i < 60 * 2; i++) {
+        stepVehicle(v, cmd, false, DT);
+        expect(Math.hypot(v.vx, v.vz)).toBeLessThanOrEqual(entry);
+      }
+    }
+  });
+
+  it('pivots about the car, not about some point out in the road', () => {
+    // A held pull is a rotation plus a scrub, so the car cannot cover more ground during it
+    // than it would have coasting - the old fling made it cover a third more.
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    for (let i = 0; i < 60 * 30 && v.speed < 31; i++) stepVehicle(v, cmd, false, DT);
+    const entry = v.speed;
+    const x0 = v.x;
+    const z0 = v.z;
+
+    cmd.throttle = 0;
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    run(v, cmd, 1);
+    expect(Math.hypot(v.x - x0, v.z - z0)).toBeLessThan(entry * 1);
+  });
+
+  it('stops rotating on opposite lock, button still down', () => {
+    const free = peak(pull(1.2, 31));
+    const caught = peak(pull(1.2, 31, 0.5));
+    expect(caught).toBeLessThan(free * 0.7);
   });
 });

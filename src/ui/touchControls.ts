@@ -127,6 +127,9 @@ export function createTouchControls(parent: HTMLElement = document.body): InputS
       out.shiftUp = false;
       out.shiftDown = false;
       out.transmission = false;
+      // The Rayo Rush prompt and its results card are buttons on the touch layer itself,
+      // so the thumb pad has nothing to bind here.
+      out.activate = false;
       restartLatched = false;
     },
     dispose() {
