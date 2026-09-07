@@ -181,7 +181,7 @@ export function createCityWorld(): World {
   const solids: Rect[] = [...blocks, ...perimeter];
   const shoulders = { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder };
   // The pavement beside the streets stands a step proud of them, for the art and the car alike.
-  const kerbs = createKerbField(ribbons, shoulders);
+  const kerbs = createKerbField(ribbons, shoulders, blocks);
   const kerbGrade = { gx: 0, gz: 0 };
 
   const onGroundRoad = (x: number, z: number, pad: number): boolean => {

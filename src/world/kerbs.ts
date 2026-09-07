@@ -1,5 +1,5 @@
 import { onRibbonAtLevel } from './cityGen';
-import { SIDEWALK_Y, type CityPlan, type KerbField, type RibbonDef } from './cityPlan';
+import { inRect, SIDEWALK_Y, type CityPlan, type KerbField, type Rect, type RibbonDef } from './cityPlan';
 import { createProjection, projectOntoPath, segmentCount } from './track';
 
 /**
@@ -12,6 +12,13 @@ import { createProjection, projectOntoPath, segmentCount } from './track';
  *    renderer used to do inline: no pavement across the mouth of a crossing road. The
  *    renderer asks by (ribbon, segment, side); the simulation asks by point and lands on the
  *    same flag, so a car is never lifted where nothing is drawn,
+ *  - how wide each stretch is is measured, not assumed: the zone's shoulder is only a
+ *    starting point, and the band is then run out to the face of the block behind it. The
+ *    blocks are placed on a grid and only guaranteed to clear the shoulder, so the gap
+ *    between the two is often a metre or three wide — pavement you can see and stand on,
+ *    which used to drop a car back to road level the moment it left the band,
+ *  - the blocks themselves are pavement too: their slab is the same step high, so a car that
+ *    noses into one over its collider stays up rather than sinking through the kerb,
  *  - the asphalt always wins: a point on any street is at road level whatever pavement runs
  *    beside it, and the alleys are paved flush: a kerb in a lane that narrow is a trap, not
  *    a landmark,
@@ -25,8 +32,14 @@ import { createProjection, projectOntoPath, segmentCount } from './track';
 export const KERB_HEIGHT = SIDEWALK_Y;
 /** Lateral run over which the kerb face rises (m): a chamfer a car can mount, not a wall. */
 export const KERB_RAMP = 0.6;
+/** Overhang past the band's outer edge (m): the lip that closes the seam at a block's face. */
+export const KERB_LIP = 0.3;
 /** Shoulders narrower than this are not worth paving. */
 const MIN_SHOULDER = 0.8;
+/** How far past the zone's shoulder a band may run to reach the block behind it (m). */
+const REACH_MAX = 8;
+/** Step of the outward march that finds that block face (m). */
+const REACH_STEP = 0.25;
 
 type Shoulders = NonNullable<CityPlan['shoulders']>;
 
@@ -38,15 +51,44 @@ interface Layer {
   maxZ: number;
   /** Two flags per segment: [i * 2] is the left side, [i * 2 + 1] the right. */
   paved: Uint8Array;
+  /** Paved width at the segment's near end, per segment and side (m). */
+  widthA: Float32Array;
+  /** The same at its far end: the band tapers between the two, so it can follow a block face
+   *  that a diagonal street meets at an angle instead of stopping short of it. */
+  widthC: Float32Array;
 }
 
-export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Shoulders): KerbField {
+export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Shoulders, blocks: readonly Rect[] = []): KerbField {
   const proj = createProjection();
 
-  const widthOf = (rb: RibbonDef, i: number): number => {
+  const shoulderOf = (rb: RibbonDef, i: number): number => {
     const s = rb.path.samples[i];
     const w = rb.kind === 'alley' ? shoulders.alley : shoulders[s.zone];
     return w < MIN_SHOULDER ? 0 : w;
+  };
+
+  const solidAt = (x: number, z: number): boolean => {
+    for (let i = 0; i < blocks.length; i++) if (inRect(blocks[i], x, z)) return true;
+    return false;
+  };
+
+  /**
+   * How far the pavement can run outward from the road edge under (x, z) before it meets the
+   * face of a block — or, past the zone's own shoulder, the asphalt of some other street. -1
+   * when it meets neither within reach, which means open ground rather than a kerb to a wall.
+   */
+  const reachAt = (rb: RibbonDef, y: number, x: number, z: number, nx: number, nz: number, edge: number, base: number): number => {
+    const limit = base + REACH_MAX;
+    for (let o = REACH_STEP; o <= limit; o += REACH_STEP) {
+      const px = x + nx * (edge + o);
+      const pz = z + nz * (edge + o);
+      if (solidAt(px, pz)) return o - REACH_STEP;
+      if (o <= base) continue;
+      for (const other of ribbons) {
+        if (other !== rb && onRibbonAtLevel(other, px, pz, y, 0)) return o - REACH_STEP;
+      }
+    }
+    return -1;
   };
 
   const layers = new Map<RibbonDef, Layer>();
@@ -55,6 +97,8 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
     const samples = rb.path.samples;
     const segs = segmentCount(rb.path);
     const paved = new Uint8Array(segs * 2);
+    const widthA = new Float32Array(segs * 2);
+    const widthC = new Float32Array(segs * 2);
     let minX = Infinity;
     let maxX = -Infinity;
     let minZ = Infinity;
@@ -66,19 +110,21 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
       if (s.x > maxX) maxX = s.x;
       if (s.z < minZ) minZ = s.z;
       if (s.z > maxZ) maxZ = s.z;
-      const r = s.halfWidth + widthOf(rb, i);
+      const r = s.halfWidth + shoulderOf(rb, i) + REACH_MAX;
       if (r > reach) reach = r;
     }
     for (let i = 0; i < segs; i++) {
       const a = samples[i];
       const c = samples[(i + 1) % samples.length];
-      const width = widthOf(rb, i);
-      if (width === 0) continue;
+      const base = shoulderOf(rb, i);
+      if (base === 0) continue;
       for (let k = 0; k < 2; k++) {
         const side = k === 0 ? -1 : 1;
+        const nx = -a.tz * side;
+        const nz = a.tx * side;
         // The middle of this stretch of pavement. Another road through it is a junction.
-        const mx = (a.x + c.x) / 2 + -a.tz * (a.halfWidth + width / 2) * side;
-        const mz = (a.z + c.z) / 2 + a.tx * (a.halfWidth + width / 2) * side;
+        const mx = (a.x + c.x) / 2 + nx * (a.halfWidth + base / 2);
+        const mz = (a.z + c.z) / 2 + nz * (a.halfWidth + base / 2);
         let crossing = false;
         for (const other of ribbons) {
           if (other !== rb && onRibbonAtLevel(other, mx, mz, a.y, 0.6)) {
@@ -86,17 +132,42 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
             break;
           }
         }
-        if (!crossing) paved[i * 2 + k] = 1;
+        if (crossing) continue;
+        // Measured at both ends and at the middle, and the band tapers between the two ends.
+        // An end that reaches nothing (the mouth of a junction, an empty lot) falls back to
+        // the zone's own shoulder rather than dragging the whole stretch in with it — one
+        // open end is no reason to leave a trench along a stretch that does back onto a
+        // block — but never past a face the rays did find, so pavement never enters one. The
+        // middle only pulls the band in: a face that bows toward the street still keeps it out.
+        const rayA = reachAt(rb, a.y, a.x, a.z, nx, nz, a.halfWidth, base);
+        const rayC = reachAt(rb, c.y, c.x, c.z, nx, nz, c.halfWidth, base);
+        const rayM = reachAt(rb, a.y, (a.x + c.x) / 2, (a.z + c.z) / 2, nx, nz, a.halfWidth, base);
+        let open = base;
+        for (const r of [rayA, rayC, rayM]) if (r >= 0 && r < open) open = r;
+        let wa = rayA >= 0 ? rayA : open;
+        let wc = rayC >= 0 ? rayC : open;
+        const mid = (wa + wc) / 2;
+        if (rayM >= 0 && mid > rayM && mid > 0) {
+          wa *= rayM / mid;
+          wc *= rayM / mid;
+        }
+        if (Math.min(wa, wc) < MIN_SHOULDER) continue;
+        paved[i * 2 + k] = 1;
+        widthA[i * 2 + k] = wa;
+        widthC[i * 2 + k] = wc;
       }
     }
-    layers.set(rb, { rb, minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach, paved });
+    layers.set(rb, { rb, minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach, paved, widthA, widthC });
   }
 
   const list = [...layers.values()];
 
   return {
-    widthAt(rb, i) {
-      return layers.has(rb) ? widthOf(rb, i) : 0;
+    widthAt(rb, i, side, t = 0) {
+      const layer = layers.get(rb);
+      if (!layer) return 0;
+      const slot = i * 2 + (side < 0 ? 0 : 1);
+      return layer.widthA[slot] + (layer.widthC[slot] - layer.widthA[slot]) * t;
     },
     paved(rb, i, side) {
       const layer = layers.get(rb);
@@ -117,11 +188,12 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
           out.gz = 0;
           return 0;
         }
-        const width = widthOf(layer.rb, proj.index);
-        if (width === 0 || over > width) continue;
-        if (layer.rb.kind === 'alley') continue;
         const side = proj.lateral >= 0 ? 1 : -1;
-        if (layer.paved[proj.index * 2 + (side < 0 ? 0 : 1)] !== 1) continue;
+        const slot = proj.index * 2 + (side < 0 ? 0 : 1);
+        if (layer.paved[slot] !== 1) continue;
+        const width = layer.widthA[slot] + (layer.widthC[slot] - layer.widthA[slot]) * proj.t;
+        if (over > width + KERB_LIP) continue;
+        if (layer.rb.kind === 'alley') continue;
         const t = over < KERB_RAMP ? over / KERB_RAMP : 1;
         const y = KERB_HEIGHT * t;
         if (y <= best) continue;
@@ -135,6 +207,13 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
           out.gx = 0;
           out.gz = 0;
         }
+      }
+      // The block slabs stand at the same step as the pavement that runs up to them, so a car
+      // that noses over a block's collider is carried on, not dropped through the kerb.
+      if (best < KERB_HEIGHT && solidAt(x, z)) {
+        best = KERB_HEIGHT;
+        out.gx = 0;
+        out.gz = 0;
       }
       return best;
     },

@@ -1,12 +1,14 @@
 import type { PlayerCommand } from '../types';
 
 /**
- * Keyboard input -> PlayerCommand. Edge-triggered actions (fire, restart, cruise, pov) are latched
+ * Keyboard input -> PlayerCommand. Edge-triggered actions (restart, cruise, pov) are latched
  * between polls so a short tap is never lost, and cleared after `poll()` reads them once.
+ * `fire` is not one of them: it reports the button's held state, because the lightning charges
+ * while it is down and the simulation owns that timing (`src/sim/lightning.ts`).
  *
  * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
- * E or mouse click fires lightning, R restarts, C toggles cruise mode, P cycles camera view,
- * X / Z shift up / down on a manual box, T toggles automatic / manual, F takes up (and
+ * E held (or a held mouse button) charges and throws the lightning, R restarts, C toggles
+ * cruise mode, P cycles camera view, X / Z shift up / down on a manual box, T toggles automatic / manual, F takes up (and
  * afterwards dismisses) a free-world activity — the Rayo Rush marker.
  */
 export interface InputSource {
@@ -35,7 +37,8 @@ export function createPlayerCommand(): PlayerCommand {
 
 export function createKeyboardInput(target: Window | HTMLElement = window): InputSource {
   const down = new Set<string>();
-  let fireLatched = false;
+  /** Pointer ids currently held down on the world (not on a control), for the mouse binding. */
+  const firingPointers = new Set<number>();
   let restartLatched = false;
   let cruiseLatched = false;
   let povLatched = false;
@@ -50,7 +53,6 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       return;
     }
     down.add(e.code);
-    if (e.code === 'KeyE') fireLatched = true;
     if (e.code === 'KeyR') restartLatched = true;
     if (e.code === 'KeyC') cruiseLatched = true;
     if (e.code === 'KeyP') povLatched = true;
@@ -65,26 +67,33 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   };
   const onBlur = (): void => {
     down.clear();
+    firingPointers.clear();
   };
   /**
-   * A click — or a tap — fires lightning. This listens for `pointerdown` rather than
-   * `mousedown` so a phone fires on the touch itself: the compatibility mouse event a tap
-   * would otherwise be waiting for is synthesised only after `touchend`, and is dropped
-   * entirely when the double-tap-zoom guard in `src/ui/mobileShell.ts` swallows a fast second
-   * tap. Taps on a control — the thumb pad, a menu, any button — are that control's, not the
-   * gun's.
+   * Holding the mouse — or a finger — charges the lightning, exactly as holding E does. This
+   * listens for `pointerdown` rather than `mousedown` so a phone charges from the touch
+   * itself: the compatibility mouse event a tap would otherwise be waiting for is synthesised
+   * only after `touchend`, and is dropped entirely when the double-tap-zoom guard in
+   * `src/ui/mobileShell.ts` swallows a fast second tap. Touches on a control — the thumb pad,
+   * a menu, any button — are that control's, not the gun's.
    */
   const onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return;
     const el = e.target instanceof Element ? e.target : null;
     if (el?.closest('.rb-touch, #menu-root, button, input, select, textarea, a')) return;
-    fireLatched = true;
+    firingPointers.add(e.pointerId);
+  };
+  /** Any end of the pointer releases the shot; a lost `pointerup` would leave the gun stuck on. */
+  const onPointerUp = (e: PointerEvent): void => {
+    firingPointers.delete(e.pointerId);
   };
 
   target.addEventListener('keydown', onKeyDown as EventListener);
   target.addEventListener('keyup', onKeyUp as EventListener);
   window.addEventListener('blur', onBlur);
   window.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
 
   return {
     poll(out) {
@@ -97,7 +106,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.steer = (right ? 1 : 0) - (left ? 1 : 0);
       out.handbrake = down.has('Space');
       out.nitro = down.has('ShiftLeft') || down.has('ShiftRight');
-      out.fire = fireLatched;
+      out.fire = down.has('KeyE') || firingPointers.size > 0;
       out.restart = restartLatched;
       out.cruise = cruiseLatched;
       out.pov = povLatched;
@@ -105,7 +114,6 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.shiftDown = shiftDownLatched;
       out.transmission = transmissionLatched;
       out.activate = activateLatched;
-      fireLatched = false;
       restartLatched = false;
       cruiseLatched = false;
       povLatched = false;
@@ -119,6 +127,8 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       target.removeEventListener('keyup', onKeyUp as EventListener);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
     },
   };
 }

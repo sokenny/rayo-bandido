@@ -15,7 +15,7 @@
 | Drivetrain | Rear-wheel drive. Not simulated per wheel, but the handling model must express it: throttle only ever loosens the rear, and the brake loads the front (left-foot braking tightens the line) |
 | Gearbox | Six-speed with a simulated engine rpm (`src/sim/drivetrain.ts`): road rpm is linear through zero per gear, and under throttle the engine revs above it by the gear's torque. Two boxes, toggled with T and remembered: the **automatic** picks the gear, the **manual** (X/Z, RB/LB) hands it to the player, who then holds a gear through a corner and gets capped at that gear's top speed. It drives the tacho, the engine note and the limiter — **not** the slide: the car handles identically on either box |
 | Lightning charge | Charged only through valid drifting |
-| Lightning targeting | Auto-target nearest eligible electric vehicle inside a forward cone |
+| Lightning targeting | Aimed, not locked on: the bolt leaves along the car's heading and hits whatever is on that line. Held to charge and thrown on the release — the longer the hold, the further it reaches (2026-09-07) |
 | Reward | Destroyed/disabled electric vehicles award money |
 | Money in MVP | Visible counter only; modifications come later |
 | Nitro | Separate resource that recharges gradually |
@@ -30,8 +30,8 @@ These values may be tuned without asking Juan. Keep them centralized.
 
 | Parameter | Starting default |
 | --- | --- |
-| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click lightning; R restart; T automatic/manual; X/Z shift up/down (RB/LB on a pad) |
-| Gamepad | Xbox-style standard mapping, always live beside the keyboard. NFS Underground 2's default pad layout, so the muscle memory carries over: RT throttle, LT brake/reverse, left stick steers, A handbrake, B nitro, Y camera. The three actions NFSU2 has no counterpart for take the buttons it leaves free: X lightning, View cruise, Start restart; A/Start confirm in menus |
+| Controls | WASD/arrow keys drive; Space handbrake; Shift nitro; E or click **held** to charge and throw the lightning; R restart; T automatic/manual; X/Z shift up/down (RB/LB on a pad) |
+| Gamepad | Xbox-style standard mapping, always live beside the keyboard. NFS Underground 2's default pad layout, so the muscle memory carries over: RT throttle, LT brake/reverse, left stick steers, A handbrake, B nitro, Y camera. The three actions NFSU2 has no counterpart for take the buttons it leaves free: X lightning (held, like E), View cruise, Start restart; A/Start confirm in menus |
 | Camera FOV | 60 base, easing toward 70 during nitro |
 | Drift activation | Speed above 25 km/h-equivalent and slip angle above roughly 12° for 200 ms |
 | Drift cancellation | Low speed, collision, reversal or slip below threshold for roughly 350 ms |
@@ -39,8 +39,9 @@ These values may be tuned without asking Juan. Keep them centralized.
 | Lightning cost | 50 units per shot |
 | Nitro capacity | 100 units |
 | Nitro recharge | Recharge while moving and not boosting; no recharge while stationary |
-| Auto-aim cone | Approximately 35° either side of forward direction |
-| Auto-aim range | Approximately 45 world meters |
+| Lightning hold | 1 s for a full-reach shot. The bolt only ever leaves on the release — holding longer just sits at full reach — and a release before roughly 0.12 s is a fumble that costs nothing |
+| Lightning range | 75 world metres at a full hold, scaled straight down by the fraction of the hold — release at 0.5 s and it reaches 37 m |
+| Lightning hit radius | 2.2 m either side of the beam's line, about a car's width |
 | Render scale | Starts at `min(devicePixelRatio, 1.5)`; the resolution governor may step it down to 0.7 (x0.85 per notch) while frames are dropped on the GPU, and back up with headroom. `?scale=` pins it |
 | Start-up | Loading screen until every shader is compiled and every texture uploaded (`warmUp` in `src/game.ts`); the WANTED portrait is waited for up to 2.5 s so the board is drawn once |
 | Target reward | 100 currency units |

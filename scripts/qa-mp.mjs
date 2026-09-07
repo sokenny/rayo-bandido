@@ -252,13 +252,18 @@ const RAM = () => {
   return best.id;
 };
 
-/** Fire the lightning at whatever is locked, with a full charge. Returns the target hit, or -1. */
+/**
+ * Hold the lightning at whatever is on the line of fire, with a full charge. The gun charges
+ * while fire is held (full reach at `LIGHTNING.maxHold`, 1 s = 60 ticks) and throws it on the
+ * release, which is the tick after this hold runs out.
+ * Returns the target that was aimed at, or -1.
+ */
 const FIRE = () => {
   const rb = window.__rb;
   const l = rb.state.lightning;
   if (l.acquiredTargetId < 0 || l.cooldown > 0) return -1;
   l.charge = 100; // plenty: the sim clamps what it spends
-  rb.inject({ fire: true }, 2);
+  rb.inject({ fire: true }, 65);
   return l.acquiredTargetId;
 };
 

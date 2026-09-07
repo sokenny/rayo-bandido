@@ -5,10 +5,10 @@ import type { InputSource } from '../core/input/keyboard';
  * The on-screen pad: the phone's version of WASD.
  *
  * Deliberately basic — steer, gas, brake, handbrake, nitro, restart — because a thumb pad
- * with a control for everything is a control for nothing. Lightning is not on the pad: a tap
- * anywhere on the screen already fires it (the mouse-click binding in
- * `src/core/input/keyboard.ts` sees the touch's compatibility click), so the big empty middle
- * of the screen *is* the fire button. Camera, cruise and the gearbox stay on the keyboard.
+ * with a control for everything is a control for nothing. Lightning is not on the pad: a
+ * finger held anywhere on the screen already charges and throws it (the pointer binding in
+ * `src/core/input/keyboard.ts` sees the touch directly), so the big empty middle of the
+ * screen *is* the fire button. Camera, cruise and the gearbox stay on the keyboard.
  *
  * It is an `InputSource` like any other, so it is combined with keyboard and pad in
  * `src/game.ts` and the simulation never learns it exists. Steering is digital (-1 / +1) to
@@ -67,8 +67,8 @@ export function createTouchControls(parent: HTMLElement = document.body): InputS
 
   function wire(btn: HTMLElement, action: PadAction): void {
     const press = (e: PointerEvent): void => {
-      // Stops the tap from also scrolling, zooming, or reaching the window as the click that
-      // fires lightning — a thumb on GAS should not shoot.
+      // Stops the tap from also scrolling, zooming, or reaching the window as the press that
+      // charges lightning — a thumb on GAS should not shoot.
       e.preventDefault();
       // Capture is what makes a thumb that slides off still release the button. It throws for
       // a pointer the browser no longer tracks, which must not cost us the press itself.

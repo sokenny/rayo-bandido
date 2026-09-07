@@ -38,7 +38,11 @@ export interface PlayerCommand {
   handbrake: boolean;
   /** Nitro held. */
   nitro: boolean;
-  /** Fire lightning. Edge-triggered: true for exactly one simulation tick per key press. */
+  /**
+   * Fire lightning, held: true for every tick the button is down. The shot charges while it
+   * is held and leaves on release (or on its own at `LIGHTNING.maxHold`), so the sim — not
+   * the input layer — owns the edges. See `src/sim/lightning.ts`.
+   */
   fire: boolean;
   /** Restart. Edge-triggered: true for exactly one simulation tick per key press. */
   restart: boolean;
@@ -187,8 +191,14 @@ export interface NitroState {
 export interface LightningState {
   /** 0..capacity. Only drifting adds charge. */
   charge: number;
-  /** Id of the target currently inside the auto-aim cone and nearest, or -1. */
+  /** Id of the target the beam would hit right now, or -1. A preview, not a lock. */
   acquiredTargetId: number;
+  /** Seconds the fire button has been held on the shot being charged (0 when not charging). */
+  hold: number;
+  /** True while a shot is charging: fire is held and the shot was paid for at the press. */
+  charging: boolean;
+  /** False until fire is released, so one press only ever charges one shot. */
+  armed: boolean;
   /** Seconds until the next shot may be fired. */
   cooldown: number;
   /** Seconds remaining on the last arc for presentation (informational). */
@@ -218,7 +228,10 @@ export interface TargetState {
   hitTime: number;
   /** Simple patrol progress. Implementation detail of `src/sim/targets.ts`. */
   patrolIndex: number;
+  /** Patrol speed on a clear road (m/s). Constant. */
   patrolSpeed: number;
+  /** Speed actually being driven (m/s). Eased down for cars ahead, see `src/sim/targets.ts`. */
+  speed: number;
   /** Whether a reward has already been paid for this target. Guards against duplicate money. */
   rewarded: boolean;
 }
@@ -466,8 +479,9 @@ export type GameEvent =
   | { type: 'driftEnd'; duration: number; chain: number }
   | { type: 'nitroStart' }
   | { type: 'nitroEnd' }
+  /** `targetId` is -1 when the shot went out and hit nothing. */
   | { type: 'lightningFired'; targetId: number; fromX: number; fromY: number; fromZ: number; toX: number; toY: number; toZ: number }
-  | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' }
+  | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' | 'short' }
   | { type: 'targetDestroyed'; targetId: number; x: number; y: number; z: number; reward: number }
   | { type: 'nearMiss'; targetId: number; x: number; y: number; z: number; points: number; quality: number }
   | {
@@ -710,6 +724,10 @@ export interface HudSnapshot {
   targetsRemaining: number;
   targetsTotal: number;
   targetAcquired: boolean;
+  /** 0..1 of the hold needed for a full-range shot (0 when no shot is charging). */
+  aim01: number;
+  /** Reach of the shot as currently charged (m). */
+  aimRange: number;
   lastReward: number;
   time: number;
   /** True while the car moves backwards. */

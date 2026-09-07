@@ -1508,6 +1508,14 @@ while everything under it turns; it hangs below the halo rather than above becau
 camera looks slightly down and anything above ends up in the top of the frame where the controls
 card is. Eight draw calls and 978 triangles for the whole marker.
 
+Juan then asked for that wordmark three times the size, which stopped it being a nameplate that
+tucks inside the ring: at 9.3 m wide it is 2.3 m tall, and there is no room for that under a
+2.8 m halo hung at 6.9 m without dropping it into bus-roof height. So the glyph rides higher
+(8.6 m) and the sprite hangs off the BOTTOM OF THE HALO by construction rather than at a typed-in
+offset — resize the wordmark now and it moves out of the ring's way on its own instead of quietly
+growing back into it. The canvas carries about a third of its height as transparent margin, so
+the visible word sits around 3.9-4.9 m: clear of the 3.75 m buses that run this boulevard.
+
 **Marked cars** wear the electric car's OWN acquisition ring in the system's amber, held steady
 instead of pulsed — the cyan lock always wins when both apply. Only the nearest fourteen inside
 62 m, chosen by `markRushTargets`, which is the same predicate that decides what actually

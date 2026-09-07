@@ -113,6 +113,19 @@
       ],
       "port": 5180,
       "autoPort": true
+    },
+    {
+      "name": "rayo-bandido-dev-mac-5182",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5182",
+        "--strictPort"
+      ],
+      "port": 5182
     }
   ]
 }

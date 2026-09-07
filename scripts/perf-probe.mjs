@@ -265,7 +265,9 @@ async function probeOnce(browser, runIndex) {
         s.lightning.charge = 100;
       });
       await sleep(300);
-      await inject({ fire: true }, 1);
+      // Held, not tapped: the gun charges while fire is down (full reach at 1 s = 60 ticks)
+      // and throws on the release, the tick after this hold runs out.
+      await inject({ fire: true }, 65);
     },
     900,
   );

@@ -307,12 +307,12 @@ function buildVerges(b: EnvBuilders, field: ReclaimField): void {
       sinceLast = 0;
       // A ramp climbing away from the street has no pavement beside it.
       if (a.y > 0.5) continue;
-      const width = kerbs ? kerbs.widthAt(rb, i) : (shoulders ? shoulders[a.zone] : 0);
-      if (width < RECLAIM_SCATTER.vergeMinWidth) continue;
       const nx = -a.tz;
       const nz = a.tx;
       for (const side of [-1, 1] as const) {
         if (kerbs && !kerbs.paved(rb, i, side)) continue;
+        const width = kerbs ? kerbs.widthAt(rb, i, side) : (shoulders ? shoulders[a.zone] : 0);
+        if (width < RECLAIM_SCATTER.vergeMinWidth) continue;
         const rng = makeRng(seedAt(a.x + nx * side * 10, a.z + nz * side * 10, 0xb1));
         const gap = RECLAIM_SCATTER.vergeGapMin + rng() * Math.max(0, width - RECLAIM_SCATTER.vergeGapMin - 0.5);
         const px = a.x + nx * side * (a.halfWidth + gap);

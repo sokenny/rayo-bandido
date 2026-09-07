@@ -111,7 +111,7 @@ describe('gamepad input', () => {
     expect(cmd.brake).toBe(0);
   });
 
-  it('fires once per press, not once per tick, while the button is held', () => {
+  it('reports fire as held, so the lightning can charge while X is down', () => {
     const set = mockPads();
     const input = createGamepadInput();
     const cmd = createPlayerCommand();
@@ -120,13 +120,11 @@ describe('gamepad input', () => {
     input.poll(cmd);
     expect(cmd.fire).toBe(true);
     input.poll(cmd);
-    expect(cmd.fire).toBe(false);
+    expect(cmd.fire).toBe(true);
 
     set(pad());
     input.poll(cmd);
-    set(pad({ down: [2] }));
-    input.poll(cmd);
-    expect(cmd.fire).toBe(true);
+    expect(cmd.fire).toBe(false);
   });
 
   it('shifts once per bumper press: RB up, LB down', () => {

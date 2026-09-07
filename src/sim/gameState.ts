@@ -81,7 +81,7 @@ export function createNitroState(): NitroState {
 }
 
 export function createLightningState(): LightningState {
-  return { charge: 0, acquiredTargetId: -1, cooldown: 0, arcTimer: 0, lastTargetId: -1 };
+  return { charge: 0, acquiredTargetId: -1, hold: 0, charging: false, armed: true, cooldown: 0, arcTimer: 0, lastTargetId: -1 };
 }
 
 export function createEconomyState(): EconomyState {

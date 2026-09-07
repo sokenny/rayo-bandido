@@ -92,7 +92,7 @@ Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md
 | T | Automatic / manual transmission (remembered). On manual you keep the gear through a corner and the limiter caps you at that gear's top speed. The box sets the tacho, the engine note and the limiter — it does not change how the car slides |
 | X / Z | Shift up / down (manual). On a pad: RB / LB |
 | Shift | Nitro (recharges gradually while driving) |
-| E or left click | Fire lightning at the nearest electric car in the forward cone |
+| E or left click (**hold**) | Charge and throw the lightning. It reaches further the longer you hold, up to 75 m at 1 s, and leaves when you let go — hold past a second and it simply waits at full reach. The bolt flies straight down the car's heading and hits nothing you have not lined up |
 | R | Instant restart (in a race: back to the grid and a new countdown; in a multiplayer race: a rescue back onto the road at the last gate, clock still running) |
 | C | Cruise mode: the car drives itself around the city (or the lap) at a relaxed pace. Any driving input hands control back |
 | Esc | Back to the main menu |
@@ -113,7 +113,7 @@ same physics, same HUD.
   from the window.
 - **Basic controls only** (`src/ui/touchControls.ts`): steer left / right, gas, brake, handbrake,
   nitro, and a small restart in the top-left corner. **Tapping anywhere else on the screen fires
-  lightning** — the empty middle of the screen is the fire button. Camera, cruise and the gearbox
+  lightning** — the empty middle of the screen is the fire button, held the same way E is. Camera, cruise and the gearbox
   stay on the keyboard: a thumb pad with a control for everything is a control for nothing.
 - **The HUD is trimmed to what is read while driving.** Only the lightning charge ring — moved up
   clear of the steer buttons — and the minimap, two fifths smaller and up in the top-right corner.

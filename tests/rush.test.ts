@@ -45,6 +45,7 @@ function makeTarget(id: number, x: number, z: number): TargetState {
     hitTime: -1,
     patrolIndex: 0,
     patrolSpeed: 0,
+    speed: 0,
     rewarded: false,
   };
 }

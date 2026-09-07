@@ -11,7 +11,7 @@ import type { InputSource } from './keyboard';
  * A handbrake, B nitro, Y cycles the camera.
  *
  * Three actions have no NFSU2 counterpart, so they take the buttons that game leaves free for
- * them: X fires the lightning (NFSU2's "look back", which this game has no equivalent of),
+ * them: X charges and throws the lightning (NFSU2's "look back", which this game has no equivalent of),
  * View toggles cruise, Start restarts. The d-pad steers as well as the stick, and the stick's
  * Y axis is a throttle/brake fallback for pads whose triggers report nothing analog - the face
  * buttons cannot do that job any more now that they hold the handbrake and the bottle.
@@ -128,7 +128,8 @@ export function createGamepadInput(): InputSource {
 
       // Edge-detected here rather than latched: `pressed` compares against the previous poll,
       // so a held button reports true exactly once however many ticks run in a frame.
-      out.fire = pressed(pad, BTN_X);
+      // Held, not edged: X charges the lightning for as long as it is down (see stepLightning).
+      out.fire = buttonDown(pad, BTN_X);
       out.restart = pressed(pad, BTN_START);
       out.cruise = pressed(pad, BTN_BACK);
       out.pov = pressed(pad, BTN_Y);

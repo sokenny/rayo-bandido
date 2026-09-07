@@ -1461,6 +1461,42 @@ body {
   text-shadow: 0 0 10px rgba(79, 243, 255, 0.5);
 }
 
+/* The hold meter: how much reach the shot has bought so far. Hidden until a shot is
+   charging, because a full-width empty bar under an idle reticle reads as a broken gauge. */
+.rb-reticle__charge {
+  width: 74px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(79, 243, 255, 0.16);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.rb-reticle.is-charging .rb-reticle__charge {
+  opacity: 1;
+}
+
+.rb-reticle.is-full .rb-reticle__charge {
+  box-shadow: 0 0 10px rgba(252, 238, 10, 0.4);
+}
+
+/* Held at full reach: the meter goes hot, so the player knows waiting longer buys nothing. */
+.rb-reticle.is-full .rb-reticle__charge-fill {
+  background: var(--rb-yellow);
+  box-shadow: 0 0 10px rgba(252, 238, 10, 0.8);
+}
+
+.rb-reticle__charge-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--rb-cyan);
+  box-shadow: 0 0 8px rgba(79, 243, 255, 0.75);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
 /* ------------------------------------------- centre screen: system message */
 
 /* One component for every transient centre-screen line the game says (RESTART, the cruise

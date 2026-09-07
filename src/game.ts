@@ -357,6 +357,8 @@ export function createGame(
     targetsRemaining: 0,
     targetsTotal: state.targets.length,
     targetAcquired: false,
+    aim01: 0,
+    aimRange: 0,
     lastReward: 0,
     time: 0,
     reversing: false,
@@ -939,6 +941,8 @@ export function createGame(
     snapshot.targetsRemaining = remaining;
     snapshot.targetsTotal = state.targets.length;
     snapshot.targetAcquired = state.lightning.acquiredTargetId >= 0;
+    snapshot.aim01 = state.lightning.charging ? state.lightning.hold / LIGHTNING.maxHold : 0;
+    snapshot.aimRange = LIGHTNING.range * snapshot.aim01;
     snapshot.lastReward = state.economy.lastReward;
     snapshot.time = simTime;
     snapshot.reversing = v.speed < -0.5;

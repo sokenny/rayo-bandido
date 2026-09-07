@@ -180,7 +180,22 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     wallMat.setDetailMap(concreteArt.texture, concreteArt.luma);
   });
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
-  const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
+  // Double-sided, and this is what stops a lamp from half-vanishing when you drive past it.
+  // `MeshBuilder.tube` draws a strut as two crossed quads — the lamp's boom and cable
+  // conduit, and every cable, branch and railing built the same way — and a quad has exactly
+  // one face. Culled, a crossed pair only exists in the half of the world its two fronts
+  // point into: from the other side the boom was simply not drawn, and the head hung in the
+  // air over a pole it was no longer joined to. Dropping the cull is free in triangles
+  // (emitting both windings instead would add ~11k, past the ceiling `cityWorld.test.ts`
+  // holds) and it closes the open-bottomed boxes too: an overhang seen from underneath now
+  // shows its inside rather than a hole. Three flips the normal on a back face, so the
+  // shading stays right.
+  const propsMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.62,
+    metalness: 0.18,
+    side: THREE.DoubleSide,
+  });
   // Greenery: leaves and bark, each its own material so the art on one never lands on a
   // shipping container. Both are dry and matte — nothing in a canopy reflects the neon — and
   // both start untextured, which is exactly how the palms looked before the art existed, so a
@@ -194,9 +209,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // Graffiti and grime: lit like the concrete it sits on, blended without writing depth and
   // pushed off the surface behind it, so a tag can never z-fight a wall.
   const decalMat = createDecalMaterial(graffiti.texture);
-  const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-  const neonPulseMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-  const neonFlickerMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  // Double-sided for the reason `propsMat` is: the light itself is tubes and single quads —
+  // the lamp lens, the accent strips up the column, sign bars — so a cull took the light off
+  // one side of every fixture in the city. These are unlit, so a back face shades identically
+  // to a front one; the cull was pure loss.
+  const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide });
+  const neonPulseMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide });
+  const neonFlickerMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide });
   const glowMat = new THREE.MeshBasicMaterial({
     map: glowTex,
     vertexColors: true,
@@ -209,6 +228,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     // distance instead of mixing them towards the fog colour, which on an additive blend
     // would paint haze-coloured light onto the sky behind every far-off lamp.
     fog: true,
+    // A halo is one quad and a spark is a crossed pair, so the cull decided which side of a
+    // lamp got a glow at all: approach a working lamp from behind and the head was lit but
+    // the air around it was not. Each quad still draws once, so nothing gets brighter than it
+    // was from its good side — it is simply that brightness from every side now.
+    side: THREE.DoubleSide,
   });
   // Roughly a third of the street lamps are broken. The heads live in `neon` and their halos
   // and light pools in `glow`, so both materials read the per-vertex fault seed.

@@ -302,7 +302,7 @@ describe('city kerbs', () => {
     layout.surface!.sample(spot.x + -spot.tz * off, spot.z + spot.tx * off, yHint, SAMPLE);
     return SAMPLE.y;
   };
-  const width = kerbs.widthAt(spot.rb, spot.i);
+  const width = kerbs.widthAt(spot.rb, spot.i, 1);
 
   it('leaves the asphalt flat and raises the pavement beside it by a full step', () => {
     expect(width).toBeGreaterThan(0.8);
@@ -322,6 +322,55 @@ describe('city kerbs', () => {
     expect(SAMPLE.gx * -spot.tz + SAMPLE.gz * spot.tx).toBeGreaterThan(0);
     at(spot.halfWidth + KERB_RAMP + 0.5);
     expect(Math.hypot(SAMPLE.gx, SAMPLE.gz)).toBe(0);
+  });
+
+  it('holds a car up all the way to the block behind the pavement', () => {
+    // The bug this covers: the band was as wide as the zone's shoulder, but the blocks only
+    // clear that shoulder — they often stand a metre or three further back, and the pavement
+    // between the two dropped a car back to road level while it was still standing on it.
+    let clean = 0;
+    let trench = 0;
+    for (const rb of ground) {
+      if (rb.kind === 'alley') continue;
+      const samples = rb.path.samples;
+      for (let i = 0; i < samples.length - 1; i++) {
+        for (const side of [-1, 1]) {
+          if (!kerbs.paved(rb, i, side)) continue;
+          const a = samples[i];
+          const c = samples[i + 1];
+          const mx = (a.x + c.x) / 2;
+          const mz = (a.z + c.z) / 2;
+          const nx = -a.tz * side;
+          const nz = a.tx * side;
+          const width = kerbs.widthAt(rb, i, side, 0.5);
+          const at = (d: number): [number, number] => [mx + nx * (a.halfWidth + d), mz + nz * (a.halfWidth + d)];
+          // Every step of the band, from the top of the kerb face to its outer edge, is up.
+          for (let off = KERB_RAMP + 0.01; off <= width; off += 0.5) {
+            const [x, z] = at(off);
+            // Except where another street runs through: there the asphalt wins, as it should.
+            if (plan.isRoad(x, z)) continue;
+            expect(kerbs.heightAt(x, z, SAMPLE), `pavement dips at ${x}, ${z}`).toBeCloseTo(KERB_HEIGHT, 3);
+          }
+          // And where a block stands behind it, the band runs out to its face rather than
+          // stopping at the shoulder: no strip of bare ground between the two to fall into.
+          for (let d = width; d < width + 6; d += 0.25) {
+            const [x, z] = at(d);
+            if (!plan.isSolid(x, z)) continue;
+            if (d - width <= 0.3) clean++;
+            else trench++;
+            // The block's own slab carries on at the same step, so a car nosing over its
+            // collider stays up instead of sinking through the kerb.
+            expect(kerbs.heightAt(x, z, SAMPLE)).toBeCloseTo(KERB_HEIGHT, 3);
+            break;
+          }
+        }
+      }
+    }
+    // What is left is the odd notched or slanted block face a single tapered strip cannot
+    // follow, and the vacant lots too deep to pave. Pavement is never laid into a building,
+    // so those stay bare ground — but they are the exception now, not the rule.
+    expect(clean).toBeGreaterThan(280);
+    expect(trench / (clean + trench)).toBeLessThan(0.2);
   });
 
   it('never lifts a car that is still on the asphalt', () => {

@@ -354,8 +354,11 @@ export const SIDEWALK_Y = 0.22;
  * as much as the kerb you can see. Built by `src/world/kerbs.ts`.
  */
 export interface KerbField {
-  /** Paved width beside `rb` at sample `i` (m). 0 where that stretch is not paved. */
-  widthAt(rb: RibbonDef, i: number): number;
+  /**
+   * Paved width beside `rb` on `side`, `t` of the way along segment `i` (m): the band tapers
+   * from end to end to follow the blocks behind it. 0 where that stretch is not paved.
+   */
+  widthAt(rb: RibbonDef, i: number, side: number, t?: number): number;
   /** True when segment `i` of `rb` carries pavement on `side` (-1 left, +1 right of travel). */
   paved(rb: RibbonDef, i: number, side: number): boolean;
   /**

@@ -52,6 +52,8 @@ const CHAIN_FADE = 1.5;
 const DRIVE_HINT_EVERY = 8;
 /** Quantisation of the chain drain bar: 20 steps over the whole window. */
 const CHAIN_STEPS = 20;
+/** Quantisation of the aim charge bar, in steps over the full hold. */
+const AIM_STEPS = 30;
 
 /**
  * Same card, pad labels, shown instead of the keys once a controller is plugged in. The order
@@ -62,7 +64,7 @@ const PAD_CONTROLS = [
   ['STICK', 'steer'],
   ['A', 'handbrake'],
   ['B', 'nitro'],
-  ['X', 'lightning'],
+  ['X', 'hold: aim'],
   ['Y', 'camera'],
   ['VIEW', 'cruise'],
   ['START', 'restart'],
@@ -74,7 +76,7 @@ const CONTROLS = [
   ['WASD', 'drive'],
   ['SPACE', 'handbrake'],
   ['SHIFT', 'nitro'],
-  ['E', 'lightning'],
+  ['E', 'hold: aim'],
   ['R', 'restart'],
   ['C', 'cruise'],
   ['P', 'camera'],
@@ -140,7 +142,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-money__flashes"><span class="rb-reward"></span><span class="rb-reward"></span>` +
     `<span class="rb-reward"></span></div>` +
     `</div>` +
-    `<div class="rb-reticle">${RETICLE_ICON}<span class="rb-reticle__label">TARGET LOCKED</span></div>` +
+    `<div class="rb-reticle">${RETICLE_ICON}` +
+    `<div class="rb-reticle__charge"><span class="rb-reticle__charge-fill"></span></div>` +
+    `<span class="rb-reticle__label">ON TARGET</span></div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-race">` +
     `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span></div>` +
@@ -222,6 +226,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const remainingEl = pick<HTMLElement>(hud, '.rb-money__remaining');
   const rewardEls = Array.from(hud.querySelectorAll<HTMLElement>('.rb-reward'));
   const reticleEl = pick<HTMLElement>(hud, '.rb-reticle');
+  const reticleFillEl = pick<HTMLElement>(hud, '.rb-reticle__charge-fill');
+  const reticleLabelEl = pick<HTMLElement>(hud, '.rb-reticle__label');
   const cruiseEl = pick<HTMLElement>(hud, '.rb-cruise');
   const driftEl = pick<HTMLElement>(hud, '.rb-drift');
   const driftTimeEl = pick<HTMLElement>(hud, '.rb-drift__time');
@@ -269,6 +275,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   let shownChainStep = -1;
   let drifting = false;
   let locked = false;
+  let shownCharging = false;
+  let shownFullCharge = false;
+  let shownAimStep = -1;
   let ready = false;
   let reversing = false;
   let controlsVisible = true;
@@ -489,9 +498,37 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         chainBarEl.style.transform = `scaleX(${f.toFixed(2)})`;
       }
 
-      if (s.targetAcquired !== locked) {
-        locked = s.targetAcquired;
-        reticleEl.classList.toggle('is-on', s.targetAcquired);
+      // The reticle is up while the shot charges, and while the beam's line crosses a car.
+      // Charging, it reads out the reach the hold has bought so far — that number is the
+      // whole skill of the gun now, since nothing bends towards a target.
+      const charging = s.aim01 > 0;
+      const showReticle = charging || s.targetAcquired;
+      if (showReticle !== locked) {
+        locked = showReticle;
+        reticleEl.classList.toggle('is-on', showReticle);
+      }
+      if (charging !== shownCharging) {
+        shownCharging = charging;
+        reticleEl.classList.toggle('is-charging', charging);
+      }
+      // Full reach, still held: the meter has nothing left to say, so it says so and waits.
+      const full = charging && s.aim01 >= 1;
+      if (full !== shownFullCharge) {
+        shownFullCharge = full;
+        reticleEl.classList.toggle('is-full', full);
+      }
+      // Full reach is its own step, so the readout lands on the real maximum rather than on
+      // whatever the last quantised step rounded to.
+      const aimStep = charging ? (full ? AIM_STEPS : Math.min(AIM_STEPS - 1, Math.floor(s.aim01 * AIM_STEPS))) : -1;
+      if (aimStep !== shownAimStep) {
+        shownAimStep = aimStep;
+        if (aimStep < 0) {
+          reticleFillEl.style.transform = 'scaleX(0)';
+          reticleLabelEl.textContent = 'ON TARGET';
+        } else {
+          reticleFillEl.style.transform = `scaleX(${(aimStep / AIM_STEPS).toFixed(2)})`;
+          reticleLabelEl.textContent = `${Math.round(s.aimRange)}M`;
+        }
       }
 
       if (s.money !== shownMoney) {
@@ -561,9 +598,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
           ],
           420,
         );
+      } else if (e.type === 'lightningFired') {
+        // A miss costs the same charge as a hit: say so, or the shot looks like a bug.
+        if (e.targetId < 0) showNote(noteEl, 'MISS');
       } else if (e.type === 'lightningDenied') {
         if (e.reason === 'noCharge') showNote(noteEl, 'DRIFT TO CHARGE');
         else if (e.reason === 'noTarget') showNote(noteEl, 'NO TARGET');
+        else if (e.reason === 'short') showNote(noteEl, 'HOLD E TO AIM');
         else showNote(noteEl, 'RECHARGING');
       } else if (e.type === 'raceCountdown') {
         showCountdown(String(e.seconds), false);

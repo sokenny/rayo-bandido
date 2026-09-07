@@ -2,25 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { createArenaLayout } from '../src/world/arenaLayout';
 import { createInitialGameState, stepGame } from '../src/sim/gameState';
 import { createPlayerCommand } from '../src/core/input/keyboard';
-import { selectTarget } from '../src/sim/targeting';
+import { rayTarget } from '../src/sim/targeting';
 import { LIGHTNING, NITRO, TARGETS } from '../src/config/tuning';
 import type { TargetState } from '../src/core/types';
 
 const DT = 1 / 60;
 
 function makeTarget(id: number, x: number, z: number, status: TargetState['status'] = 'active'): TargetState {
-  return { id, x, z, y: 0, heading: 0, prevX: x, prevZ: z, prevY: 0, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, rewarded: false };
+  return { id, x, z, y: 0, heading: 0, prevX: x, prevZ: z, prevY: 0, prevHeading: 0, vx: 0, vz: 0, status, hitTime: -1, patrolIndex: 0, patrolSpeed: 0, speed: 0, rewarded: false };
 }
 
-describe('targeting cone', () => {
-  it('picks the nearest active target inside the forward cone', () => {
-    const targets = [makeTarget(0, 0, -40), makeTarget(1, 0, -20), makeTarget(2, 30, 0), makeTarget(3, 0, -10, 'destroyed')];
-    expect(selectTarget(0, 0, 0, targets)).toBe(1);
+describe('beam aim', () => {
+  it('hits the nearest active target on the line of fire', () => {
+    const targets = [makeTarget(0, 0, -25), makeTarget(1, 0, -12), makeTarget(2, 20, 0), makeTarget(3, 0, -6, 'destroyed')];
+    expect(rayTarget(0, 0, 0, targets, LIGHTNING.range)).toBe(1);
   });
 
-  it('ignores targets outside the range or behind the car', () => {
-    const targets = [makeTarget(0, 0, 60), makeTarget(1, 0, -80)];
-    expect(selectTarget(0, 0, 0, targets)).toBe(-1);
+  it('ignores targets behind the car, off the line, or past the charged reach', () => {
+    expect(rayTarget(0, 0, 0, [makeTarget(0, 0, 12)], LIGHTNING.range)).toBe(-1);
+    expect(rayTarget(0, 0, 0, [makeTarget(0, 6, -12)], LIGHTNING.range)).toBe(-1);
+    expect(rayTarget(0, 0, 0, [makeTarget(0, 0, -20)], 10)).toBe(-1);
   });
 });
 
@@ -69,25 +70,89 @@ describe('game rules', () => {
     expect(s.nitro.amount).toBe(10);
   });
 
-  it('firing with enough charge destroys the acquired target once and pays exactly one reward', () => {
+  /** Parks the car `distance` metres behind the first target, aimed at it, with full charge. */
+  function aimedAtFirstTarget(distance: number) {
     const layout = createArenaLayout();
     const s = createInitialGameState(layout);
-    const cmd = createPlayerCommand();
-    // Aim the car at the first target and grant charge.
     const t = s.targets[0];
-    s.vehicle.x = t.x;
-    s.vehicle.z = t.z + 20;
-    s.vehicle.heading = 0;
+    // A patrolling target would wander off the line during a long hold; park them all, and
+    // leave only this one shootable so nothing else can wander onto the line of fire.
+    for (const other of s.targets) {
+      other.patrolSpeed = 0;
+      if (other !== t) other.status = 'disabled';
+    }
+    layout.targetPatrols.length = 0;
+    s.vehicle.x = s.vehicle.prevX = t.x;
+    s.vehicle.z = s.vehicle.prevZ = t.z + distance;
+    s.vehicle.heading = s.vehicle.prevHeading = 0;
     s.lightning.charge = LIGHTNING.capacity;
+    return { layout, s, t };
+  }
+
+  /** Holds fire for `hold` seconds, then releases it. */
+  function holdFire(s: ReturnType<typeof createInitialGameState>, layout: ReturnType<typeof createArenaLayout>, hold: number) {
+    const cmd = createPlayerCommand();
     cmd.fire = true;
+    for (let i = 0; i < Math.round(hold / DT); i++) stepGame(s, cmd, layout, DT);
+    cmd.fire = false;
     stepGame(s, cmd, layout, DT);
+  }
+
+  it('a held shot released with enough reach destroys the target once and pays one reward', () => {
+    const { layout, s, t } = aimedAtFirstTarget(LIGHTNING.range * 0.6);
+    // Six tenths of the range needs six tenths of the hold; give it three quarters.
+    holdFire(s, layout, LIGHTNING.maxHold * 0.75);
     expect(s.lightning.charge).toBeCloseTo(LIGHTNING.capacity - LIGHTNING.cost);
     expect(t.status).toBe('destroyed');
     expect(s.economy.money).toBe(TARGETS.reward);
     expect(s.economy.destroyed).toBe(1);
-    // A second immediate shot at the same spot must not double pay or pick the dead target.
-    stepGame(s, cmd, layout, DT);
+    // A second shot at the same spot must not double pay or pick the dead target.
+    s.lightning.cooldown = 0;
+    holdFire(s, layout, LIGHTNING.maxHold * 0.75);
     expect(s.economy.money).toBe(TARGETS.reward);
+  });
+
+  it('a short hold falls short of a target that a long hold reaches', () => {
+    const short = aimedAtFirstTarget(LIGHTNING.range * 0.8);
+    holdFire(short.s, short.layout, LIGHTNING.maxHold * 0.5);
+    expect(short.t.status).toBe('active');
+    // The shot still left, and still cost its charge.
+    expect(short.s.lightning.charge).toBeCloseTo(LIGHTNING.capacity - LIGHTNING.cost);
+    expect(short.s.events.some((e) => e.type === 'lightningFired' && e.targetId < 0)).toBe(true);
+
+    const full = aimedAtFirstTarget(LIGHTNING.range * 0.8);
+    holdFire(full.s, full.layout, LIGHTNING.maxHold);
+    expect(full.t.status).toBe('destroyed');
+  });
+
+  it('a shot off the line of fire misses however long it is held', () => {
+    const { layout, s, t } = aimedAtFirstTarget(LIGHTNING.range * 0.5);
+    s.vehicle.x = s.vehicle.prevX = t.x + 6;
+    holdFire(s, layout, LIGHTNING.maxHold);
+    expect(t.status).toBe('active');
+  });
+
+  it('a hold past the maximum waits at full reach and only throws on the release', () => {
+    const { layout, s, t } = aimedAtFirstTarget(LIGHTNING.range * 0.95);
+    const cmd = createPlayerCommand();
+    cmd.fire = true;
+    for (let i = 0; i < Math.round((LIGHTNING.maxHold * 2) / DT); i++) stepGame(s, cmd, layout, DT);
+    // Still held, so nothing has left; the charge is capped, not spent.
+    expect(t.status).toBe('active');
+    expect(s.lightning.charging).toBe(true);
+    expect(s.lightning.hold).toBeCloseTo(LIGHTNING.maxHold);
+    expect(s.lightning.charge).toBe(LIGHTNING.capacity);
+    cmd.fire = false;
+    stepGame(s, cmd, layout, DT);
+    expect(t.status).toBe('destroyed');
+  });
+
+  it('a tap too short to aim throws nothing and costs nothing', () => {
+    const { layout, s, t } = aimedAtFirstTarget(5);
+    holdFire(s, layout, LIGHTNING.minHold * 0.5);
+    expect(t.status).toBe('active');
+    expect(s.lightning.charge).toBe(LIGHTNING.capacity);
+    expect(s.events.some((e) => e.type === 'lightningDenied' && e.reason === 'short')).toBe(true);
   });
 
   it('firing without charge is denied', () => {
@@ -96,7 +161,7 @@ describe('game rules', () => {
     const cmd = createPlayerCommand();
     cmd.fire = true;
     stepGame(s, cmd, layout, DT);
-    expect(s.events.some((e) => e.type === 'lightningDenied')).toBe(true);
+    expect(s.events.some((e) => e.type === 'lightningDenied' && e.reason === 'noCharge')).toBe(true);
     expect(s.economy.money).toBe(0);
   });
 

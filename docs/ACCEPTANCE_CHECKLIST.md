@@ -26,7 +26,7 @@ Status as of 2026-09-03 (Fable lead session stopped by Juan before the final QA 
 - [x] Lightning charge increases only during a valid drift. (Browser: `noChargeWithoutDrift` and `chargeFromDrift` passed; tests)
 - [ ] Nitro recharges gradually while moving and not boosting. (Tests pass; browser check failed once on script timing, re-run pending)
 - [x] At least three electric targets are available. (Browser: 6 targets)
-- [x] Lightning selects the nearest valid target inside the forward cone. (Browser: `targetAcquiredInCone`; tests)
+- [x] Lightning hits what the car is pointed at, out to the reach the hold bought. (Browser: `targetAcquiredInCone`; tests)
 - [x] Firing consumes charge. (Browser)
 - [x] Impact is visually obvious. (Browser: `artifacts/06-destroyed.png` shows the charred, sagging target, shock ring and +100 flash; the arc itself was not captured, pending item 4)
 - [x] Target is destroyed/disabled once and cannot award duplicate money. (Browser: `noDuplicateReward`; tests)

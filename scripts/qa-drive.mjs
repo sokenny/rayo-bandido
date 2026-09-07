@@ -107,6 +107,8 @@ try {
       };
     });
   const inject = (partial, ticks) => page.evaluate((p, t) => window.__rb.inject(p, t), partial, ticks);
+  /** Ticks of held fire for a full-reach shot: `LIGHTNING.maxHold` at the 60 Hz sim step, plus slack. */
+  const FIRE_TICKS = 65;
   /** Wait until every injected tick has been consumed by the simulation. */
   const waitIdle = async (timeoutMs = 20000) => {
     const start = Date.now();
@@ -182,7 +184,10 @@ try {
   results.metrics.nitroAfterBoost = nitroState.nitro;
   results.metrics.nitroAfterRecharge = afterNitro.nitro;
 
-  // 5. Lightning: line up with the nearest active target (QA teleport), earn charge if needed, fire.
+  // 5. Lightning: line up with the nearest active target (QA teleport), earn charge if needed,
+  // then hold fire. The gun charges while the button is down and throws the bolt by itself at
+  // `LIGHTNING.maxHold` (1 s = 60 ticks) and throws it on the release — the tick after the
+  // injected hold runs out — so a one-tick press is a fumble, not a shot.
   const target = await page.evaluate(() => {
     const s = window.__rb.state;
     const t = s.targets.find((x) => x.status === 'active');
@@ -223,7 +228,9 @@ try {
   results.checks.targetAcquiredInCone = locked.acquired >= 0;
   const moneyBefore = locked.money;
   const chargeBefore = locked.charge;
-  await inject({ fire: true }, 1);
+  await inject({ fire: true }, FIRE_TICKS);
+  // The hold runs at the sim's pace: wait for it to be consumed, or the shot is still in the air.
+  await waitIdle();
   await sleep(40);
   await shot('05-lightning.png');
   await sleep(600);
@@ -233,7 +240,8 @@ try {
   results.checks.destroyedIncrements = afterFire.destroyed === locked.destroyed + 1;
   await shot('06-destroyed.png');
   // Fire again immediately: must not double-pay for the same target.
-  await inject({ fire: true }, 1);
+  await inject({ fire: true }, FIRE_TICKS);
+  await waitIdle();
   await sleep(300);
   const afterSecond = await read();
   results.checks.noDuplicateReward = afterSecond.destroyed <= afterFire.destroyed + 1 && afterSecond.money <= afterFire.money + 100;
@@ -255,7 +263,8 @@ try {
     await page.evaluate(() => {
       window.__rb.state.lightning.charge = 100;
     });
-    await inject({ fire: true }, 1);
+    await inject({ fire: true }, FIRE_TICKS);
+    await waitIdle();
     await sleep(300);
   }
   const stressEnd = await read();

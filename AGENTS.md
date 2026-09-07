@@ -66,6 +66,10 @@
 - Preserve road readability. Darkness, fog and bloom must not hide gameplay.
 - Lightning is cyan/blue-white. Nitro is magenta/violet with a warm exhaust core.
 - Use low-poly silhouettes, modular architecture, emissive windows and selective neon.
+- A material that draws `MeshBuilder.tube` or `panel` output — struts, cables, neon, halos —
+  must be `THREE.DoubleSide`. Those primitives are crossed or single quads, not closed solids,
+  so a back-face cull deletes them from half the compass: it is what made street lamps lose
+  their boom and their light when approached from the wrong side.
 
 ## Agent coordination
 

@@ -460,10 +460,18 @@ export const NITRO = {
 export const LIGHTNING = {
   capacity: 100,
   cost: 50,
-  /** Half-angle of the forward auto-aim cone (rad). ~35 degrees. */
-  coneHalfAngle: (35 * Math.PI) / 180,
-  /** Auto-aim range (m). */
-  range: 45,
+  /**
+   * The shot is aimed, not locked on: it leaves the nose along the car's heading and stops at
+   * whatever `range` the hold bought. Nothing curves towards a car, so pointing counts.
+   */
+  /** Reach of a fully charged shot (m). A shorter hold reaches proportionally less far. */
+  range: 75,
+  /** Seconds of held fire for a full-range shot. The shot leaves on its own at this point. */
+  maxHold: 1,
+  /** A hold shorter than this is a fumble: nothing leaves, nothing is spent. */
+  minHold: 0.12,
+  /** How far off the beam's line a car may be and still be hit (m). Roughly a car's width. */
+  hitRadius: 2.2,
   /** Seconds between shots. */
   cooldown: 0.35,
   /** Seconds the arc stays visible. */
@@ -496,6 +504,38 @@ export const TARGETS = {
     targetPush: 0.7,
     /** Minimum approach speed to register a bump event for feedback (m/s). */
     minImpact: 1.2,
+  },
+  /**
+   * How electric cars behave towards EACH OTHER (`src/sim/targets.ts`).
+   *
+   * Patrol loops share streets and junctions, so two cars regularly want the same piece of
+   * road at the same moment. Left alone they drove straight through one another, which is
+   * the one thing traffic can do that no amount of lighting will excuse.
+   *
+   * Two mechanisms, in that order of preference. `lookahead`/`halfWidth` are a lane-shaped
+   * cone in front of each car: anything inside it makes the car lift off and, close enough,
+   * stop — so most conflicts are settled before they are collisions. `contact` is the
+   * backstop for the ones that are not (a car shoved by the player, a junction taken at an
+   * angle the cone missed): the two are pushed apart and given a knock, so a crossing reads
+   * as a shunt rather than a merge.
+   */
+  traffic: {
+    /** How far ahead a car watches for another car in its lane (m). */
+    lookahead: 11,
+    /** Half-width of that lane (m). Wider than a car, so a near-lane pass still registers. */
+    halfWidth: 2.3,
+    /** Clear road ahead below which the car is stopped outright (m). */
+    stopGap: 3.6,
+    /** How hard a car may slow for the one in front (m/s^2). Brisk: it must not be rammed. */
+    brake: 16,
+    /** How fast it picks the patrol speed back up once the road clears (m/s^2). */
+    accel: 4.5,
+    /** Centre distance at which two cars are touching (m). Two `knock.radius` and a margin. */
+    contactDistance: 2.5,
+    /** Fraction of the closing speed turned into a knock when they touch anyway. */
+    bounce: 0.45,
+    /** Ceiling on that knock (m/s), so a corner case cannot fire a car across the street. */
+    maxBounce: 3,
   },
 };
 
@@ -1290,7 +1330,7 @@ export const RUSH = {
    */
   targets: {
     /** Marked out to here (m). Comfortably past `LIGHTNING.range`, so a target is seen coming. */
-    markRadius: 62,
+    markRadius: 92,
     /** Never more than this many marked at once, nearest first. */
     maxMarked: 14,
   },

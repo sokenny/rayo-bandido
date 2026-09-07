@@ -57,7 +57,7 @@ const RING_INNER = RING_OUTER - 1.1;
 /** How far the paint floats over the road (m). Enough to clear the asphalt's own lift. */
 const PAINT_Y = 0.035;
 /** Height the glyph is centred at (m). Well over the tallest thing that drives under it. */
-const GLYPH_Y = 6.9;
+const GLYPH_Y = 8.6;
 /**
  * The bolt: how tall it stands, how far it is stretched sideways from the outline's own thin
  * proportions, and how deep it is extruded. The depth is what the whole idea rests on — a
@@ -74,13 +74,17 @@ const RING_GAP = 0.42;
 /** How much the ring is tilted off vertical (rad), so a spin never brings it fully edge-on. */
 const RING_TILT = 0.34;
 /**
- * The wordmark sprite: its width in metres, and how far BELOW the halo it hangs. Below, because
- * the glyph is high and the chase camera looks slightly down — anything above the halo ends up
- * in the very top of the frame, where the controls card already is. Under it, the word reads as
- * a nameplate and stays clear of the roof of the tallest bus that can pass beneath it.
+ * The wordmark sprite: its width in metres, and the gap between the bottom of the halo and the
+ * top of its box. BELOW the halo, because the glyph is high and the chase camera looks slightly
+ * down — anything above it ends up in the very top of the frame, where the controls card is.
+ *
+ * At this size it no longer tucks inside the ring the way a small nameplate did, so it hangs
+ * clear underneath and the glyph rides higher to make room. The canvas carries about a third of
+ * its height as transparent margin above and below the letters, so the visible word sits well
+ * inside the box — which is what keeps it clear of the roof of a bus passing beneath.
  */
-const CAPTION_WIDTH = 3.1;
-const CAPTION_DROP = 0.55;
+const CAPTION_WIDTH = 9.3;
+const CAPTION_GAP = 0.25;
 /** Chevron dimensions (m): the two arrows on the approach axis. */
 const CHEVRON_SPAN = 3.6;
 const CHEVRON_DEPTH = 1.5;
@@ -369,8 +373,11 @@ export function createRushMarker(site: { x: number; z: number; y: number; headin
     toneMapped: false,
   });
   const caption = new THREE.Sprite(captionMat);
-  caption.scale.set(CAPTION_WIDTH, (CAPTION_WIDTH * CAPTION_H) / CAPTION_W, 1);
-  caption.position.y = -(RING_RADIUS - CAPTION_DROP);
+  const captionHeight = (CAPTION_WIDTH * CAPTION_H) / CAPTION_W;
+  caption.scale.set(CAPTION_WIDTH, captionHeight, 1);
+  // Hung off the bottom of the halo rather than placed at a number, so resizing the wordmark
+  // moves it out of the ring's way on its own instead of quietly growing back into it.
+  caption.position.y = -(RING_RADIUS + captionHeight / 2 + CAPTION_GAP);
   caption.renderOrder = 4;
   glyph.add(caption);
 
