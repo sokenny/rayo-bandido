@@ -2,7 +2,9 @@ import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan'
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
-import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec } from './buildingKit';
+import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec, type Volume } from './buildingKit';
+import { FLOOR } from './facadeAtlas';
+import { dressBuilding } from './buildingReclaim';
 import { signCell } from './textures';
 
 /**
@@ -250,11 +252,15 @@ interface Module {
 interface Plot extends Module {
   blk: BlockRect;
   inner: Rect2;
+  /** Pavement between the block's collider edge and the buildings, per axis (m). */
+  pave: { x: number; z: number };
   spec: BuildingSpec;
   seed: number;
   /** Set once built. */
   top?: number;
   dark?: boolean;
+  /** The volumes actually drawn on this plot. Everything hung on the building reads these. */
+  vols?: Volume[];
 }
 
 function heightFor(massing: 1 | 2 | 3 | 4, rng: () => number): number {
@@ -328,6 +334,7 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
       height: h,
       blk,
       inner,
+      pave: setback,
       seed,
       spec: { zone: blk.zone, massing: blk.massing, height: h, base: 0.22, detail: 'near', street },
     });
@@ -369,16 +376,69 @@ function buildPlot(b: EnvBuilders, p: Plot): void {
   p.top = bld.top;
   p.dark = bld.dark;
   const h = bld.top - p.spec.base;
+  // Reclamation: the ground-floor module, its paint and its plants, and whatever has seeded
+  // itself on the roof. Driven by the reclamation field at this plot, so a whole pocket of
+  // the city gives way together instead of one building in ten doing it on its own.
+  const ground = bld.volumes.find((v) => v.y0 <= p.spec.base + 0.01 && v.role !== 'link') ?? bld.volumes[0];
+  dressBuilding(b, ground, p, p.spec.base, bld.crown, bld.top, p.blk.zone, p.spec.street ?? [true, true, true, true], p.pave, bld.dark);
+  p.vols = bld.volumes;
   const m: Module = { minX: p.minX, maxX: p.maxX, minZ: p.minZ, maxZ: p.maxZ, height: h };
   // A big screen standing on the roof, facing the street, on some of the taller buildings.
-  if (!bld.dark && h > 24 && rng() < 0.22) rooftopSign(b, m, p.inner, bld.top, rng);
+  // The plot says which way the street is; the crown says where the roof edge actually is.
+  if (!bld.dark && h > 24 && rng() < 0.22) rooftopSign(b, m, bld.crown, p.inner, bld.top, rng);
   // Street facades: shopfront bands, signs, the district's screens.
   if (!bld.dark) {
-    tryFacade(b, p.blk, p.inner, m, 1, 0, rng);
-    tryFacade(b, p.blk, p.inner, m, -1, 0, rng);
-    tryFacade(b, p.blk, p.inner, m, 0, 1, rng);
-    tryFacade(b, p.blk, p.inner, m, 0, -1, rng);
+    tryFacade(b, p.blk, p.inner, bld.volumes, m, 1, 0, rng);
+    tryFacade(b, p.blk, p.inner, bld.volumes, m, -1, 0, rng);
+    tryFacade(b, p.blk, p.inner, bld.volumes, m, 0, 1, rng);
+    tryFacade(b, p.blk, p.inner, bld.volumes, m, 0, -1, rng);
   }
+}
+
+/**
+ * The wall someone standing on side (dx, dz) actually sees between `y0` and `y1`: the
+ * outermost volume of the building that spans that whole height.
+ *
+ * Everything hung on a facade must be placed against this and never against the plot
+ * rectangle. Most archetypes stand well inside their plot — a slab takes a third of it, a
+ * podium tower half, a cantilever shaft 84% — and a band, a sign or a screen put on the plot
+ * edge at a height the outer volume does not reach ends up hanging in mid-air beside the
+ * building. Returns null when nothing reaches that height, which is the signal to draw
+ * nothing at all.
+ */
+function faceVolume(vols: Volume[], dx: number, dz: number, y0: number, y1: number): Volume | null {
+  let best: Volume | null = null;
+  let bestOut = -Infinity;
+  for (const v of vols) {
+    if (v.role === 'link') continue;
+    if (v.y0 > y0 + 0.01 || v.y1 < y1 - 0.01) continue;
+    const out = dx === 1 ? v.maxX : dx === -1 ? -v.minX : dz === 1 ? v.maxZ : -v.minZ;
+    if (out > bestOut + 0.01) {
+      best = v;
+      bestOut = out;
+    }
+  }
+  return best;
+}
+
+/**
+ * The two volumes a bridge at height `y` can actually connect: one from each plot, both
+ * spanning that floor, close enough and facing each other squarely. Null when the buildings
+ * only look like neighbours at plot level.
+ */
+function linkVolumes(a: Plot, c: Plot, y: number): [Volume, Volume] | null {
+  for (const va of a.vols ?? []) {
+    if (va.role === 'link' || va.y0 > y + 0.01 || va.y1 < y + FLOOR - 0.01) continue;
+    for (const vc of c.vols ?? []) {
+      if (vc.role === 'link' || vc.y0 > y + 0.01 || vc.y1 < y + FLOOR - 0.01) continue;
+      const gapX = Math.max(vc.minX - va.maxX, va.minX - vc.maxX);
+      const gapZ = Math.max(vc.minZ - va.maxZ, va.minZ - vc.maxZ);
+      const ovX = Math.min(va.maxX, vc.maxX) - Math.max(va.minX, vc.minX);
+      const ovZ = Math.min(va.maxZ, vc.maxZ) - Math.max(va.minZ, vc.minZ);
+      if ((gapX > 0.3 && gapX < 6 && ovZ >= 5) || (gapZ > 0.3 && gapZ < 6 && ovX >= 5)) return [va, vc];
+    }
+  }
+  return null;
 }
 
 /** Enclosed bridges between neighbouring towers on one block. */
@@ -394,12 +454,17 @@ function buildLinks(b: EnvBuilders, plots: Plot[]): void {
       const gapZ = Math.max(c.minZ - a.maxZ, a.minZ - c.maxZ);
       const overlapX = Math.min(a.maxX, c.maxX) - Math.max(a.minX, c.minX);
       const overlapZ = Math.min(a.maxZ, c.maxZ) - Math.max(a.minZ, c.minZ);
-      const sideBySide = (gapX > 0.3 && gapX < 6 && overlapZ >= 5) || (gapZ > 0.3 && gapZ < 6 && overlapX >= 5);
+      const sideBySide = (gapX >= 0 && gapX < 6 && overlapZ >= 5) || (gapZ >= 0 && gapZ < 6 && overlapX >= 5);
       if (!sideBySide) continue;
       const rng = makeRng((a.seed ^ c.seed) >>> 0);
       if (rng() > BLOCKS.linkChance) continue;
       const y = a.spec.base + snapFloors(Math.min(a.top, c.top) * (0.4 + rng() * 0.3));
-      buildLink(b, a, c, y, a.blk.zone, rng);
+      // The plots being neighbours is only the shortlist. The bridge has to span two walls
+      // that exist at its own height: on a podium or offset tower the shaft is far inside the
+      // plot, and a bridge drawn plot-to-plot would start and end in mid-air.
+      const pair = linkVolumes(a, c, y);
+      if (!pair) continue;
+      buildLink(b, pair[0], pair[1], y, a.blk.zone, rng);
       made++;
     }
   }
@@ -413,10 +478,14 @@ function buildBlocks(b: EnvBuilders): void {
   buildLinks(b, plots);
 }
 
-/** A billboard on the roof edge, turned toward whichever side has a street below. */
-function rooftopSign(b: EnvBuilders, m: Module, inner: Rect2, top: number, rng: () => number): void {
-  const w = m.maxX - m.minX;
-  const d = m.maxZ - m.minZ;
+/**
+ * A billboard on the roof edge, turned toward whichever side has a street below. `m` is the
+ * plot (which decides which side the street is on); `roof` is the footprint of the highest
+ * volume, which is where the board and its posts actually stand. On a stepped or offset
+ * tower the two are far apart, and using the plot would leave the board floating out over
+ * the setback with its posts standing on nothing.
+ */
+function rooftopSign(b: EnvBuilders, m: Module, roof: Rect2, inner: Rect2, top: number, rng: () => number): void {
   const cx = (m.minX + m.maxX) / 2;
   const cz = (m.minZ + m.maxZ) / 2;
   const isRoad = b.plan.isRoad;
@@ -438,12 +507,17 @@ function rooftopSign(b: EnvBuilders, m: Module, inner: Rect2, top: number, rng: 
   }
   if (!pick) return;
   const [dx, dz] = pick;
-  const along = dx !== 0 ? d : w;
+  // From here on the roof, not the plot: the board sits on the edge of the volume it stands on.
+  const rw = roof.maxX - roof.minX;
+  const rd = roof.maxZ - roof.minZ;
+  const rcx = (roof.minX + roof.maxX) / 2;
+  const rcz = (roof.minZ + roof.maxZ) / 2;
+  const along = dx !== 0 ? rd : rw;
   const sw = Math.min(along * 0.85, 9 + rng() * 9);
   const sh = sw * (0.42 + rng() * 0.2);
   const sy = top + 1.4 + sh / 2;
-  const px = dx !== 0 ? (dx === 1 ? m.maxX : m.minX) - dx * 1.2 : cx;
-  const pz = dz !== 0 ? (dz === 1 ? m.maxZ : m.minZ) - dz * 1.2 : cz;
+  const px = dx !== 0 ? (dx === 1 ? roof.maxX : roof.minX) - dx * 1.2 : rcx;
+  const pz = dz !== 0 ? (dz === 1 ? roof.maxZ : roof.minZ) - dz * 1.2 : rcz;
   const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
   const target = rng() < 0.5 ? b.billA : b.billB;
   target.panel(px, sy, pz, sw, sh, rotY);
@@ -468,6 +542,7 @@ function tryFacade(
   b: EnvBuilders,
   blk: BlockRect,
   inner: Rect2,
+  vols: Volume[],
   m: Module,
   dx: number,
   dz: number,
@@ -477,11 +552,25 @@ function tryFacade(
     dx === 1 ? m.maxX > inner.maxX - 1.2 : dx === -1 ? m.minX < inner.minX + 1.2 : dz === 1 ? m.maxZ > inner.maxZ - 1.2 : m.minZ < inner.minZ + 1.2;
   if (!flush) return;
 
-  const cx = (m.minX + m.maxX) / 2;
-  const cz = (m.minZ + m.maxZ) / 2;
-  const faceX = dx === 1 ? m.maxX : dx === -1 ? m.minX : cx;
-  const faceZ = dz === 1 ? m.maxZ : dz === -1 ? m.minZ : cz;
-  const width = dx !== 0 ? m.maxZ - m.minZ : m.maxX - m.minX;
+  // The shopfront band decides the wall: whichever volume is outermost on this side at
+  // street level. Nothing above is drawn unless a volume reaches that far out at that height.
+  const bandY = 3.2 + rng() * 1.4;
+  const ground = faceVolume(vols, dx, dz, bandY, bandY);
+  if (!ground) return;
+
+  const face = (v: Volume): { x: number; z: number; width: number; alongX: boolean } => ({
+    x: dx === 1 ? v.maxX : dx === -1 ? v.minX : (v.minX + v.maxX) / 2,
+    z: dz === 1 ? v.maxZ : dz === -1 ? v.minZ : (v.minZ + v.maxZ) / 2,
+    width: dx !== 0 ? v.maxZ - v.minZ : v.maxX - v.minX,
+    alongX: dx === 0,
+  });
+
+  const g = face(ground);
+  const faceX = g.x;
+  const faceZ = g.z;
+  const width = g.width;
+  const cx = (ground.minX + ground.maxX) / 2;
+  const cz = (ground.minZ + ground.maxZ) / 2;
   // Only dress the wall if there is road across the sidewalk from it.
   const isRoad = b.plan.isRoad;
   if (!isRoad(faceX + dx * 7, faceZ + dz * 7) && !isRoad(faceX + dx * 11, faceZ + dz * 11) && !isRoad(faceX + dx * 15, faceZ + dz * 15)) return;
@@ -491,7 +580,6 @@ function tryFacade(
   const c = accent(zone, rng);
 
   // Shopfront band at ground level.
-  const bandY = 3.2 + rng() * 1.4;
   const bandLen = width * (0.5 + rng() * 0.35);
   const bx = faceX + dx * 0.25;
   const bz = faceZ + dz * 0.25;
@@ -525,14 +613,20 @@ function tryFacade(
     for (let k = 0; k < count; k++) {
       const sw = Math.min(width * 0.86, 7 + rng() * 9);
       const sh = sw * (0.5 + rng() * 0.45);
-      if (sy + sh / 2 > m.height - 1.5) break;
+      // The screen goes on whatever wall is outermost across its own full height. A tower set
+      // back on a podium is a different wall from the shopfront below, and above the tower's
+      // roof there is no wall at all.
+      const sv = faceVolume(vols, dx, dz, sy - sh / 2, sy + sh / 2 + 1.5);
+      if (!sv) break;
+      const sf = face(sv);
+      const fw = Math.min(sf.width * 0.86, sw);
       const target = (k + Math.floor(rng() * 2)) % 2 === 0 ? b.billA : b.billB;
-      target.panel(faceX + dx * 0.45, sy, faceZ + dz * 0.45, sw, sh, rotY);
+      target.panel(sf.x + dx * 0.45, sy, sf.z + dz * 0.45, fw, sh, rotY);
       b.props.color(PAL.metalDark, 0.7);
-      if (dx !== 0) b.props.box(faceX + dx * 0.2, sy, faceZ, 0.3, sh + 0.6, sw + 0.6);
-      else b.props.box(faceX, sy, faceZ + dz * 0.2, sw + 0.6, sh + 0.6, 0.3);
+      if (dx !== 0) b.props.box(sf.x + dx * 0.2, sy, sf.z, 0.3, sh + 0.6, fw + 0.6);
+      else b.props.box(sf.x, sy, sf.z + dz * 0.2, fw + 0.6, sh + 0.6, 0.3);
       const hc = target === b.billA ? PAL.neonCyan : PAL.neonMagenta;
-      halo(b, faceX + dx * 0.9, sy, faceZ + dz * 0.9, sw * 1.9, sh * 1.9, rotY, hc, 0.13);
+      halo(b, sf.x + dx * 0.9, sy, sf.z + dz * 0.9, fw * 1.9, sh * 1.9, rotY, hc, 0.13);
       sy += sh + 1.6 + rng() * 2;
     }
     groundGlow(b, faceX + dx * 10, faceZ + dz * 10, dx !== 0 ? 30 : width * 1.6, dx !== 0 ? width * 1.6 : 30, c, 0.08, 0.028);
@@ -546,13 +640,17 @@ function tryFacade(
   const tall = cell === 7 || cell === 13;
   const sw = tall ? 2.6 : Math.min(width * 0.7, 5 + rng() * 3.5);
   const sh = tall ? sw * 3 : sw * (0.75 + rng() * 0.4);
-  const sy = 6 + rng() * Math.max(1, Math.min(14, m.height - 10));
-  b.signs.panel(faceX + dx * 0.35, sy, faceZ + dz * 0.35, sw, sh, rotY, uv.u0, uv.v0, uv.u1, uv.v1);
+  const sy = 6 + rng() * Math.max(1, Math.min(14, ground.y1 - 10));
+  // Same rule as the screens: the sign hangs on the wall that is there at its own height.
+  const nv = faceVolume(vols, dx, dz, sy - sh / 2, sy + sh / 2);
+  if (!nv) return;
+  const nf = face(nv);
+  b.signs.panel(nf.x + dx * 0.35, sy, nf.z + dz * 0.35, sw, sh, rotY, uv.u0, uv.v0, uv.u1, uv.v1);
   // The halo always takes the zone accent, so a sign can never introduce a hue of its own.
-  halo(b, faceX + dx * 0.7, sy, faceZ + dz * 0.7, sw * 2.8, sh * 2.8, rotY, c, 0.17);
+  halo(b, nf.x + dx * 0.7, sy, nf.z + dz * 0.7, sw * 2.8, sh * 2.8, rotY, c, 0.17);
   // Wet reflection streak running away from the sign across the asphalt. Long and faint: this
   // is the smear on the road that does most of the work in the reference.
-  groundGlow(b, faceX + dx * 12, faceZ + dz * 12, dx !== 0 ? 34 : sw * 1.6, dx !== 0 ? sw * 1.6 : 34, c, 0.11, 0.024);
+  groundGlow(b, nf.x + dx * 12, nf.z + dz * 12, dx !== 0 ? 34 : sw * 1.6, dx !== 0 ? sw * 1.6 : 34, c, 0.11, 0.024);
 }
 
 /* ------------------------------------------------------------------ perimeter + skyline */
@@ -591,8 +689,8 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
       const [wx, wz] = along((min + max) / 2, 1.7);
       const w = horizontal ? max - min - 0.8 : 3.4;
       const d = horizontal ? 3.4 : max - min - 0.8;
-      b.concrete.color(PAL.concrete, 1.15);
-      b.concrete.box(wx, 1.72, wz, w, 3, d);
+      b.wall.color(PAL.concrete, 1.15);
+      b.wall.box(wx, 1.72, wz, w, 3, d);
     }
 
     const depth = 7.4;

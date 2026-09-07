@@ -1,8 +1,7 @@
-import { inBusStop, type RingBillboardDef, type SkybridgeDef, type TowerDef } from '../../../world/cityPlan';
+import type { RingBillboardDef, SkybridgeDef, TowerDef } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { makeRng } from './meshBuilder';
-import { BARK_TILE, FOLIAGE_TILE, groundGlow, halo, type EnvBuilders } from './builders';
-import { blockSetback } from './cityBuilder';
+import { groundGlow, halo, type EnvBuilders } from './builders';
 import { facadeCell } from './facadeAtlas';
 import { lampPost } from './propsBuilder';
 import { rollLampFault } from './lampFaults';
@@ -13,6 +12,10 @@ import { rollLampFault } from './lampFaults';
  * between buildings. Low-poly on purpose — tubes and boxes — with the light doing the work.
  * Everything lands in the shared per-material builders; no new draw calls. The water surface
  * itself is a separate mesh in `environment.ts`.
+ *
+ * The greenery that used to live here — a hedge or a palm every few metres along every block
+ * ledge in the city — is gone. What grows now grows where the city has been let go, from
+ * `reclaimBuilder.ts` and the plant kit in `plants.ts`.
  */
 export function buildLandmarks(b: EnvBuilders): void {
   const rng = makeRng(0x1a7d);
@@ -25,229 +28,6 @@ export function buildLandmarks(b: EnvBuilders): void {
   for (const [i, j] of b.plan.powerLines ?? []) buildPowerLine(b, towers[i], towers[j], rng);
   for (const r of b.plan.ringBillboards ?? []) buildRingBillboard(b, r, rng);
   for (const s of b.plan.skybridges ?? []) buildSkybridge(b, s, rng);
-  buildGreenery(b, rng);
-}
-
-/* ------------------------------------------------------------------ greenery */
-
-/** A hedge: two stacked boxes, the top one narrower, so it reads as a clipped bush. */
-function hedge(b: EnvBuilders, x: number, z: number, y0: number, len: number, along: 'x' | 'z', rng: () => number): void {
-  const h = 1.0 + rng() * 0.5;
-  const w = 0.9 + rng() * 0.3;
-  const tile = { tileW: FOLIAGE_TILE, tileH: FOLIAGE_TILE };
-  b.foliage.color(PAL.foliage, 0.85 + rng() * 0.3);
-  b.foliage.box(x, y0 + h / 2, z, along === 'x' ? len : w, h, along === 'x' ? w : len, tile);
-  b.foliage.color(PAL.foliage, 1.05 + rng() * 0.25);
-  b.foliage.box(x, y0 + h + 0.2, z, along === 'x' ? len - 0.6 : w - 0.3, 0.4, along === 'x' ? w - 0.3 : len - 0.6, tile);
-}
-
-/** Cross-section corners, clockwise seen from above, so `shaft`'s side quads face outward. */
-const CORNERS: ReadonlyArray<readonly [number, number]> = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-
-/**
- * A four-sided tapered column between two points, square in plan. Unlike `tube` (two crossed
- * quads, half of them backface-culled) it is solid from every angle, which is what a trunk
- * needs: the props material is single-sided.
- */
-function shaft(
-  b: EnvBuilders,
-  x0: number,
-  y0: number,
-  z0: number,
-  r0: number,
-  x1: number,
-  y1: number,
-  z1: number,
-  r1: number,
-): void {
-  // The bark runs up the shaft in world metres, continuous from one segment to the next
-  // (v comes from the height, not from the segment index), and each of the four faces gets
-  // its own slice across, so the grain never wraps back on itself at a corner.
-  const u = (2 * r0) / BARK_TILE;
-  const v0 = y0 / BARK_TILE;
-  const v1 = y1 / BARK_TILE;
-  for (let k = 0; k < 4; k++) {
-    const ax = CORNERS[k][0];
-    const az = CORNERS[k][1];
-    const bx = CORNERS[(k + 1) % 4][0];
-    const bz = CORNERS[(k + 1) % 4][1];
-    b.bark.quad(
-      x0 + bx * r0, y0, z0 + bz * r0,
-      x0 + ax * r0, y0, z0 + az * r0,
-      x1 + ax * r1, y1, z1 + az * r1,
-      x1 + bx * r1, y1, z1 + bz * r1,
-      k * u, v0, (k + 1) * u, v1,
-    );
-  }
-}
-
-/**
- * One tapered blade of a frond, drawn twice: the top face and, 4 cm below it, the underside
- * with the winding reversed. The gap is what keeps the two from z-fighting and gives the
- * frond a little thickness against the sky.
- */
-function blade(
-  b: EnvBuilders,
-  px: number,
-  py: number,
-  pz: number,
-  pw: number,
-  qx: number,
-  qy: number,
-  qz: number,
-  qw: number,
-  nx: number,
-  nz: number,
-  u0: number,
-  v0: number,
-  u1: number,
-  v1: number,
-): void {
-  const ax = px - nx * pw;
-  const az = pz - nz * pw;
-  const bx = px + nx * pw;
-  const bz = pz + nz * pw;
-  const cx = qx + nx * qw;
-  const cz = qz + nz * qw;
-  const dx = qx - nx * qw;
-  const dz = qz - nz * qw;
-  b.foliage.quad(ax, py + 0.02, az, bx, py + 0.02, bz, cx, qy + 0.02, cz, dx, qy + 0.02, dz, u0, v0, u1, v1);
-  b.foliage.quad(dx, qy - 0.02, dz, cx, qy - 0.02, cz, bx, py - 0.02, bz, ax, py - 0.02, az, u0, v0, u1, v1);
-}
-
-/**
- * A low-poly palm. The trunk is a curved, tapered, four-sided shaft with a flared root, and
- * it leans out over the street — taller palms lean further — so the crown clears the facade
- * behind it. Heights run from head height to fourteen metres, and no frond is allowed to
- * reach further into the block than the pavement it stands on: `outX/outZ` points at the
- * street and `room` is the metres of pavement between the trunk and the wall.
- */
-function palm(
-  b: EnvBuilders,
-  x: number,
-  z: number,
-  y0: number,
-  outX: number,
-  outZ: number,
-  room: number,
-  rng: () => number,
-): void {
-  // Squared so most palms are young and short and a few are old giants: the spread is the
-  // point, a row of identical trees reads as wallpaper.
-  const t = rng();
-  const h = 4.5 + t * t * 9.5;
-  const lean = 0.5 + t * 1.6;
-  const drift = (rng() - 0.5) * 1.1;
-  const topX = x + outX * lean - outZ * drift;
-  const topZ = z + outZ * lean + outX * drift;
-  const r = 0.24 + t * 0.2;
-
-  // The shaft, in three segments: straight at the foot, curving into the crown.
-  const segs = 3;
-  let px = x;
-  let py = y0 - 0.25;
-  let pz = z;
-  let pr = r * 1.6;
-  for (let i = 1; i <= segs; i++) {
-    const u = i / segs;
-    const bend = u * u;
-    const nx = x + (topX - x) * bend;
-    const nz = z + (topZ - z) * bend;
-    const ny = y0 + h * u;
-    const nr = r * (1.1 - 0.35 * u);
-    // Alternating bands: the old leaf scars that ring a palm trunk.
-    b.bark.color(PAL.bark, i % 2 ? 0.95 : 1.15);
-    shaft(b, px, py, pz, pr, nx, ny, nz, nr);
-    px = nx;
-    py = ny;
-    pz = nz;
-    pr = nr;
-  }
-  // The boot: the stub of old fronds where the crown meets the trunk.
-  b.bark.color(PAL.bark, 1.2);
-  b.bark.box(topX, y0 + h + 0.15, topZ, r * 2.7, 0.8, r * 2.7, { tileW: BARK_TILE, tileH: BARK_TILE });
-
-  const fronds = 7 + Math.floor(rng() * 4);
-  const phase = rng() * Math.PI * 2;
-  const cy = y0 + h + 0.4;
-  for (let i = 0; i < fronds; i++) {
-    const a = phase + (i / fronds) * Math.PI * 2 + (rng() - 0.5) * 0.3;
-    const fx = Math.cos(a);
-    const fz = Math.sin(a);
-    let len = (1.5 + h * 0.3) * (0.8 + rng() * 0.4);
-    // How much of this frond points at the wall, and how far it may go before it hits it.
-    const inward = -(fx * outX + fz * outZ);
-    if (inward > 0.05) len = Math.min(len, Math.max(1.1, (room + lean - 0.4) / inward));
-    const droop = len * (0.45 + rng() * 0.35);
-    const nx = -fz;
-    const nz = fx;
-    const mx = topX + fx * len * 0.55;
-    const mz = topZ + fz * len * 0.55;
-    const my = cy + 0.25 - droop * 0.2;
-    const ex = topX + fx * len;
-    const ez = topZ + fz * len;
-    const ey = cy - droop;
-    const shade = 0.95 + rng() * 0.45;
-    // Each frond takes its own window into the leaf tile — a random third of it, across and
-    // down — so a crown of ten blades is ten different bits of foliage rather than the same
-    // photograph ten times. The blade's own length sets how much of the window it stretches
-    // over, which keeps the leaves roughly the size they are on a hedge.
-    const wu = 0.34;
-    const wv = Math.min(0.9, (len / FOLIAGE_TILE) * 0.34);
-    const u0 = rng() * (1 - wu);
-    const v0 = rng() * (1 - wv);
-    b.foliage.color(PAL.foliage, shade);
-    blade(b, topX + fx * 0.25, cy, topZ + fz * 0.25, 0.14, mx, my, mz, 0.5, nx, nz, u0, v0, u0 + wu, v0 + wv * 0.55);
-    // The drooping half catches more of the sky, so it sits a touch brighter.
-    b.foliage.color(PAL.foliage, shade + 0.2);
-    blade(b, mx, my, mz, 0.5, ex, ey, ez, 0.1, nx, nz, u0, v0 + wv * 0.55, u0 + wu, v0 + wv);
-  }
-}
-
-/**
- * Hedges and palms along every block ledge that faces a street, in every zone: a hedge run
- * or a palm every few metres, thickest along the waterfront. They stand on the pavement
- * inside the block's collider, so nothing here is ever driven into — and they are planted
- * halfway between the kerb and the facade, using the same setback the buildings do, so a
- * narrow plot gets a hedge or nothing rather than a palm growing out of a wall.
- */
-function buildGreenery(b: EnvBuilders, rng: () => number): void {
-  const isRoad = b.plan.isRoad;
-  const quayZ = b.plan.water ? b.plan.water.quayZ : Infinity;
-  const downtown = b.plan.downtown;
-  for (const blk of b.plan.blocks) {
-    const nearWater = blk.maxZ > quayZ - 40;
-    const inDowntown = !!downtown && blk.minX >= downtown.minX && blk.maxX <= downtown.maxX && blk.minZ >= downtown.minZ && blk.maxZ <= downtown.maxZ;
-    const step = nearWater ? 7 : 9;
-    const palmChance = nearWater ? 0.55 : inDowntown ? 0.12 : 0.22;
-    const hedgeChance = inDowntown ? 0.3 : 0.4;
-    const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ);
-    /**
-     * `outX/outZ` points from the block out at the street; `pave` is the pavement between
-     * the collider edge and the facade on that side.
-     */
-    const place = (edgeX: number, edgeZ: number, outX: number, outZ: number, pave: number, along: 'x' | 'z'): void => {
-      // Halfway out on the ledge, but never so close to the kerb that a bumper clips it.
-      const off = Math.min(1.6, Math.max(0.7, pave * 0.5));
-      const x = edgeX - outX * off;
-      const z = edgeZ - outZ * off;
-      // Not through a bus shelter: it stands on the same strip of pavement.
-      if (inBusStop(b.plan, x, z, 1.2)) return;
-      const y0 = b.plan.padY(x, z);
-      const room = pave - off;
-      const r = rng();
-      if (r < palmChance && room > 0.7) palm(b, x, z, y0, outX, outZ, room, rng);
-      else if (r < palmChance + hedgeChance && room > 0.5) hedge(b, x, z, y0, 2.4 + rng() * 3, along, rng);
-    };
-    for (let x = blk.minX + 3; x < blk.maxX - 3; x += step) {
-      if (isRoad(x, blk.minZ - 6)) place(x, blk.minZ, 0, -1, setback.z, 'x');
-      if (isRoad(x, blk.maxZ + 6)) place(x, blk.maxZ, 0, 1, setback.z, 'x');
-    }
-    for (let z = blk.minZ + 3; z < blk.maxZ - 3; z += step) {
-      if (isRoad(blk.minX - 6, z)) place(blk.minX, z, -1, 0, setback.x, 'z');
-      if (isRoad(blk.maxX + 6, z)) place(blk.maxX, z, 1, 0, setback.x, 'z');
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ waterfront */

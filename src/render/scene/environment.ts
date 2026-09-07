@@ -8,22 +8,27 @@ import { buildLandmarks } from './env/landmarksBuilder';
 import { buildProps } from './env/propsBuilder';
 import { buildTransit } from './env/transitBuilder';
 import { buildTrack } from './env/trackBuilder';
+import { buildReclamation } from './env/reclaimBuilder';
+import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { createBadkalaPoster } from './env/badkalaPoster';
-import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeSkyTexture, makeTransitAtlas } from './env/textures';
+import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
+import { createWallMaterial } from './env/wallDetail';
 import { applyHaze, HAZE } from './env/haze';
+import { createAtmosphere, type AtmosphereVisual } from './env/atmosphere';
 import type { MeshBuilder } from './env/meshBuilder';
 import { createWindowActivity } from './env/windowActivity';
-import { attachTexture } from '../textures/load';
+import { attachTexture, loadTexture } from '../textures/load';
 import { createLampFaults } from './env/lampFaults';
+import { isTouchDevice } from '../../ui/viewport';
 
 /**
  * The Rayo Bandido city: a nocturnal block of city built entirely from a `CityPlan`
  * (`src/world/cityPlan.ts`), which the test arena and the racing circuit both produce from the
  * same rectangles and paths their simulation collides with, so what you can see and what you
- * can crash into are the same data. This module also owns the scene background, fog and the
- * only two lights in the game.
+ * can crash into are the same data. This module also owns the sky (`env/atmosphere.ts`), the
+ * fog and the only two lights in the game.
  *
  * HOW IT STAYS CHEAP
  * - Everything is merged into thirteen BufferGeometries, one per material: thirteen draw
@@ -47,6 +52,8 @@ import { createLampFaults } from './env/lampFaults';
  */
 export interface EnvironmentVisual {
   root: THREE.Group;
+  /** The sky, the rain and the storm (`env/atmosphere.ts`). Exposed for live tuning. */
+  atmosphere: AtmosphereVisual;
   /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
   ready: Promise<void>;
   /** Called once per render frame for cheap animation (blinking signs, holograms). */
@@ -63,10 +70,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
   /* ---------------------------------------------------------------- atmosphere + light */
 
-  const skyTex = makeSkyTexture();
   const envTex = makeEnvTexture();
-  scene.background = skyTex;
-  scene.backgroundIntensity = 1;
+  // No background texture any more: the sky is geometry now — one inverted dome with a
+  // procedural storm on it (`env/atmosphere.ts`), drawn before everything with the depth
+  // test off, which is the background in the only sense that matters. The environment map
+  // stays: it is what the wet road and the car paint reflect, and it is also the channel a
+  // lightning flash uses to make every wet surface flare.
+  scene.background = null;
   scene.environment = envTex;
   // Enough to give the wet asphalt a sheen and to keep the blue in the shadows.
   scene.environmentIntensity = 0.95;
@@ -90,6 +100,19 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   key.position.set(-70, 110, -50);
   root.add(key);
 
+  // Everything above the skyline, and everything a lightning strike touches: the dome, the
+  // rain, the storm clock, and the lifts it puts on the fog, on these two lights and on the
+  // environment map. Built last of the atmosphere block so it reads the fog and the light
+  // intensities the world actually settled on.
+  const atmosphere = createAtmosphere({
+    scene,
+    fogColor: PAL.fog,
+    hemi,
+    key,
+    touch: isTouchDevice(),
+  });
+  root.add(atmosphere.root);
+
   /* ---------------------------------------------------------------- textures */
 
   const asphaltTex = makeAsphaltTexture(PAL.asphalt, 7);
@@ -104,10 +127,16 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const glowTex = makeGlowTexture();
   const billTexA = makeBillboardTexture(0);
   const billTexB = makeBillboardTexture(1);
+  // Every tag, piece, damp streak and crack in the city on one atlas: twelve cells of real
+  // graffiti art out of `public/textures/graffiti/`, loaded in the background behind a
+  // procedural fallback, and four procedural cells of dirt. One material for all of it.
+  const graffiti = makeGraffitiAtlas();
   // The one texture in the city that loads an image. It disposes itself, so it stays out of
   // the `textures` list below.
   const badkala = createBadkalaPoster();
-  const textures = [skyTex, envTex, asphaltTex, facadeTex, signTex, transitTex, glowTex, billTexA, billTexB];
+  // The graffiti atlas disposes itself (it owns the images it composites), so it stays out
+  // of this list, exactly as the BADKALA poster does.
+  const textures = [envTex, asphaltTex, facadeTex, signTex, transitTex, glowTex, billTexA, billTexB];
 
   /* ---------------------------------------------------------------- materials */
 
@@ -128,18 +157,35 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // Rooms behind the panes: each window drifts, and now and then one goes dark or comes back.
   const windows = createWindowActivity();
   const facadeMat = createFacadeMaterial(facadeTex, windows, 0.85 * PAL.windowGain);
+  // The concrete between the panes: a photographed wall out of `public/textures/buildings/`,
+  // multiplied over the atlas's flat grey so every facade in the city carries real stain and
+  // grain. It lands after start-up and the glass is masked out of it; until then (or if the
+  // file is missing) the facades are exactly the flat concrete they were.
+  // Street-level concrete: the ground-floor modules, viaduct skirts and piers, alley walls
+  // and retaining walls, all sharing one material that projects the same photograph in world
+  // space (`env/wallDetail.ts`). These are the surfaces the car actually drives past, and
+  // until this existed they were the only big concrete in the city with nothing on them.
+  const wallMat = createWallMaterial();
+  const concreteArt = loadTexture('buildings/concrete');
+  void concreteArt.ready.then(() => {
+    facadeMat.setConcreteMap(concreteArt.texture, concreteArt.luma);
+    wallMat.setDetailMap(concreteArt.texture, concreteArt.luma);
+  });
   const roofMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18 });
   // Greenery: leaves and bark, each its own material so the art on one never lands on a
-  // shipping container. Both are dry and matte — nothing in a hedge reflects the neon — and
+  // shipping container. Both are dry and matte — nothing in a canopy reflects the neon — and
   // both start untextured, which is exactly how the palms looked before the art existed, so a
   // missing file costs nothing but the detail. The vertex colours stay: they carry the palette
-  // tint and the per-frond shading the geometry was built around, and the map multiplies into
+  // tint and the per-plant shading the geometry was built around, and the map multiplies into
   // them rather than replacing them.
   const foliageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
   const barkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   const foliageArt = attachTexture(foliageMat, 'nature/foliage', null);
   const barkArt = attachTexture(barkMat, 'nature/bark', null);
+  // Graffiti and grime: lit like the concrete it sits on, blended without writing depth and
+  // pushed off the surface behind it, so a tag can never z-fight a wall.
+  const decalMat = createDecalMaterial(graffiti.texture);
   const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   const neonPulseMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   const neonFlickerMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -182,15 +228,19 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     applyHaze(m, { strength: HAZE.neonStrength, lightKeep: HAZE.neonLightKeep });
   }
   applyHaze(glowMat, { strength: HAZE.glowStrength, additive: true });
+  // Paint fades into the haze exactly as the wall under it does.
+  applyHaze(decalMat);
   const materials = [
     roadMat,
     laneMat,
     concreteMat,
+    wallMat,
     facadeMat,
     roofMat,
     propsMat,
     foliageMat,
     barkMat,
+    decalMat,
     neonMat,
     neonPulseMat,
     neonFlickerMat,
@@ -210,6 +260,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   buildTransit(b);
   buildTrack(b);
   buildLandmarks(b);
+  // Last, so it can read everything the other builders placed: the reclamation pass — the
+  // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
+  buildReclamation(b);
 
   const geometries: THREE.BufferGeometry[] = [];
   const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
@@ -225,6 +278,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   };
 
   add(b.concrete, concreteMat, 'env-concrete');
+  add(b.wall, wallMat, 'env-walls');
   add(b.road, roadMat, 'env-road');
   add(b.lane, laneMat, 'env-lanes');
   add(b.facade, facadeMat, 'env-facade');
@@ -232,6 +286,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   add(b.props, propsMat, 'env-props');
   add(b.bark, barkMat, 'env-bark');
   add(b.foliage, foliageMat, 'env-foliage');
+  // After every opaque surface it might sit on, before the lights.
+  add(b.decal, decalMat, 'env-decals', 1);
   add(b.signs, signMat, 'env-signs', 1);
   add(b.transit, transitMat, 'env-transit', 1);
   add(b.billA, billMatA, 'env-billboard-a', 1);
@@ -281,8 +337,12 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
   return {
     root,
-    ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready]).then(() => undefined),
+    atmosphere,
+    ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
+      // The sky, the rain and the storm. First, because a strike rewrites the fog colour and
+      // the two scene lights that everything below is then drawn with.
+      atmosphere.update(frameDt, time);
       // The rooms behind the windows and the failing street lamps keep their own clocks.
       windows.update(time);
       lampFaults.update(time);
@@ -318,13 +378,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       wantedBoard.update(time);
     },
     dispose() {
+      atmosphere.dispose();
       wantedBoard.dispose();
       badkala.dispose();
+      graffiti.dispose();
       roadArt.dispose();
+      concreteArt.dispose();
       foliageArt.dispose();
       barkArt.dispose();
       scene.remove(root);
-      if (scene.background === skyTex) scene.background = null;
       if (scene.environment === envTex) scene.environment = null;
       scene.fog = null;
       for (const g of geometries) g.dispose();

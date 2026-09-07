@@ -34,8 +34,9 @@ surface its art and nothing else — the game never blocks on one.
 ```
 public/textures/
   road/        street surfaces: asphalt, and later kerbs, paint, patches
-  nature/      greenery: foliage (hedges + palm fronds), bark (palm trunks)
-  buildings/   facades, roofs, shutters
+  nature/      greenery: foliage (leaf mass for every plant), bark (trunks and branches)
+  graffiti/    textura-grafiti-1..9.webp: the paint on the city's walls
+  buildings/   concrete.webp (the wall between the windows), and later roofs, shutters
   props/       barriers, containers, signage
   sky/         backdrops and environment maps
 ```
@@ -43,6 +44,16 @@ public/textures/
 Only the folders in use exist. The two poster images (`/badkala.webp`, `/rayo-wanted.webp`) are
 one-off screens rather than surfaces, load through their own modules, and stay at the root of
 `public/`.
+
+`graffiti/` is the one folder that is not a manifest slot. Its nine files are composited into a
+single atlas at start-up by `src/render/scene/env/graffiti.ts` — twelve paint cells, so the
+first three files are drawn a second time mirrored — behind a procedural fallback, in the same
+load-in-the-background, never-block shape as everything else here. Adding a tenth file means
+adding a line to `GRAFFITI_ART` in that module, with the file's pixel size: the atlas stretches
+each image to fill its square cell and gives the shape back when it sizes the quad, so the
+table has to know what shape the file is. They are cut-outs with alpha. Files 1–6 are abstract
+and roughly 100–200 px; 7–9 are the long banner murals, 256 px tall and lettered with the
+game's own lines. Nothing in any of them may be a real name or a brand.
 
 ## Conventions
 
@@ -57,7 +68,11 @@ one-off screens rather than surfaces, load through their own modules, and stay a
   against the running game instead of re-exported.
 - **Scale.** Each surface declares how many metres one tile covers, and the art should be shot
   for about that much of the real thing: `ROAD_TILE` 8 m (`scene/env/cityBuilder.ts`),
-  `FOLIAGE_TILE` 1.3 m and `BARK_TILE` 1.6 m (`scene/env/builders.ts`).
+  `FOLIAGE_TILE` 1.3 m and `BARK_TILE` 1.6 m (`scene/env/builders.ts`), and the facade
+  concrete 8 m (`FACADE_TILE` / `CONCRETE_REPEAT`, `scene/env/facadeAtlas.ts`).
+- **Wrapping.** A slot marked `mirrored` in the manifest tiles flipped on both axes, so a
+  photograph that does not wrap seamlessly still tiles without a join. `buildings/concrete`
+  uses it; a properly seamless tile should not.
 
 ```bash
 cwebp -resize 1024 1024 -q 85 -m 6 source.png -o public/textures/road/asphalt.webp

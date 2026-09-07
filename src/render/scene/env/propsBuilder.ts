@@ -49,6 +49,10 @@ function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
       const h = tall ? 5.5 + rng() * 2 : w;
       const out = 1.4 + w / 2;
       const y = 7 + rng() * 7;
+      // The ledge is the block's edge, not a wall: the plot behind it may be empty, or set
+      // back, or carry a building that stops below this. Without a wall to bracket onto, the
+      // blade and its arm would hang over the pavement on nothing.
+      if (!b.walls.faceAt(x, y, z, dx, dz) || !b.walls.faceAt(x, y + h / 2, z, dx, dz)) return;
       const px = x + dx * out;
       const pz = z + dz * out;
       // The blade reads edge-on to the wall, so it faces along the street.
@@ -56,8 +60,14 @@ function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
       b.signs.panel(px, y, pz, w, h, bladeRot, uv.u0, uv.v0, uv.u1, uv.v1);
       b.signs.panel(px, y, pz, w, h, bladeRot + Math.PI, uv.u0, uv.v0, uv.u1, uv.v1);
       b.props.color(PAL.metalDark, 0.8);
-      if (dx !== 0) b.props.box(x + dx * (out / 2), y + h / 2 - 0.2, z, out, 0.2, 0.2);
-      else b.props.box(x, y + h / 2 - 0.2, z + dz * (out / 2), 0.2, 0.2, out);
+      // A tall blade gets a second bracket near its foot. One arm at the top leaves five
+      // metres of sign swinging off a single strut with nothing beside it, which reads as
+      // floating even though the top is bolted on.
+      const arms = h > 4 ? [y + h / 2 - 0.2, y - h / 2 + 0.4] : [y + h / 2 - 0.2];
+      for (const ay of arms) {
+        if (dx !== 0) b.props.box(x + dx * (out / 2), ay, z, out, 0.2, 0.2);
+        else b.props.box(x, ay, z + dz * (out / 2), 0.2, 0.2, out);
+      }
       // Two families only: the hot cells bloom magenta, everything else blooms cyan.
       const hot = cell === 0 || cell === 3 || cell === 6 || cell === 10 || cell === 11 || cell === 15;
       const c = hot ? PAL.neonMagenta : PAL.neonCyan;
@@ -161,11 +171,86 @@ export function lampColor(zone: ZoneId, rng: () => number): number {
 }
 
 /**
+ * Proportions of the lamp post kit, as fractions of `poleH` up the pole and metres across it.
+ * One shape for the whole city: an alley stub and a corporate mast are the same fixture at
+ * two sizes, so the street reads as one municipality rather than a props bin.
+ *
+ * The design is the industrial reference Juan approved: a wide splayed foot, a boot that
+ * steps in twice, a bolted collar halfway up, a slimmer upper shaft, and a stub that carries
+ * on past the boom instead of stopping at it. Every one of those is a horizontal break, and
+ * horizontal breaks are the only detail this scene's lighting can actually see — the city is
+ * lit by a hemisphere, so a surface's brightness follows `normal.y` and almost nothing else.
+ * Panel lines and bolt heads down a vertical face would cost triangles and render as one flat
+ * tone; a collar with a lit top edge reads from across the street.
+ *
+ * Widths are given as [depth along the arm, width across it]: the column is a rectangular
+ * section that is deeper in the direction it has to cantilever, like the reference.
+ */
+const LAMP = {
+  /** Vertical divisions, as fractions of `poleH`. */
+  plateTop: 0.018,
+  bootMid: 0.085,
+  bootTop: 0.17,
+  shaftMid: 0.52,
+  collarTop: 0.565,
+  shaftTop: 0.945,
+  stubTop: 1.05,
+  /** Where the boom leaves the column and where the head hangs, as fractions of `poleH`. */
+  boomY: 0.965,
+  headY: 0.935,
+  /** Section [depth, width] in metres at 1x scale. */
+  plate: [1.26, 1.02],
+  bootLow: [0.9, 0.74],
+  bootHigh: [0.62, 0.52],
+  shaftLow: [0.42, 0.34],
+  collar: [0.52, 0.44],
+  shaftHigh: [0.28, 0.23],
+  stub: [0.24, 0.2],
+  /**
+   * The luminaire: a slab housing with the lens recessed into its underside rather than hung
+   * below it. The overlap is the whole difference between a fixture and a lit tile — the
+   * housing has to overhang the lens at both ends and clip its top edge, or the lens reads
+   * as a billboard floating under a separate black box.
+   */
+  headLen: 2.3,
+  headWidth: 0.66,
+  headThick: 0.4,
+  /** Lens centre below the housing's underside, its width, and its half-length as a fraction
+   * of `headLen` — under 0.5 so the housing overhangs it. */
+  lensDrop: 0.1,
+  lensWidth: 0.26,
+  lensReach: 0.36,
+  /** The boom: it rises off the column to a knee and then runs out, like the reference,
+   * instead of cutting one straight line from pole to head. `kneeOut` is where the bend sits
+   * along the arm, `kneeRise` how far above the column top, both scaled. */
+  boomWidth: 0.14,
+  kneeOut: 0.3,
+  kneeRise: 0.24,
+  /** Conduit up the side of the column. */
+  conduit: 0.1,
+  /** The two accent strips, as fractions of `poleH`, and the status pip between them. */
+  stripLow: [0.22, 0.4],
+  stripHigh: [0.63, 0.79],
+  stripWidth: 0.09,
+  pipY: 0.5,
+  pipHeight: 0.13,
+} as const;
+
+/** The kit is drawn at this scale; a 7.4 m street lamp is 1x. */
+function lampScale(poleH: number): number {
+  return Math.min(1.15, Math.max(0.68, poleH / 7.4));
+}
+
+/**
  * One lamp post at (x, z) standing on ground height `y0`, with its arm reaching `arm` metres
  * in the unit direction (dx, dz) toward the road. The spill lands `spill` metres out.
  *
  * `fault` is the lamp's fault seed from `rollLampFault`: 0 for a lamp that works, otherwise
- * the head, its halo and its pool of light all carry the seed and stutter together.
+ * the lens, its halo and its pool of light on the road carry the seed and stutter together,
+ * so the light on the ground goes with the light in the head. Nothing structural takes the
+ * seed — see the note on the boom for why that line matters.
+ *
+ * See `LAMP` for why the detail here is all horizontal breaks and emission.
  */
 export function lampPost(
   b: EnvBuilders,
@@ -181,19 +266,106 @@ export function lampPost(
   fault = 0,
 ): void {
   const alongX = Math.abs(dx) > Math.abs(dz);
-  b.props.color(PAL.metalDark, 0.8);
-  b.props.box(x, y0 + poleH / 2, z, 0.24, poleH, 0.24);
-  const hx = x + dx * arm;
-  const hz = z + dz * arm;
-  const hy = y0 + poleH;
-  b.props.color(PAL.metalDark, 0.7);
-  b.props.tube(x, hy - 0.2, z, hx, hy - 0.2, hz, 0.16);
+  // The arm direction, normalised: the circuit hands us diagonals, so the column is oriented
+  // off it rather than snapped to an axis.
+  const len = Math.hypot(dx, dz) || 1;
+  const ax = dx / len;
+  const az = dz / len;
+  const s = lampScale(poleH);
+  const yAt = (f: number): number => y0 + poleH * f;
+  const seg = (a: number, bTop: number, sec: readonly [number, number]): void => {
+    b.props.orientedBox(x, z, ax, az, sec[0] * s, sec[1] * s, yAt(a), yAt(bTop));
+  };
+
+  // Column, bottom to top. The plate, the collar and the stub are drawn a shade brighter than
+  // the shafts: they are the pieces with an exposed top face, and the top face is the only
+  // one the hemisphere really lights, so lifting them is what makes the breaks read.
+  b.props.color(PAL.metalDark, 1.45);
+  seg(0, LAMP.plateTop, LAMP.plate);
+  b.props.color(PAL.metalDark, 0.95);
+  seg(LAMP.plateTop, LAMP.bootMid, LAMP.bootLow);
+  seg(LAMP.bootMid, LAMP.bootTop, LAMP.bootHigh);
+  b.props.color(PAL.metalDark, 1.1);
+  seg(LAMP.bootTop, LAMP.shaftMid, LAMP.shaftLow);
+  b.props.color(PAL.metalDark, 1.45);
+  seg(LAMP.shaftMid, LAMP.collarTop, LAMP.collar);
+  b.props.color(PAL.metalDark, 1.1);
+  seg(LAMP.collarTop, LAMP.shaftTop, LAMP.shaftHigh);
+  b.props.color(PAL.metalDark, 1.45);
+  seg(LAMP.shaftTop, LAMP.stubTop, LAMP.stub);
+
+  // Cable conduit clipped up the side of the column and elbowing over the top into the boom.
+  // Up the SIDE rather than the back, and lifted well clear of the shaft's own tone: on the
+  // back it sat inside the column's outline and against a black pole at night that is the
+  // same as not drawing it. On the side it widens the silhouette, which is a shape the eye
+  // gets for free from any angle.
+  const side = (LAMP.shaftHigh[1] / 2 + LAMP.conduit / 2) * s;
+  const bx = x - az * side;
+  const bz = z + ax * side;
+  b.props.color(PAL.metalDark, 1.5);
+  b.props.tube(bx, yAt(LAMP.bootTop), bz, bx, yAt(LAMP.shaftTop), bz, LAMP.conduit * s);
+  b.props.tube(bx, yAt(LAMP.shaftTop), bz, x + ax * side, yAt(LAMP.boomY), z + az * side, LAMP.conduit * s);
+
+  const hx = x + ax * arm;
+  const hz = z + az * arm;
+  const headY = yAt(LAMP.headY);
+
+  // The boom: solid metal, rising off the column to a knee and then running out to the head.
+  //
+  // It has to be solid, and this is the rule the whole fixture is built to. Everything drawn
+  // into `neon` or `glow` is scaled by the lamp's fault level in the vertex shader
+  // (`lampFaults.ts`), so on a faulty lamp it drops to an ember for seconds at a time. That is
+  // right for light and wrong for structure: the old lamp got away with an emissive bracket
+  // because the head it carried was emissive too, and the pair vanished together. This head is
+  // a solid housing, so an emissive boom left a black slab hanging in the air over a pole it
+  // was no longer joined to every time the ballast cut out.
+  //
+  // So: every piece of the fixture that is METAL goes in `props` and is always there, and only
+  // the lens, the halo and the pool of light on the road carry the fault. A broken lamp goes
+  // dark; it never comes apart.
+  const kneeOut = arm * LAMP.kneeOut;
+  const kx = x + ax * kneeOut;
+  const kz = z + az * kneeOut;
+  const kneeY = yAt(LAMP.boomY) + LAMP.kneeRise * s;
+  const joinX = hx - ax * LAMP.headLen * 0.3 * s;
+  const joinZ = hz - az * LAMP.headLen * 0.3 * s;
+  b.props.color(PAL.metalDark, 1.5);
+  b.props.tube(x, yAt(LAMP.boomY), z, kx, kneeY, kz, LAMP.boomWidth * s);
+  b.props.tube(kx, kneeY, kz, joinX, headY + LAMP.headThick * s, joinZ, LAMP.boomWidth * s);
+
+  // Accent strips up the road-facing side of the column. Always the cold family whatever the
+  // head burns: they are the fixture's own service lighting, not part of the street's colour
+  // script, and keeping them one hue is what makes a row of lamps look like one product.
+  // No fault seed either, for the same reason the boom is metal — they are what still draws
+  // the pole when the head is out, and a lamp post that disappears entirely is a hole in the
+  // street, not a broken lamp.
+  const front = (LAMP.shaftLow[0] / 2 + LAMP.stripWidth / 2) * s;
+  const fx = x + ax * front;
+  const fz = z + az * front;
+  b.neon.fault(0).color(PAL.neonCyan, 0.85);
+  b.neon.tube(fx, yAt(LAMP.stripLow[0]), fz, fx, yAt(LAMP.stripLow[1]), fz, LAMP.stripWidth * s);
+  b.neon.tube(fx, yAt(LAMP.stripHigh[0]), fz, fx, yAt(LAMP.stripHigh[1]), fz, LAMP.stripWidth * s);
+  // The status pip, on its own supply like the strips.
+  b.neon.color(PAL.neonMagenta, 1);
+  b.neon.tube(fx, yAt(LAMP.pipY), fz, fx, yAt(LAMP.pipY) + LAMP.pipHeight * s, fz, 0.07 * s);
+
+  // The luminaire: a dark slab housing, elongated along the boom, with the lit lens slung
+  // under it. Splitting the two is the whole point of the head — a bar of light with a solid
+  // body over it reads as a fixture, where one glowing box reads as a floating tile.
+  b.props.color(PAL.metalDark, 1.25);
+  b.props.orientedBox(
+    hx, hz, ax, az,
+    LAMP.headLen * s, LAMP.headWidth * s,
+    headY, headY + LAMP.headThick * s,
+    { bottom: true },
+  );
   b.neon.color(color, 1).fault(fault);
-  // Lamp head is elongated along the arm; its halo faces down the street at the driver.
-  b.neon.box(hx, hy - 0.45, hz, alongX ? 1.5 : 0.6, 0.22, alongX ? 0.6 : 1.5);
+  const lensHalf = LAMP.headLen * LAMP.lensReach * s;
+  const lensY = headY - LAMP.lensDrop * s;
+  b.neon.tube(hx - ax * lensHalf, lensY, hz - az * lensHalf, hx + ax * lensHalf, lensY, hz + az * lensHalf, LAMP.lensWidth * s);
   b.neon.fault(0);
-  // The arm is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
-  halo(b, hx, hy - 0.5, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2, fault);
+  // The boom is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
+  halo(b, hx, lensY - 0.05, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2, fault);
   // The spill always lands on the asphalt, whatever the pole ended up standing on.
   groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, 0.14, 0.03, fault);
 }
@@ -256,18 +428,14 @@ export function buildGate(b: EnvBuilders, g: GateDef): void {
     // Structural pylon.
     b.props.color(PAL.metalDark, 0.9);
     b.props.box(x, g.height / 2, z, 0.9, g.height, 0.9);
-    // Angled neon slashes, straight from the wet-road reference.
+    // Neon strip up the pylon: the gate reads as two lit posts and a beam, nothing else.
     const inward = i === 0 ? 1 : -1;
     const ox = dx * inward;
     const oz = dz * inward;
     b.neonPulse.color(c, 1);
-    b.neonPulse.tube(x + ox * 0.6, 2.2, z + oz * 0.6, x + ox * 3.4, g.height - 1.4, z + oz * 3.4, 0.34);
-    b.neon.color(c, 0.9);
-    b.neon.tube(x + ox * 1.9, 1.6, z + oz * 1.9, x + ox * 4.6, g.height - 3.2, z + oz * 4.6, 0.26);
-    b.neon.color(i === 0 ? g.right : g.left, 0.9);
-    b.neon.tube(x - ox * 0.15, 3.4, z - oz * 0.15, x - ox * 0.15, g.height - 0.6, z - oz * 0.15, 0.3);
-    halo(b, x + ox * 2, g.height / 2, z + oz * 2, 11, g.height * 1.3, faceRot, c, 0.16);
-    groundGlow(b, x + ox * 5, z + oz * 5, 24, 24, c, 0.15);
+    b.neonPulse.tube(x + ox * 0.5, 1.6, z + oz * 0.5, x + ox * 0.5, g.height - 0.6, z + oz * 0.5, 0.3);
+    halo(b, x + ox * 0.5, g.height / 2, z + oz * 0.5, 5, g.height * 1.2, faceRot, c, 0.16);
+    groundGlow(b, x + ox * 2, z + oz * 2, 18, 18, c, 0.15);
   }
   // Top beam.
   const mx = (g.x0 + g.x1) / 2;
@@ -458,6 +626,9 @@ function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
       if (!isRoad(x + dx * 8, z + dz * 8)) return;
       const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
       const y0 = padY(x, z);
+      // Same rule as the blades: all of this is bolted to a garage wall, so there has to be
+      // one. The tallest thing here reaches about 6.5 m up.
+      if (!b.walls.faceAt(x, y0 + 1.2, z, dx, dz) || !b.walls.faceAt(x, y0 + 6.4, z, dx, dz)) return;
       const r = rng();
       if (r < 0.45) {
         b.props.color(PAL.metalDark, 0.85);

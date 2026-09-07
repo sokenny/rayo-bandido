@@ -898,6 +898,10 @@ export function buildBuilding(b: EnvBuilders, plot: Rect2, spec: BuildingSpec, r
 
   const archetype = pickArchetype(f);
   const volumes = archetype === 'landmark' ? landmarkMassing(f, spec.landmark ?? 0) : MASSINGS[archetype](f);
+  // Register the walls the moment the massing is decided. Everything hung on a facade later —
+  // by this file or by any builder that runs after the city — asks the index where the walls
+  // are, because most archetypes stand well inside the plot they were given.
+  for (const v of volumes) if (v.role !== 'link') b.walls.add(v);
 
   // The building's own light: one tint, one wall brightness, one pattern offset.
   const zone = spec.zone;

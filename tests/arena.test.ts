@@ -8,6 +8,7 @@ import {
 } from '../src/world/arenaLayout';
 import { builderStats, createBuilders } from '../src/render/scene/env/builders';
 import { buildCity } from '../src/render/scene/env/cityBuilder';
+import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { createArenaWorld } from '../src/world/arenaWorld';
@@ -193,6 +194,7 @@ describe('environment budget', () => {
     buildCity(b);
     buildProps(b);
     buildTrack(b);
+    buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
     expect(triangles, `environment triangles: ${triangles}`).toBeLessThan(100000);
     expect(triangles, 'the arena is not empty').toBeGreaterThan(4000);
@@ -206,6 +208,7 @@ describe('environment budget', () => {
     buildCity(b);
     buildProps(b);
     buildTrack(b);
+    buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
     expect(triangles, `circuit triangles: ${triangles}`).toBeLessThan(150000);
     expect(triangles, 'the circuit is not empty').toBeGreaterThan(10000);

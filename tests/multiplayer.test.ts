@@ -7,7 +7,15 @@ import { createTrafficSync, TRAFFIC_STRIDE } from '../src/sim/traffic';
 import { createTargets, stepTargets } from '../src/sim/targets';
 import { resolveTargetCollisions } from '../src/sim/collision';
 import { createRivalSet } from '../src/net/rivals';
-import { CAR_FLAG, INTERP_DELAY_MS, RIVAL_TIMEOUT_MS, packCarFlags, type WireCar } from '../src/net/protocol';
+import { spawnForSlot } from '../src/world/arrivals';
+import {
+  CAR_FLAG,
+  INTERP_DELAY_MS,
+  MAX_WORLD_PLAYERS,
+  RIVAL_TIMEOUT_MS,
+  packCarFlags,
+  type WireCar,
+} from '../src/net/protocol';
 import { slotColor, slotCss, SLOT_COLORS } from '../src/core/playerColors';
 import { rankStandings, type StandingsRow } from '../src/ui/standings';
 
@@ -566,6 +574,12 @@ describe('player colours', () => {
     expect(used.size).toBe(SLOT_COLORS.length);
   });
 
+  it('has a colour for every car the open world will hold', () => {
+    // The city is capped at the number of colours there are to tell its cars apart with; if
+    // one grows the other has to.
+    expect(SLOT_COLORS.length).toBe(MAX_WORLD_PLAYERS);
+  });
+
   it('wraps rather than failing on a slot outside the grid', () => {
     expect(slotColor(SLOT_COLORS.length)).toBe(slotColor(0));
     expect(slotColor(-1)).toBe(slotColor(SLOT_COLORS.length - 1));
@@ -573,5 +587,112 @@ describe('player colours', () => {
 
   it('renders as a six-digit CSS hex', () => {
     expect(slotCss(0)).toMatch(/^#[0-9a-f]{6}$/);
+  });
+});
+
+/* --------------------------------------------------------------- open world */
+
+/**
+ * The city's field is not a grid: people arrive and quit while everyone else keeps driving. So
+ * the rival set is reconcilable, and what it must never do is disturb the cars that stayed.
+ */
+describe('a field that changes while you drive', () => {
+  const juan = { id: 'p1', name: 'JUAN', slot: 0 };
+  const romeo = { id: 'p2', name: 'ROMEO', slot: 1 };
+
+  it('starts empty: the city has a field before anyone else is in it', () => {
+    const set = createRivalSet();
+    expect(set.all).toHaveLength(0);
+    expect(set.sync([])).toBe(false);
+  });
+
+  it('adds the car that just drove up and drops the one that quit', () => {
+    const set = createRivalSet();
+    expect(set.sync([juan])).toBe(true);
+    expect(set.all.map((r) => r.name)).toEqual(['JUAN']);
+
+    expect(set.sync([juan, romeo])).toBe(true);
+    expect(set.all.map((r) => r.name)).toEqual(['JUAN', 'ROMEO']);
+
+    expect(set.sync([romeo])).toBe(true);
+    expect(set.all.map((r) => r.name)).toEqual(['ROMEO']);
+    expect(set.get('p1')).toBeUndefined();
+  });
+
+  it('keeps the same array, because the game holds a reference to it', () => {
+    const set = createRivalSet();
+    const held = set.all;
+    set.sync([juan, romeo]);
+    expect(set.all).toBe(held);
+    expect(held).toHaveLength(2);
+  });
+
+  it('leaves a car that stayed exactly where it was', () => {
+    const set = createRivalSet([juan]);
+    set.apply('p1', 1000, wire({ x: 40 }), null);
+    set.apply('p1', 1100, wire({ x: 50 }), null);
+    // Somebody else joining must not move, hide or reset the car already on the road.
+    set.sync([juan, romeo]);
+    set.update(1100 + INTERP_DELAY_MS, SIM_STEP);
+    const stayed = set.get('p1')!;
+    expect(stayed.x).toBeCloseTo(50, 5);
+    expect(stayed.present).toBe(true);
+  });
+
+  it('reports no change when the roster is the same people again', () => {
+    const set = createRivalSet([juan, romeo]);
+    expect(set.sync([romeo, juan])).toBe(false);
+  });
+
+  it('takes a new name without throwing the samples away', () => {
+    const set = createRivalSet([juan]);
+    set.apply('p1', 1000, wire({ x: 7 }), null);
+    expect(set.sync([{ ...juan, name: 'JUANCHO' }])).toBe(false);
+    set.update(1000 + INTERP_DELAY_MS, SIM_STEP);
+    expect(set.all[0].name).toBe('JUANCHO');
+    expect(set.all[0].x).toBeCloseTo(7, 5);
+  });
+});
+
+/**
+ * Where a roamer's car appears. Everybody who picks OPEN WORLD would otherwise land on the one
+ * city spawn, inside whoever got there first.
+ */
+describe('the open world arrival fan', () => {
+  const spawn = { x: -66, z: -20, heading: 0 };
+
+  it('leaves the first car on the spawn the single-player city uses', () => {
+    const first = spawnForSlot(spawn, 0);
+    expect(first.x).toBeCloseTo(spawn.x, 6);
+    expect(first.z).toBeCloseTo(spawn.z, 6);
+    expect(first.heading).toBe(spawn.heading);
+  });
+
+  it('never puts two cars in the same place', () => {
+    const seen = new Set<string>();
+    for (let slot = 0; slot < MAX_WORLD_PLAYERS; slot++) {
+      const place = spawnForSlot(spawn, slot);
+      seen.add(`${place.x.toFixed(2)},${place.z.toFixed(2)}`);
+    }
+    expect(seen.size).toBe(MAX_WORLD_PLAYERS);
+  });
+
+  it('fans out across the road and back down it, never forwards', () => {
+    // Heading 0 faces -Z, so a car behind the spawn has a GREATER z.
+    for (let slot = 0; slot < MAX_WORLD_PLAYERS; slot++) {
+      const place = spawnForSlot(spawn, slot);
+      expect(place.z).toBeGreaterThanOrEqual(spawn.z - 1e-6);
+      expect(Math.abs(place.x - spawn.x)).toBeLessThanOrEqual(4);
+      // Everybody points the same way: nobody arrives facing the traffic.
+      expect(place.heading).toBe(spawn.heading);
+    }
+  });
+
+  it('lays the fan out in the spawn own frame, whichever way the street runs', () => {
+    const turned = { x: 0, z: 0, heading: Math.PI / 2 };
+    // Facing +X now, so the row behind is at negative X and the lanes are along Z.
+    const behind = spawnForSlot(turned, 3);
+    expect(behind.x).toBeLessThan(0);
+    expect(behind.z).toBeCloseTo(0, 6);
   });
 });

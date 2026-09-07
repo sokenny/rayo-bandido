@@ -28,7 +28,14 @@ Open http://127.0.0.1:5173 (add `?debug=1` for the performance overlay).
 | `npm run qa:headed` | Same, in a visible Chrome window (use this for a real, vsync-limited FPS number) |
 
 Controls: WASD / arrows drive, Space handbrake, Shift nitro, E or left click fires lightning,
-R restarts, M mutes audio, F3 or backquote toggles the debug overlay.
+R restarts, M mutes audio, F3 or backquote toggles the debug overlay, F4 reads the world
+coordinate under the crosshair and copies the whole readout to the clipboard.
+
+The debug overlay's second block is a world readout in the same metres every spec in
+`src/world` is written in (x east, z south, y up, heading 0 = north): the car, the camera, the
+ground point under the crosshair, and - on F4 - the visible surface there, named by the collider
+it belongs to (`blk-38 [-52..-36 x -50..-24]`). Use it to report a place by coordinate instead
+of by description. `window.__rb.where()` returns the same reading to a script.
 Gamepad (Xbox-style, standard mapping) follows NFS Underground 2's default layout: RT throttle,
 LT brake/reverse, left stick or d-pad steers, A handbrake, B nitro, Y camera. What NFSU2 has no
 counterpart for takes the buttons it leaves free: X lightning, View cruise, Start restart. The
@@ -1162,3 +1169,225 @@ body, and the car bouncing off a bus instead of through it).
 **Known gaps.** The electric cars still steer round nothing, so at a junction one can cross a
 bus's lane and pass through it — the same thing they already do to each other. One route has
 only two calling points, because the shelters near its legs mostly landed on the far kerb.
+
+## The city reclaimed by nature (2026-09-07)
+
+Juan's brief: the city looked *landscaped* — a hedge or a palm every seven metres along every
+block ledge in the map, all the same size, all the same spacing. It should look like a city
+that has been let go and grown over, gritty and cyberpunk, not post-apocalyptic. Two concept
+renders came with it. After the first pass he added: **most** of the city should have plants,
+not a handful of pockets, and the procedural graffiti doodles should be replaced with the six
+real graffiti images he supplied.
+
+**The one field.** `render/scene/env/reclaim.ts` answers "how far gone is this spot" for the
+whole map, and every plant, tag, stain, vine and blank ground-floor wall is placed from it — so
+a vine, the weeds under it and the paint beside it belong to the same place instead of being
+three independent coin flips. It is a floor (`baseNeglect`, the city as a whole) plus radial
+POCKETS on a 46 m grid (`pocketChance`, the places that have gone feral), biased per zone so
+the corporate core is the best-kept part rather than a clean one. Pure arithmetic over a
+position: no state, build time only, never in the render loop. It rides on `EnvBuilders`, so
+every builder asks the same field the same question.
+
+`RECLAIM.baseNeglect` is the single knob for how green the city is. At 0.45 the split is
+8 % kept / 45 % lightly grown / 36 % overgrown / 12 % feral.
+
+**What reads from it.**
+
+- `plants.ts` — the kit: canopy tree, crooked street tree, palm, sapling, shrub, fern, weed
+  tuft, vine, dead tree. Canopies are opaque faceted BLOBS (a six-lune closed lump, twelve
+  triangles) rather than alpha leaf cards: cheaper, no sorting, and they silhouette against
+  the neon. Leaf normals are tilted skyward (`MeshBuilder.normalUp`, new) because this city is
+  lit by a hemisphere light and an unbiased vertical leaf facet comes out black.
+- `reclaimBuilder.ts` — where it all goes. The pass that carries the look is **the verge**: the
+  paved shoulder beside every ground-level street, which the kerb field already sizes and the
+  street lamps already stand on. A block's own ledge is ten metres further back, so what grows
+  there is scenery and what grows on the verge fills the frame. Also block ledges, the inside
+  of blocks, alley walls and barriers, the perimeter retaining wall, viaduct columns and
+  fences, the quay, and kerb-side retaining walls built into the strongest pockets.
+- `buildingReclaim.ts` — per building: a ground-floor module where the place has given up,
+  creeper down the facade, weeds in the joint, a drift of growth on a low roof.
+- `groundFloor.ts` — nine interchangeable lower-floor modules (service wall, shutter, parking
+  podium, maintenance bay, retaining wall, utility facade, underpass colonnade, ruined
+  storefront, panelled wall). Each one hands back METADATA — paintable rectangles with
+  keep-clear zones, vine lips, planting strips, prop anchors — and the reclamation passes read
+  only that, so nothing is ever painted over glass.
+- `graffiti.ts` — one atlas, one material, one draw call for every tag and every damp streak.
+  Twelve cells are Juan's art out of `public/textures/graffiti/`, each used twice (once
+  mirrored), loaded in the background behind a procedural fallback; four are procedural dirt
+  (streaks, stain, cracks, soot) tinted with `PAL.grime`. Decals are alpha-blended without
+  writing depth and polygon-offset off the surface, so nothing z-fights.
+
+**Collision.** Nothing here has a collider and nothing needs one: every plant, tag and plinth
+is inside a collider the simulation already has, hugging the face of one, or over four and a
+half metres up where a bus passes under it. `tests/reclamation.test.ts` sweeps every vertex of
+the greenery and decal builders against that rule; the plant kit clamps its own canopies,
+fronds and trunk leans against it (`OVERHANG_CLEAR`), and the ground modules clamp every box
+they draw to the pavement they stand on.
+
+**Measured** (city, 1600x900, headless M3 Pro). Env builders 162.0k -> 213.4k triangles and
+17 -> 18 draw calls (the one decal material). Runtime worst view 179.3k -> 231.8k triangles,
+50 -> 58 draw calls, 21 -> 25 textures, 33 programs unchanged. GPU 1.4 ms -> 2.6 ms average on
+a 16.7 ms frame; 60 FPS held in every view, no console errors. That is above the ~200k
+guideline in AGENTS.md and deliberately so — the direction is a green city, the cost is about
+a millisecond of GPU on a frame with twelve to spare, and `baseNeglect` trades the two off.
+457 tests green, 20 of them new.
+
+**Known gaps.** No runtime LOD: the environment is merged per material with `frustumCulled =
+false`, so every triangle is submitted every frame and detail is tiered at build time
+(archetype mix by intensity, one mark instead of a composition on far surfaces) rather than by
+distance. Chunking the greenery into ~120 m meshes would cut submitted triangles several-fold
+at the cost of a handful of draw calls, and is the obvious next move if the budget ever bites.
+Graffiti is not placed on tower facades above the first three metres except in the worst
+pockets, so the tall blank walls in the corporate core stay bare.
+
+## The storm sky (2026-09-07)
+
+Juan's reference: a night storm over the city — near-black navy overhead, deep desaturated
+teal through the body of the sky, a brighter cyan-grey industrial haze along the skyline,
+several large layered cloud banks with real depth in them, a magenta wash under some of them
+from the city's own light, and lightning that briefly shows what is inside the cloud. What
+was there instead was a 512 x 256 canvas gradient set as `scene.background`, which could not
+move, could not be lit, and would have tiled visibly the moment anything was drawn into it.
+
+**The sky is geometry now.** One inverted 500 m sphere centred on the camera, drawn first with
+the depth test off, which is the background in the only sense that matters: everything else
+paints over it. `scene.background` is null and `makeSkyTexture` is gone. `scene.environment`
+stays exactly as it was — it is what the wet road and the car paint reflect.
+
+**The clouds are a projection, not a texture** (`env/skyDome.ts`). Each layer is a plane at a
+notional height and the view ray is projected onto it, `p = d.xz / d.y`. That divide is where
+the depth comes from: straight up a formation reads at its true size, and towards the horizon
+the same noise stretches without limit into the long banks a storm ceiling actually shows. Two
+layers at different heights, scales and (very slow) drifts move against each other; the near
+one's domain is bent by the far one's, so neither noise lattice can survive into the image.
+The shape is fbm value noise from a hash — no texture, no period, nothing to repeat.
+
+Three things carry the look beyond that. Detail is flattened towards the mean in step with how
+fast the projection runs past a pixel (`hazeStart` / `hazeEnd`), which is both the
+anti-aliasing and the aerial haze. A layer reads darker where its UNDERSIDE is in view
+(`cloudUnderside`), so the ceiling overhead stays near-black while the banks along the skyline
+keep the light they catch — without that term the whole sky filled with pale grey. And the
+magenta is pushed into the thick parts of a layer (`pollutionFocus`) rather than spread evenly,
+which is the difference between light coming up through a few banks and a pink band painted
+across the horizon.
+
+**Lightning is weather, not the weapon.** `env/storm.ts` is a clock with no Three.js and no DOM
+in it, so it is unit-tested: irregular gaps skewed to the short end, and a strike is two to
+four sub-flashes at uneven spacing with decaying peaks, because a single symmetric flash reads
+as a light switch. `env/atmosphere.ts` spends one strike in five places at once — the sky (lit
+through the RAW noise, so the flash reveals structure rather than a silhouette), the fog colour
+(the one that does the most work: distant blocks are mostly fog by the time they reach the eye,
+so lifting the air in front of them turns the skyline into silhouettes), both scene lights, the
+environment map (the wet-road flare, for free, with no new material and no new pass), and the
+rain.
+
+**Rain** (`env/rain.ts`) is one `LineSegments` animated entirely in the vertex shader. The wrap
+includes the camera's world position, so — `mod` being periodic — the field is anchored in the
+world and drops stream past a moving car with no jump when the box moves, and the streaks are
+raked back by the camera's own motion.
+
+**Controls.** Everything is in `ATMOSPHERE` in `src/config/tuning.ts`: sky colours, horizon
+glow, coverage, softness, contrast, the two scales and the two drifts, light-pollution colour /
+intensity / focus, fog colour / tint / density scale, storm frequency / intensity / colour and
+the five things a flash lifts, rain, and the quality level. Live from the console:
+`__rb.atmosphere.config.coverage = 0.8; __rb.atmosphere.refresh()`, and
+`__rb.atmosphere.strike()` fires a bolt on demand. `?atmos=low|medium|high` pins the preset for
+a capture, the way `?scale=` pins the render scale; `auto` is high on a pointer device and
+medium on a touch one. The three levels differ only in noise octaves, whether the second cloud
+layer is drawn, dome tessellation and rain count — never in colour.
+
+**Measured** (city, 1600x900, headless M3 Pro). Two extra draw calls and no extra render pass.
+Best of four interleaved runs with the dome and rain toggled, camera parked so the sky fills
+the frame: **0.30 ms of GPU**, of which the dome is 0.24 and the rain 0.06. The perf gate
+passes in both runs — 33 programs start to finish (nothing compiles mid-play), worst frame
+16.8 ms, draws within budget, no console errors. A hidden tab batches the whole atmosphere into
+one coarse step every 0.5 s, which is what the capture scripts drive it through.
+
+**Midnight, not dawn.** The first pass read as about 6 a.m. — Juan's note — so the whole
+palette came down: zenith, middle and horizon darkened, `horizonGlow` 0.55 -> 0.34, both cloud
+colours darkened, `cloudUnderside` up, `pollution` 0.5 -> 0.42, and `fogTint` 0.55 -> 0.7 so
+each world's own haze is pulled further into the night. Checked as numbers rather than off a
+thumbnail (a downscaled screenshot of this city is not readable): 64 x 64 patches read straight
+out of the drawing buffer, camera above every roof so the sample is the dome and nothing else.
+Sky luminance fell 52 % at 3 degrees of elevation, 52 % at 15, 69 % at 30 and 85 % at the
+zenith. The road is unaffected — it is lit by the palette's own hemisphere light, not by the
+sky — and a strike now has somewhere to go: the calm-to-flash contrast is far stronger against
+a black ceiling than it was against a blue one.
+
+**Known gaps.** The storm has no thunder — the audio layer is untouched. Rain falls through
+roofs, viaducts and tunnels: there is no occupancy test, and adding one would cost the single
+draw call the whole system is built around. The reflection env map is still the small canvas
+equirect from before, so the wet road reflects a generic night sky rather than this one; the
+flash reaches it through `environmentIntensity`, not through its pixels.
+
+## The open world is a server (2026-09-07)
+
+Free roam stopped being single player. There is no new mode and no new menu category: **OPEN
+WORLD is inherently a server** now, so picking it joins the one city everybody shares. Same car,
+one colour each, up to eight of them.
+
+**One permanent room.** The match server already held many rooms (`server/rooms.mjs`); the city
+is one more, on a reserved code (`WORLD_ROOM_CODE = 'WRLD'`), with two differences from a versus
+room. It is opened when the process starts and never reaped, so `GET /rooms` can report an empty
+city rather than no city — which is what lets the main menu say `ONLINE 2 / 8 DRIVING` before you
+commit to anything. And its code is reserved: `freshCode` never mints it, and `join` routes it to
+the city whatever the connection claimed it wanted, so a versus room can never collide with it.
+
+**The same room with the phase machine taken out** (`server/room.mjs`, `mode: 'world'`). No match
+to start, nothing to be ready for, nothing to load, no flag: the phase is `roaming` from the
+moment the room opens, and cars are fanned out the whole time instead of only during a race.
+`start`, `ready` and `finish` are ignored. Everything that is not about racing is shared code with
+versus — the roster, the host, the clock, the snapshot fan-out, the host-owned electric-car
+traffic (`createCityWorld()` is deterministic, so every client builds the same road).
+
+**A slot is an identity, not a grid position.** A racer's slot is handed out per match; a roamer
+takes the lowest free one at the door and keeps it until they disconnect, when it goes back in the
+pool — so a room that has churned all evening still shows cyan, magenta and lime rather than four
+cars in the last four colours. `SLOT_COLORS` grew from four to eight to match, and
+`MAX_WORLD_PLAYERS` is capped at exactly that: the city cannot hold more cars than there are
+colours to tell them apart with.
+
+**A field that changes while you drive.** This was the real client-side work. A race builds its
+rivals once and never touches the set again; the city cannot. `createRivalSet` gained `sync`,
+which reconciles the tracks against a roster and reports whether anything actually changed —
+keeping the samples of every car that stayed, so somebody joining does not make the car ahead of
+you jump. `all` is the same array throughout, because the game, the minimap and the name tags all
+hold the reference from the moment the world was built. `src/game.ts` mirrors that: rival visuals
+are pooled by player id and re-aligned on each roster event (a car is built when someone drives
+up, removed from the scene and disposed when they quit), and `src/render/nameTags.ts` does the
+same with its DOM tags. `ownsTraffic` became a function rather than a captured boolean, because in
+the city the host changes hands the moment they leave and the client that inherits it has to start
+publishing.
+
+**What the player sees.** A roster under the minimap (`src/ui/onlinePanel.ts`): `ONLINE n/8`, one
+row per car in that player's colour, yours marked. It is the open world's whole multiplayer UI —
+there is no lobby to sit in and no results screen to come back to — and it is directly under the
+map because the two answer the same question a second apart: the map says where the coloured dots
+are, the roster says who they are. Rows are rebuilt only on a roster change, never per frame. The
+minimap needed nothing: it already drew rivals in slot colours for versus.
+
+**Arrival.** The city has one spawn, so eight cars would land inside each other.
+`src/world/arrivals.ts` fans them out from the slot — three abreast, then a row behind — in the
+spawn's own frame, so it still points down the street whichever way the street runs, and slot 0 is
+left exactly where the single-player city always put it.
+
+**R is a rescue here too**, not a restart: resetting the world would reset money and traffic other
+people can see, so R puts the car back where it came into the city.
+
+**Falling back.** A city with no server is still a city. `?mode=city` waits up to 4 s for the
+server to name the room (the slot decides the car's colour and where it appears, so the world
+cannot be built before that), then drives alone and says so — and `?mode=city&solo=1` asks for
+that outright, which is what the capture and QA scripts now use so nobody else's car turns up in a
+screenshot. Reloading closes the socket on `pagehide` rather than waiting for the browser to get
+round to it, so a player who reloads twice is not holding three of the eight colours.
+
+**Protocol 3 -> 4**: `RoomInfo.mode`, the `roaming` phase, `MAX_WORLD_PLAYERS`, the reserved code
+and label. `tests/protocol.test.ts` checks all of it against `server/protocol.mjs` as before.
+
+**Tested.** 505 unit tests green, typecheck and production build green. Six new end-to-end tests
+drive a real server through the city (a car straight in with a slot; slots handed back; cars
+relayed with no match in between; `start` ignored; more cars than a race grid; listed even when
+empty), plus the reconcile and arrival-fan tests. Verified in the browser against
+`npm run host`: three cars in the city at once, each the right colour on every screen, name plates
+and minimap dots correct, a car appearing and disappearing live as a player joins and quits, the
+menu's live counter tracking it, and the versus room browser correctly not listing the city.

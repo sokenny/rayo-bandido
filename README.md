@@ -6,9 +6,12 @@ city, drift to charge lightning, fire it at the electric cars that replaced ever
 Desktop browser with a keyboard or a pad — and a phone, held sideways, with the on-screen pad
 (see [Phones](#phones)). Three ways in from the main menu:
 
-- **City** — Bandido Bay, the big free-roam city: a viaduct on pillars round the whole map and out
-  over the bay, four ramps, a skyway that climbs to 24 m between the towers, a diagonal avenue,
-  alleys, a screen-covered square, thirteen electric cars (four of them lapping the viaduct).
+- **Open World** — Bandido Bay, the big free-roam city, **and everybody else who is in it**: a
+  viaduct on pillars round the whole map and out over the bay, four ramps, a skyway that climbs to
+  24 m between the towers, a diagonal avenue, alleys, a screen-covered square, thirteen electric
+  cars (four of them lapping the viaduct). There is no lobby and no code — every server holds one
+  permanent city and picking OPEN WORLD drops you straight into it, up to eight cars at a time,
+  each a different colour. See [The open world](#the-open-world).
 - **Test** — the original free-roam city block: drift plaza, highway, JDM alley, six patrolling electric cars.
 - **Race** — the *Bandido Loop*, a 1.4 km street circuit for 2-lap races of about a minute and a
   half: a highway straight to empty the nitro on, chained sweepers to drift through (no corner
@@ -29,8 +32,10 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173 for the main menu. The chosen world lives in the URL (`?mode=city`,
-`?mode=test`, `?mode=race`, or `?mp=1` for multiplayer), so a world can be opened directly and a room link can
+`?mode=test`, `?mode=race`, or `?mp=1` for a versus room), so a world can be opened directly and a room link can
 be shared — `?mp=1` alone opens the room browser, `?mp=1&room=K7QP` goes straight into a room.
+`?mode=city` joins the shared open world; add `&solo=1` for a city with nobody else in it, which
+is what the capture and QA scripts use.
 Append `?debug=1` to start with the performance overlay open, and `?scale=1` (any 0.7-1.5) to pin
 the render scale instead of letting the resolution governor pick it. For multiplayer use
 `npm run dev:mp`, which starts the match server alongside Vite.
@@ -136,7 +141,29 @@ asphalt, guardrails, lamps and the rest from the same data. Change the spec, run
 
 ## Multiplayer
 
-Up to four cars on the Bandido Loop, in as many rooms as people want to open.
+Two shapes of it, on the same server and the same socket: one permanent **open world** everybody
+shares, and as many **versus** race rooms as people want to open.
+
+### The open world
+
+Free roam is not single player any more. Every match server holds one city, on a reserved room
+code, from the moment it starts — so picking OPEN WORLD in the menu joins whoever is already
+driving around in it. Nothing to create, no code to hand out, no lobby to sit in: the plain URL
+is the invitation, and the main menu says how many cars are out there before you commit.
+
+Up to **eight cars**, each in its own colour, taken at the door and given back when you quit. The
+roster under the minimap says who is online and what colour they are; the minimap shows them as
+dots in those colours; each car carries its name plate. Cars are solid here too, so you can shove
+a friend off the viaduct. The electric-car traffic belongs to whoever has been connected longest
+and is relayed to everyone else, exactly as in a race, so all eight screens agree about what is
+on the road; when that player quits, the next-longest-connected one takes it over.
+
+Nothing is timed and nothing is scored against anybody: there is no flag, no laps and no
+classification. **R is a rescue**, not a restart — it puts your car back where you came into the
+city rather than resetting a world other people are in.
+
+If the server cannot be reached, the city is still a city: the game says so and drops you into it
+alone. `?mode=city&solo=1` asks for that outright.
 
 ### Racing your friends
 
@@ -151,8 +178,9 @@ the match socket. Then point a tunnel at it and send people the URL:
 ngrok http 8080
 ```
 
-Open the ngrok URL with `?mp=1` on the end — `https://something.ngrok-free.app/?mp=1` — and you
-land on the **room browser**. Make a room, and the lobby shows the link to hand out, with a
+Send the plain ngrok URL and whoever opens it can pick OPEN WORLD and be in the same city as you.
+For a race instead, open that URL with `?mp=1` on the end — `https://something.ngrok-free.app/?mp=1`
+— and you land on the **room browser**. Make a room, and the lobby shows the link to hand out, with a
 **COPY** button next to it: it is the same URL with your room's code on it, and only that link
 (or the code typed into the browser screen) puts a car in your room. That is the whole setup:
 because one process serves the page and accepts the socket, the game connects back to whatever
@@ -164,8 +192,9 @@ through it and land in your lobby.
 
 ### Rooms
 
-One server holds many rooms, so "clicking VERSUS first" no longer decides anything. The browser
-screen has three ways in:
+One server holds many rooms, so "clicking VERSUS first" no longer decides anything. The open world
+is a room on that same server, but it is a place rather than a match, so it is kept out of this
+list and reached from the main menu instead. The browser screen has three ways in:
 
 - **MAKE A ROOM** — name it, and you get a four-character code (no I, O, 0 or 1 in it, because
   codes get read aloud). You are its host. **LIST IT PUBLICLY** is ticked by default, so the room

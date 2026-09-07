@@ -13,7 +13,9 @@ import { frameDecor, menuHeader } from './chrome';
  *
  * The public list is plain HTTP (`GET /rooms`), because it has to be readable before there is
  * any socket to read it over. It is polled while the screen is up: rooms fill and empty while
- * somebody is deciding which one to knock on.
+ * somebody is deciding which one to knock on. The open world is filtered out of it — it is a
+ * room on the same server, but it is a place, not a match, and the main menu is where you go
+ * into it.
  *
  * DOM only, like the rest of `src/ui`, and dressed as the main menu so the two feel like one
  * screen with two steps.
@@ -147,7 +149,9 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
     const controller = new AbortController();
     inFlight = controller;
     try {
-      const rooms = await fetchRooms(controller.signal);
+      // The open world is listed too — it is a room like any other to the server — but it is
+      // not something you knock on from here: it has its own card on the main menu.
+      const rooms = (await fetchRooms(controller.signal)).filter((room) => room.mode !== 'world');
       if (controller.signal.aborted || done) return;
       statusEl.classList.remove('is-bad');
       statusEl.textContent =

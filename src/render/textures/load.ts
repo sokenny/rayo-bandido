@@ -9,8 +9,8 @@ import { TEXTURE_ROOT, TEXTURES, type TextureSlot, type TextureSpec } from './ma
  * simply what the game keeps. `ready` resolves either way — the loading screen can await it to
  * avoid a visible pop without ever hanging on a missing asset.
  *
- * Tinting and gain run once, into a canvas, at load time; there is no per-frame cost and no
- * shader variant. A slot with neither wraps the decoded image directly.
+ * The grade runs once, into a canvas, at load time; there is no per-frame cost and no
+ * shader variant. A slot that asks for none of it wraps the decoded image directly.
  */
 
 /** How long a slot waits for its files before the fallback becomes permanent. */
@@ -19,6 +19,18 @@ const TIMEOUT_MS = 4000;
 export interface TextureHandle {
   /** Resolves once the art is in and applied, or once the slot has been given up on. */
   ready: Promise<void>;
+  /**
+   * The graded tile's average brightness IN LINEAR LIGHT — what a shader actually gets back
+   * from `texture2D`, not what `normalize` put in the file. Null until the art lands, and for
+   * a slot with no grade (nothing measures those).
+   *
+   * A detail map that multiplies a surface has to be divided by this or it darkens it, and
+   * the two numbers are a long way apart: the grade runs on sRGB bytes, and a tile normalised
+   * to a byte mean of 0.62 comes back from the sampler averaging 0.62^2.2, about 0.38. Read
+   * it as `1 / luma` — that is the gain that makes a detail map texture a surface without
+   * also dimming it.
+   */
+  readonly luma: number | null;
   /** The loaded texture, or null while it is still loading and if no file was found. */
   readonly texture: THREE.Texture | null;
   /** Whether a file was found. Useful in a debug overlay; nothing in the game branches on it. */
@@ -31,7 +43,11 @@ type MappedMaterial = THREE.Material & { map: THREE.Texture | null };
 
 function applySpec(tex: THREE.Texture, spec: TextureSpec): void {
   tex.colorSpace = spec.linear ? THREE.NoColorSpace : THREE.SRGBColorSpace;
-  const wrap = spec.tiling ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  const wrap = spec.mirrored
+    ? THREE.MirroredRepeatWrapping
+    : spec.tiling
+      ? THREE.RepeatWrapping
+      : THREE.ClampToEdgeWrapping;
   tex.wrapS = wrap;
   tex.wrapT = wrap;
   tex.anisotropy = spec.anisotropy ?? 4;
@@ -39,12 +55,12 @@ function applySpec(tex: THREE.Texture, spec: TextureSpec): void {
 }
 
 /**
- * Redraw the art through the slot's tint, gain and brightness normalisation. All three are
- * plain per-pixel maths on the
- * decoded image, so the file on disk stays the untouched original and the grade lives in the
- * manifest where it can be tuned against the running game.
+ * Redraw the art through the slot's tint, gain, brightness normalisation and contrast, in that
+ * order. All four are plain per-pixel maths on the decoded image, so the file on disk stays the
+ * untouched original and the grade lives in the manifest where it can be tuned against the
+ * running game.
  */
-function graded(img: HTMLImageElement, spec: TextureSpec): HTMLCanvasElement {
+function graded(img: HTMLImageElement, spec: TextureSpec): { canvas: HTMLCanvasElement; luma: number } {
   const cv = document.createElement('canvas');
   cv.width = img.naturalWidth;
   cv.height = img.naturalHeight;
@@ -70,9 +86,7 @@ function graded(img: HTMLImageElement, spec: TextureSpec): HTMLCanvasElement {
   // leaves 0 and 1 where they are, so a dark photograph brightens without a clipped highlight.
   const target = spec.normalize;
   if (target !== undefined && target > 0) {
-    let sum = 0;
-    for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-    const mean = sum / (d.length / 4) / 255;
+    const mean = meanLuma(d);
     if (mean > 0.001 && mean < 0.999) {
       const k = Math.log(target) / Math.log(mean);
       const lut = new Uint8ClampedArray(256);
@@ -85,8 +99,62 @@ function graded(img: HTMLImageElement, spec: TextureSpec): HTMLCanvasElement {
     }
   }
 
+  // Contrast expansion, if the slot asked for one. Pushes every channel away from the tile's
+  // own mean and then puts the mean back, so the surface keeps the brightness `normalize`
+  // chose and gets back the grain the gamma flattened out of it. Clamping at the ends is the
+  // price, and at the amounts this is used for it costs a fraction of a percent of pixels.
+  const boost = spec.contrast;
+  if (boost !== undefined && boost !== 1) {
+    const before = meanLuma(d);
+    const lut = new Uint8ClampedArray(256);
+    const mid = before * 255;
+    for (let v = 0; v < 256; v++) lut[v] = Math.round(mid + (v - mid) * boost);
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = lut[d[i]];
+      d[i + 1] = lut[d[i + 1]];
+      d[i + 2] = lut[d[i + 2]];
+    }
+    // Clamping is not symmetric on an asymmetric histogram, so the mean drifts. Put it back.
+    const after = meanLuma(d);
+    if (after > 0.001) {
+      const k = before / after;
+      const fix = new Uint8ClampedArray(256);
+      for (let v = 0; v < 256; v++) fix[v] = Math.round(v * k);
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = fix[d[i]];
+        d[i + 1] = fix[d[i + 1]];
+        d[i + 2] = fix[d[i + 2]];
+      }
+    }
+  }
+
   ctx.putImageData(data, 0, 0);
-  return cv;
+  return { canvas: cv, luma: linearMean(d) };
+}
+
+/** sRGB byte (0..255) to linear light (0..1), the transfer three's sampler applies. */
+function toLinear(v: number): number {
+  const c = v / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+/**
+ * Average luma of an RGBA buffer in LINEAR light — the number a shader sampling this texture
+ * will average, as opposed to the byte average `normalize` works in. See `TextureHandle.luma`.
+ */
+function linearMean(d: Uint8ClampedArray): number {
+  const lut = new Float64Array(256);
+  for (let v = 0; v < 256; v++) lut[v] = toLinear(v);
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += 0.2126 * lut[d[i]] + 0.7152 * lut[d[i + 1]] + 0.0722 * lut[d[i + 2]];
+  return sum / (d.length / 4);
+}
+
+/** Average luma (0..1) of an RGBA buffer. */
+function meanLuma(d: Uint8ClampedArray): number {
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  return sum / (d.length / 4) / 255;
 }
 
 /**
@@ -97,6 +165,7 @@ export function loadTexture(slot: TextureSlot): TextureHandle {
   const spec: TextureSpec = TEXTURES[slot];
   const img = new Image();
   let texture: THREE.Texture | null = null;
+  let luma: number | null = null;
   let settled = false;
   let index = 0;
   let timeout = 0;
@@ -115,8 +184,18 @@ export function loadTexture(slot: TextureSlot): TextureHandle {
       settled = true;
       window.clearTimeout(timeout);
       if (found) {
-        const needsGrade = (spec.tint?.amount ?? 0) > 0 || (spec.gain ?? 1) !== 1 || spec.normalize !== undefined;
-        texture = needsGrade ? new THREE.CanvasTexture(graded(found, spec)) : new THREE.Texture(found);
+        const needsGrade =
+          (spec.tint?.amount ?? 0) > 0 ||
+          (spec.gain ?? 1) !== 1 ||
+          spec.normalize !== undefined ||
+          (spec.contrast ?? 1) !== 1;
+        if (needsGrade) {
+          const g = graded(found, spec);
+          texture = new THREE.CanvasTexture(g.canvas);
+          luma = g.luma;
+        } else {
+          texture = new THREE.Texture(found);
+        }
         applySpec(texture, spec);
       }
       resolve();
@@ -134,6 +213,9 @@ export function loadTexture(slot: TextureSlot): TextureHandle {
     get texture() {
       return texture;
     },
+    get luma() {
+      return luma;
+    },
     get loaded() {
       return texture !== null;
     },
@@ -144,6 +226,7 @@ export function loadTexture(slot: TextureSlot): TextureHandle {
       img.onerror = null;
       texture?.dispose();
       texture = null;
+      luma = null;
     },
   };
 }

@@ -42,6 +42,7 @@ export class MeshBuilder {
   private cw = 1;
   private softRadius = 0;
   private chamferSize = 0;
+  private upBias = 0;
 
   constructor(withColor = false, withFault = false, withCell = false) {
     this.withColor = withColor;
@@ -88,6 +89,42 @@ export class MeshBuilder {
   soft(radius: number): this {
     this.softRadius = radius;
     return this;
+  }
+
+  /**
+   * Tilts the normals of subsequent primitives toward +Y by `amount` (0 = off, 1 = straight
+   * up), without touching a single vertex.
+   *
+   * This exists because of how this city is lit. The night is a HemisphereLight over a very
+   * weak key, and a hemisphere's contribution depends on `normal.y` alone: a vertical surface
+   * gets the midpoint between sky and ground, a surface facing up gets the sky. Leaves are
+   * the case that breaks on: a real canopy is a mass of leaves at every angle, most of them
+   * presenting some of their face to the sky, but a low-poly canopy is a handful of flat
+   * facets, and the vertical ones come out nearly black — which is exactly what a plant does
+   * NOT look like at night against a lit city.
+   *
+   * Biasing the normal up is the cheap, correct-looking fix: it says "this facet stands in
+   * for a lot of leaves, and some of them are facing the sky". Free — same vertices, same
+   * triangles, only different normals.
+   */
+  normalUp(amount: number): this {
+    this.upBias = amount;
+    return this;
+  }
+
+  /** Applies `upBias` to the four corner normals in `N4`, in place. */
+  private biasNormals(): void {
+    const t = this.upBias;
+    if (t <= 0) return;
+    for (let i = 0; i < 12; i += 3) {
+      const x = N4[i] * (1 - t);
+      const y = N4[i + 1] * (1 - t) + t;
+      const z = N4[i + 2] * (1 - t);
+      const l = Math.hypot(x, y, z) || 1;
+      N4[i] = x / l;
+      N4[i + 1] = y / l;
+      N4[i + 2] = z / l;
+    }
   }
 
   /**
@@ -148,6 +185,7 @@ export class MeshBuilder {
       N4[i + 1] = ny;
       N4[i + 2] = nz;
     }
+    this.biasNormals();
     this.emit(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
   }
 
@@ -221,6 +259,7 @@ export class MeshBuilder {
       N4[i * 3 + 1] = y;
       N4[i * 3 + 2] = z;
     }
+    this.biasNormals();
     this.emit(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, u0, v0, u1, v1);
   }
 
@@ -391,6 +430,16 @@ export class MeshBuilder {
     nx /= len;
     ny /= len;
     nz /= len;
+    if (this.upBias > 0) {
+      const t = this.upBias;
+      const bx2 = nx * (1 - t);
+      const by2 = ny * (1 - t) + t;
+      const bz2 = nz * (1 - t);
+      const bl = Math.hypot(bx2, by2, bz2) || 1;
+      nx = bx2 / bl;
+      ny = by2 / bl;
+      nz = bz2 / bl;
+    }
     this.positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
     this.uvs.push(0, 0, 1, 0, 1, 1);
     for (let i = 0; i < 3; i++) this.normals.push(nx, ny, nz);

@@ -135,6 +135,40 @@ export function loft(sections: LoftSection[], options: LoftOptions | boolean = t
   return geo;
 }
 
+/**
+ * Turns a shell inside out: the same surface, wound and normalled the other way.
+ *
+ * Everything here is single-sided, so a hull built by `loft()` simply is not there when you
+ * are inside it. Flipping a copy of one gives the inward-facing surface a cabin needs — and
+ * being inward-facing, it also cannot be seen from outside however far it pokes through the
+ * bodywork, which a box standing in for the same panel very much can.
+ */
+export function flipFaces(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (g !== geometry) geometry.dispose();
+  const position = g.getAttribute('position') as THREE.BufferAttribute;
+  const normal = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
+  const swap = (attr: THREE.BufferAttribute): void => {
+    const a = attr.array as Float32Array;
+    for (let i = 0; i < a.length; i += 9) {
+      for (let k = 0; k < 3; k++) {
+        const b = a[i + 3 + k];
+        a[i + 3 + k] = a[i + 6 + k];
+        a[i + 6 + k] = b;
+      }
+    }
+    attr.needsUpdate = true;
+  };
+  swap(position);
+  if (normal) {
+    swap(normal);
+    const n = normal.array as Float32Array;
+    for (let i = 0; i < n.length; i++) n[i] = -n[i];
+    normal.needsUpdate = true;
+  }
+  return g;
+}
+
 /** Axis-aligned box centred on the origin. 12 tris. */
 export function box(width: number, height: number, depth: number): THREE.BufferGeometry {
   return new THREE.BoxGeometry(width, height, depth).toNonIndexed();

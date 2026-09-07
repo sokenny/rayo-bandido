@@ -2,7 +2,16 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { C2S, MAX_PLAYERS, PROTOCOL_VERSION, ROOM_CODE_ALPHABET, ROOM_CODE_LEN, S2C } from '../src/net/protocol';
+import {
+  C2S,
+  MAX_PLAYERS,
+  MAX_WORLD_PLAYERS,
+  PROTOCOL_VERSION,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LEN,
+  S2C,
+  WORLD_ROOM_CODE,
+} from '../src/net/protocol';
 
 /**
  * The match server, end to end: a real `node server/index.mjs` on a real port with real
@@ -544,5 +553,135 @@ describe('rooms', () => {
     // The private room is absent entirely: the list cannot leak a code.
     expect(body.rooms.some((room) => room.code === hidden)).toBe(false);
     await resetRoom();
+  });
+});
+
+/**
+ * The open world. It is the same room code path as a race, but with the racing taken out: no
+ * phases to walk through, a slot handed out at the door, and cars relayed from the moment
+ * somebody is in there to send them.
+ *
+ * These tests deliberately share one room — the city is one room, for everybody, forever — so
+ * each of them cleans up after itself with `resetRoom` and never assumes it is empty on arrival.
+ */
+describe('the open world', () => {
+  interface Welcome {
+    id: string;
+    room: { code: string; label: string; listed: boolean; mode: string };
+  }
+
+  /** How many cars the server currently says are in the city. */
+  async function cityListing(): Promise<{ code: string; mode: string; players: number; max: number; phase: string } | undefined> {
+    const body = (await (await fetch(`http://127.0.0.1:${port}/rooms`)).json()) as {
+      rooms: Array<{ code: string; mode: string; players: number; max: number; phase: string }>;
+    };
+    return body.rooms.find((room) => room.code === WORLD_ROOM_CODE);
+  }
+
+  /**
+   * Wait for the city to be empty before a test counts anything in it. Unlike every other room
+   * here, this one is shared by the whole file and outlives `resetRoom`, so a socket the
+   * previous test closed may still be on the roster for a beat.
+   */
+  async function emptyCity(): Promise<void> {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      if (((await cityListing())?.players ?? 0) === 0) return;
+      await sleep(50);
+    }
+    throw new Error('the open world never emptied');
+  }
+
+  /** Join the city. It is never created: the code is reserved and the server already holds it. */
+  const enterCity = async (name: string): Promise<Client> =>
+    connect(name, PROTOCOL_VERSION, { join: WORLD_ROOM_CODE });
+
+  it('lets a car straight in, roaming, with a slot and a colour of its own', async () => {
+    await emptyCity();
+    const juan = await enterCity('JUAN');
+    const welcome = await juan.expect<Welcome>(S2C.welcome);
+    expect(welcome.room.code).toBe(WORLD_ROOM_CODE);
+    expect(welcome.room.mode).toBe('world');
+
+    const lobby = await juan.expect<{ phase: string; players: Array<{ name: string; slot: number }> }>(S2C.lobby);
+    // No lobby to sit in and no match to wait for: the phase never changes.
+    expect(lobby.phase).toBe('roaming');
+    expect(lobby.players.find((p) => p.name === 'JUAN')?.slot).toBe(0);
+    await resetRoom();
+  });
+
+  it('gives everyone a different slot, and hands a freed one back to the next arrival', async () => {
+    await emptyCity();
+    const juan = await enterCity('JUAN');
+    const romeo = await enterCity('ROMEO');
+    await Promise.all([juan.expect(S2C.welcome), romeo.expect(S2C.welcome)]);
+    await sleep(150);
+
+    const roster = juan.all(S2C.lobby).pop() as { players: Array<{ name: string; slot: number }> };
+    expect(roster.players.map((p) => p.slot)).toEqual([0, 1]);
+
+    // JUAN quits; the next car in takes the colour he gave back rather than a third one.
+    juan.close();
+    await sleep(150);
+    const late = await enterCity('LATE');
+    await late.expect(S2C.welcome);
+    const after = await late.expect<{ players: Array<{ name: string; slot: number }> }>(S2C.lobby);
+    expect(after.players.find((p) => p.name === 'LATE')?.slot).toBe(0);
+    expect(after.players.find((p) => p.name === 'ROMEO')?.slot).toBe(1);
+    await resetRoom();
+  });
+
+  it('relays cars with no match, no ready and no countdown in between', async () => {
+    await emptyCity();
+    const juan = await enterCity('JUAN');
+    const romeo = await enterCity('ROMEO');
+    await Promise.all([juan.expect(S2C.welcome), romeo.expect(S2C.welcome)]);
+
+    juan.send({
+      t: C2S.car,
+      c: { x: 12, z: -4, h: 1, vx: 0, vz: 0, sp: 30, sa: 0, la: 0, ga: 0, f: 0, ch: 0 },
+      r: null,
+    });
+    const snapshot = await romeo.next<{ p: Array<{ c: { x: number; sp: number } }> }>(S2C.snapshot);
+    expect(snapshot.p[0].c).toMatchObject({ x: 12, sp: 30 });
+    // Nothing raced, so nothing was announced.
+    expect(romeo.all(S2C.match)).toHaveLength(0);
+    expect(romeo.all(S2C.go)).toHaveLength(0);
+    await resetRoom();
+  });
+
+  it('ignores a request to start a race, because there is no race to start', async () => {
+    await emptyCity();
+    const juan = await enterCity('JUAN');
+    await juan.expect(S2C.welcome);
+    juan.send({ t: C2S.start });
+    await sleep(200);
+    expect(juan.all(S2C.match)).toHaveLength(0);
+    const lobby = juan.all(S2C.lobby).pop() as { phase: string };
+    expect(lobby.phase).toBe('roaming');
+    await resetRoom();
+  });
+
+  it('holds more cars than a race grid, and says so in the room list', async () => {
+    await emptyCity();
+    const crowd: Client[] = [];
+    for (let i = 0; i < MAX_PLAYERS + 1; i++) {
+      const client = await enterCity(`ROAMER${i}`);
+      await client.expect(S2C.welcome);
+      crowd.push(client);
+    }
+    // A fifth car is a full grid in versus and an ordinary evening here.
+    expect(crowd[MAX_PLAYERS].all(S2C.refused)).toHaveLength(0);
+
+    const city = await cityListing();
+    expect(city).toMatchObject({ mode: 'world', max: MAX_WORLD_PLAYERS, phase: 'roaming' });
+    expect(city?.players).toBe(MAX_PLAYERS + 1);
+    await resetRoom();
+  });
+
+  it('is listed even with nobody in it, so the menu can say the city is quiet', async () => {
+    await resetRoom();
+    await emptyCity();
+    // Never reaped, unlike a race room: the menu has to be able to report a quiet evening.
+    expect(await cityListing()).toMatchObject({ mode: 'world', players: 0 });
   });
 });

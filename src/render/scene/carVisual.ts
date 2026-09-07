@@ -27,9 +27,10 @@ import { createCabinInterior } from './vehicles/interior';
  *   drives are transform carriers; `update()` bakes `steer.matrix * spin.matrix` into the
  *   instance matrices, so `update()` must run every frame after `syncCar()` (`src/game.ts`
  *   already does).
- * - Twelve draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
- *   ground light pool, underglow, wheels, and the cabin's three (trim, light strips, spectrum
- *   bars — see `vehicles/interior.ts`). The chassis group costs nothing extra.
+ * - Fourteen draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
+ *   ground light pool, underglow, wheels, and the cabin's five (trim, light strips, spectrum
+ *   bars and the two that make up the turning steering wheel — see `vehicles/interior.ts`).
+ *   The chassis group costs nothing extra.
  */
 export interface CarVisualOptions {
   /**
@@ -51,6 +52,8 @@ export interface CarVisual {
   setNitro(intensity: number): void;
   /** 0..1 cyan underglow / electric charge glow. */
   setCharge(level: number): void;
+  /** Front wheel angle (rad, positive = right), which turns the cabin's steering wheel. */
+  setSteering(steerAngle: number): void;
   /**
    * The music the cabin's spectrum display runs on: `ThemeAudio.spectrum`, one 0..1 level per
    * bar, low frequencies first. Held by reference, so passing it once is enough; with nothing
@@ -91,9 +94,10 @@ const FRONT_HALF_TRACK = VEHICLE.trackWidth / 2;
 const REAR_HALF_TRACK = VEHICLE.trackWidth / 2 + 0.02;
 const HALF_BASE = VEHICLE.wheelbase / 2;
 
-/** Vertex alpha of the player's rear screen, on top of the glass material's own opacity.
- *  Low enough to see the cabin through, high enough that the pane still reads as glass. */
-const REAR_GLASS_ALPHA = 0.52;
+/** Vertex alpha of the player's windscreen and rear screen, on top of the glass material's
+ *  own opacity. Low enough to see the cabin through from behind and the road through from
+ *  the driver's seat, high enough that both panes still read as glass. */
+const GLAZING_ALPHA = 0.52;
 
 const TAIL_RED = new THREE.Color(0xff1a2e);
 const TAIL_MAGENTA = new THREE.Color(0xff33d6);
@@ -303,20 +307,22 @@ export function tintBody(material: THREE.MeshStandardMaterial, colour: THREE.Col
 }
 
 /**
- * `rearAlpha` scales the rear screen's opacity on top of the material's own, and nothing
- * else: it is how the player's car gets a back window you can see the cabin through
- * (`interior.ts`) while a rival, which has no cabin behind it, keeps the flat dark glass.
+ * `glazingAlpha` scales the windscreen's and rear screen's opacity on top of the material's
+ * own, and nothing else — the side windows are untouched. It is how the player's car gets
+ * glass you can see the cabin through from behind and the road through from the driver's
+ * seat (`interior.ts`), while a rival, which has no cabin behind either pane, keeps the flat
+ * dark glass.
  */
-export function buildGlassGeometry(rearAlpha = 1): THREE.BufferGeometry {
+export function buildGlassGeometry(glazingAlpha = 1): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const windshield = box(1.2, 0.02, 0.78);
   windshield.rotateX(-0.564);
   windshield.translate(0, 1.1, -0.41);
-  parts.push(partRGBA(windshield, 0xffffff, 1));
+  parts.push(partRGBA(windshield, 0xffffff, glazingAlpha));
   const rearGlass = box(1.16, 0.02, 1.0);
   rearGlass.rotateX(0.377);
   rearGlass.translate(0, 1.137, 1.107);
-  parts.push(partRGBA(rearGlass, 0xffffff, rearAlpha));
+  parts.push(partRGBA(rearGlass, 0xffffff, glazingAlpha));
   for (const sign of [-1, 1]) {
     const side = box(0.02, 0.4, 0.68);
     side.rotateZ(sign * 0.26);
@@ -396,17 +402,25 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   }
 
   /* ---------------------------------------------------------------- glass */
-  // The chase camera looks through the rear screen for the whole game, so on the player's own
-  // car that pane is left far clearer than the rest: it is the window onto the cabin.
-  const glassGeo = buildGlassGeometry(REAR_GLASS_ALPHA);
+  // The chase camera looks through the rear screen for the whole game and the cabin view
+  // looks out through the windscreen, so on the player's own car both panes are left far
+  // clearer than the side glass: they are the windows onto, and out of, the cabin.
+  const glassGeo = buildGlassGeometry(GLAZING_ALPHA);
+  // The player's glass differs from a rival's (`rivalCarVisual.ts`) in more than its alpha,
+  // because it is the only glass with a cabin behind it rather than paint. Each pane is a
+  // 2 cm box, so a double-sided one blends twice along the same sight line and a window ends
+  // up darker than the paint around it — a black board laid on the deck rather than a hole
+  // you look through. Front faces only fixes that; the pane still reads from both sides,
+  // since each side sees its own outward face. Less metal and a little more colour in the
+  // tint then leave it looking like glass at an angle instead of an absence.
   const glassMat = new THREE.MeshStandardMaterial({
-    color: 0x0b1c26,
-    roughness: 0.06,
-    metalness: 0.55,
+    color: 0x15242f,
+    roughness: 0.08,
+    metalness: 0.32,
     transparent: true,
     opacity: 0.68,
     vertexColors: true,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   });
   const glass = new THREE.Mesh(glassGeo, glassMat);
   glass.name = 'player-car-glass';
@@ -622,6 +636,9 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
     },
     setMusic(spectrum) {
       interior.setMusic(spectrum);
+    },
+    setSteering(steerAngle) {
+      interior.setSteering(steerAngle);
     },
     setBodyAccel(latAccel, longAccel) {
       attitude.setAccel(latAccel, longAccel);

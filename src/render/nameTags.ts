@@ -13,6 +13,10 @@ import { slotCss } from '../core/playerColors';
  * Drawn as DOM instead of sprites so a name costs no draw call, no texture upload and no
  * atlas, and stays crisp at any resolution the governor picks.
  *
+ * The field is fixed in a race and not in the open world, so the tags are keyed by player id
+ * and reconciled with `sync` when somebody arrives or leaves — same treatment the rival cars
+ * themselves get.
+ *
  * Performance contract: one element per rival, created once. Per frame it writes only
  * `transform` and `opacity`, never reads geometry back (so it cannot force a layout), and
  * skips the write entirely when the tag has not moved a pixel.
@@ -20,6 +24,8 @@ import { slotCss } from '../core/playerColors';
 export interface NameTags {
   /** Project and place every tag. Call once per rendered frame. */
   update(camera: THREE.Camera, rivals: readonly RivalCar[]): void;
+  /** Rebuild the tags for a changed field: one per rival, in the order given. */
+  sync(rivals: readonly RivalCar[]): void;
   dispose(): void;
 }
 
@@ -30,6 +36,14 @@ const MAX_DISTANCE = 120;
 /** Fade starts here and reaches nothing at `MAX_DISTANCE` (m). */
 const FADE_DISTANCE = 80;
 
+interface Tag {
+  el: HTMLDivElement;
+  shownX: number;
+  shownY: number;
+  shownOpacity: number;
+  visible: boolean;
+}
+
 export function createNameTags(root: HTMLElement, rivals: readonly RivalCar[]): NameTags {
   const layer = document.createElement('div');
   layer.className = 'rb-tags';
@@ -38,17 +52,48 @@ export function createNameTags(root: HTMLElement, rivals: readonly RivalCar[]): 
   const anchor = new THREE.Vector3();
   const cameraPosition = new THREE.Vector3();
 
-  const tags = rivals.map((rival) => {
+  /** Kept by player id so a car that stays keeps its element across a roster change. */
+  const byId = new Map<string, Tag>();
+  /** The same tags in the order `update` is handed the rivals, so the two walk in step. */
+  let tags: Tag[] = [];
+
+  function makeTag(): Tag {
     const el = document.createElement('div');
     el.className = 'rb-tag';
-    el.style.color = slotCss(rival.slot);
-    el.textContent = rival.name;
     el.hidden = true;
     layer.appendChild(el);
     return { el, shownX: -1, shownY: -1, shownOpacity: -1, visible: false };
-  });
+  }
+
+  function sync(list: readonly RivalCar[]): void {
+    const next: Tag[] = [];
+    const seen = new Set<string>();
+    for (const rival of list) {
+      seen.add(rival.id);
+      let tag = byId.get(rival.id);
+      if (!tag) {
+        tag = makeTag();
+        byId.set(rival.id, tag);
+      }
+      // Name and colour are written here rather than per frame: they only change when the
+      // roster does.
+      tag.el.style.color = slotCss(rival.slot);
+      tag.el.textContent = rival.name;
+      next.push(tag);
+    }
+    for (const [id, tag] of byId) {
+      if (seen.has(id)) continue;
+      tag.el.remove();
+      byId.delete(id);
+    }
+    tags = next;
+  }
+
+  sync(rivals);
 
   return {
+    sync,
+
     update(camera, list) {
       const width = window.innerWidth;
       const height = window.innerHeight;
@@ -105,6 +150,8 @@ export function createNameTags(root: HTMLElement, rivals: readonly RivalCar[]): 
     },
 
     dispose() {
+      byId.clear();
+      tags = [];
       layer.remove();
     },
   };

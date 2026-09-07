@@ -192,18 +192,24 @@ export const POWER_LINE = { z: 262, xs: [-250, -170, -90, -10, 70, 150, 230], he
  * cars of each spread evenly round it. Nine rectangles cover the whole grid.
  */
 export const TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
-  { rect: { minX: -190, maxX: -70, minZ: -160, maxZ: -60 }, cars: 3 },
-  { rect: { minX: -70, maxX: 20, minZ: -160, maxZ: 60 }, cars: 4 },
-  { rect: { minX: 20, maxX: 110, minZ: -160, maxZ: -60 }, cars: 3 },
-  { rect: { minX: 110, maxX: 210, minZ: -160, maxZ: 60 }, cars: 4 },
-  { rect: { minX: -190, maxX: -70, minZ: -60, maxZ: 120 }, cars: 4 },
-  { rect: { minX: -70, maxX: 110, minZ: -60, maxZ: 60 }, cars: 3 },
-  { rect: { minX: 20, maxX: 110, minZ: -60, maxZ: 186 }, cars: 4 },
-  { rect: { minX: 110, maxX: 210, minZ: 60, maxZ: 186 }, cars: 3 },
-  { rect: { minX: -190, maxX: 20, minZ: 120, maxZ: 186 }, cars: 3 },
+  { rect: { minX: -190, maxX: -70, minZ: -160, maxZ: -60 }, cars: 6 },
+  { rect: { minX: -70, maxX: 20, minZ: -160, maxZ: 60 }, cars: 8 },
+  { rect: { minX: 20, maxX: 110, minZ: -160, maxZ: -60 }, cars: 6 },
+  { rect: { minX: 110, maxX: 210, minZ: -160, maxZ: 60 }, cars: 8 },
+  { rect: { minX: -190, maxX: -70, minZ: -60, maxZ: 120 }, cars: 8 },
+  { rect: { minX: -70, maxX: 110, minZ: -60, maxZ: 60 }, cars: 6 },
+  { rect: { minX: 20, maxX: 110, minZ: -60, maxZ: 186 }, cars: 8 },
+  { rect: { minX: 110, maxX: 210, minZ: 60, maxZ: 186 }, cars: 6 },
+  { rect: { minX: -190, maxX: 20, minZ: 120, maxZ: 186 }, cars: 6 },
 ];
-/** Cars patrolling the viaduct itself. */
-export const VIADUCT_CARS = 8;
+/**
+ * Cars patrolling the viaduct itself, split evenly between its lanes. The highway is the one
+ * road in the city wide enough for two files of traffic, and it should read as busy from the
+ * street below.
+ */
+export const VIADUCT_CARS = 64;
+/** Offsets from the viaduct centreline (m) of the lanes the traffic runs in. */
+export const VIADUCT_LANES = [5, 1.5];
 
 /**
  * Bus routes: rectangles of boulevard centrelines, driven clockwise in the kerb lane —

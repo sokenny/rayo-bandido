@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { THEME } from '../../../config/tuning';
-import { box, mergeParts, part, partRGBA } from './geometryKit';
+import { THEME, VEHICLE } from '../../../config/tuning';
+import { box, flipFaces, loft, mergeParts, part, partRGBA } from './geometryKit';
 
 /**
  * The car's cabin: what you see through the rear screen.
  *
  * The chase camera spends the whole game looking down through the back window, so the glass
- * is opened up (see `buildGlassGeometry`'s `rearAlpha`) and this fills what is behind it —
+ * is opened up (see `buildGlassGeometry`'s `glazingAlpha`) and this fills what is behind it —
  * dash, wheel, seats, console, parcel shelf — and, dead centre of the dash, the spectrum
  * analyser of the car's sound system, whose bars are driven by the theme song through
  * `ThemeAudio.spectrum`.
@@ -20,9 +20,11 @@ import { box, mergeParts, part, partRGBA } from './geometryKit';
  *   display then rests on its floor line, lit but flat.
  *
  * IMPLEMENTATION NOTES
- * - Three draw calls: the trim (one merged standard-material mesh), the light strips (one
- *   merged additive mesh: dash glow, seat piping, speaker rings, the display's base line) and
- *   the bars (one `InstancedMesh`, one instance per bar).
+ * - Five draw calls: the trim (one merged standard-material mesh), the light strips (one
+ *   merged additive mesh: dash glow, seat piping, speaker rings, the display's base line),
+ *   the bars (one `InstancedMesh`, one instance per bar) and the steering wheel's two, which
+ *   are separate only because the rim turns and the rest of the cabin does not. The wheel's
+ *   meshes share the trim and glow materials rather than making their own.
  * - The cabin is 42 cm tall between the deck at y ~0.89 and the roof at 1.31, so nothing here
  *   is at human scale; the parts are sized to read as a silhouette from three car lengths
  *   back, which is the only place this is ever seen from.
@@ -36,7 +38,14 @@ export interface CabinInterior {
    * works. A shorter array simply leaves the remaining bars at rest.
    */
   setMusic(spectrum: ArrayLike<number>): void;
-  /** Advance the bars and the bass throb of the light strips. Call once per render frame. */
+  /**
+   * Where the front wheels are pointing (rad, positive = right): `VehicleState.steerAngle`.
+   * The steering wheel turns with it on a full 900-degree rack, the way a real rim does — from
+   * the driver's seat a rim that sat still while the car turned would be the first thing you
+   * saw, and one that only twitched would be the second.
+   */
+  setSteering(steerAngle: number): void;
+  /** Advance the bars and the bass throb of the light strips. Call once per frame. */
   update(frameDt: number): void;
   dispose(): void;
 }
@@ -44,9 +53,9 @@ export interface CabinInterior {
 /* Trim colours: dark slate, a shade or two above the night around the car. Any lighter and
  * the cabin reads as a hole in the roof; any darker and the dash, wheel and seats collapse
  * into one silhouette and only the light strips are left. */
-const TRIM = 0x242a3c;
-const TRIM_LIGHT = 0x39415c;
-const SEAT = 0x2b3145;
+const TRIM = 0x161b28;
+const TRIM_LIGHT = 0x2a3049;
+const SEAT = 0x1d2234;
 const SCREEN = 0x04050a;
 
 /** The two colours the car already wears underneath: cyan on the left, magenta on the right. */
@@ -77,6 +86,22 @@ const BAR_FALL = 9;
 /** Where the driver sits, and so where the wheel and the instrument binnacle go. */
 const DRIVER_X = -0.33;
 
+/* The steering wheel: hub position, rake, rim size, and how many turns of rim it takes to put
+ * the road wheels where `steerAngle` says they are.
+ *
+ * A real rack, not a shortened one: 900 degrees lock to lock, so the rim comes round two and
+ * a half turns end to end and `STEERING_LOCK` — half of that — at full lock either way. The
+ * ratio is derived from `VEHICLE.maxSteerAngle` rather than written down, so retuning the
+ * rack keeps the rim honest. The road wheels are unaffected; this is the rim alone. */
+const WHEEL_HUB_X = DRIVER_X;
+const WHEEL_HUB_Y = 1.035;
+const WHEEL_HUB_Z = -0.27;
+const WHEEL_RAKE = 0.42;
+const WHEEL_RADIUS = 0.125;
+/** Rim travel from centre to full lock (rad): 450 degrees, i.e. 900 lock to lock. */
+const STEERING_LOCK = Math.PI * 2.5;
+const STEERING_RATIO = STEERING_LOCK / VEHICLE.maxSteerAngle;
+
 /** Applies the display's mounting transform to a piece of its housing. */
 function ontoPanel(geo: THREE.BufferGeometry, x: number, y: number, z: number): THREE.BufferGeometry {
   geo.translate(x, y, z);
@@ -88,18 +113,30 @@ function ontoPanel(geo: THREE.BufferGeometry, x: number, y: number, z: number): 
 function buildTrimGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
-  // Liner. The greenhouse is a single-sided shell, so from in here its roof and side walls do
-  // not exist at all and the city shows straight through them; these are the surfaces that
-  // close the cabin off. They sit a centimetre inside the paint, following its taper.
-  const headliner = box(1.2, 0.02, 0.78);
-  headliner.translate(0, 1.285, 0.28);
-  parts.push(part(headliner, TRIM));
-  for (const sign of [-1, 1]) {
-    const wall = box(0.02, 0.46, 1.56);
-    wall.rotateZ(sign * 0.25);
-    wall.translate(sign * 0.665, 1.07, 0.66);
-    parts.push(part(wall, TRIM));
-  }
+  // Liner: headlining, door cards and pillar insides in one piece.
+  //
+  // The greenhouse is a single-sided shell, so from in here its roof and walls do not exist at
+  // all and the city shows straight through them. This is that same hull turned inside out
+  // (`flipFaces`) and inset, which is the only shape that follows the roofline everywhere it
+  // tapers — flat panels standing in for it poked out through the glass at both ends, where
+  // the roof drops away to a lip. Its windscreen and backlight faces are left out for the
+  // same reason the paint's are: those two are the windows.
+  parts.push(
+    part(
+      flipFaces(
+        loft(
+          [
+            { z: -0.73, bottomY: 0.82, topY: 0.86, bottomHalfWidth: 0.725, topHalfWidth: 0.725 },
+            { z: -0.07, bottomY: 0.86, topY: 1.288, bottomHalfWidth: 0.705, topHalfWidth: 0.585 },
+            { z: 0.61, bottomY: 0.86, topY: 1.298, bottomHalfWidth: 0.705, topHalfWidth: 0.585 },
+            { z: 1.56, bottomY: 0.86, topY: 0.918, bottomHalfWidth: 0.745, topHalfWidth: 0.685 },
+          ],
+          { caps: false, openTop: [0, 2] },
+        ),
+      ),
+      TRIM,
+    ),
+  );
 
   // Floor pan, just clear of the hull's top face so the two never fight for the same pixels.
   const floor = box(1.34, 0.02, 2.14);
@@ -121,19 +158,7 @@ function buildTrimGeometry(): THREE.BufferGeometry {
   binnacle.translate(DRIVER_X, 1.055, -0.42);
   parts.push(part(binnacle, TRIM_LIGHT));
 
-  // Steering wheel: rim, hub and a two-spoke cross, raked toward the driver.
-  const rim = new THREE.TorusGeometry(0.125, 0.016, 5, 14);
-  rim.rotateX(0.42);
-  rim.translate(DRIVER_X, 1.035, -0.27);
-  parts.push(part(rim, TRIM_LIGHT));
-  const spokeH = box(0.2, 0.016, 0.012);
-  spokeH.rotateX(0.42);
-  spokeH.translate(DRIVER_X, 1.035, -0.27);
-  parts.push(part(spokeH, TRIM));
-  const hub = box(0.06, 0.05, 0.03);
-  hub.rotateX(0.42);
-  hub.translate(DRIVER_X, 1.035, -0.27);
-  parts.push(part(hub, TRIM_LIGHT));
+  // Steering column. The rim it carries turns, so it is built separately, below.
   const column = box(0.05, 0.05, 0.16);
   column.rotateX(-0.5);
   column.translate(DRIVER_X, 0.995, -0.35);
@@ -196,17 +221,39 @@ function buildTrimGeometry(): THREE.BufferGeometry {
 }
 
 /**
+ * The steering wheel's rim, spokes and hub, built flat in the XY plane around the origin so
+ * the group that carries it can simply spin it about its own Z.
+ */
+function buildSteeringGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  parts.push(part(new THREE.TorusGeometry(WHEEL_RADIUS, 0.016, 5, 14), TRIM_LIGHT));
+  parts.push(part(box(WHEEL_RADIUS * 1.6, 0.016, 0.012), TRIM));
+  parts.push(part(box(0.06, 0.05, 0.03), TRIM_LIGHT));
+  return mergeParts(parts);
+}
+
+/** The shift light on the rim's twelve o'clock. Turns with the rim, so it rides its group. */
+function buildSteeringGlowGeometry(): THREE.BufferGeometry {
+  const mark = box(0.07, 0.014, 0.022);
+  mark.translate(0, WHEEL_RADIUS, 0);
+  return mergeParts([partRGBA(mark, MAGENTA, 1)]);
+}
+
+/**
  * The light strips: everything in the cabin that is a light rather than a surface. One
  * additive mesh, so the whole set can breathe with the bass by moving a single opacity.
  */
 function buildGlowGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
-  // Dash ambient strip: the line of light along the top of the dash that lifts the whole cabin.
-  const dashStrip = box(1.1, 0.014, 0.02);
+  // Dash ambient strip: the line of light along the top of the dash that lifts the whole
+  // cabin. Wide enough in Z to still read from the driver's seat, where it is seen almost
+  // edge-on from less than a metre away.
+  const dashStrip = box(1.1, 0.014, 0.05);
   dashStrip.rotateX(-0.3);
-  dashStrip.translate(0, 1.063, -0.556);
+  dashStrip.translate(0, 1.063, -0.548);
   parts.push(partRGBA(dashStrip, CYAN, 1));
+
 
   // The tachometer inside the binnacle, and the piping across the top of each seat back.
   const tacho = box(0.22, 0.012, 0.03);
@@ -262,7 +309,7 @@ export function createCabinInterior(): CabinInterior {
     metalness: 0.1,
     // A touch of self-illumination: the cabin has no light of its own, and without this the
     // trim collapses into one flat black shape behind the glass.
-    emissive: 0x141d33,
+    emissive: 0x0c1322,
     emissiveIntensity: 1,
   });
   const trim = new THREE.Mesh(trimGeo, trimMat);
@@ -285,6 +332,25 @@ export function createCabinInterior(): CabinInterior {
   glow.renderOrder = 2;
   group.add(glow);
   disposables.push(glowGeo, glowMat);
+
+  /* ------------------------------------------------------------ steering wheel */
+  // Two meshes on one pivot: the rim shares the trim material, its shift light the glow
+  // material. `rake` holds the column angle, `spin` is the only thing steering touches.
+  const rake = new THREE.Group();
+  rake.position.set(WHEEL_HUB_X, WHEEL_HUB_Y, WHEEL_HUB_Z);
+  rake.rotation.x = WHEEL_RAKE;
+  group.add(rake);
+  const spin = new THREE.Group();
+  rake.add(spin);
+  const steeringGeo = buildSteeringGeometry();
+  const steering = new THREE.Mesh(steeringGeo, trimMat);
+  steering.name = 'player-car-steering';
+  spin.add(steering);
+  const steeringGlowGeo = buildSteeringGlowGeometry();
+  const steeringGlow = new THREE.Mesh(steeringGlowGeo, glowMat);
+  steeringGlow.renderOrder = 2;
+  spin.add(steeringGlow);
+  disposables.push(steeringGeo, steeringGlowGeo);
 
   /* -------------------------------------------------------- spectrum display */
   const panel = new THREE.Group();
@@ -335,6 +401,11 @@ export function createCabinInterior(): CabinInterior {
     group,
     setMusic(spectrum) {
       levels = spectrum;
+    },
+    setSteering(steerAngle) {
+      // Positive steer is to the right, which turns the rim clockwise: a negative rotation
+      // about the wheel's own axis, the same sign convention the road wheels use.
+      spin.rotation.z = -steerAngle * STEERING_RATIO;
     },
     update(frameDt) {
       let bass = 0;

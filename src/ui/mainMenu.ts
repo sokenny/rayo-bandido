@@ -1,5 +1,6 @@
 import type { GameMode } from '../core/types';
-import { MAX_PLAYERS } from '../net/protocol';
+import { MAX_PLAYERS, MAX_WORLD_PLAYERS, worldListing } from '../net/protocol';
+import { fetchRooms } from '../net/connection';
 import { createGamepadMenuNav } from '../core/input/gamepadMenu';
 import { frameDecor, menuHeader } from './chrome';
 
@@ -7,13 +8,23 @@ import { frameDecor, menuHeader } from './chrome';
  * Main menu: pick a world. A numbered list on the left, a dossier on the right that describes
  * whatever the cursor is on. Keyboard or mouse. DOM only; the choice is handed back to
  * `src/main.ts`, which loads the game for that world.
+ *
+ * Both worlds on this screen are online now, in two different senses: OPEN WORLD is one city
+ * everybody shares and VERSUS is a race room you make. So the screen polls `GET /rooms` while it
+ * is up and shows how many cars are in the city — the answer to "is anyone playing?" belongs
+ * here, before the choice, not after it.
  */
 export interface MainMenu {
   dispose(): void;
 }
 
-/** The three single-player worlds, plus the lobby. */
+/** The worlds, plus the versus lobby. */
 export type MenuChoice = GameMode | 'multiplayer';
+
+/** How often the live city count is re-read while the menu is up. */
+const POLL_MS = 5000;
+/** The dossier row that carries it, so the poll can find it without re-rendering the rest. */
+const ONLINE_LABEL = 'ONLINE';
 
 interface MenuEntry {
   mode: MenuChoice;
@@ -27,14 +38,14 @@ interface MenuEntry {
 const ENTRIES: MenuEntry[] = [
   {
     mode: 'city',
-    kicker: 'FREE ROAM',
+    kicker: 'FREE ROAM · ONLINE',
     name: 'OPEN WORLD',
-    desc: 'Bandido Bay. Viaducts, ramps, the skyway, the square, the water. Get lost.',
+    desc: 'Bandido Bay, and whoever else is out driving it. Viaducts, ramps, the skyway, the square, the water. No clock, no flag.',
     spec: [
       ['ZONE', 'BANDIDO BAY'],
       ['SIZE', '540 x 550 M'],
       ['ROADS', 'VIADUCT · SKYWAY · ALLEYS'],
-      ['CLOCK', 'NONE'],
+      [ONLINE_LABEL, 'CHECKING'],
     ],
   },
   {
@@ -51,7 +62,7 @@ const ENTRIES: MenuEntry[] = [
   },
   {
     mode: 'multiplayer',
-    kicker: 'ONLINE',
+    kicker: 'ONLINE · RACE',
     name: 'VERSUS',
     desc: `Same circuit, up to ${MAX_PLAYERS} cars. Share the link, race your friends.`,
     spec: [
@@ -113,6 +124,8 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
 
   let selected = -1;
   let done = false;
+  /** What the city's ONLINE row currently says. Re-read on a timer while the menu is up. */
+  let onlineText = 'CHECKING';
 
   function renderDossier(entry: MenuEntry, index: number): void {
     dossierEl.dataset.mode = entry.mode;
@@ -120,7 +133,29 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
     kickerEl.textContent = `// ${entry.kicker}`;
     nameEl.textContent = entry.name;
     descEl.textContent = entry.desc;
-    specEl.innerHTML = entry.spec.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    specEl.innerHTML = entry.spec
+      .map(([k, v]) => `<dt>${k}</dt><dd>${k === ONLINE_LABEL ? onlineText : v}</dd>`)
+      .join('');
+  }
+
+  /**
+   * How busy the city is, asked over plain HTTP because there is no socket on this screen. A
+   * server that cannot be reached says so rather than pretending the city is empty: the two
+   * are different answers and only one of them is worth driving into.
+   */
+  async function pollWorld(): Promise<void> {
+    let next: string;
+    try {
+      const listing = worldListing(await fetchRooms());
+      next = listing
+        ? `${listing.players} / ${listing.max} DRIVING`
+        : `0 / ${MAX_WORLD_PLAYERS} DRIVING`;
+    } catch {
+      next = 'NO SERVER · SOLO';
+    }
+    if (next === onlineText || done) return;
+    onlineText = next;
+    if (selected >= 0 && ENTRIES[selected].mode === 'city') renderDossier(ENTRIES[selected], selected);
   }
 
   function select(index: number): void {
@@ -179,10 +214,13 @@ export function showMainMenu(root: HTMLElement, onSelect: (mode: MenuChoice) => 
   });
   select(0);
   cards[0]?.focus({ preventScroll: true });
+  void pollWorld();
+  const poll = window.setInterval(() => void pollWorld(), POLL_MS);
 
   return {
     dispose() {
       window.removeEventListener('keydown', onKey);
+      window.clearInterval(poll);
       pad.dispose();
       menu.remove();
     },

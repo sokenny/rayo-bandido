@@ -1,4 +1,4 @@
-import { C2S, MAX_PLAYERS, PROTOCOL_VERSION, S2C, sanitizeName } from './protocol.mjs';
+import { C2S, MAX_PLAYERS, MAX_WORLD_PLAYERS, PROTOCOL_VERSION, S2C, sanitizeName } from './protocol.mjs';
 
 /**
  * A match room: up to `MAX_PLAYERS` cars, one race at a time.
@@ -25,6 +25,18 @@ import { C2S, MAX_PLAYERS, PROTOCOL_VERSION, S2C, sanitizeName } from './protoco
  *   `loading` waits for every racer to report a built and warmed-up circuit (or for
  *   `LOAD_TIMEOUT_MS`, so one broken client cannot hold the grid). `countdown` is the window
  *   between announcing GO and reaching it. `results` stays up until the host starts again.
+ *
+ * THE OPEN WORLD (`mode: 'world'`) IS THE SAME ROOM WITH THE PHASE MACHINE TAKEN OUT. There is
+ * no match to start, so there is nothing to be ready for, nothing to load and no flag: the
+ * phase is `roaming` from the moment the room opens until the process dies, cars are relayed
+ * the whole time, and a player who arrives is simply in the city with everyone else. What it
+ * keeps is everything that is not about racing — the roster, the host (who still owns the
+ * electric-car traffic), the clock and the snapshot fan-out.
+ *
+ * The one thing the world room owns that a versus room does not is the SLOT. A racer's slot is
+ * a grid position handed out per match; a roamer's slot is their identity for the whole visit —
+ * it picks their colour on every screen (`src/core/playerColors.ts`), so it is assigned at the
+ * door, held until they disconnect, and then freed for the next arrival.
  */
 
 /** Longest wait for the slowest client to build the circuit before starting without it. */
@@ -41,12 +53,14 @@ const FINISH_GRACE_MS = 60_000;
 /** A race with nobody left in it is abandoned rather than left running forever. */
 const EMPTY_RACE_MS = 5_000;
 
-export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = false, laps = 2, log: rawLog = () => {} } = {}) {
+export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = false, mode = 'versus', laps = 2, log: rawLog = () => {} } = {}) {
   /** Every line a room prints says which room it came from: one process, many rooms. */
   const log = (msg) => rawLog(`${code} · ${msg}`);
+  const world = mode === 'world';
+  const capacity = world ? MAX_WORLD_PLAYERS : MAX_PLAYERS;
   /** @type {Map<string, any>} */
   const players = new Map();
-  let phase = 'lobby';
+  let phase = world ? 'roaming' : 'lobby';
   let nextId = 1;
   let raceId = 0;
   let goAt = 0;
@@ -86,6 +100,18 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
   function hostId() {
     const first = ordered()[0];
     return first ? first.id : '';
+  }
+
+  /**
+   * The lowest slot nobody is using, in the open world. Lowest rather than next: a player who
+   * leaves gives their colour back, so a room that has churned all evening still shows cyan,
+   * magenta and lime rather than four cars in the last four colours.
+   */
+  function freeSlot() {
+    const taken = new Set();
+    for (const p of players.values()) taken.add(p.slot);
+    for (let i = 0; i < capacity; i++) if (!taken.has(i)) return i;
+    return 0;
   }
 
   function wirePlayers() {
@@ -179,20 +205,23 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
   function handle(player, msg) {
     switch (msg.t) {
       case C2S.name:
-        if (phase === 'lobby' || phase === 'results') {
+        // In the world a name can be changed at any time: there is no screen it is settled on.
+        if (world || phase === 'lobby' || phase === 'results') {
           player.name = sanitizeName(msg.name, player.name);
           pushLobby();
         }
         break;
 
       case C2S.ready:
+        if (world) break;
         player.ready = !!msg.ready;
         pushLobby();
         break;
 
       case C2S.start:
-        // Only the host starts, and only from a screen where nobody is driving.
-        if (player.id === hostId() && (phase === 'lobby' || phase === 'results')) startMatch();
+        // Only the host starts, and only from a screen where nobody is driving. The world has
+        // no match to start.
+        if (!world && player.id === hostId() && (phase === 'lobby' || phase === 'results')) startMatch();
         break;
 
       case C2S.loaded:
@@ -216,7 +245,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
 
       case C2S.traffic:
         // The host is authoritative for the electric cars; everyone else just receives them.
-        if (player.id === hostId() && (phase === 'racing' || phase === 'countdown')) {
+        if (player.id === hostId() && (world || phase === 'racing' || phase === 'countdown')) {
           broadcast({ t: S2C.traffic, now: now(), at: Number(msg.at) || now(), d: msg.d }, player.id);
         }
         break;
@@ -238,7 +267,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
       }
 
       case C2S.finish:
-        if (msg.raceId !== raceId || player.result) break;
+        if (world || msg.raceId !== raceId || player.result) break;
         player.result = { total: Number(msg.total), best: Number(msg.best) };
         player.finished = true;
         if (firstFinishAt === 0) firstFinishAt = now();
@@ -255,6 +284,16 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
     }
   }
 
+  /** One snapshot to everybody: every car the server has heard from, under one timestamp. */
+  function fanOut(t) {
+    const rows = [];
+    for (const p of ordered()) {
+      if (p.slot < 0 || !p.car) continue;
+      rows.push({ id: p.id, c: p.car, r: p.race, at: p.carAt });
+    }
+    if (rows.length > 0) broadcast({ t: S2C.snapshot, now: t, p: rows });
+  }
+
   /* ------------------------------------------------------------------- room */
 
   return {
@@ -267,6 +306,9 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
     get listed() {
       return listed;
     },
+    get mode() {
+      return mode;
+    },
     get phase() {
       return phase;
     },
@@ -276,7 +318,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
 
     /** One row of `GET /rooms`, and what `welcome` says about the room a socket landed in. */
     listing() {
-      return { code, label, listed, players: players.size, max: MAX_PLAYERS, phase };
+      return { code, label, listed, mode, players: players.size, max: capacity, phase };
     },
 
     /**
@@ -294,12 +336,14 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
         );
         return null;
       }
-      if (players.size >= MAX_PLAYERS) {
+      if (players.size >= capacity) {
         sendRaw(
           JSON.stringify({
             t: S2C.refused,
             reason: 'full',
-            detail: `the room is full (${MAX_PLAYERS}/${MAX_PLAYERS}). Try again when a race ends.`,
+            detail: world
+              ? `the city is full (${capacity}/${capacity}). Try again in a minute.`
+              : `the room is full (${capacity}/${capacity}). Try again when a race ends.`,
           }),
         );
         return null;
@@ -311,7 +355,8 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
         send: sendRaw,
         joinedAt: now(),
         ready: false,
-        slot: -1,
+        // A roamer takes a slot at the door and keeps it; a racer is given one per match.
+        slot: world ? freeSlot() : -1,
         loaded: false,
         finished: false,
         car: null,
@@ -320,9 +365,9 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
         result: null,
       };
       players.set(player.id, player);
-      send(player, { t: S2C.welcome, id: player.id, now: now(), room: { code, label, listed } });
+      send(player, { t: S2C.welcome, id: player.id, now: now(), room: { code, label, listed, mode } });
       pushLobby();
-      log(`${player.name} (${player.id}) joined — ${players.size}/${MAX_PLAYERS}`);
+      log(`${player.name} (${player.id}) joined — ${players.size}/${capacity}`);
       return player;
     },
 
@@ -343,7 +388,13 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
       const player = players.get(playerId);
       if (!player) return;
       players.delete(playerId);
-      log(`${player.name} (${player.id}) left — ${players.size}/${MAX_PLAYERS}`);
+      log(`${player.name} (${player.id}) left — ${players.size}/${capacity}`);
+      if (world) {
+        // Nothing to wind down: the city stays open, the slot is free again, and whoever is
+        // left is told so the departed car stops being drawn and the host can be handed on.
+        pushLobby();
+        return;
+      }
       if (players.size === 0) {
         phase = 'lobby';
         return;
@@ -357,6 +408,11 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
     /** Drives the snapshot fan-out and the phase timers. Call at `SNAPSHOT_HZ`. */
     tick() {
       const t = now();
+
+      if (world) {
+        fanOut(t);
+        return;
+      }
 
       if (phase === 'loading' && t - loadingSince > LOAD_TIMEOUT_MS) announceGo();
       if (phase === 'countdown' && t >= goAt) {
@@ -378,12 +434,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
       }
 
       if (phase !== 'racing' && phase !== 'countdown') return;
-      const rows = [];
-      for (const p of ordered()) {
-        if (p.slot < 0 || !p.car) continue;
-        rows.push({ id: p.id, c: p.car, r: p.race, at: p.carAt });
-      }
-      if (rows.length > 0) broadcast({ t: S2C.snapshot, now: t, p: rows });
+      fanOut(t);
     },
   };
 }

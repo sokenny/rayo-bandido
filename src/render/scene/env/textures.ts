@@ -8,7 +8,7 @@ import { makeRng } from './meshBuilder';
  * (256-1024 px), mipmapped and shared by the merged meshes that use them.
  */
 
-function canvas(w: number, h: number): { cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+export function canvas(w: number, h: number): { cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
@@ -17,7 +17,7 @@ function canvas(w: number, h: number): { cv: HTMLCanvasElement; ctx: CanvasRende
   return { cv, ctx };
 }
 
-function toTexture(cv: HTMLCanvasElement, repeat = false): THREE.CanvasTexture {
+export function toTexture(cv: HTMLCanvasElement, repeat = false): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
@@ -25,10 +25,6 @@ function toTexture(cv: HTMLCanvasElement, repeat = false): THREE.CanvasTexture {
   tex.anisotropy = 4;
   tex.needsUpdate = true;
   return tex;
-}
-
-function rgba(c: number, a: number): string {
-  return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
 }
 
 function hex(c: number): string {
@@ -352,22 +348,57 @@ export function makeSignAtlas(): THREE.CanvasTexture {
     panel('#0d0709', hex(PAL.neonPink));
     text('車', hex(PAL.winWarm), 150, CJK_FONT);
   });
-  // 12: cyan target reticle.
+  // 12: the bandido tag - a scrawled one-line face with a slash across it, the crew mark
+  // that gets sprayed on half the city. Drawn as loose strokes rather than geometry so it
+  // reads as paint on a lightbox, not as a logo.
   cell(12, () => {
     panel('#04070c');
-    glow(ctx, hex(PAL.neonCyan), 22);
-    ctx.strokeStyle = hex(PAL.neonCyan);
-    ctx.lineWidth = 8;
+    const c = hex(PAL.neonCyan);
+    // Normalised sketch coordinates, so the drawing stays legible if the cell ever resizes.
+    const px = (u: number): number => u * C;
+    ctx.strokeStyle = c;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 13;
+    glow(ctx, c, 22);
+
+    // The head: one continuous loop that overshoots and crosses itself at the top left.
     ctx.beginPath();
-    ctx.arc(C / 2, C / 2, 72, 0, Math.PI * 2);
+    ctx.moveTo(px(0.36), px(0.14));
+    ctx.bezierCurveTo(px(0.18), px(0.24), px(0.16), px(0.54), px(0.25), px(0.72));
+    ctx.bezierCurveTo(px(0.34), px(0.9), px(0.6), px(0.94), px(0.72), px(0.79));
+    ctx.bezierCurveTo(px(0.84), px(0.64), px(0.83), px(0.38), px(0.74), px(0.23));
+    ctx.bezierCurveTo(px(0.65), px(0.09), px(0.43), px(0.05), px(0.33), px(0.17));
+    ctx.bezierCurveTo(px(0.29), px(0.23), px(0.29), px(0.3), px(0.31), px(0.36));
     ctx.stroke();
+
+    // The slash: a single hard diagonal through the left eye, the way a tag gets crossed out.
     ctx.beginPath();
-    ctx.moveTo(C / 2, 30);
-    ctx.lineTo(C / 2, C - 30);
-    ctx.moveTo(30, C / 2);
-    ctx.lineTo(C - 30, C / 2);
+    ctx.moveTo(px(0.08), px(0.74));
+    ctx.lineTo(px(0.58), px(0.27));
     ctx.stroke();
+
+    // Left eye: a scratched X. Right eye: a lazy dash.
+    ctx.lineWidth = 11;
+    ctx.beginPath();
+    ctx.moveTo(px(0.29), px(0.49));
+    ctx.lineTo(px(0.4), px(0.61));
+    ctx.moveTo(px(0.4), px(0.48));
+    ctx.lineTo(px(0.29), px(0.6));
+    ctx.moveTo(px(0.5), px(0.47));
+    ctx.lineTo(px(0.62), px(0.43));
+    ctx.stroke();
+
+    // Mouth: a squiggle, drawn in one wobble.
+    ctx.beginPath();
+    ctx.moveTo(px(0.34), px(0.72));
+    ctx.quadraticCurveTo(px(0.4), px(0.63), px(0.46), px(0.72));
+    ctx.quadraticCurveTo(px(0.52), px(0.81), px(0.58), px(0.7));
+    ctx.stroke();
+
     clearGlow(ctx);
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
   });
   // 13: cyan vertical bars (open / garage bay).
   cell(13, () => {
@@ -446,41 +477,6 @@ export function makeBillboardTexture(variant: number): THREE.CanvasTexture {
   return tex;
 }
 
-/**
- * Equirectangular night sky: black overhead falling into a bruised purple city glow that
- * settles onto the fog colour at the horizon, so the ground plane and the sky meet invisibly.
- */
-export function makeSkyTexture(): THREE.CanvasTexture {
-  const W = 512;
-  const H = 256;
-  const { cv, ctx } = canvas(W, H);
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, hex(PAL.skyTop));
-  g.addColorStop(0.3, hex(PAL.skyTop));
-  g.addColorStop(0.6, hex(PAL.skyGlow));
-  g.addColorStop(0.8, hex(PAL.skyHorizon));
-  g.addColorStop(0.93, hex(PAL.fog));
-  g.addColorStop(1, hex(PAL.fog));
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-  // Uneven light domes from the districts beyond the arena.
-  // Broad and few: the horizon should glow in two or three big washes, not many small ones.
-  const rng = makeRng(7788);
-  for (let i = 0; i < 8; i++) {
-    const x = rng() * W;
-    const r = 90 + rng() * 150;
-    const rg = ctx.createRadialGradient(x, H * 0.94, 0, x, H * 0.94, r);
-    const c = rng();
-    rg.addColorStop(0, rgba(c < 0.62 ? PAL.neonCyan : PAL.neonMagenta, c < 0.62 ? 0.16 : 0.14));
-    rg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = rg;
-    ctx.fillRect(x - r, H * 0.94 - r, r * 2, r * 2);
-  }
-  const tex = toTexture(cv, true);
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  return tex;
-}
 
 /**
  * Tiny equirectangular environment map. Not a real reflection probe: just a dark sky with a

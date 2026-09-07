@@ -45,6 +45,13 @@
     'Franklin Gothic Medium', sans-serif;
   --rb-mono: ui-monospace, 'Cascadia Mono', 'Consolas', 'SF Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
 
+  /* The minimap's corner, and the drop from its top edge to whatever sits under it (its own
+     height plus its padding plus a gap). Both are variables because the roster below it has to
+     follow the map wherever a narrow window puts it, and the two are siblings in the HUD
+     rather than one inside the other. */
+  --rb-minimap-top: 96px;
+  --rb-minimap-drop: 192px;
+
   /* The cut corner every surface shares. */
   --rb-n: 13px;
   --rb-notch: polygon(0 0, calc(100% - var(--rb-n)) 0, 100% var(--rb-n), 100% 100%, 0 100%);
@@ -2306,11 +2313,35 @@ body {
   white-space: pre;
 }
 
+/* The world readout sits under the performance figures, in the cold accent so the two
+   blocks read as different things: one is about speed, the other about place. */
+.debug-coords {
+  margin-top: 4px;
+  color: var(--rb-cyan, #7fe7ff);
+  box-shadow: inset 0 0 0 1px rgba(127, 231, 255, 0.24);
+}
+
+/* Marks the pixel the `aim` line reports on. */
+.debug-crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 17px;
+  height: 17px;
+  margin: -9px 0 0 -9px;
+  pointer-events: none;
+  z-index: 21;
+  background:
+    linear-gradient(to right, transparent 7px, rgba(127, 231, 255, 0.9) 7px 10px, transparent 10px),
+    linear-gradient(to bottom, transparent 7px, rgba(127, 231, 255, 0.9) 7px 10px, transparent 10px);
+  mix-blend-mode: screen;
+}
+
 /* ------------------------------------------------------------ minimap */
 
 .rb-minimap {
   position: absolute;
-  top: 96px;
+  top: var(--rb-minimap-top);
   right: 26px;
   padding: 4px;
   background: var(--rb-panel);
@@ -2322,6 +2353,92 @@ body {
 
 .rb-minimap canvas {
   display: block;
+}
+
+/* ------------------------------------------------------- open world roster */
+
+/* Who else is in the city, directly under the minimap and in the same colours the dots on it
+   are drawn in. See `src/ui/onlinePanel.ts`. */
+.rb-online {
+  position: absolute;
+  top: calc(var(--rb-minimap-top) + var(--rb-minimap-drop));
+  right: 26px;
+  /* Plus the padding, this is the minimap's own width: the two edges have to line up. */
+  width: 168px;
+  padding: 6px 8px 7px;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-hairline-cold);
+  clip-path: var(--rb-notch);
+  --rb-n: 8px;
+  font-family: var(--rb-mono);
+  pointer-events: none;
+}
+
+.rb-online__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--rb-dim);
+}
+
+.rb-online__count {
+  color: var(--rb-cyan);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 8px rgba(79, 243, 255, 0.5);
+}
+
+.rb-online__note {
+  margin-top: 3px;
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--rb-magenta);
+  text-transform: uppercase;
+}
+
+.rb-online__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 5px;
+}
+
+.rb-online__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rb-text);
+}
+
+.rb-online__row.is-self .rb-online__name {
+  color: var(--rb-online-colour);
+  text-shadow: 0 0 8px var(--rb-online-colour);
+}
+
+.rb-online__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: var(--rb-online-colour);
+  box-shadow: 0 0 6px var(--rb-online-colour);
+}
+
+.rb-online__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rb-online__you {
+  margin-left: auto;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--rb-dim);
 }
 
 /* ------------------------------------------------------------ race readout */
@@ -2602,9 +2719,19 @@ body {
 }
 
 @media (max-width: 900px), (max-height: 620px) {
+  :root {
+    --rb-minimap-top: 84px;
+    /* The map is three quarters the size here, so what is under it moves up by the same. */
+    --rb-minimap-drop: 150px;
+  }
+
   .rb-minimap {
-    top: 84px;
     transform: scale(0.75);
+    transform-origin: 100% 0;
+  }
+
+  .rb-online {
+    transform: scale(0.85);
     transform-origin: 100% 0;
   }
 

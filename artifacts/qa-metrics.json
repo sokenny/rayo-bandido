@@ -1,6 +1,6 @@
 {
-  "url": "http://127.0.0.1:5174/?debug=1&mode=test",
-  "executablePath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "url": "http://127.0.0.1:5173/?debug=1&mode=test",
+  "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "headed": false,
   "checks": {
     "spawnFullNitro": true,
@@ -25,30 +25,30 @@
     "noConsoleErrors": true
   },
   "metrics": {
-    "maxSlipDeg": 2.0222923486784157,
+    "maxSlipDeg": 8.236403079085184,
     "driftSamples": 0,
     "chargeAfterDrift": 0,
-    "nitroAfterBoost": 74.7999999999999,
-    "nitroAfterRecharge": 60.79999999999984,
-    "stressSeconds": 15.633333333333645,
-    "fpsAfterStress": 280.5571905042156,
-    "fpsDrivingAvg": 293.55909739432093,
-    "fpsDrivingMin": 228.8501219283437,
-    "frameMsDriving": 3.0493902439024416,
-    "drawCalls": 44,
-    "triangles": 16214,
-    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
-    "gpu": "ANGLE (Intel, Intel(R) Graphics (0x00007D67) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    "nitroAfterBoost": 71.99999999999989,
+    "nitroAfterRecharge": 58.599999999999824,
+    "stressSeconds": 15.416666666667016,
+    "fpsAfterStress": 564.757533426463,
+    "fpsDrivingAvg": 622.2379561014445,
+    "fpsDrivingMin": 543.6081242532857,
+    "frameMsDriving": 1.535474006116208,
+    "drawCalls": 49,
+    "triangles": 26844,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+    "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)"
   },
   "screenshots": [
-    "artifacts\\01-spawn.png",
-    "artifacts\\02-driving.png",
-    "artifacts\\03-drift.png",
-    "artifacts\\04-nitro.png",
-    "artifacts\\05-lightning.png",
-    "artifacts\\06-destroyed.png",
-    "artifacts\\07-restart.png",
-    "artifacts\\08-stress.png"
+    "artifacts/01-spawn.png",
+    "artifacts/02-driving.png",
+    "artifacts/03-drift.png",
+    "artifacts/04-nitro.png",
+    "artifacts/05-lightning.png",
+    "artifacts/06-destroyed.png",
+    "artifacts/07-restart.png",
+    "artifacts/08-stress.png"
   ],
   "consoleErrors": []
 }

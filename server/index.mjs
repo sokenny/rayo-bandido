@@ -60,6 +60,9 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (msg) => console.log(`[${stamp()}] ${msg}`);
 
 const rooms = createRooms({ laps, log });
+// The open world is a room like any other, except that it is always there: opened before the
+// first connection so `GET /rooms` can report an empty city rather than no city at all.
+rooms.ensureWorld();
 
 /* ------------------------------------------------------------------- static */
 
@@ -211,7 +214,8 @@ server.listen(port, () => {
   log(`Rayo Bandido match server on http://127.0.0.1:${bound}`);
   log(existsSync(dist) ? `serving ${dist}` : 'no dist/ yet — run `npm run build`');
   log(`share it with:  ngrok http ${bound}`);
-  log('then open the URL with ?mp=1, make a room, and send friends the link it gives you');
+  log('the open world is always up — send friends the plain URL and pick OPEN WORLD');
+  log('for a race instead, open the URL with ?mp=1, make a room and send the link it gives you');
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

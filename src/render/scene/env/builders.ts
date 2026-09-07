@@ -1,4 +1,5 @@
 import { MeshBuilder } from './meshBuilder';
+import { createReclaimField, type ReclaimField } from './reclaim';
 import type { CityPlan } from '../../../world/cityPlan';
 
 export { SIDEWALK_Y } from '../../../world/cityPlan';
@@ -13,12 +14,40 @@ export { SIDEWALK_Y } from '../../../world/cityPlan';
  */
 export interface EnvBuilders {
   plan: CityPlan;
+  /**
+   * Where the city has been let go (`reclaim.ts`). Rides along beside the plan so every
+   * builder asks the same field the same question and a vine, the weeds under it and the
+   * graffiti beside it all belong to the same pocket. Built once, read everywhere, never
+   * touched after the city is generated.
+   */
+  reclaim: ReclaimField;
+  /**
+   * Every building wall the city actually built, registered as it is drawn. Anything hung on
+   * a facade after the buildings exist — a blade sign, a pipe run, an AC unit — must ask this
+   * whether there is a wall where it wants to mount, instead of assuming one at the block's
+   * edge. Most archetypes stand well inside their plot and some plots are empty, so the block
+   * ledge is not a wall; hanging on it is how things end up floating over the setback.
+   */
+  walls: WallIndex;
   /** Wet asphalt, tinted per zone through vertex colours. */
   road: MeshBuilder;
   /** Road paint: lane lines, plaza circle, hazard chevrons, the start line. */
   lane: MeshBuilder;
-  /** Ground plane, sidewalks, curbs, perimeter walls. */
+  /** Ground plane, sidewalks, curbs, kerbs, fascias and every other flat concrete trim. */
   concrete: MeshBuilder;
+  /**
+   * The big blank concrete a car drives past at arm's length: ground-floor modules
+   * (`groundFloor.ts`), viaduct skirts and piers (`elevatedBuilder.ts`), alley walls
+   * (`trackBuilder.ts`), the kerb-side retaining walls the reclamation puts in
+   * (`reclaimBuilder.ts`) and the perimeter wall (`cityBuilder.ts`).
+   *
+   * Split out of `concrete` for one reason: it samples the concrete photograph
+   * (`textures/manifest.ts`, slot `buildings/concrete`) through `wallDetail.ts`, and the
+   * sidewalks and kerb tops in `concrete` do not want it — a 4 m tile projected down a
+   * pavement reads as blotches, and the trim is small enough that the detail is wasted on it.
+   * One extra draw call for every eye-level wall in the city.
+   */
+  wall: MeshBuilder;
   /**
    * Every facade in the city: vertex colour = the building's window tint, `aFacadeCell` =
    * which atlas style the wall samples (`facadeAtlas.ts`). One builder, one material.
@@ -29,14 +58,21 @@ export interface EnvBuilders {
   /** Painted metal: barriers, containers, poles, pipes, AC units, roof boxes. */
   props: MeshBuilder;
   /**
-   * Leaf mass: palm fronds and hedges. Its own builder rather than a corner of `props`
-   * because it samples a leaf texture (`textures/manifest.ts`, slot `nature/foliage`) that
-   * has no business on a shipping container. UVs are world-scaled, so a hedge and a frond
-   * show leaves of the same size.
+   * Leaf mass: canopies, fronds, shrubs, vines and weeds (`plants.ts`). Its own builder rather
+   * than a corner of `props` because it samples a leaf texture (`textures/manifest.ts`, slot
+   * `nature/foliage`) that has no business on a shipping container. UVs are world-scaled, so
+   * a weed tuft and a tree canopy show leaves of the same size.
    */
   foliage: MeshBuilder;
-  /** Palm trunks, sampling the bark texture (slot `nature/bark`) tiled up the shaft. */
+  /** Trunks and branches, sampling the bark texture (slot `nature/bark`) tiled up the shaft. */
   bark: MeshBuilder;
+  /**
+   * Graffiti and grime: every tag, piece, damp streak, stain and crack in the city, all from
+   * one white-on-transparent atlas (`graffiti.ts`) tinted per quad. Alpha-blended without
+   * writing depth and offset off the surface behind it, so a decal can neither z-fight the
+   * wall it is on nor punch a hole in what is behind it.
+   */
+  decal: MeshBuilder;
   /** Unlit neon, always on — except the lamp heads tagged with a fault seed. */
   neon: MeshBuilder;
   /** Unlit neon that breathes. */
@@ -59,7 +95,66 @@ export interface EnvBuilders {
   badkala: MeshBuilder;
 }
 
-/** Metres of leaf texture per tile. Shared by hedges and palm fronds, so a clipped bush and a
+/** One built volume, as far as the wall index cares. */
+interface WallVolume {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  y0: number;
+  y1: number;
+}
+
+/** Grid cell (m) the index buckets footprints into. About one building. */
+const WALL_CELL = 16;
+
+/**
+ * Where the city's walls actually are. Volumes are registered as the buildings are drawn and
+ * looked up by the builders that run afterwards.
+ */
+export class WallIndex {
+  private readonly cells = new Map<number, WallVolume[]>();
+
+  private static key(x: number, z: number): number {
+    return (Math.floor(x / WALL_CELL) + 2048) * 4096 + Math.floor(z / WALL_CELL) + 2048;
+  }
+
+  add(v: WallVolume): void {
+    for (let x = v.minX; x <= v.maxX + WALL_CELL; x += WALL_CELL) {
+      for (let z = v.minZ; z <= v.maxZ + WALL_CELL; z += WALL_CELL) {
+        const k = WallIndex.key(Math.min(x, v.maxX), Math.min(z, v.maxZ));
+        const list = this.cells.get(k);
+        if (list) list.push(v);
+        else this.cells.set(k, [v]);
+      }
+    }
+  }
+
+  /**
+   * True when a wall facing (dx, dz) stands within `reach` metres behind (x, z) at height y —
+   * that is, when something mounted there would have a building to hang on.
+   */
+  faceAt(x: number, y: number, z: number, dx: number, dz: number, reach = 1.6): boolean {
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oz = -1; oz <= 1; oz++) {
+        const list = this.cells.get(WallIndex.key(x + ox * WALL_CELL, z + oz * WALL_CELL));
+        if (!list) continue;
+        for (const v of list) {
+          if (y < v.y0 - 0.01 || y > v.y1 + 0.01) continue;
+          const gap = dx === 1 ? x - v.maxX : dx === -1 ? v.minX - x : dz === 1 ? z - v.maxZ : v.minZ - z;
+          if (gap > reach || gap < -0.6) continue;
+          const across = dx !== 0 ? z : x;
+          const lo = dx !== 0 ? v.minZ : v.minX;
+          const hi = dx !== 0 ? v.maxZ : v.maxX;
+          if (across >= lo - 0.3 && across <= hi + 0.3) return true;
+        }
+      }
+    }
+    return false;
+  }
+}
+
+/** Metres of leaf texture per tile. Shared by every plant in the kit, so a weed tuft and a
  * palm crown are made of leaves the same size — roughly the span of the source photograph. */
 export const FOLIAGE_TILE = 1.3;
 
@@ -83,11 +178,13 @@ export const BARK_TILE = 1.6;
  * building corner visibly needs real geometry, not a normal.
  */
 const SOFT_EDGE = {
+  // Shared by `concrete` and `wall`: they are the same material, split only by whether the
+  // concrete photograph lands on them.
   concrete: 0.25,
   facade: 0.4,
   roof: 0.3,
   props: 0.15,
-  // A hedge is the softest thing on the street; a trunk is a stiff cylinder faked with four
+  // A canopy is the softest thing on the street; a trunk is a stiff cylinder faked with four
   // faces, and rounding its vertical corners is exactly the case the note above says a
   // hemisphere light cannot see, so it is left sharp.
   foliage: 0.3,
@@ -112,17 +209,40 @@ const CHAMFER = {
   props: 0,
 } as const;
 
+/**
+ * How far the normals of the two flat-facet families are tilted toward the sky
+ * (`MeshBuilder.normalUp`). The night here is a hemisphere light, so `normal.y` is very
+ * nearly the only thing that decides how bright a surface comes out: a vertical facet sits
+ * at the midpoint between sky and ground, and the sky is worth several times the ground.
+ *
+ * - LEAVES: a low-poly canopy is a handful of flat facets standing in for thousands of leaves
+ *   at every angle. Without the bias its vertical facets read as black holes in the plant.
+ * - DECALS: a tag is paint on a wall, but a wall's own normal is horizontal, so an unbiased
+ *   decal is as dark as the concrete it is on and the graffiti simply is not there at night.
+ *   The bias, with the small emissive on the decal material, is what makes paint read.
+ */
+const NORMAL_UP = {
+  // Enough that leaves are not black, not so much that a canopy loses all its internal
+  // shading: the light and dark sides of the same lump are what make it read as a volume.
+  foliage: 0.52,
+  decal: 0.5,
+} as const;
+
 export function createBuilders(plan: CityPlan): EnvBuilders {
   return {
     plan,
+    reclaim: createReclaimField(plan),
+    walls: new WallIndex(),
     road: new MeshBuilder(true),
     lane: new MeshBuilder(true),
     concrete: new MeshBuilder(true).soft(SOFT_EDGE.concrete).chamfer(CHAMFER.concrete),
+    wall: new MeshBuilder(true).soft(SOFT_EDGE.concrete).chamfer(CHAMFER.concrete),
     facade: new MeshBuilder(true, false, true).soft(SOFT_EDGE.facade),
     roof: new MeshBuilder(true).soft(SOFT_EDGE.roof),
     props: new MeshBuilder(true).soft(SOFT_EDGE.props).chamfer(CHAMFER.props),
-    foliage: new MeshBuilder(true).soft(SOFT_EDGE.foliage),
+    foliage: new MeshBuilder(true).soft(SOFT_EDGE.foliage).normalUp(NORMAL_UP.foliage),
     bark: new MeshBuilder(true),
+    decal: new MeshBuilder(true).normalUp(NORMAL_UP.decal),
     neon: new MeshBuilder(true, true),
     neonPulse: new MeshBuilder(true),
     neonFlicker: new MeshBuilder(true),
@@ -140,7 +260,7 @@ export function builderStats(b: EnvBuilders): { triangles: number; drawCalls: nu
   let triangles = 0;
   let drawCalls = 0;
   for (const [key, value] of Object.entries(b)) {
-    if (key === 'plan') continue;
+    if (key === 'plan' || key === 'reclaim' || key === 'walls') continue;
     const mb = value as MeshBuilder;
     triangles += mb.triangles;
     if (!mb.empty) drawCalls++;

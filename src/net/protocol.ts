@@ -17,10 +17,17 @@
  */
 
 /** Bumped whenever a message shape changes. A mismatch is refused at `hello`. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
-/** Players per match. Also the room capacity: a fifth connection is refused. */
+/** Players per VERSUS match. Also that room's capacity: a fifth connection is refused. */
 export const MAX_PLAYERS = 4;
+
+/**
+ * Cars in the open world at once. Bigger than a race grid because nothing has to line up on a
+ * start line — it is capped only by what a phone can draw and by the colours there are to tell
+ * players apart (`src/core/playerColors.ts` has exactly this many).
+ */
+export const MAX_WORLD_PLAYERS = 8;
 
 /**
  * ROOMS. One server process holds many rooms, each identified by a short code that a player
@@ -41,6 +48,30 @@ export const ROOM_LABEL_MAX = 20;
 export const MAX_ROOMS = 64;
 /** How long an empty room is kept before it is reaped, so a host can reload without losing it. */
 export const EMPTY_ROOM_TTL_MS = 120_000;
+
+/**
+ * THE OPEN WORLD IS A ROOM. Free roam is not a single-player mode with a multiplayer variant:
+ * it is one permanent room, on a reserved code, that every server holds from the moment it
+ * starts. Choosing OPEN WORLD in the menu joins it — there is nothing to create, no code to
+ * hand out and no lobby to sit in, which is the whole point: you are dropped into the city and
+ * whoever else is driving is already there.
+ *
+ * The code is reserved: `freshCode` in `server/rooms.mjs` never mints it, so a versus room can
+ * never collide with the world, and a link with `?room=WRLD` in it always lands in the city.
+ */
+export const WORLD_ROOM_CODE = 'WRLD';
+/** The world room's label, which is what `GET /rooms` and the lobby show it as. */
+export const WORLD_ROOM_LABEL = 'BANDIDO BAY';
+
+/**
+ * What a room is FOR, which decides its rules:
+ *
+ *   versus — a race grid: lobby, countdown, laps, a flag and a classification.
+ *   world  — the open city: no phases, no clock, players come and go, cars are relayed the
+ *            whole time. A player keeps one slot (and therefore one colour) for as long as
+ *            they stay connected.
+ */
+export type RoomMode = 'versus' | 'world';
 
 /** How often a client publishes its car, and how often the server fans snapshots back out. */
 export const SNAPSHOT_HZ = 20;
@@ -195,13 +226,15 @@ export interface WirePlayer {
 }
 
 /** Where the room is. The client mirrors this in `src/net/session.ts`. */
-export type RoomPhase = 'lobby' | 'loading' | 'countdown' | 'racing' | 'results';
+export type RoomPhase = 'lobby' | 'loading' | 'countdown' | 'racing' | 'results' | 'roaming';
 
 /** The room a socket ended up in, as the server describes it back at `welcome`. */
 export interface RoomInfo {
   code: string;
   label: string;
   listed: boolean;
+  /** 'world' for the open city, 'versus' for a race room. Fixed for the life of the room. */
+  mode: RoomMode;
 }
 
 /** One row of `GET /rooms`: what the browser screen needs to decide whether to knock. */
@@ -209,6 +242,11 @@ export interface RoomListing extends RoomInfo {
   players: number;
   max: number;
   phase: RoomPhase;
+}
+
+/** How many cars are in the open world right now, for the menu's live counter. */
+export function worldListing(rooms: readonly RoomListing[]): RoomListing | null {
+  return rooms.find((room) => room.mode === 'world') ?? null;
 }
 
 /**

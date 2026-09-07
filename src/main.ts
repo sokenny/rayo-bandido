@@ -6,7 +6,7 @@ import { showMainMenu, type MenuChoice } from './ui/mainMenu';
 import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
-import { sanitizeName, sanitizeRoomCode, sanitizeRoomLabel, type RoomEntry } from './net/protocol';
+import { WORLD_ROOM_CODE, sanitizeName, sanitizeRoomCode, sanitizeRoomLabel, type RoomEntry } from './net/protocol';
 import { installMobileShell } from './ui/mobileShell';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
@@ -18,9 +18,16 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 }
 
 /**
- * What to load comes from the URL: `?mode=city` (the big free-roam city), `?mode=test` (the
- * original test block), `?mode=race` (the circuit on your own), or `?mp=1` (multiplayer). Without any of them the main menu is shown
- * and the choice is written into the URL, so a world is always one reload away.
+ * What to load comes from the URL: `?mode=city` (the open world), `?mode=test` (the original
+ * test block), `?mode=race` (the circuit on your own), or `?mp=1` (a versus room). Without any
+ * of them the main menu is shown and the choice is written into the URL, so a world is always
+ * one reload away.
+ *
+ * THE OPEN WORLD IS A SERVER. `?mode=city` does not build a private city any more: it joins the
+ * one permanent room every server holds (`WORLD_ROOM_CODE`), so whoever else picked OPEN WORLD
+ * is already driving around in it. There is no lobby and no code to hand out — the plain URL is
+ * the invitation. `?mode=city&solo=1` is the way back to a city with nobody in it, which is what
+ * the capture and QA scripts want.
  *
  * MULTIPLAYER ADDRESSES. One server holds many rooms, so `?mp=1` alone means "show me the
  * rooms" and the room itself rides in the query string:
@@ -99,6 +106,89 @@ async function buildGame(mode: GameMode, loading: LoadingScreen, net: NetSession
     }
   }
   return game;
+}
+
+/** How long the city waits for the server before deciding to be a single-player city. */
+const WORLD_CONNECT_MS = 4000;
+
+/**
+ * Wait until the server has said which room we are in, or until it is clear that it will not.
+ * Resolves true when there is a room to drive in.
+ *
+ * The city cannot be built before this: the slot decides the car's colour and where it appears,
+ * and both are wrong if they are chosen and then corrected a second later.
+ */
+function waitForRoom(session: NetSession, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (session.room) {
+      resolve(true);
+      return;
+    }
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      off();
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    // `onLobby` also fires on a status change, so a refusal and a dropped socket land here too.
+    const off = session.onLobby(() => {
+      if (session.room) finish(true);
+      else if (session.phase === 'refused' || session.phase === 'closed') finish(false);
+    });
+    const timer = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+/**
+ * The open world: join the city everyone shares, then drive. Unlike a versus race there is no
+ * lobby, no countdown and nothing to wait for — the session is opened, the world is built
+ * around the slot it comes back with, and the car is on the road.
+ *
+ * A server that cannot be reached is not an error here: the city is still a city, so the game
+ * falls back to driving it alone rather than refusing to start. That is also what `&solo=1`
+ * asks for outright.
+ */
+async function openWorld(): Promise<void> {
+  const loading = createLoadingScreen(document.getElementById('loading-root'));
+  const solo = new URLSearchParams(location.search).has('solo');
+  let session: NetSession | null = null;
+
+  if (!solo) {
+    loading.set('CONNECTING TO BANDIDO BAY', 0.06);
+    await loading.paint();
+    session = createSession(storedName(), { join: WORLD_ROOM_CODE });
+    const connected = await waitForRoom(session, WORLD_CONNECT_MS);
+    if (!connected) {
+      // Nobody to drive with, but the city is still there. A full city and an unreachable one
+      // are different disappointments, so the caption says which it was.
+      const refused = session.phase === 'refused' && session.problem;
+      loading.set(refused ? refused.toUpperCase() : 'NO SERVER · DRIVING ALONE', 0.1);
+      await loading.paint();
+      session.dispose();
+      session = null;
+    }
+  }
+
+  const game = await buildGame('city', loading, session);
+  game.start();
+  canvas!.focus();
+  void loading.hide();
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Escape') return;
+    session?.dispose();
+    location.assign(urlWith(null));
+  });
+
+  // Reloading or closing the tab gives the slot back now rather than whenever the browser gets
+  // round to dropping the socket. The city has eight colours in it; a player who reloads twice
+  // should not be holding three of them.
+  window.addEventListener('pagehide', (e) => {
+    if (e.persisted) return;
+    session?.dispose();
+  });
 }
 
 /** Single player: build the world, start driving, ESC goes back to the menu. */
@@ -292,5 +382,6 @@ if (new URLSearchParams(location.search).has('mp')) {
   const entry = roomEntryFromUrl(storedName());
   if (entry) void multiplayer(entry);
   else rooms();
-} else if (mode) void boot(mode);
+} else if (mode === 'city') void openWorld();
+else if (mode) void boot(mode);
 else menu();

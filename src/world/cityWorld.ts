@@ -38,6 +38,7 @@ import {
   SKYWAY_SPEC,
   TRAFFIC_LOOPS,
   VIADUCT_CARS,
+  VIADUCT_LANES,
   VIADUCT_SPEC,
   VIADUCT_Y,
 } from './citySpec';
@@ -290,33 +291,64 @@ export function createCityWorld(): World {
 
   /* ---------------------------------------------------------- traffic, cruise */
 
+  // Built here rather than at the layout: a ground spawn at the foot of a ramp sits a few
+  // centimetres above zero, and the car has to start on the road, not under it.
+  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, kerbs);
+  const GROUND_SAMPLE = { y: 0, gx: 0, gz: 0 };
+
   const targetSpawns: SpawnPoint[] = [];
   const targetPatrols: Array<Array<{ x: number; z: number }>> = [];
+  // Every road carries traffic both ways: half the cars of a loop drive it clockwise in the
+  // inner lane, half anticlockwise in the outer one, so each file keeps to its own side of
+  // the centreline and the player meets oncoming headlights.
   for (const loop of TRAFFIC_LOOPS) {
-    const corners = loopWaypoints(loop.rect, LANE);
-    for (let k = 0; k < loop.cars; k++) {
-      // Spread the cars evenly round the rectangle: car k starts k/n of the way round.
-      const at = placeAlongLoop(corners, (k + 0.5) / loop.cars);
-      const rotated = [...corners.slice(at.next), ...corners.slice(0, at.next)];
-      targetSpawns.push({ x: at.x, z: at.z, heading: at.heading });
-      targetPatrols.push(rotated);
+    for (const dir of [1, -1]) {
+      const corners = dir > 0 ? loopWaypoints(loop.rect, LANE) : loopWaypoints(loop.rect, -LANE).reverse();
+      const cars = dir > 0 ? Math.ceil(loop.cars / 2) : Math.floor(loop.cars / 2);
+      for (let k = 0; k < cars; k++) {
+        // Spread the cars evenly round the rectangle: car k starts k/n of the way round.
+        const at = placeAlongLoop(corners, (k + 0.5) / cars);
+        const rotated = [...corners.slice(at.next), ...corners.slice(0, at.next)];
+        surface.sample(at.x, at.z, 0, GROUND_SAMPLE);
+        targetSpawns.push({ x: at.x, z: at.z, y: GROUND_SAMPLE.y, heading: at.heading });
+        targetPatrols.push(rotated);
+      }
     }
   }
   {
+    // The viaduct the same way: two lanes each side of its centreline, the oncoming pair
+    // driven round the loop backwards. Lanes are offset half a gap from each other so the
+    // files interleave rather than driving in pairs.
     const samples = viaduct.path.samples;
-    const lane: Array<{ x: number; z: number }> = [];
-    for (let i = 0; i < samples.length; i += 3) {
-      const s = samples[i];
-      lane.push({ x: s.x + -s.tz * LANE, z: s.z + s.tx * LANE });
+    const lanes: Array<Array<{ x: number; z: number }>> = [];
+    for (const dir of [1, -1]) {
+      for (const offset of VIADUCT_LANES) {
+        const lane: Array<{ x: number; z: number }> = [];
+        for (let i = 0; i < samples.length; i += 3) {
+          const s = samples[i];
+          lane.push({ x: s.x + -s.tz * offset * dir, z: s.z + s.tx * offset * dir });
+        }
+        lanes.push(dir > 0 ? lane : lane.reverse());
+      }
     }
-    for (let k = 0; k < VIADUCT_CARS; k++) {
-      const start = Math.floor((k * lane.length) / VIADUCT_CARS);
-      const rotated = [...lane.slice(start), ...lane.slice(0, start)];
-      const s = samples[Math.min(samples.length - 1, start * 3)];
-      targetSpawns.push({ x: rotated[0].x, z: rotated[0].z, y: VIADUCT_Y, heading: Math.atan2(s.tx, -s.tz) });
-      targetPatrols.push(rotated);
+    const perLane = Math.floor(VIADUCT_CARS / lanes.length);
+    for (let l = 0; l < lanes.length; l++) {
+      const lane = lanes[l];
+      for (let k = 0; k < perLane; k++) {
+        const start = Math.floor(((k + (l % 2) * 0.5) * lane.length) / perLane) % lane.length;
+        const rotated = [...lane.slice(start), ...lane.slice(0, start)];
+        const ahead = rotated[1] ?? rotated[0];
+        targetSpawns.push({
+          x: rotated[0].x,
+          z: rotated[0].z,
+          y: VIADUCT_Y,
+          heading: Math.atan2(ahead.x - rotated[0].x, -(ahead.z - rotated[0].z)),
+        });
+        targetPatrols.push(rotated);
+      }
     }
   }
+
   const cruiseRoute = loopWaypoints(TRAFFIC_LOOPS[0].rect, LANE);
 
   /* ---------------------------------------------------------- layout */
@@ -362,7 +394,7 @@ export function createCityWorld(): World {
     cruiseRoute,
     colliders,
     walls,
-    surface: createSurfaceField(elevated.map((rb) => rb.path), 1.5, kerbs),
+    surface,
     race: null,
     busRoutes,
     minimap: {

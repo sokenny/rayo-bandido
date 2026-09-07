@@ -79,10 +79,20 @@ export interface Palette {
   litGain: number;
   /** The bay's surface. */
   water: number;
-  /** Hedges and palm fronds. */
+  /** Leaf mass: canopies, fronds, shrubs, weeds. */
   foliage: number;
-  /** Palm trunks: kept well above the night floor, or the tree reads as a floating crown. */
+  /** Dead and dying growth: bleached weeds, bare branches, the thin stuff in a crack. */
+  foliageDry: number;
+  /** Trunks and branches: kept well above the night floor, or a tree reads as a floating crown. */
   bark: number;
+  /**
+   * Spray-can colours, in the order a writer reaches for them: cold, hot, bleached white,
+   * a warm accent and two dirty ones. Graffiti is paint, not neon, so these are read by the
+   * scene light like any other surface.
+   */
+  paint: number[];
+  /** Damp, soot, stains and cracks on concrete. */
+  grime: number;
 
   // The two scene lights.
   hemiSky: number;
@@ -147,7 +157,10 @@ export const ARENA_PALETTE: Palette = {
   litGain: 1,
   water: 0x0b1d2e,
   foliage: 0x1b4f52,
+  foliageDry: 0x5c5946,
   bark: 0x5a4a50,
+  paint: [0x3fe8ff, 0xff2f9b, 0xd8e4ee, 0x8f5bff, 0xc4553f, 0x6c7a72],
+  grime: 0x16202a,
 
   hemiSky: 0x5aa0d4,
   hemiGround: 0x2a3f50,
@@ -213,7 +226,10 @@ export const BAY_PALETTE: Palette = {
   litGain: 1.4,
   water: 0x0b2226,
   foliage: 0x3f8f5a,
+  foliageDry: 0x6d6a4c,
   bark: 0x6a5946,
+  paint: [0x3ff0e8, 0xff3d4a, 0xd6e2e0, 0xffb347, 0x9a5f3a, 0x64806a],
+  grime: 0x0c1a1a,
 
   hemiSky: 0x2f6f7a,
   hemiGround: 0x0d1a1c,

@@ -380,7 +380,10 @@ export function makeFacadeAtlas(): THREE.CanvasTexture {
 
 /* ------------------------------------------------------------------ material */
 
-export const FACADE_CACHE_KEY = `${WINDOW_ACTIVITY_CACHE_KEY}-atlas-v1`;
+export const FACADE_CACHE_KEY = `${WINDOW_ACTIVITY_CACHE_KEY}-atlas-v2-concrete`;
+
+/** How many times the concrete photograph repeats across one atlas cell (`FACADE_TILE` m). */
+const CONCRETE_REPEAT = 1.5;
 
 const VERTEX_PARS = `
 attribute vec3 aFacadeCell;
@@ -393,6 +396,9 @@ const VERTEX_BODY = `
 
 const FRAGMENT_PARS = `
 varying vec3 vFacadeCell;
+uniform sampler2D rbConcreteMap;
+uniform float rbConcreteMix;
+uniform float rbConcreteGain;
 `;
 
 /**
@@ -412,6 +418,20 @@ const MAP_FRAGMENT = `
   // and drops, so the emissive carries the colour; the concrete takes the wall brightness.
   float rbGlass = smoothstep(0.08, 0.3, max(sampledDiffuseColor.r, max(sampledDiffuseColor.g, sampledDiffuseColor.b)));
   sampledDiffuseColor.rgb *= mix(vec3(vFacadeCell.z), vColor * 0.3, rbGlass);
+  // The concrete photograph, on the wall's own (untiled, world-scaled) UV rather than the
+  // atlas cell, so its grain never lines up with the window grid and never repeats on the
+  // same beat. It multiplies the concrete only: rbGlass keeps the panes off it, or a lit
+  // window would pick up stains and lose its glow. Zero until the file lands.
+  //
+  // rbConcreteGain is 1 / the tile's average brightness in LINEAR light, measured at load
+  // (textures/load.ts), so the photograph textures the wall without dimming it. It is NOT
+  // 1 / normalize: the grade is solved on sRGB bytes and the sampler hands back linear, and
+  // the two differ by the whole transfer curve -- a byte mean of 0.62 samples at about 0.38.
+  if (rbConcreteMix > 0.0) {
+    vec3 rbConcrete = texture2D(rbConcreteMap, rbTileUv * ${CONCRETE_REPEAT.toFixed(2)}).rgb;
+    float rbAmount = rbConcreteMix * (1.0 - rbGlass);
+    sampledDiffuseColor.rgb *= mix(vec3(1.0), rbConcrete * rbConcreteGain, rbAmount);
+  }
   diffuseColor *= sampledDiffuseColor;
 #endif
 `;
@@ -424,10 +444,34 @@ const EMISSIVE_FRAGMENT = `
 `;
 
 /**
+ * The facade material, plus the one hook it exposes: the concrete detail map, which arrives
+ * off disk (`textures/manifest.ts`, slot `buildings/concrete`) some frames after start-up.
+ */
+export interface FacadeMaterial extends THREE.MeshStandardMaterial {
+  /** Swap in the concrete photograph, or pass null to go back to flat atlas concrete. */
+  setConcreteMap(tex: THREE.Texture | null, luma?: number | null, mix?: number): void;
+}
+
+/**
  * The one facade material: the atlas as map and emissive map, the window activity on top,
  * and the atlas patch that makes `aFacadeCell` and the vertex colour do the rest.
  */
-export function createFacadeMaterial(atlas: THREE.Texture, windows: WindowActivity, intensity: number, seed = 2.7): THREE.MeshStandardMaterial {
+export function createFacadeMaterial(
+  atlas: THREE.Texture,
+  windows: WindowActivity,
+  intensity: number,
+  seed = 2.7,
+): FacadeMaterial {
+  // Shared with the compiled shader: setting `.value` later is the whole swap, so the concrete
+  // photograph can land after start-up without a recompile.
+  // A 1x1 white texel stands in until then: an unbound sampler is undefined behaviour, and
+  // white is the identity for the multiply the shader does with it.
+  const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  white.needsUpdate = true;
+  const concreteMap: { value: THREE.Texture } = { value: white };
+  const concreteMix = { value: 0 };
+  // Overwritten from the measured tile; sized for a mid-grey one if the measure is missing.
+  const concreteGain = { value: 2.6 };
   const material = new THREE.MeshStandardMaterial({
     map: atlas,
     emissive: 0xffffff,
@@ -444,6 +488,9 @@ export function createFacadeMaterial(atlas: THREE.Texture, windows: WindowActivi
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VERTEX_PARS}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERTEX_BODY}`);
+    shader.uniforms.rbConcreteMap = concreteMap;
+    shader.uniforms.rbConcreteMix = concreteMix;
+    shader.uniforms.rbConcreteGain = concreteGain;
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAGMENT_PARS}`)
       .replace('#include <map_fragment>', MAP_FRAGMENT)
@@ -452,5 +499,12 @@ export function createFacadeMaterial(atlas: THREE.Texture, windows: WindowActivi
       .replace('#include <emissivemap_fragment>', EMISSIVE_FRAGMENT);
   };
   material.customProgramCacheKey = () => FACADE_CACHE_KEY;
-  return material;
+  const facade = material as FacadeMaterial;
+  facade.setConcreteMap = (tex, luma = null, mix = 0.85) => {
+    concreteMap.value = tex ?? white;
+    concreteMix.value = tex ? mix : 0;
+    concreteGain.value = luma && luma > 0.01 ? 1 / luma : 2.6;
+  };
+  material.addEventListener('dispose', () => white.dispose());
+  return facade;
 }

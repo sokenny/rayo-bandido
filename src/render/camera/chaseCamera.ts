@@ -24,22 +24,29 @@ import {
  * - While reversing the camera keeps the car's own heading (it never swings around the car)
  *   and shortens the look-ahead so the car stays readable.
  *
- * Besides the chase view the rig carries two rigid mounts (`CAMERA.mounts`, cycled with P):
- * `front`, hanging off the nose and looking back down the car, and `side`, a fender cam at
- * the driver's door. Those are placed exactly rather than damped — a lens bolted to the
- * bodywork does not trail the car — and they inherit a fraction of the body's roll and dive
- * so the horizon leans with the chassis instead of floating level.
+ * Besides the chase view the rig carries three rigid mounts (`CAMERA.mounts`): `front`,
+ * hanging off the nose and looking back down the car, `side`, a fender cam at the driver's
+ * door, and `cabin`, the driver's eyeline behind the wheel. Those are placed exactly rather
+ * than damped — a lens bolted to the bodywork does not trail the car — and they inherit a
+ * fraction of the body's roll and dive so the horizon leans with the chassis instead of
+ * floating level. `cabin` goes further: being inside the shell, its offsets swing with the
+ * body too (`ridesBody`), so the dashboard in front of it never moves.
  *
- * All three views drive the one `PerspectiveCamera`, so a view change costs no extra draw
- * calls and nothing downstream (speed blur, name tags) has to know which one is live.
+ * `VIEW_ORDER` is what P walks through, and it is deliberately not every view the rig can
+ * hold: `cabin` is built and reachable through `setView` (and so through `window.__rb.view`)
+ * but sits outside the cycle.
+ *
+ * All of them drive the one `PerspectiveCamera`, so a view change costs no extra draw calls
+ * and nothing downstream (speed blur, name tags) has to know which one is live.
  *
  * The camera receives an already-interpolated car pose each frame from `src/game.ts`.
  * Allocation-free per frame: only the two scratch vectors below are ever written.
  */
 
-/** Cycle order of the P key. `chase` is the default and the one every restart returns to. */
-export type CameraView = 'chase' | 'front' | 'side';
+/** Every view the rig can hold. `chase` is the default and the one every restart returns to. */
+export type CameraView = 'chase' | 'cabin' | 'front' | 'side';
 
+/** What P walks through, in order. `cabin` is left out: reachable, but not in the rotation. */
 const VIEW_ORDER: readonly CameraView[] = ['chase', 'front', 'side'];
 
 /** One entry of `CAMERA.mounts`. See the tuning block for what each offset means. */
@@ -85,7 +92,11 @@ export interface ChaseCamera {
   readonly view: CameraView;
   /** Jump to a view. Takes effect on the next `update()`; the switch is deliberately a cut. */
   setView(view: CameraView): void;
-  /** Advance one step through `chase -> front -> side` and wrap. */
+  /**
+   * Advance one step through `VIEW_ORDER` (`chase -> front -> side`) and wrap. A view held
+   * outside that order, like `cabin`, is left where it is: cycling out of it lands on the
+   * first entry, and only `setView` can get back to it.
+   */
   cycleView(): CameraView;
 }
 
@@ -163,17 +174,42 @@ export function createChaseCamera(aspect: number): ChaseCamera {
     );
   }
 
-  /** Resolve a mount's car-local offsets into the world `pos` / `look` scratch vectors. */
+  /**
+   * Resolve a mount's car-local offsets into the world `pos` / `look` scratch vectors.
+   *
+   * A `ridesBody` mount has its own offsets swung by the body's roll and dive first, about
+   * the car's origin at road level — the same pivot `carVisual`'s sprung chassis turns about.
+   * That is what makes a lens inside the cabin move exactly as the cabin does. The two angles
+   * are applied one after the other rather than as a single rotation: they never exceed a few
+   * degrees, so the cross term is far below anything the eye could pick up in a moving car.
+   */
   function placeMount(pose: CameraPose, mount: Mount): void {
     const h = pose.heading;
     const fx = forwardX(h);
     const fz = forwardZ(h);
     const rx = rightX(h);
     const rz = rightZ(h);
+    let ahead = mount.ahead;
+    let side = mount.side;
+    let height = mount.height;
+    if (mount.ridesBody) {
+      // Roll turns the (right, up) plane; dive turns the (up, back) plane, and `ahead` is the
+      // negated local z the body's pitch is measured about.
+      const cr = Math.cos(pose.roll);
+      const sr = Math.sin(pose.roll);
+      const rolledSide = side * cr - height * sr;
+      const rolledHeight = side * sr + height * cr;
+      const cp = Math.cos(pose.pitch);
+      const sp = Math.sin(pose.pitch);
+      const back = -ahead;
+      side = rolledSide;
+      height = rolledHeight * cp - back * sp;
+      ahead = -(rolledHeight * sp + back * cp);
+    }
     pos.set(
-      pose.x + fx * mount.ahead + rx * mount.side,
-      pose.y + mount.height,
-      pose.z + fz * mount.ahead + rz * mount.side,
+      pose.x + fx * ahead + rx * side,
+      pose.y + height,
+      pose.z + fz * ahead + rz * side,
     );
     look.set(
       pose.x + fx * mount.lookAhead + rx * mount.lookSide,
@@ -321,6 +357,7 @@ export function createChaseCamera(aspect: number): ChaseCamera {
       cut = true;
     },
     cycleView() {
+      // `indexOf` is -1 for a view outside the cycle, which steps to entry 0 — the chase view.
       view = VIEW_ORDER[(VIEW_ORDER.indexOf(view) + 1) % VIEW_ORDER.length];
       cut = true;
       return view;

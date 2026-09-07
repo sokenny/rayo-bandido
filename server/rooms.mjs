@@ -5,6 +5,8 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LEN,
   S2C,
+  WORLD_ROOM_CODE,
+  WORLD_ROOM_LABEL,
   sanitizeRoomCode,
   sanitizeRoomLabel,
 } from './protocol.mjs';
@@ -29,6 +31,12 @@ import { createRoom } from './room.mjs';
  *
  * LISTED VS UNLISTED. A listed room appears in `GET /rooms` for anyone pointed at the server;
  * an unlisted one is reachable only by its code. Unlisted is the default.
+ *
+ * THE WORLD ROOM. One room is not like the others: `WORLD_ROOM_CODE` is the open city, it is
+ * opened when the server starts rather than on demand, and it is never reaped — so `GET /rooms`
+ * can always say how many people are driving around in it, including nobody. Its code is
+ * reserved, so `freshCode` never hands it to a versus room and `join` always routes it to the
+ * city whatever the connection claimed it wanted.
  */
 
 export function createRooms({ laps = 2, log = () => {} } = {}) {
@@ -44,16 +52,23 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
       for (let i = 0; i < ROOM_CODE_LEN; i++) {
         code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
       }
-      if (!entries.has(code)) return code;
+      if (code !== WORLD_ROOM_CODE && !entries.has(code)) return code;
     }
     return '';
   }
 
-  function open(code, label, listed) {
-    const room = createRoom({ code, label, listed, laps, log });
+  function open(code, label, listed, mode = 'versus') {
+    const room = createRoom({ code, label, listed, mode, laps, log });
     entries.set(code, { room, emptySince: now() });
-    log(`room ${code} opened — "${label}"${listed ? ' (public)' : ''} — ${entries.size} open`);
+    log(`room ${code} opened — "${label}"${listed ? ' (public)' : ''}${mode === 'world' ? ' (open world)' : ''} — ${entries.size} open`);
     return room;
+  }
+
+  /** The open city, opened on first use and kept for the life of the process. */
+  function world() {
+    const existing = entries.get(WORLD_ROOM_CODE);
+    if (existing) return existing.room;
+    return open(WORLD_ROOM_CODE, WORLD_ROOM_LABEL, true, 'world');
   }
 
   function refuse(sendRaw, reason, detail) {
@@ -77,6 +92,14 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
       return rows;
     },
 
+    /**
+     * Open the world room now rather than when somebody first knocks, so `GET /rooms` reports
+     * an empty city instead of no city and the menu's counter is right from a cold start.
+     */
+    ensureWorld() {
+      return world();
+    },
+
     /** The room under this code, or null. Used by the tests and by `/health`. */
     get(code) {
       const entry = entries.get(sanitizeRoomCode(code));
@@ -98,6 +121,15 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
       }
 
       const wanted = sanitizeRoomCode(hello.room);
+      // The city is never created, only entered — whatever the link said about labels or
+      // listing, and whether or not anybody is in it yet.
+      if (wanted === WORLD_ROOM_CODE) {
+        const room = world();
+        const player = room.join(sendRaw, hello);
+        if (!player) return null;
+        return { room, player };
+      }
+
       const create = hello.create && typeof hello.create === 'object' ? hello.create : null;
       let entry = wanted ? entries.get(wanted) : undefined;
 
@@ -140,6 +172,8 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
       const t = now();
       for (const [code, entry] of entries) {
         entry.room.tick();
+        // The city outlives everyone in it: there is nothing to come back to if it is reaped.
+        if (code === WORLD_ROOM_CODE) continue;
         if (entry.room.size > 0) {
           entry.emptySince = 0;
           continue;

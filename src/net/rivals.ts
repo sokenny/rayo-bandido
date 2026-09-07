@@ -24,8 +24,15 @@ import {
  * than freezing mid-corner or sliding off forever. After `RIVAL_TIMEOUT_MS` of silence it
  * stops being `present` at all, which takes it out of the scene, the minimap and collision.
  *
+ * A RACE has a fixed field: the set is built once from the grid and never changes. THE OPEN
+ * WORLD does not — people arrive and quit all evening — so the set is also reconcilable
+ * (`sync`), which adds a track for a new arrival and drops the one belonging to somebody who
+ * left. `all` is the same array throughout, mutated in place, because the game, the minimap and
+ * the name tags all hold a reference to it from the moment the world was built.
+ *
  * Performance contract: the `RivalCar` objects are allocated once per player and mutated in
- * place, and the sample ring is fixed-size, so nothing here allocates per frame.
+ * place, and the sample ring is fixed-size, so nothing here allocates per frame. `sync` does
+ * allocate, but it runs once per roster change, which is once per person walking in or out.
  */
 
 /** Samples kept per rival. At 20 Hz this is a second of history — far more than needed. */
@@ -48,8 +55,18 @@ interface Track {
 }
 
 export interface RivalSet {
-  /** Live rivals, one per remote player in the match, in grid-slot order. */
+  /**
+   * Live rivals, one per remote player, in slot order. The SAME array for the life of the set:
+   * `sync` rewrites its contents rather than replacing it.
+   */
   readonly all: RivalCar[];
+  /**
+   * Reconcile the set against a roster: keep the tracks that are still in it, add one per new
+   * player, drop the rest. A player who keeps their slot keeps their samples, so somebody
+   * renaming themselves does not make their car jump. Returns true when `all` actually
+   * changed, which is what tells the caller to build or retire a car in the scene.
+   */
+  sync(players: Array<{ id: string; name: string; slot: number }>): boolean;
   /** Take one player's snapshot row. A sample stamped no newer than the last one is dropped. */
   apply(id: string, serverTime: number, car: WireCar, race: WireRace | null): void;
   /**
@@ -109,17 +126,25 @@ function applyDiscrete(rival: RivalCar, car: WireCar): void {
   rival.charge = car.ch;
 }
 
-export function createRivalSet(players: Array<{ id: string; name: string; slot: number }>): RivalSet {
+function createTrack(id: string, name: string, slot: number): Track {
+  const samples: Sample[] = [];
+  for (let i = 0; i < BUFFER; i++) samples.push({ t: -1, car: { x: 0, z: 0, h: 0, vx: 0, vz: 0, sp: 0, sa: 0, la: 0, ga: 0, f: 0, ch: 0 } });
+  return { rival: emptyRival(id, name, slot), samples, head: 0, count: 0, newest: -1 };
+}
+
+export function createRivalSet(players: Array<{ id: string; name: string; slot: number }> = []): RivalSet {
   const tracks = new Map<string, Track>();
   const all: RivalCar[] = [];
 
-  for (const p of [...players].sort((a, b) => a.slot - b.slot)) {
-    const samples: Sample[] = [];
-    for (let i = 0; i < BUFFER; i++) samples.push({ t: -1, car: { x: 0, z: 0, h: 0, vx: 0, vz: 0, sp: 0, sa: 0, la: 0, ga: 0, f: 0, ch: 0 } });
-    const track: Track = { rival: emptyRival(p.id, p.name, p.slot), samples, head: 0, count: 0, newest: -1 };
-    tracks.set(p.id, track);
-    all.push(track.rival);
+  /** Refill `all` from `tracks`, in slot order, without swapping the array itself out. */
+  function rebuild(): void {
+    all.length = 0;
+    for (const track of tracks.values()) all.push(track.rival);
+    all.sort((a, b) => a.slot - b.slot);
   }
+
+  for (const p of players) tracks.set(p.id, createTrack(p.id, p.name, p.slot));
+  rebuild();
 
   /** Newest sample at or before `t`, and the oldest one after it. */
   function bracket(track: Track, t: number): { before: Sample | null; after: Sample | null } {
@@ -137,6 +162,34 @@ export function createRivalSet(players: Array<{ id: string; name: string; slot: 
 
   return {
     all,
+
+    sync(roster) {
+      let changed = false;
+      const seen = new Set<string>();
+      for (const p of roster) {
+        seen.add(p.id);
+        const existing = tracks.get(p.id);
+        if (!existing) {
+          tracks.set(p.id, createTrack(p.id, p.name, p.slot));
+          changed = true;
+          continue;
+        }
+        // A name or a slot can change under a player who never went away; neither is worth
+        // throwing their samples out for.
+        if (existing.rival.name !== p.name) existing.rival.name = p.name;
+        if (existing.rival.slot !== p.slot) {
+          existing.rival.slot = p.slot;
+          changed = true;
+        }
+      }
+      for (const id of [...tracks.keys()]) {
+        if (seen.has(id)) continue;
+        tracks.delete(id);
+        changed = true;
+      }
+      if (changed) rebuild();
+      return changed;
+    },
 
     apply(id, serverTime, car, race) {
       const track = tracks.get(id);

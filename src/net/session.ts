@@ -37,6 +37,12 @@ import { TRAFFIC_STRIDE } from '../sim/traffic';
  *
  * Publishing is throttled here rather than at the call site, so the game can simply hand over
  * the car every simulation tick and let the session decide what actually goes on the wire.
+ *
+ * TWO KINDS OF ROOM. A VERSUS room hands out its field once, at `match`, and the session
+ * follows a race through it. THE OPEN WORLD (`isWorld`) has no match at all: the field is the
+ * room's roster, so the rivals are built the moment the server welcomes us and reconciled every
+ * time somebody arrives or quits (`onRoster`). Everything below the roster — the snapshots, the
+ * interpolation, the traffic, the clock — is the same code in both.
  */
 
 export type SessionPhase = 'connecting' | RoomPhase | 'refused' | 'closed';
@@ -77,9 +83,20 @@ export interface NetSession {
   readonly self: NetPlayer | null;
   /** True for the player who starts matches and owns the electric-car traffic. */
   readonly isHost: boolean;
+  /** True in the open world: no match, no phases, a roster that changes under you. */
+  readonly isWorld: boolean;
+  /**
+   * The slot this client drives in — a grid position in a race, a seat in the city. It is what
+   * picks the car's colour, so it is 0 until the server has said otherwise.
+   */
+  readonly slot: number;
   readonly match: NetMatch | null;
   readonly results: ResultsMessage['order'] | null;
-  /** Remote cars in the current match, in grid order. Empty until a match starts. */
+  /**
+   * The other cars: the rest of the grid in a race, everybody else in the city. One array for
+   * the life of the session's field — hold the reference, not a copy. Empty in a versus room
+   * until a match starts.
+   */
   readonly rivals: RivalCar[];
 
   setName(name: string): void;
@@ -109,6 +126,11 @@ export interface NetSession {
   countdownSeconds(): number;
 
   onLobby(handler: () => void): () => void;
+  /**
+   * The open world's field changed: somebody arrived, quit or took a different slot. Handed the
+   * same `rivals` array, whose CONTENTS have been rewritten — the array itself never changes.
+   */
+  onRoster(handler: (rivals: RivalCar[]) => void): () => void;
   onMatch(handler: (match: NetMatch) => void): () => void;
   onGo(handler: (seconds: number) => void): () => void;
   onResults(handler: (results: ResultsMessage['order']) => void): () => void;
@@ -153,6 +175,7 @@ function emitter<T>() {
 export function createSession(name: string, entry: RoomEntry): NetSession {
   const connection: Connection = createConnection(name, entry);
   const lobbyEvents = emitter<void>();
+  const rosterEvents = emitter<RivalCar[]>();
   const matchEvents = emitter<NetMatch>();
   const goEvents = emitter<number>();
   const resultEvents = emitter<ResultsMessage['order']>();
@@ -170,6 +193,8 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
   let results: ResultsMessage['order'] | null = null;
   let rivalSet: RivalSet | null = null;
   let goAt = -1;
+  /** Set once the server has said which kind of room this socket landed in. */
+  let world = false;
   /**
    * The tick length the publish throttles count in. Set by `update`, which the game calls once
    * per simulation tick just before it publishes, so the throttles advance on simulation time
@@ -195,6 +220,20 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
   /** Angles get one more digit: a hundredth of a radian is half a degree and would show. */
   const qa = (value: number): number => Math.round(value * 1000) / 1000;
 
+  /**
+   * In the city the roster IS the field: reconcile the rivals against it and tell the game when
+   * that actually changed something, so it can add or retire a car in the scene.
+   */
+  function syncWorldRivals(): void {
+    if (!rivalSet) rivalSet = createRivalSet();
+    const roster: Array<{ id: string; name: string; slot: number }> = [];
+    for (const p of players) {
+      if (p.id === selfId) continue;
+      roster.push({ id: p.id, name: p.name, slot: p.slot });
+    }
+    if (rivalSet.sync(roster)) rosterEvents.emit(rivalSet.all);
+  }
+
   unsubscribe.push(
     connection.on<LobbyMessage>(S2C.lobby, (message) => {
       roomPhase = message.phase;
@@ -206,6 +245,7 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
         rivalSet = null;
         goAt = -1;
       }
+      if (world) syncWorldRivals();
       lobbyEvents.emit();
     }),
   );
@@ -273,6 +313,10 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
     connection.on<WelcomeMessage>(S2C.welcome, (message) => {
       selfId = message.id;
       room = message.room ?? null;
+      world = room?.mode === 'world';
+      // The city's field exists from the moment we are in it, before anybody else has been
+      // announced: the game builds its scene around this array and keeps the reference.
+      if (world) syncWorldRivals();
       lobbyEvents.emit();
     }),
   );
@@ -309,6 +353,14 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
     },
     get isHost() {
       return selfId !== '' && selfId === hostId;
+    },
+    get isWorld() {
+      return world;
+    },
+    get slot() {
+      if (match) return match.slot;
+      const self = players.find((p) => p.id === selfId);
+      return self && self.slot >= 0 ? self.slot : 0;
     },
     get match() {
       return match;
@@ -397,6 +449,7 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
     },
 
     onLobby: lobbyEvents.add,
+    onRoster: rosterEvents.add,
     onMatch: matchEvents.add,
     onGo: goEvents.add,
     onResults: resultEvents.add,
@@ -421,6 +474,7 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
       for (const off of unsubscribe) off();
       unsubscribe.length = 0;
       lobbyEvents.clear();
+      rosterEvents.clear();
       matchEvents.clear();
       goEvents.clear();
       resultEvents.clear();

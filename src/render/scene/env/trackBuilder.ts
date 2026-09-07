@@ -283,8 +283,8 @@ function buildRails(b: EnvBuilders, rails: RailDef[], rng: () => number): void {
     const ym = (ya + yb) / 2;
     if (r.kind === 'wall') {
       // Alley: a tall concrete wall with a tired magenta tube along the top.
-      b.concrete.color(PAL.concrete, 1.05);
-      b.concrete.slopedBox(ax, az, bx, bz, ya, yb, 0.5, 2.7);
+      b.wall.color(PAL.concrete, 1.05);
+      b.wall.slopedBox(ax, az, bx, bz, ya, yb, 0.5, 2.7);
       b.neonFlicker.color(PAL.neonMagenta, 0.55);
       b.neonFlicker.tube(r.ax, ya + 2.8, r.az, r.bx, yb + 2.8, r.bz, 0.14);
       if (rng() < 0.2) {
@@ -370,6 +370,14 @@ function buildAlleyDressing(b: EnvBuilders, rb: RibbonDef, rng: () => number): v
     const c = offsetAtStation(path, s, 0);
     const side = rng() < 0.5 ? -1 : 1;
     const p = offsetAtStation(path, s, side * (c.halfWidth - 0.35));
+    // These tubes hug the alley wall. An alley runs past gaps, yards and setbacks as often as
+    // it runs between two walls, and a tube hung where there is no wall is a bar of light
+    // floating over the lane — so ask the city where its walls actually are.
+    const nx = side * -c.tz;
+    const nz = side * c.tx;
+    const wx = Math.abs(nx) > Math.abs(nz) ? Math.sign(nx) : 0;
+    const wz = wx === 0 ? Math.sign(nz) : 0;
+    if (!b.walls.faceAt(p.x, 2.2, p.z, wx, wz)) continue;
     const color = rng() < 0.6 ? PAL.neonMagenta : PAL.neonCyan;
     const t = rng() < 0.4 ? b.neonFlicker : b.neonPulse;
     t.color(color, 0.9);
@@ -385,6 +393,15 @@ function buildAlleyDressing(b: EnvBuilders, rb: RibbonDef, rng: () => number): v
     const p = offsetAtStation(path, end + inward * 6, -(c.halfWidth + 0.2));
     const uv = signCell(rng() < 0.5 ? 10 : 15);
     const rot = Math.atan2(c.tx, c.tz);
+    // The sign needs something to be on. A wall at the mouth is the best of it; failing that
+    // it goes up a post of its own, which is what a sign at the kerb would really be on.
+    const mx = Math.abs(c.tz) > Math.abs(c.tx) ? Math.sign(-c.tz) : 0;
+    const mz = mx === 0 ? Math.sign(c.tx) : 0;
+    const y0 = b.plan.padY(p.x, p.z);
+    if (!b.walls.faceAt(p.x, 4.6, p.z, mx, mz) && !b.walls.faceAt(p.x, 4.6, p.z, -mx, -mz)) {
+      b.props.color(PAL.metalDark, 0.8);
+      b.props.box(p.x, (y0 + 5.7) / 2, p.z, 0.22, 5.7 - y0, 0.22);
+    }
     b.signs.panel(p.x, 4.6, p.z, 2.2, 2.2, rot, uv.u0, uv.v0, uv.u1, uv.v1);
     b.signs.panel(p.x, 4.6, p.z, 2.2, 2.2, rot + Math.PI, uv.u0, uv.v0, uv.u1, uv.v1);
     halo(b, p.x, 4.6, p.z, 8, 5, rot, PAL.neonMagenta, 0.16);

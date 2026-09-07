@@ -45,8 +45,8 @@ describe('player car visual', () => {
       const budget = measure(car.root);
       expect(budget.triangles).toBeLessThan(8000);
       // body, glass, heads, tails, reverse, exhaust glow, ground pool, rocker glow, wheels,
-      // plus the cabin's trim, light strips and spectrum bars.
-      expect(budget.drawCalls).toBeLessThanOrEqual(12);
+      // plus the cabin's trim, light strips, spectrum bars and turning steering wheel.
+      expect(budget.drawCalls).toBeLessThanOrEqual(14);
     } finally {
       car.dispose();
     }
@@ -129,6 +129,29 @@ describe('player car cabin display', () => {
       car.setMusic(new Float32Array(BARS));
       run(car, 1);
       for (const h of barHeights(car)) expect(h).toBeLessThan(0.012);
+    } finally {
+      car.dispose();
+    }
+  });
+
+  it('turns the cabin\'s steering wheel with the road wheels, and only about its own axis', () => {
+    const car = createCarVisual();
+    try {
+      const rim = car.root.getObjectByName('player-car-steering') as THREE.Object3D;
+      const spin = rim.parent as THREE.Object3D;
+      car.setSteering(0);
+      expect(spin.rotation.z).toBeCloseTo(0, 10);
+
+      // Steering right turns the rim clockwise, which is a negative rotation about its axis,
+      // and full lock is a quarter turn short of one and a half: a 900-degree rack.
+      car.setSteering(VEHICLE.maxSteerAngle);
+      const right = spin.rotation.z;
+      expect(right).toBeCloseTo(-Math.PI * 2.5, 6);
+      car.setSteering(-VEHICLE.maxSteerAngle);
+      expect(spin.rotation.z).toBeCloseTo(-right, 6);
+      // The rake of the column is the parent's business; steering must not touch it.
+      expect(spin.rotation.x).toBe(0);
+      expect(spin.rotation.y).toBe(0);
     } finally {
       car.dispose();
     }
@@ -336,6 +359,27 @@ describe('electric car visual', () => {
       expect(chassis.position.y).toBe(0);
     } finally {
       target.dispose();
+      disposeElectricCarResources();
+    }
+  });
+  it('paints the traffic in three colours, and a car keeps its own through a hit and back', () => {
+    const cars = [0, 1, 2, 3].map((i) => createElectricCarVisual(i));
+    try {
+      const bodyColor = (v: (typeof cars)[number]) =>
+        ((v.root.children[0] as THREE.Group).children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>).material.color;
+      const hexes = cars.map((v) => bodyColor(v).getHex());
+      expect(new Set(hexes.slice(0, 3)).size).toBe(3);
+      // The paint follows the index, so the fourth car wears the first car's colour again.
+      expect(hexes[3]).toBe(hexes[0]);
+
+      const own = hexes[1];
+      cars[1].setStatus('destroyed', 2);
+      cars[1].update(1 / 60, 2.5);
+      expect(bodyColor(cars[1]).getHex()).not.toBe(own);
+      cars[1].setStatus('active', 0);
+      expect(bodyColor(cars[1]).getHex()).toBe(own);
+    } finally {
+      for (const v of cars) v.dispose();
       disposeElectricCarResources();
     }
   });

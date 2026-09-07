@@ -6,17 +6,22 @@ import {
   EMPTY_ROOM_TTL_MS,
   MAX_PLAYERS,
   MAX_ROOMS,
+  MAX_WORLD_PLAYERS,
   NAME_MAX,
   PROTOCOL_VERSION,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LEN,
   ROOM_LABEL_MAX,
   S2C,
+  WORLD_ROOM_CODE,
+  WORLD_ROOM_LABEL,
   SNAPSHOT_HZ,
   TRAFFIC_HZ,
   sanitizeName,
   sanitizeRoomCode,
   sanitizeRoomLabel,
+  worldListing,
+  type RoomListing,
 } from '../src/net/protocol';
 
 /**
@@ -68,6 +73,7 @@ describe('wire protocol', () => {
   it('agrees on the shared constants', () => {
     expect(constant('PROTOCOL_VERSION')).toBe(PROTOCOL_VERSION);
     expect(constant('MAX_PLAYERS')).toBe(MAX_PLAYERS);
+    expect(constant('MAX_WORLD_PLAYERS')).toBe(MAX_WORLD_PLAYERS);
     expect(constant('SNAPSHOT_HZ')).toBe(SNAPSHOT_HZ);
     expect(constant('TRAFFIC_HZ')).toBe(TRAFFIC_HZ);
     expect(constant('NAME_MAX')).toBe(NAME_MAX);
@@ -80,6 +86,18 @@ describe('wire protocol', () => {
     expect(constant('EMPTY_ROOM_TTL_MS')).toBe(EMPTY_ROOM_TTL_MS);
     // A code typed against one alphabet and read against another would refuse legal rooms.
     expect(text('ROOM_CODE_ALPHABET')).toBe(ROOM_CODE_ALPHABET);
+  });
+
+  it('agrees on the code the open world lives at', () => {
+    // Both sides reserve this one: the client asks for it by name and the server refuses to
+    // mint it for anything else. Two different values and OPEN WORLD lands nowhere.
+    expect(text('WORLD_ROOM_CODE')).toBe(WORLD_ROOM_CODE);
+    expect(text('WORLD_ROOM_LABEL')).toBe(WORLD_ROOM_LABEL);
+  });
+
+  it('reserves a world code that a room code field would actually accept', () => {
+    expect(sanitizeRoomCode(WORLD_ROOM_CODE)).toBe(WORLD_ROOM_CODE);
+    expect(sanitizeRoomLabel(WORLD_ROOM_LABEL)).toBe(WORLD_ROOM_LABEL);
   });
 
   it('uses each message name exactly once per direction', () => {
@@ -132,5 +150,27 @@ describe('room labels', () => {
   it('falls back when the label is empty', () => {
     expect(sanitizeRoomLabel('   ')).toBe('BANDIDO ROOM');
     expect(sanitizeRoomLabel('', 'GHOST ROOM')).toBe('GHOST ROOM');
+  });
+});
+
+describe('reading the room list', () => {
+  const row = (code: string, mode: 'versus' | 'world', players: number): RoomListing => ({
+    code,
+    label: code,
+    listed: true,
+    mode,
+    players,
+    max: 4,
+    phase: mode === 'world' ? 'roaming' : 'lobby',
+  });
+
+  it('picks the open world out of a list of race rooms', () => {
+    const rooms = [row('AAAA', 'versus', 2), row(WORLD_ROOM_CODE, 'world', 3), row('BBBB', 'versus', 1)];
+    expect(worldListing(rooms)?.players).toBe(3);
+  });
+
+  it('says so plainly when a server has no world in it', () => {
+    expect(worldListing([row('AAAA', 'versus', 2)])).toBeNull();
+    expect(worldListing([])).toBeNull();
   });
 });

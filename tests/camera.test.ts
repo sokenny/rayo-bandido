@@ -45,11 +45,17 @@ function expectedMount(pose: CameraPose, mount: (typeof CAMERA.mounts)[keyof typ
 }
 
 describe('camera views', () => {
-  it('cycles chase -> front -> side and wraps', () => {
+  it('cycles chase -> front -> side and wraps, leaving the cabin view out of it', () => {
     const rig = createChaseCamera(16 / 9);
     expect(rig.view).toBe('chase');
     expect(rig.cycleView()).toBe('front');
     expect(rig.cycleView()).toBe('side');
+    expect(rig.cycleView()).toBe('chase');
+
+    // The cabin view is still reachable, it is just not on P's rotation — and cycling out of
+    // it lands back at the head of the cycle rather than anywhere surprising.
+    rig.setView('cabin');
+    expect(rig.view).toBe('cabin');
     expect(rig.cycleView()).toBe('chase');
   });
 
@@ -76,7 +82,7 @@ describe('camera views', () => {
     (globalThis as { window?: Window }).window = previous;
   });
 
-  for (const view of ['front', 'side'] as const) {
+  for (const view of ['cabin', 'front', 'side'] as const) {
     it(`places the ${view} mount at its car-local offset, whatever the heading`, () => {
       const rig = createChaseCamera(16 / 9);
       rig.setView(view);
@@ -129,6 +135,29 @@ describe('camera views', () => {
     expect(readRoll('side')).toBeCloseTo(Math.sin(roll * CAMERA.mounts.side.rollFollow), 3);
     expect(readRoll('front')).toBeCloseTo(Math.sin(roll * CAMERA.mounts.front.rollFollow), 3);
     expect(Math.sign(readRoll('side'))).toBe(-Math.sign(readRoll('front')));
+  });
+
+  it('swings the cabin mount with the body it is bolted inside, and leaves the others put', () => {
+    const roll = 0.06;
+    const pitch = -0.04;
+    const place = (view: CameraView, extra: Partial<CameraPose>): THREE.Vector3 => {
+      const rig = createChaseCamera(16 / 9);
+      rig.setView(view);
+      rig.update(poseAt(0, 0, 0, extra), DT);
+      return rig.camera.position.clone();
+    };
+
+    // A lens on the bodywork keeps its place on the road whatever the shell does...
+    expect(place('front', {}).distanceTo(place('front', { roll, pitch }))).toBeLessThan(1e-9);
+
+    // ...while the one inside the cabin travels with it. The body leans onto its left, so an
+    // eye up at 1.17 m swings left with it, and the dive drops it.
+    const still = place('cabin', {});
+    const leaning = place('cabin', { roll, pitch });
+    expect(leaning.distanceTo(still)).toBeGreaterThan(0.03);
+    expect(leaning.x).toBeLessThan(still.x);
+    // The swing is a rotation about the car's origin: it keeps the eye's distance from it.
+    expect(leaning.length()).toBeCloseTo(still.length(), 6);
   });
 
   it('cuts back to the chase position instead of damping through the bodywork', () => {

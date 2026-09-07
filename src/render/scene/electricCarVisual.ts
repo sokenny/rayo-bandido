@@ -30,7 +30,16 @@ const TRIM = 0xb9c2ce;
 const TYRE = 0x1a1c22;
 const POD = 0xdfe6ef;
 
-const CLEAN_BODY = new THREE.Color(0xe8f0ff);
+/**
+ * The three paints the city's electric cars come in. Deliberately muted — the neon belongs
+ * to the players, so a target reads as part of the traffic until it is locked. Which one a
+ * car wears follows its index, so the mix is the same every run.
+ */
+const BODY_COLORS = [
+  new THREE.Color(0xe8f0ff), // ice white
+  new THREE.Color(0x6f8296), // slate blue
+  new THREE.Color(0xc9a172), // warm sand
+];
 const CHARRED_BODY = new THREE.Color(0x1d1b1a);
 const CLEAN_BAR = new THREE.Color(0x00e5ff);
 const DEAD_BAR = new THREE.Color(0x0c0f12);
@@ -158,7 +167,7 @@ function getShared(): SharedResources {
       beacon: new THREE.SphereGeometry(0.075, 8, 4),
       ring: buildRing(),
       bodyMat: new THREE.MeshStandardMaterial({
-        color: CLEAN_BODY.getHex(),
+        color: BODY_COLORS[0].getHex(),
         vertexColors: true,
         roughness: 0.35,
         metalness: 0.2,
@@ -212,7 +221,9 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   const chassis = new THREE.Group();
   root.add(chassis);
 
+  const cleanBody = BODY_COLORS[index % BODY_COLORS.length];
   const bodyMat = s.bodyMat.clone();
+  bodyMat.color.copy(cleanBody);
   const barMat = s.barMat.clone();
   const beaconMat = s.beaconMat.clone();
   const ringMat = s.ringMat.clone();
@@ -246,7 +257,7 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       const nowAlive = status === 'active';
       if (nowAlive) {
         if (!alive) {
-          bodyMat.color.copy(CLEAN_BODY);
+          bodyMat.color.copy(cleanBody);
           bodyMat.roughness = 0.35;
           bodyMat.metalness = 0.2;
           barMat.emissive.copy(CLEAN_BAR);
@@ -261,7 +272,7 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       const raw = timeSinceHit <= 0 ? 1 : Math.min(1, timeSinceHit / SAG_TIME);
       // Smoothstep for a heavy settle rather than a linear slide.
       const t = raw * raw * (3 - 2 * raw);
-      bodyMat.color.lerpColors(CLEAN_BODY, CHARRED_BODY, t);
+      bodyMat.color.lerpColors(cleanBody, CHARRED_BODY, t);
       bodyMat.roughness = 0.35 + t * 0.6;
       bodyMat.metalness = 0.2 - t * 0.15;
       barMat.emissive.lerpColors(CLEAN_BAR, DEAD_BAR, t);

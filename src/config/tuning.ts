@@ -623,10 +623,40 @@ export const CAMERA = {
    * nauseating). Their sign flips with the direction the lens faces: a rear-facing mount sees
    * the same lean mirrored.
    *
+   * `ridesBody` says the mount is bolted to the sprung shell rather than to the road: its
+   * offsets are swung by the body's own roll and dive before they are placed, not just its
+   * lens. Only the cabin view needs it, and it needs it badly — a lens sitting 40 cm from a
+   * dashboard that leans without it would watch that dashboard swim around the frame.
+   *
    * Body reference (`carVisual.ts`): nose at ahead 2.16, tail at ahead -2.24, flanks at
    * side ±1.0, roof at height 1.35.
    */
   mounts: {
+    /**
+     * Cabin view: the driver's own eyeline, just behind and above the wheel on the left-hand
+     * seat, aimed level down the road. Not on P's rotation (see `VIEW_ORDER` in
+     * `render/camera/chaseCamera.ts`); it is reached by name, through `setView`. The dashboard, the wheel and the sound system's
+     * spectrum display (`render/scene/vehicles/interior.ts`) sit in the bottom of the frame,
+     * which is the whole point of the view — so it is the one mount that rides the body
+     * outright (`ridesBody`, both follows at 1) and keeps the cabin rock steady while the
+     * world leans around it.
+     *
+     * The eye sits 11 cm below the headlining and about 60 cm back from the wheel, which is
+     * further back than a driver really sits: the cabin is modelled at 42 cm of headroom, and
+     * from any closer the wheel swallows the frame.
+     */
+    cabin: {
+      ahead: -0.27,
+      side: -0.33,
+      height: 1.17,
+      lookAhead: 9,
+      lookSide: -0.33,
+      lookHeight: 1.02,
+      fov: 66,
+      rollFollow: 1,
+      pitchFollow: 1,
+      ridesBody: true,
+    },
     /**
      * Front view: the lens hangs just over 2 m off the nose looking back down the car, so the
      * whole front end fills the lower frame and the road behind you fills the rest. Aimed at
@@ -649,6 +679,7 @@ export const CAMERA = {
       /** Facing backwards, so the body's lean arrives mirrored. */
       rollFollow: -0.45,
       pitchFollow: -0.45,
+      ridesBody: false,
     },
     /**
      * Side-door view: a fender-mounted lens just outboard of the driver's-side skirt, aimed
@@ -671,6 +702,7 @@ export const CAMERA = {
       fov: 64,
       rollFollow: 0.45,
       pitchFollow: 0.45,
+      ridesBody: false,
     },
   },
   /**
@@ -704,6 +736,196 @@ export const SPEED_BLUR = {
    * The car, the road ahead and the target being aimed at all live in here — readability first.
    */
   centerClear: 0.26,
+};
+
+/**
+ * THE STORM SKY.
+ *
+ * Everything the atmosphere does, in one object. The sky is not a texture and not a skybox:
+ * it is one inverted dome with a procedural shader (`render/scene/env/skyDome.ts`), and the
+ * storm above the city is drawn by that shader every frame from noise, so nothing tiles and
+ * nothing repeats. This block is the whole art direction of it; `__rb.atmosphere` writes to
+ * these same fields live, so anything here can be tuned with the game running.
+ *
+ * Colours are sRGB hex, exactly as the palette writes them.
+ */
+export const ATMOSPHERE = {
+  /**
+   * `auto` picks `high` on a pointer device and `medium` on a touch one, which is the same
+   * split the rest of the renderer makes. `low`, `medium` and `high` differ only in noise
+   * octaves, whether the second cloud layer is drawn, dome tessellation and rain count —
+   * never in colour, so the three look like the same sky at different resolutions.
+   */
+  quality: 'auto' as 'auto' | 'low' | 'medium' | 'high',
+
+  /* ------------------------------------------------------------------ the gradient */
+
+  /** Overhead. Near-black navy: the sky has to be the darkest thing in the frame. */
+  zenith: 0x02050b,
+  /** The body of the sky. Deep, desaturated teal. */
+  middle: 0x0a1d25,
+  /** Where the city's light hits the cloud base: a brighter cyan-grey industrial haze. */
+  horizon: 0x24414b,
+  /** How high the middle colour takes over from the horizon (0..1 of the upper hemisphere). */
+  middleBand: 0.3,
+  /**
+   * How much of the sky above that the teal takes to become the navy. The zenith colour is
+   * the last to arrive on purpose: reach it too early and the whole ceiling reads as black
+   * and the clouds have nothing to be seen against.
+   */
+  zenithSpan: 0.55,
+  /** Extra lift in the last few degrees above the skyline. 0 turns the glow off. */
+  horizonGlow: 0.34,
+  /** How tightly that lift hugs the horizon. Smaller is tighter. */
+  horizonFalloff: 0.16,
+
+  /* ------------------------------------------------------------------ the clouds */
+
+  /** Thick cloud core. Storm cloud is not grey: it is a cold, dirty slate blue. */
+  cloudDark: 0x070d14,
+  /** Cloud edge, where the sky behind it shows through. The "silver" of a storm lining. */
+  cloudLight: 0x39505c,
+  /**
+   * How much darker a bank reads when it is seen from underneath (0..1). Straight up you are
+   * looking at the base of the cloud and it is nearly black; towards the skyline you see its
+   * flank, turned to the city and catching its light. Without this the ceiling overhead
+   * fills with pale grey and stops being the dark navy the sky is meant to be.
+   */
+  cloudUnderside: 0.55,
+  /**
+   * How much of the sky is cloud (0 = clear, 1 = overcast). This is the single value that
+   * changes the weather most; 0.62 is the layered, broken cover of the reference.
+   */
+  coverage: 0.62,
+  /** Softness of the cloud edge. Low is hard-edged and graphic, high is vapourous. */
+  edgeSoftness: 0.34,
+  /** Contrast inside the cloud mass. Above 1 pushes the thin stuff away and thickens cores. */
+  contrast: 1.5,
+  /**
+   * Cloud scale, in noise cells across the plane each layer is projected onto. Low numbers
+   * are the large, layered systems the reference has; raise it and the sky turns to popcorn.
+   * Too low and the whole upper sky falls inside a single cell and goes flat, which is what
+   * the projection does at the zenith: `d.xz` goes to zero there, so the scale has to be
+   * generous enough that straight up still has structure in it.
+   */
+  scaleFar: 3.1,
+  scaleNear: 1.8,
+  /**
+   * Drift, in noise units per second. Deliberately tiny: a storm ceiling barely moves, and
+   * the near layer moving faster than the far one is the whole parallax cue. Never raise
+   * these far — fast cloud is the fastest way to make a sky look like a screensaver.
+   */
+  driftFar: 0.0062,
+  driftNear: 0.0135,
+  /** How much the near layer's shape is bent by the far layer's. Kills any residual grid. */
+  warp: 0.55,
+  /** Master opacity of both layers. Below 1 leaves the gradient reading through the storm. */
+  cloudOpacity: 0.94,
+
+  /* ------------------------------------------------- light pollution */
+
+  /** The city's glow on the underside of the cloud base. */
+  pollutionColor: 0xd8348c,
+  /** How hard it burns. This is the magenta in the reference; a little goes a long way. */
+  pollution: 0.42,
+  /** How far up the sky the glow reaches (0..1 of the upper hemisphere). */
+  pollutionHeight: 0.42,
+  /**
+   * How far the glow is pushed into the thick parts of a layer. 1 spreads it evenly and
+   * reads as a painted pink band along the skyline; higher values light the underside of a
+   * few banks and leave the gaps between them dark, which is what the reference does.
+   */
+  pollutionFocus: 3.2,
+
+  /**
+   * Where cloud detail starts and finishes dissolving into haze, measured in noise cells per
+   * radian of view — so it follows the projection rather than an angle, and a coarse layer
+   * survives closer to the skyline than a fine one. Raise both to keep structure lower down;
+   * lower them for a thicker, hazier horizon. They are also the anti-aliasing: below
+   * `hazeEnd` the noise would run far past a pixel per cell and crawl.
+   */
+  hazeStart: 22,
+  hazeEnd: 65,
+
+  /* ------------------------------------------------------------------ aerial depth */
+
+  /**
+   * The haze distance dissolves into. Mixed `fogTint` of the way from the world's own fog
+   * colour towards this, so each palette keeps its identity and gains the storm's blue-grey.
+   */
+  fogColor: 0x17313d,
+  fogTint: 0.7,
+  /**
+   * Multipliers on whatever haze the world asked for (`plan.fog`). Above 1 is denser air:
+   * distant buildings fade sooner. 1 leaves the world exactly as it was tuned.
+   */
+  fogDensityScale: 1.15,
+  fogFarScale: 0.92,
+
+  /* ------------------------------------------------------------------ lightning */
+
+  storm: {
+    /**
+     * Strike rate multiplier. 1 is roughly one strike every 9-26 s; 0 turns the weather
+     * lightning off entirely (the lightning WEAPON is `LIGHTNING`, and is unrelated).
+     */
+    frequency: 1,
+    /** Seconds between strikes, before `frequency`. The gap is skewed towards the short end. */
+    minGap: 9,
+    maxGap: 26,
+    /** Sub-flashes per strike. Never one: a single clean flash is what reads as fake. */
+    minFlashes: 2,
+    maxFlashes: 4,
+    /** Seconds between sub-flashes inside one strike. */
+    flashGapMin: 0.04,
+    flashGapMax: 0.26,
+    /** How long one sub-flash lasts, seconds. */
+    flashDurationMin: 0.1,
+    flashDurationMax: 0.34,
+    /** Master brightness of a strike (0..1). The rest of the block scales off this. */
+    intensity: 1,
+    /** Colour of the flash: cold blue-white, the same family as the weapon's arc. */
+    color: 0xcfe6ff,
+    /**
+     * How tightly the flash is focused on the part of the sky it came from. Higher is a
+     * more local flash; low values wash the whole ceiling.
+     */
+    focus: 2.2,
+    /** How far the flash lifts the fog. This is what turns distant blocks into silhouettes. */
+    fogLift: 0.55,
+    /** How far it lifts the two scene lights, as a fraction of their own intensity. */
+    lightLift: 1.1,
+    /**
+     * How far it lifts the environment map, which is what the wet road and the car paint
+     * reflect — the "everything wet flares for a moment" cue.
+     */
+    envLift: 1.6,
+    /** How much brighter the rain gets in a flash. */
+    rainLift: 1.4,
+  },
+
+  /* ------------------------------------------------------------------ rain */
+
+  rain: {
+    /** 0 removes the rain entirely: no geometry, no material, no draw call. */
+    intensity: 0.55,
+    /** Drops in the box at full intensity, before the quality preset scales it. */
+    count: 2600,
+    /** The box that follows the camera, in metres. */
+    boxWidth: 70,
+    boxHeight: 42,
+    /** Fall speed (m/s) and streak length (m). */
+    speed: 26,
+    length: 1.5,
+    /** Wind drift (m/s) on x and z. */
+    windX: 2.4,
+    windZ: -1.1,
+    /** How far the camera's own motion tilts a streak back. 0 is dead vertical rain. */
+    motionTilt: 0.16,
+    color: 0xa8ccdc,
+    /** Peak opacity of the head of a streak. */
+    opacity: 0.3,
+  },
 };
 
 export const RENDER = {

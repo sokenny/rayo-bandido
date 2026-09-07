@@ -71,6 +71,7 @@ const CONTROLS = [
   ['X/Z', 'shift'],
   ['ESC', 'menu'],
   ['F3', 'debug'],
+  ['F4', 'coords'],
 ];
 
 /** `83.456` -> `1:23.45`. Allocates a short string; only called when the shown value changes. */
