@@ -207,6 +207,27 @@ export function createThemeAudio(): ThemeAudio {
     },
     update() {
       if (!started) return;
+
+      // The analyser taps `source` ahead of the gain node, so it keeps reporting the track's
+      // spectrum while muted. Nobody can hear it, so nothing driven by these levels should be
+      // moving: settle everything to rest instead of reading the analyser.
+      if (muted) {
+        const decay = 0.12;
+        bands.bass += -bands.bass * decay;
+        bands.mid += -bands.mid * decay;
+        bands.high += -bands.high * decay;
+        bands.energy += -bands.energy * decay;
+        for (const band of bandList) {
+          band.value += -band.value * decay;
+          band.baseline += -band.baseline * decay;
+        }
+        for (let i = 0; i < spectrum.length; i++) {
+          spectrum[i] += -spectrum[i] * decay;
+          barBaseline[i] += -barBaseline[i] * decay;
+        }
+        return;
+      }
+
       analyser.getByteFrequencyData(bins);
 
       for (const band of bandList) {

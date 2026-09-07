@@ -121,6 +121,31 @@ export const TEXTURES = {
     contrast: 1.5,
   },
 
+  /**
+   * The city's electric cars, as a detail map over the whole body shell
+   * (`scene/electricCarVisual.ts`). A worn grey panel photograph: the geometry and the three
+   * body colours say what the car is, this only breaks up the flat plastic so a target does
+   * not read as untextured next to the textured street it is parked on.
+   *
+   * It multiplies a vertex colour and a body colour, so `normalize` is what keeps an ice-white
+   * car white — without it the photograph's own grey would darken every paint by a third. The
+   * UVs run lengthwise over the body (`applyLengthwiseUVs`) and cover it once, so nothing
+   * tiles and the file never has to be seamless — which is also why the art is allowed to be
+   * a small non-power-of-two crop: the slot clamps, and WebGL2 mips an NPOT clamped texture
+   * without complaint.
+   */
+  'vehicles/electric': {
+    files: ['vehicles/electric.webp', 'vehicles/electric.png', 'vehicles/electric.jpg'],
+    anisotropy: 8,
+    tint: { color: 0x38434f, amount: 0.12 },
+    // Aimed high on purpose. `normalize` works on sRGB bytes and the sampler returns linear
+    // light, so a byte mean of 0.94 reaches the shader averaging about 0.87 — the ~13% the
+    // paint loses is the grime the map is there to add. Anything lower and an ice-white car
+    // comes back grey. The contrast is what puts the grain back after the lift flattens it.
+    normalize: 0.94,
+    contrast: 1.5,
+  },
+
   'nature/foliage': {
     files: ['nature/foliage.webp', 'nature/foliage.png', 'nature/foliage.jpg'],
     tiling: true,

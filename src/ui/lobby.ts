@@ -44,7 +44,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
   wrap.className = 'rb-menu rb-lobby';
   wrap.innerHTML =
     frameDecor('LOBBY') +
-    menuHeader('MULTIPLAYER · BANDIDO LOOP', 'room') +
+    menuHeader('MULTIPLAYER · BANDIDO GRID', 'room') +
     `<div class="rb-status rb-lobby__status" data-role="status">CONNECTING</div>` +
     `<div class="rb-panel rb-lobby__panel" data-role="panel">` +
     `<div class="rb-panel__head"><span>GRID_ROSTER</span><span class="rb-panel__id">${MAX_PLAYERS} SLOTS</span></div>` +
@@ -89,7 +89,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
   function renderRoom(): void {
     const room = session.room;
     if (!room) {
-      roomEl.textContent = 'MULTIPLAYER · BANDIDO LOOP';
+      roomEl.textContent = 'MULTIPLAYER · BANDIDO GRID';
       linkEl.textContent = '';
       return;
     }

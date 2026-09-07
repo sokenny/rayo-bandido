@@ -1391,3 +1391,71 @@ empty), plus the reconcile and arrival-fan tests. Verified in the browser agains
 `npm run host`: three cars in the city at once, each the right colour on every screen, name plates
 and minimap dots correct, a car appearing and disappearing live as a player joins and quits, the
 menu's live counter tracking it, and the versus room browser correctly not listing the city.
+
+## The versus circuit: a race inside the open world (2026-09-07)
+
+Juan asked for a circuit for VERSUS that takes place inside the city rather than beside it,
+with the city itself untouched. The first attempt was wrong and he said so: it followed the
+street grid, so every corner was a junction and every junction branched into two dead-end
+run-off pockets — confusing, and nothing like a circuit. He also asked for the highway, for the
+lap to go through the buildings, and for the barrier to be a subtle hologram rather than a
+fence of vertical sticks. Rebuilt from that.
+
+**Bandido Grid.** 1.54 km, sixteen corners, two laps. A lap: up st-west and east along
+blvd-center; north up av-main between the skyscrapers; east along blvd-north, still in
+downtown; south down av-east and east on st-n2; up the east on-ramp onto the VIADUCT, down its
+east leg, round the 60 m south-east sweeper and west along the deck OVER THE BAY; down the
+south off-ramp onto the waterfront and into turn one. A third of the lap is fifteen metres up,
+and every lap climbs and drops 30 m.
+
+**The ribbon, not the street plan.** The rebuild's one idea: the lap is a filleted racing line
+and the barrier is simply its two edges, span by span — two continuous curves round the whole
+lap. No branch, no stub, nothing standing across the road; a side street is closed because the
+barrier sweeps past its mouth, and there is nothing to drive into by mistake. Once the barrier
+is allowed to curve (which is what Juan's note unlocked), corners become radiused arcs taken
+across the junctions instead of the L-shaped street corners the first version was stuck with.
+
+The cost of inventing a racing line rather than borrowing the streets is that it can leave the
+asphalt, so that is what the tooling checks: `scripts/circuit-preview.mjs` walks the ribbon edge
+to edge, AT ITS OWN HEIGHT, against every road in `citySpec.ts` — streets, ramps and the viaduct
+— and prints, per corner, the largest radius that still fits. Tuning the lap was ten minutes of
+reading that table. `tests/circuitWorld.test.ts` runs the same check.
+
+**Heights.** The lap borrows the ramp and viaduct nodes verbatim (listed in `CIRCUIT_BORROWED`
+and pinned against `citySpec.ts` by a test) and anchors y at 0 on the street and 15 on the deck.
+The barrier does NOT take its height from the ribbon, though: each span asks the city's own
+surface field what the road is at that point, so it sits on the ramp however the two paths'
+grades happen to differ, and its collider is bracketed to that level — a barrier on the viaduct
+is not an invisible wall in the street fifteen metres underneath it.
+
+**The barrier.** Low and mostly light: a knee-high kerb unit, a chevron on its face pointing the
+way the lap goes, a hairline along the top and a thin additive curtain above it, about a metre
+tall in total. The first version was a solid lit panel and deleted the city; the second was an
+upright fence and Juan called it ugly, correctly — the reference he sent is a row of LED
+delineators, and that is what it is now. Amber on the outside of a corner, cyan everywhere else.
+
+**The city around it.** Street traffic and buses come out (fixed routes, no steering — they
+would drive through the barrier). The viaduct keeps its traffic, thinned to the file that runs
+the way the race does, because the lap shares that deck with it for a third of its length;
+which way a patrol goes is read off twice the signed area of its own loop rather than off the
+order the city built them in. Ten more cars go on the lap itself.
+
+**Timing.** The estimator (the same speed profile `track-preview.mjs` uses, so the circuits
+compare directly) says 63 s a lap, 126 s for the race.
+
+**Wiring.** New `GameMode` `'circuit'`; `?mode=circuit` drives it alone, and `VERSUS_MODE` in
+`src/main.ts` is the one constant pointing the versus lobby at it. RACE in the menu is still the
+Bandido Loop, untouched. The server's `RB_LAPS` default is now 2 to match.
+
+**Tested.** 524 unit tests green (17 new), typecheck and production build green. The new file
+pins the copies of `citySpec.ts` this file has to keep, the ribbon-on-road check, the barrier
+being unbroken and never in a building, its colliders being bracketed to their own level, the
+gates, the grid, the traffic direction on the deck, and the triangle budget (the barrier adds
+~40k in the same 19 draw calls). The last test drives the whole race on the autopilot through
+the real physics — up the ramp, over the bay, back down — and takes the flag. In the browser at
+`?mode=circuit`: 120 fps, 1.3-2.6 ms GPU, no shader compiled mid-play, 61-74 draw calls. And
+`npm run qa:mp` raced two real browsers on it end to end, green: traffic agreeing to 0.10 m
+(p95), nothing off the circuit, both players the right colour on both screens. That run earlier
+found a bug in the harness rather than the game: `qa-mp.mjs` tested "inside a building" in two
+dimensions, which calls every car on the viaduct a car in a wall, so it now respects `maxY` the
+way `src/sim/collision.ts` does.

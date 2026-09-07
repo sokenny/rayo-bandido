@@ -13,6 +13,10 @@ import { frameDecor, menuHeader } from './chrome';
  * everybody shares and VERSUS is a race room you make. So the screen polls `GET /rooms` while it
  * is up and shows how many cars are in the city — the answer to "is anyone playing?" belongs
  * here, before the choice, not after it.
+ *
+ * RACE and VERSUS are two different circuits: RACE is the Bandido Loop out of `raceSpec.ts`,
+ * VERSUS is the Bandido Grid, a lap of the open-world city closed off with neon barriers
+ * (`circuitSpec.ts`). `?mode=circuit` drives that one alone, which is how you practise it.
  */
 export interface MainMenu {
   dispose(): void;
@@ -64,12 +68,12 @@ const ENTRIES: MenuEntry[] = [
     mode: 'multiplayer',
     kicker: 'ONLINE · RACE',
     name: 'VERSUS',
-    desc: `Same circuit, up to ${MAX_PLAYERS} cars. Share the link, race your friends.`,
+    desc: `Bandido Grid: a street circuit cut through the city itself. Downtown, the waterfront, and the viaduct out over the bay. ${MAX_PLAYERS} cars, two laps, nowhere to run.`,
     spec: [
       ['GRID', `UP TO ${String(MAX_PLAYERS).padStart(2, '0')} CARS`],
-      ['CIRCUIT', 'BANDIDO LOOP'],
+      ['CIRCUIT', 'BANDIDO GRID · 1.5 KM'],
+      ['LAPS', '02'],
       ['ENTRY', 'ROOM CODE OR LINK'],
-      ['RULES', 'HOST DROPS THE FLAG'],
     ],
   },
 ];

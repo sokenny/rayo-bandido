@@ -23,20 +23,56 @@ export interface LoftSection {
   topHalfWidth: number;
 }
 
-function sectionCorners(s: LoftSection, out: Float32Array): void {
+/**
+ * The section's ring of points, counter-clockwise looking toward +Z, into `out`.
+ *
+ * With no chamfer that is the four corners — bottom-left, bottom-right, top-right, top-left —
+ * and the hull has one hard edge running the length of each of them. A chamfer replaces every
+ * corner with the two points a cut of that size lands on, so the ring is an octagon and the
+ * shoulder and rocker lines become two soft creases instead of one sharp one. The cut is
+ * clamped to just under half of the shortest edge it touches, so a section can never fold
+ * through itself however small it is.
+ */
+function sectionRing(s: LoftSection, chamfer: number, out: Float32Array): number {
   // 0 bottom-left, 1 bottom-right, 2 top-right, 3 top-left (looking toward +Z).
-  out[0] = -s.bottomHalfWidth;
-  out[1] = s.bottomY;
-  out[2] = s.z;
-  out[3] = s.bottomHalfWidth;
-  out[4] = s.bottomY;
-  out[5] = s.z;
-  out[6] = s.topHalfWidth;
-  out[7] = s.topY;
-  out[8] = s.z;
-  out[9] = -s.topHalfWidth;
-  out[10] = s.topY;
-  out[11] = s.z;
+  const cx = [-s.bottomHalfWidth, s.bottomHalfWidth, s.topHalfWidth, -s.topHalfWidth];
+  const cy = [s.bottomY, s.bottomY, s.topY, s.topY];
+  if (chamfer <= 0) {
+    for (let i = 0; i < 4; i++) {
+      out[i * 3] = cx[i];
+      out[i * 3 + 1] = cy[i];
+      out[i * 3 + 2] = s.z;
+    }
+    return 4;
+  }
+
+  // Half the shortest edge is the most any corner can eat without meeting the cut next to it.
+  let shortest = Infinity;
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    shortest = Math.min(shortest, Math.hypot(cx[j] - cx[i], cy[j] - cy[i]));
+  }
+  const cut = Math.min(chamfer, shortest * 0.45);
+
+  let p = 0;
+  for (let i = 0; i < 4; i++) {
+    const prev = (i + 3) % 4;
+    const next = (i + 1) % 4;
+    // Two points per corner: the one the cut reaches coming in along the previous edge, then
+    // the one it reaches leaving along the next. Emitting them in that order keeps the ring
+    // counter-clockwise, so face 1 is the floor, 3 the right flank, 5 the roof, 7 the left.
+    for (const other of [prev, next]) {
+      const dx = cx[other] - cx[i];
+      const dy = cy[other] - cy[i];
+      const len = Math.hypot(dx, dy);
+      const t = len > 1e-6 ? cut / len : 0;
+      out[p] = cx[i] + dx * t;
+      out[p + 1] = cy[i] + dy * t;
+      out[p + 2] = s.z;
+      p += 3;
+    }
+  }
+  return 8;
 }
 
 /** How a lofted hull is closed up. */
@@ -51,25 +87,36 @@ export interface LoftOptions {
    * is single-sided, so from inside, the rest of the shell is not there at all.
    */
   openTop?: readonly number[];
+  /**
+   * Cuts every longitudinal corner back by this many metres, turning each quad cross-section
+   * into an octagon. 0 (the default) is the hard-edged hull everything was built with; a small
+   * value is how a shape reads as rounded rather than folded out of sheet metal, at the cost
+   * of doubling the hull's triangles.
+   *
+   * `openTop` still names the roof: face 2 without a chamfer, face 5 with one.
+   */
+  chamfer?: number;
 }
 
 /**
  * Lofts a closed hull through a list of quad cross-sections ordered front (-Z) to rear (+Z).
  * Flat-shaded, outward facing, with optional end caps. 8 tris per segment + 4 for the caps,
- * less 2 for every segment left open.
+ * less 2 for every segment left open — doubled when `chamfer` rounds the corners off.
  */
 export function loft(sections: LoftSection[], options: LoftOptions | boolean = true): THREE.BufferGeometry {
   if (sections.length < 2) throw new Error('loft() needs at least two sections');
   const opts: LoftOptions = typeof options === 'boolean' ? { caps: options } : options;
   const caps = opts.caps ?? true;
   const openTop = opts.openTop ?? [];
+  const chamfer = opts.chamfer ?? 0;
   const segs = sections.length - 1;
-  const triCount = segs * 8 + (caps ? 4 : 0) - openTop.length * 2;
+  const ringSize = chamfer > 0 ? 8 : 4;
+  const triCount = segs * ringSize * 2 + (caps ? (ringSize - 2) * 2 : 0) - openTop.length * 2;
   const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 9);
 
-  const a = new Float32Array(12);
-  const b = new Float32Array(12);
+  const a = new Float32Array(24);
+  const b = new Float32Array(24);
   let p = 0;
 
   const e1 = new THREE.Vector3();
@@ -105,28 +152,36 @@ export function loft(sections: LoftSection[], options: LoftOptions | boolean = t
     p += 9;
   }
 
-  // Face k of a segment is the quad along the edge from corner k to corner k + 1, so with
-  // corners ordered bottom-left, bottom-right, top-right, top-left, face 2 is the top.
-  const TOP_FACE = 2;
+  // Face k of a segment is the quad along the edge from ring point k to point k + 1: with the
+  // four corners in the order above that puts the top at face 2, and with a chamfer's eight
+  // points it moves to face 5. See `sectionRing`.
+  const TOP_FACE = chamfer > 0 ? 5 : 2;
   for (let i = 0; i < segs; i++) {
-    sectionCorners(sections[i], a);
-    sectionCorners(sections[i + 1], b);
-    for (let k = 0; k < 4; k++) {
+    sectionRing(sections[i], chamfer, a);
+    sectionRing(sections[i + 1], chamfer, b);
+    for (let k = 0; k < ringSize; k++) {
       if (k === TOP_FACE && openTop.includes(i)) continue;
       const k0 = k * 3;
-      const k1 = ((k + 1) % 4) * 3;
+      const k1 = ((k + 1) % ringSize) * 3;
       emit(a[k0], a[k0 + 1], a[k0 + 2], a[k1], a[k1 + 1], a[k1 + 2], b[k1], b[k1 + 1], b[k1 + 2]);
       emit(a[k0], a[k0 + 1], a[k0 + 2], b[k1], b[k1 + 1], b[k1 + 2], b[k0], b[k0 + 1], b[k0 + 2]);
     }
   }
 
   if (caps) {
-    sectionCorners(sections[0], a);
-    emit(a[0], a[1], a[2], a[6], a[7], a[8], a[3], a[4], a[5]);
-    emit(a[0], a[1], a[2], a[9], a[10], a[11], a[6], a[7], a[8]);
-    sectionCorners(sections[sections.length - 1], b);
-    emit(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]);
-    emit(b[0], b[1], b[2], b[6], b[7], b[8], b[9], b[10], b[11]);
+    // A fan from ring point 0 across the rest, wound to face out at each end.
+    sectionRing(sections[0], chamfer, a);
+    for (let k = 1; k < ringSize - 1; k++) {
+      const k0 = k * 3;
+      const k1 = (k + 1) * 3;
+      emit(a[0], a[1], a[2], a[k1], a[k1 + 1], a[k1 + 2], a[k0], a[k0 + 1], a[k0 + 2]);
+    }
+    sectionRing(sections[sections.length - 1], chamfer, b);
+    for (let k = 1; k < ringSize - 1; k++) {
+      const k0 = k * 3;
+      const k1 = (k + 1) * 3;
+      emit(b[0], b[1], b[2], b[k0], b[k0 + 1], b[k0 + 2], b[k1], b[k1 + 1], b[k1 + 2]);
+    }
   }
 
   const geo = new THREE.BufferGeometry();

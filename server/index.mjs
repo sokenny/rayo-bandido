@@ -35,6 +35,9 @@ const dist = join(root, 'dist');
 const args = process.argv.slice(2);
 const argPort = args.indexOf('--port');
 const port = Number(argPort >= 0 ? args[argPort + 1] : process.env.PORT || 8080);
+// Announced to the grid at `match`, and nothing else: the number of laps a race actually runs
+// is the client's, out of the world it builds (`src/world/circuitWorld.ts`). This is here so
+// the wire says the same thing the game does — the versus circuit is two laps of the city.
 const laps = Number(process.env.RB_LAPS || 2);
 
 const MIME = {

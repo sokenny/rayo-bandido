@@ -32,8 +32,10 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173 for the main menu. The chosen world lives in the URL (`?mode=city`,
-`?mode=test`, `?mode=race`, or `?mp=1` for a versus room), so a world can be opened directly and a room link can
+`?mode=test`, `?mode=race`, `?mode=circuit`, or `?mp=1` for a versus room), so a world can be opened directly and a room link can
 be shared — `?mp=1` alone opens the room browser, `?mp=1&room=K7QP` goes straight into a room.
+`?mode=circuit` is the versus circuit on your own, which is how you practise it and how the QA
+and perf scripts drive it.
 `?mode=city` joins the shared open world; add `&solo=1` for a city with nobody else in it, which
 is what the capture and QA scripts use.
 Append `?debug=1` to start with the performance overlay open, and `?scale=1` (any 0.7-1.5) to pin
@@ -55,6 +57,7 @@ the render scale instead of letting the resolution governor pick it. For multipl
 | `npm run qa:mp:lag` | The same through an 80 ms (+20 ms jitter) relay with `--chaos`: each car rams an electric car and both fire lightning, so the shoves and kills the screens must agree about actually happen. Also counts a car flickering between destroyed and alive |
 | `npm run perf` | Performance probe: startup breakdown, worst frame while each effect appears for the first time, shaders compiled per phase, CPU/GPU ms per frame. Writes `artifacts/perf.json`. `npm run perf:headed` for vsync-limited numbers. `--mode race` probes the circuit; `--url http://127.0.0.1:4173/?debug=1&mode=test` probes the production build |
 | `node scripts/track-preview.mjs` | Circuit design tool: prints the lap's straights, corners and an estimated lap time, and writes a top-down SVG of `src/world/raceSpec.ts` to `artifacts/track-preview.svg` |
+| `node scripts/circuit-preview.mjs` | The same for the versus circuit (`src/world/circuitSpec.ts`): lap length, corners, climb, estimated lap time, the largest radius each corner will take, and whether the whole ribbon — edge to edge, at its own height — stands on a real city road. Writes `artifacts/circuit-preview.svg` |
 | `npm run perf:check` | **Perf gate.** Builds, serves `dist/` itself, probes it twice and fails on regressions that do not depend on the machine: any shader compiled mid-play, a frame over 33 ms while an effect first appears, more than 60 draw calls or 200k triangles, over 4 ms of main-thread work per frame, console errors. Run it before merging anything that touches rendering |
 
 ## Performance
@@ -124,7 +127,11 @@ same physics, same HUD.
 
 ## Race mode
 
-Three-second countdown on the grid, then two laps through five gates: the start/finish line and
+RACE in the menu is the **Bandido Loop**, the standalone circuit; VERSUS races the **Bandido
+Grid**, a lap of the open-world city (see [The versus circuit](#the-versus-circuit) below). The
+rules below are the same on both.
+
+Three-second countdown on the grid, then laps through five gates: the start/finish line and
 four checkpoint arches, crossed in order. A gate crossed backwards has to be crossed again, and the
 line re-crossed backwards takes the lap back, so reversing cannot mint laps. The two alleys leave
 the main road on the outside of a corner, just where the guardrail starts to bend away, and rejoin
@@ -133,11 +140,58 @@ time, last/best lap, checkpoint splits, a WRONG WAY warning and the results at t
 minimap (top right) shows the lap, the line and the checkpoints, the electric cars and you; the
 alleys are deliberately not drawn.
 
-The circuit is data: `src/world/raceSpec.ts` is a polygon with a fillet radius, width and zone per
-corner. `src/world/track.ts` turns it into a sampled path, `src/world/raceWorld.ts` derives the wall
+Both circuits are two laps. The circuit is data:
+`src/world/raceSpec.ts` is a polygon with a fillet radius, width and zone per corner. `src/world/track.ts` turns it into a sampled path, `src/world/raceWorld.ts` derives the wall
 colliders, gates, grid, patrols and the city blocks around the road, and the renderer draws
 asphalt, guardrails, lamps and the rest from the same data. Change the spec, run
 `node scripts/track-preview.mjs`, look at the SVG, run `npm test`.
+
+## The versus circuit
+
+**Bandido Grid** is not a separate map: it is the open-world city with a race drawn inside it.
+One racing line, a holographic barrier down each side of it, two laps of about 1.5 km, roughly
+two minutes. This is what VERSUS races on.
+
+A lap, in order:
+
+1. up st-west and east along blvd-center — the tight bit, barriers close on both sides,
+2. **north up av-main**, a 150 m straight between the skyscrapers of downtown,
+3. east along blvd-north, still in downtown, then south down av-east and east on st-n2,
+4. **the highway.** Up the east on-ramp onto the viaduct, fifteen metres over the city, down
+   its east leg, round the big south-east sweeper and west along the deck **over the bay**,
+5. down the south off-ramp onto the waterfront, and into turn one again.
+
+Sixteen corners, none sharper than a right angle, a 30 m climb and drop every lap, and about a
+third of the lap spent on the elevated highway.
+
+**It is a ribbon, not a street plan.** The lap is a filleted racing line
+(`src/world/circuitSpec.ts`) and the barrier is simply its two edges, span by span — two
+continuous curves round the whole lap. No branch, no stub, nothing standing across the road:
+every side street is closed because the barrier sweeps past its mouth. Each span carries the
+height of the road at both ends, so the barrier climbs the on-ramp and rides the deck with the
+car, and its collider is bracketed to that level so a barrier on the viaduct is not a wall in
+the street underneath it.
+
+Because the racing line is invented rather than borrowed, the thing that has to be checked is
+that it stands on real asphalt: `node scripts/circuit-preview.mjs` walks the ribbon edge to
+edge, at its own height, against every road in `citySpec.ts` — streets, ramps and the viaduct —
+and prints the largest radius each corner will take before it runs off. `tests/circuitWorld.test.ts`
+checks the same thing, plus that the barrier is unbroken, that no span is in a building, and
+that the whole lap can be driven.
+
+**The barrier is low and mostly light** — a knee-high kerb unit, a chevron pointing the way the
+lap goes, a hairline along the top and a thin holographic curtain above it. The point of racing
+here instead of on the Bandido Loop is that it is the city out there, so nothing in it stands
+between the driver and any of it. Amber on the outside of a corner, cyan everywhere else.
+
+**The city keeps running around it.** The street traffic and the buses come out — they follow
+fixed routes and do not steer around anything, so they would drive through the barrier — and
+are replaced with cars on the lap itself. The viaduct keeps its traffic, thinned to the file
+that runs the way the race does, because the lap shares that deck with it.
+
+`src/world/circuitWorld.ts` calls `createCityWorld()` unchanged and edits the instance it gets
+back; nothing in `citySpec.ts` or `cityWorld.ts` knows the circuit exists. Change the lap, run
+`node scripts/circuit-preview.mjs`, look at the SVG, run `npm test`.
 
 ## Multiplayer
 

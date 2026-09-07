@@ -109,7 +109,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   root.innerHTML = '';
 
   const hud = document.createElement('div');
-  hud.className = `rb-hud${mode === 'race' ? ' is-race' : ''}`;
+  hud.className = `rb-hud${mode === 'race' || mode === 'circuit' ? ' is-race' : ''}`;
   // R restarts on your own; in a match it cannot, because the race belongs to everybody — it
   // puts the car back on the road at the last gate instead, with the clock still running.
   function controlsFor(source: string[][]): string {
@@ -320,7 +320,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       resultsEl.classList.toggle('is-on', r.phase === 'finished');
       if (r.phase === 'finished') {
         resultsTimeEl.textContent = formatRaceTime(r.finishTime);
-        resultsMetaEl.textContent = `${r.laps} LAPS · BEST LAP ${formatRaceTime(r.bestLap)}`;
+        resultsMetaEl.textContent = `${r.laps} ${r.laps === 1 ? 'LAP' : 'LAPS'} · BEST LAP ${formatRaceTime(r.bestLap)}`;
         play(
           resultsEl,
           [

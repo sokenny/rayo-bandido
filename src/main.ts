@@ -19,9 +19,10 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 
 /**
  * What to load comes from the URL: `?mode=city` (the open world), `?mode=test` (the original
- * test block), `?mode=race` (the circuit on your own), or `?mp=1` (a versus room). Without any
- * of them the main menu is shown and the choice is written into the URL, so a world is always
- * one reload away.
+ * test block), `?mode=race` (the Bandido Loop on your own), `?mode=circuit` (the versus circuit
+ * inside the city, on your own — which is how you practise it) or `?mp=1` (a versus room).
+ * Without any of them the main menu is shown and the choice is written into the URL, so a world
+ * is always one reload away.
  *
  * THE OPEN WORLD IS A SERVER. `?mode=city` does not build a private city any more: it joins the
  * one permanent room every server holds (`WORLD_ROOM_CODE`), so whoever else picked OPEN WORLD
@@ -45,8 +46,15 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  */
 function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
-  return mode === 'test' || mode === 'race' || mode === 'city' ? mode : null;
+  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' ? mode : null;
 }
+
+/**
+ * The world a versus race is run on. One place, because the lobby, the loading caption and the
+ * race all have to agree, and because moving the field from one circuit to another is exactly
+ * this constant changing.
+ */
+const VERSUS_MODE: GameMode = 'circuit';
 
 /** This page with `mode`, `mp` and the room parameters replaced by whatever is asked for. */
 function urlWith(mode: GameMode | null, multiplayer = false, room = ''): string {
@@ -88,7 +96,7 @@ function roomEntryFromUrl(name: string): RoomEntry | null {
  * one screen across its races.
  */
 async function buildGame(mode: GameMode, loading: LoadingScreen, net: NetSession | null): Promise<Game> {
-  loading.set(mode === 'race' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
+  loading.set(mode === 'race' || mode === 'circuit' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
 
@@ -257,7 +265,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     lobby.hide();
     loading.show('BUILDING THE CIRCUIT');
     try {
-      game = await buildGame('race', loading, session);
+      game = await buildGame(VERSUS_MODE, loading, session);
       session.notifyLoaded();
       loading.set('WAITING FOR THE GRID', 1);
       canvas!.focus();

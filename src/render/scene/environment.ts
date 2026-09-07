@@ -8,6 +8,7 @@ import { buildLandmarks } from './env/landmarksBuilder';
 import { buildProps } from './env/propsBuilder';
 import { buildTransit } from './env/transitBuilder';
 import { buildTrack } from './env/trackBuilder';
+import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
@@ -259,6 +260,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   buildProps(b);
   buildTransit(b);
   buildTrack(b);
+  // After the track, before the landmarks: the versus circuit's barriers sit on top of the
+  // streets the city has already drawn, and nothing else in the world is allowed to be
+  // brighter than they are.
+  buildNeonWalls(b);
   buildLandmarks(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.

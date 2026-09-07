@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { spawnForSlot } from './world/arrivals';
+import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type { GameEvent, GameMode, GameState, HudSnapshot, PlayerCommand, RaceHudSnapshot, Transmission } from './core/types';
 import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, VEHICLE } from './config/tuning';
@@ -109,7 +110,14 @@ export function createGame(
     ATMOSPHERE.quality = atmosParam;
   }
 
-  const world = mode === 'race' ? createRaceWorld(options.net?.match?.raceId) : mode === 'city' ? createCityWorld() : createArenaWorld();
+  const world =
+    mode === 'race'
+      ? createRaceWorld(options.net?.match?.raceId)
+      : mode === 'circuit'
+        ? createCircuitWorld(options.net?.match?.raceId)
+        : mode === 'city'
+          ? createCityWorld()
+          : createArenaWorld();
   const layout = world.layout;
 
   /* ------------------------------------------------------------- multiplayer */

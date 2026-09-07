@@ -204,6 +204,33 @@ export function inBusStop(plan: CityPlan, x: number, z: number, pad = 0): boolea
   return false;
 }
 
+/**
+ * One span of the versus circuit's barrier: the holographic edge of the track
+ * (`src/world/circuitSpec.ts`). These are the two edges of the racing ribbon, segment by
+ * segment, so the barrier is a pair of continuous curves round the whole lap — it never
+ * branches, never stops and never stands across the road.
+ *
+ * `ay` / `by` are the heights of the road at the two ends, so a span climbs with the on-ramp
+ * and rides the viaduct. `nx` / `nz` point in at the track: the lit face and the side the
+ * light falls on. `curvature` is the racing line's here, signed, which is what turns a barrier
+ * on the outside of a corner amber.
+ */
+export interface NeonWallDef {
+  ax: number;
+  az: number;
+  ay: number;
+  bx: number;
+  bz: number;
+  by: number;
+  nx: number;
+  nz: number;
+  /** Which side of the racing line this is: -1 left, +1 right. */
+  side: number;
+  /** Signed curvature of the racing line here (1/m); positive turns right. */
+  curvature: number;
+  zone: ZoneId;
+}
+
 /** Neon route gate spanning the road from (x0, z0) to (x1, z1). */
 export interface GateDef {
   x0: number;
@@ -284,6 +311,8 @@ export interface CityPlan {
   busStops?: BusStopDef[];
   /** Districts where every street facade is stacked with screens. */
   neonDistricts?: Rect[];
+  /** The versus circuit's barriers, when this world is hosting a race inside the city. */
+  neonWalls?: NeonWallDef[];
   /**
    * Pavement between a road's edge and the first building, per zone (m), when the world
    * wants it drawn. The blocks already stand that far back; this is only the surface.

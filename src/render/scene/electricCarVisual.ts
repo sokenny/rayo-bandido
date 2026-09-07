@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TargetStatus } from '../../core/types';
-import { box, loft, mergeParts, part } from './vehicles/geometryKit';
+import { applyLengthwiseUVs, box, loft, mergeParts, part } from './vehicles/geometryKit';
+import { attachTexture, type TextureHandle } from '../textures/load';
 
 /**
  * Electric-car target visual. Clean, homogeneous, corporate: white/cool-cyan, soft shapes,
@@ -56,6 +57,8 @@ interface SharedResources {
   barMat: THREE.MeshStandardMaterial;
   beaconMat: THREE.MeshBasicMaterial;
   ringMat: THREE.MeshBasicMaterial;
+  /** The body's detail map. Owns the texture; the per-car materials only borrow it. */
+  bodyArt: TextureHandle;
 }
 
 let shared: SharedResources | null = null;
@@ -63,7 +66,9 @@ let shared: SharedResources | null = null;
 function buildBody(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
-  // Soft, homogeneous crossover hull.
+  // Soft, homogeneous crossover hull. The chamfer is deliberately small: it takes the hard
+  // edge off the shoulder and rocker without touching the silhouette, which is what keeps the
+  // car reading as a modern EV rather than a rounded-off old hatchback.
   parts.push(
     part(
       loft([
@@ -75,7 +80,7 @@ function buildBody(): THREE.BufferGeometry {
         { z: 1.35, bottomY: 0.18, topY: 0.94, bottomHalfWidth: 0.88, topHalfWidth: 0.9 },
         { z: 1.95, bottomY: 0.22, topY: 0.88, bottomHalfWidth: 0.82, topHalfWidth: 0.86 },
         { z: 2.2, bottomY: 0.36, topY: 0.76, bottomHalfWidth: 0.7, topHalfWidth: 0.74 },
-      ]),
+      ], { chamfer: 0.1 }),
       SHELL,
     ),
   );
@@ -88,7 +93,7 @@ function buildBody(): THREE.BufferGeometry {
         { z: -0.4, bottomY: 0.92, topY: 1.44, bottomHalfWidth: 0.8, topHalfWidth: 0.7 },
         { z: 0.95, bottomY: 0.92, topY: 1.46, bottomHalfWidth: 0.8, topHalfWidth: 0.7 },
         { z: 1.75, bottomY: 0.92, topY: 1.0, bottomHalfWidth: 0.8, topHalfWidth: 0.74 },
-      ]),
+      ], { chamfer: 0.07 }),
       GLASS,
     ),
   );
@@ -119,7 +124,7 @@ function buildBody(): THREE.BufferGeometry {
   // Wheels: static, merged into the body (nothing spins them).
   for (const z of [-1.35, 1.35]) {
     for (const sign of [-1, 1]) {
-      const wheel = new THREE.CylinderGeometry(0.34, 0.34, 0.2, 12);
+      const wheel = new THREE.CylinderGeometry(0.34, 0.34, 0.2, 16);
       wheel.rotateZ(Math.PI / 2);
       wheel.translate(sign * 0.86, 0.34, z);
       parts.push(part(wheel, TYRE));
@@ -127,6 +132,7 @@ function buildBody(): THREE.BufferGeometry {
   }
 
   const merged = mergeParts(parts);
+  applyLengthwiseUVs(merged);
   merged.computeBoundingSphere();
   return merged;
 }
@@ -161,7 +167,7 @@ function buildRing(): THREE.BufferGeometry {
 
 function getShared(): SharedResources {
   if (!shared) {
-    shared = {
+    const res = {
       body: buildBody(),
       bars: buildBars(),
       beacon: new THREE.SphereGeometry(0.075, 8, 4),
@@ -195,6 +201,9 @@ function getShared(): SharedResources {
         toneMapped: false,
       }),
     };
+    // The shared material is the template every car clones, so it carries the map for cars
+    // built after the art lands; the ones built before it get it in `createElectricCarVisual`.
+    shared = { ...res, bodyArt: attachTexture(res.bodyMat, 'vehicles/electric', null) };
   }
   return shared;
 }
@@ -209,6 +218,7 @@ export function disposeElectricCarResources(): void {
   shared.barMat.dispose();
   shared.beaconMat.dispose();
   shared.ringMat.dispose();
+  shared.bodyArt.dispose();
   shared = null;
 }
 
@@ -224,6 +234,16 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   const cleanBody = BODY_COLORS[index % BODY_COLORS.length];
   const bodyMat = s.bodyMat.clone();
   bodyMat.color.copy(cleanBody);
+  // `clone()` copies whatever map the template has right now, which is nothing until the file
+  // lands. Cars built before then pick it up here.
+  let disposed = false;
+  if (!bodyMat.map) {
+    void s.bodyArt.ready.then(() => {
+      if (disposed) return;
+      bodyMat.map = s.bodyArt.texture;
+      bodyMat.needsUpdate = true;
+    });
+  }
   const barMat = s.barMat.clone();
   const beaconMat = s.beaconMat.clone();
   const ringMat = s.ringMat.clone();
@@ -302,6 +322,7 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       }
     },
     dispose() {
+      disposed = true;
       bodyMat.dispose();
       barMat.dispose();
       beaconMat.dispose();

@@ -163,6 +163,17 @@ function meanLuma(d: Uint8ClampedArray): number {
  */
 export function loadTexture(slot: TextureSlot): TextureHandle {
   const spec: TextureSpec = TEXTURES[slot];
+  // No DOM, no art: unit tests run under Node, and every surface here already knows how to
+  // live on its fallback. Same shape as the procedural livery.
+  if (typeof Image === 'undefined' || typeof document === 'undefined') {
+    return {
+      ready: Promise.resolve(),
+      luma: null,
+      texture: null,
+      loaded: false,
+      dispose() {},
+    };
+  }
   const img = new Image();
   let texture: THREE.Texture | null = null;
   let luma: number | null = null;

@@ -578,7 +578,12 @@ function dressBlockGap(b: EnvBuilders, field: ReclaimField, blk: BlockRect): voi
 /**
  * Alley walls and street barriers. The tall concrete alley walls are the best canvas in the
  * city — long, blank, at eye level from the road — and they are what the concept art paints.
- * Barriers get the low, quick end of it: a tag near the ground and a weed line behind.
+ *
+ * THE LOW BARRIERS ARE DELIBERATELY LEFT BARE. A guardrail or a jersey barrier offers about
+ * half a metre of paintable face, which is not enough wall for a piece to read as paint: at
+ * that size a tag comes out as a small bright rectangle stuck on the concrete — a sticker,
+ * not graffiti — and a run of them along a highway shoulder is the first thing the eye
+ * catches. They still get their weeds and their vines; they just do not get painted.
  */
 function buildRailPaint(b: EnvBuilders, field: ReclaimField): void {
   for (const r of b.plan.rails) {
@@ -593,17 +598,14 @@ function buildRailPaint(b: EnvBuilders, field: ReclaimField): void {
     const rng = makeRng(seedAt(cx, cz, 0x44));
     const y0 = (r.ay + r.by) / 2;
     const wall = r.kind === 'wall';
-    // The face of the box `trackBuilder` actually stands here, and no taller: the highway
-    // guardrail's solid base stops at 0.68 and the thin top rail above it is set back, so
-    // paint carried up to the reflector line would hang in front of nothing.
-    const height = wall ? 2.7 : r.zone === 'corporate' ? 0.68 : r.zone === 'urban' ? 0.9 : 0.8;
-    // Paint the road side only: the back of a barrier is never seen.
-    // Both sides: which one faces the road depends on the segment, and a barrier is thin
-    // enough that painting the back of it costs two triangles and removes the question.
-    for (const side of [-1, 1] as const) {
-      const s = runSurface(r.ax, r.az, r.bx, r.bz, y0 + 0.08, height - 0.16, side, wall ? 0.28 : 0.3, r.by - r.ay);
-      paintSurface(b, s, profile, seedAt(cx, cz, 0x44 + side), wall || side > 0 ? 'near' : 'far');
-      if (wall) grimeSurface(b, s, profile, seedAt(cx, cz, 0x55 + side), rng() < 0.5 ? 'streak' : 'stain');
+    // Both sides: which one faces the road depends on the segment, and an alley wall's back
+    // is another alley. `rise` keeps the paint on the concrete where the run climbs.
+    if (wall) {
+      for (const side of [-1, 1] as const) {
+        const s = runSurface(r.ax, r.az, r.bx, r.bz, y0 + 0.08, 2.7 - 0.16, side, 0.28, r.by - r.ay);
+        paintSurface(b, s, profile, seedAt(cx, cz, 0x44 + side), side > 0 ? 'near' : 'far');
+        grimeSurface(b, s, profile, seedAt(cx, cz, 0x55 + side), rng() < 0.5 ? 'streak' : 'stain');
+      }
     }
     if (!wall) continue;
     // An alley wall in a pocket: a vine over the top and a weed line at the foot, on the

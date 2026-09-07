@@ -37,6 +37,7 @@ public/textures/
   nature/      greenery: foliage (leaf mass for every plant), bark (trunks and branches)
   graffiti/    textura-grafiti-1..9.webp: the paint on the city's walls
   buildings/   concrete.webp (the wall between the windows), and later roofs, shutters
+  vehicles/    electric.webp: the panel detail over the city's electric cars
   props/       barriers, containers, signage
   sky/         backdrops and environment maps
 ```

@@ -15,7 +15,11 @@
   and the multiplayer racing on it (both delivered after the day-one session — see
   `docs/PROGRESS.md`), plus the City: the free-roam proof of concept Juan asked for on
   2026-09-06 (`src/world/citySpec.ts`), which is built in layers — layout, elevation and
-  lighting first; textures and detailed props are a later pass of his own.
+  lighting first; textures and detailed props are a later pass of his own, plus the versus
+  circuit Juan asked for on 2026-09-07 (`src/world/circuitSpec.ts`): a racing line through an
+  instance of that same city, barriered on both sides, which is what VERSUS races on.
+- The City is never edited to suit the circuit. `src/world/circuitWorld.ts` instances it and
+  layers the race on top; `citySpec.ts` and `cityWorld.ts` must stay unaware the circuit exists.
 - Do not add accounts, garage UI, story, police AI or multiple playable cars. The City is the
   one open-world exception, and it stays a proof of concept until Juan says otherwise.
 - Multiplayer is rooms of up to four cars on the circuit — a player opens a room and hands out

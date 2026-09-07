@@ -197,8 +197,13 @@ const SNAPSHOT = () => {
   const s = rb.state;
   const layout = rb.layout;
   const bb = layout.minimap.bounds;
-  const insideBox = (x, z) => {
+  // Height matters here: the city's blocks are capped below anything that flies over them
+  // (`maxHeight` in `cityGen.ts`), so a car on the viaduct passes over a dozen footprints
+  // without being in any of them. Same test the simulation uses in `src/sim/collision.ts`.
+  const insideBox = (x, z, y) => {
     for (const b of layout.colliders) {
+      if (b.maxY !== undefined && y > b.maxY) continue;
+      if (b.minY !== undefined && y < b.minY) continue;
       if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) return true;
     }
     return false;
@@ -216,7 +221,7 @@ const SNAPSHOT = () => {
       status: t.status,
       patrolIndex: t.patrolIndex,
       offMap: t.x < bb.minX || t.x > bb.maxX || t.z < bb.minZ || t.z > bb.maxZ,
-      inBuilding: insideBox(t.x, t.z),
+      inBuilding: insideBox(t.x, t.z, t.y ?? 0),
     })),
     rivals: rb.rivals.map((r) => ({ id: r.id, slot: r.slot, present: r.present, x: r.x, z: r.z, speed: r.speed })),
     selfSlot: rb.selfSlot ?? null,
