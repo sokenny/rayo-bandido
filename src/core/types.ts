@@ -306,6 +306,13 @@ export interface ActivitySite {
   y: number;
   /** Which way the marker faces (rad), so its art can be squared up with the street. */
   heading: number;
+  /**
+   * What the player is told to call this place, in the chrome's own shouting case
+   * ("DOWNTOWN CANYON"). The world names its own streets — the rules only know there is a
+   * point here — so a mission that moves can say WHERE it moved to without the tuning file
+   * having to learn any city's geography.
+   */
+  label?: string;
 }
 
 /**
@@ -329,10 +336,33 @@ export interface RushResults {
   styleBonus: number;
   /** Whether this run was one of the day's ranked attempts. */
   ranked: boolean;
+  /**
+   * Which mission this run was for (0-based), what it asked for, and where it was driven —
+   * frozen here rather than read back off `RushState`, because by the time the card is up the
+   * state has ALREADY moved on to the next mission. The card has to describe the run that just
+   * ended, not the one now on offer.
+   */
+  level: number;
+  targetScore: number;
+  /** The site's `label`, or '' in a world that does not name its sites. */
+  levelLabel: string;
+  /** True when `score` met `targetScore`. */
+  cleared: boolean;
+  /** True when this run was the one that unlocked the next mission (so: cleared, and first). */
+  advanced: boolean;
 }
 
 export interface RushState {
   phase: RushPhase;
+  /**
+   * How many missions of `RUSH.levels` this player has finished, 0..`RUSH.levels.length`. THE
+   * one number the chain is made of: which mission is on offer, which site the marker stands
+   * on and what score it is asking for are all derived from it (`rushLevelIndex`), so there is
+   * no second copy to fall out of step with it. It survives a restart and is mirrored to
+   * localStorage by the caller (`src/core/progress.ts`) — the rules only ever move it forward
+   * by one, at the end of a run that met the target.
+   */
+  cleared: number;
   /** Seconds left of `RUSH.countdownSeconds` while counting in; 0 otherwise. */
   countdown: number;
   /** Seconds left on the clock while running; 0 otherwise. */
@@ -349,6 +379,12 @@ export interface RushState {
   styleBonus: number;
   /** True while the player is inside the marker and a run may be started. */
   atMarker: boolean;
+  /**
+   * True while another free-world activity has the player — a passenger in the car
+   * (`src/sim/passenger.ts`). Written by the orchestrator every tick, never by the rules; while
+   * it is set the marker offers nothing, so the two activities cannot overlap.
+   */
+  locked: boolean;
   /**
    * False once the marker has been used up for the day: the run still plays and still scores,
    * it just is not submitted anywhere. Set by the caller before `activate`, never by the rules.
@@ -531,8 +567,183 @@ export type GameEvent =
       cleanDrift: boolean;
     }
   | { type: 'rushEnd'; results: RushResults }
+  /**
+   * A mission was cleared for the first time and the chain moved on. Raised immediately before
+   * the `rushEnd` that carries the run itself, so anything listening sees the run and the
+   * promotion in the order they happened.
+   *
+   * `cleared` is the new total, `level` the mission just finished, and `allClear` true when
+   * that was the last one. Presentation and persistence both hang off this: the marker in the
+   * world re-paints itself at the next site, the minimap re-marks it, and the browser writes
+   * the new total down.
+   */
+  | { type: 'rushLevelUp'; level: number; cleared: number; allClear: boolean }
   /** The results card was dismissed; the world is back to plain free roam. */
-  | { type: 'rushDismissed' };
+  | { type: 'rushDismissed' }
+  /* ---------------------------------------------------------------- passengers */
+  /** A pin went up: someone at `stopId` wants a ride. */
+  | { type: 'passengerOffer'; passengerId: string; stopId: string }
+  /** The pickup prompt came up or went away (the car stopped on the pin, or left it). */
+  | { type: 'passengerPrompt'; on: boolean }
+  /** The passenger got in. The ride is on; the destination is marked. */
+  | { type: 'passengerBoard'; passengerId: string; destinationId: string }
+  /** A subtitle line started. `kind` is what it is for, so a listener can pick a sound. */
+  | { type: 'passengerLine'; passengerId: string; text: string; kind: PassengerLineKind }
+  /** Satisfaction moved by a discrete amount. `reason` names the rule; presentation shows it. */
+  | { type: 'passengerMood'; delta: number; reason: PassengerReaction }
+  /** The car is stopped inside the destination (or just left it). */
+  | { type: 'passengerDropPrompt'; on: boolean }
+  /** The ride is over and paid. Raised exactly once per completed ride. */
+  | { type: 'passengerComplete'; results: PassengerResults }
+  /** The ride ended without a drop-off. Nothing is paid. */
+  | { type: 'passengerCancel'; passengerId: string; reason: 'player' | 'restart' | 'respawn' }
+  /** The fare card was put away; free roam continues. */
+  | { type: 'passengerDismissed' };
+
+/**
+ * A place a passenger can be picked up or dropped at: a stopping point on a road, named for
+ * the player, and tagged so the catalogue can say which kinds of place a character goes to
+ * without knowing any city's geography. The world validates that every one is on a road.
+ */
+export interface PassengerStop {
+  id: string;
+  x: number;
+  z: number;
+  /** Road height under it (m). */
+  y: number;
+  /** Which way the marker faces (rad). */
+  heading: number;
+  /** What the player is told to call it ("THE QUAY"). */
+  label: string;
+  /** What kind of place it is: matched against a passenger's pickup and destination tags. */
+  tags: readonly string[];
+}
+
+/** What one subtitle line is for. Openings outrank reactions in the queue. */
+export type PassengerLineKind = 'opening' | 'brief' | 'reaction' | 'arrival' | 'farewell';
+
+/** The rules a passenger can care about. See `src/content/passengers.ts`. */
+export type PassengerPreferenceKind = 'slow' | 'fast' | 'noDrift' | 'drift' | 'noRayo' | 'rayo';
+
+/** The things a passenger can react to. Each is raised by exactly one rule in `src/sim/passenger.ts`. */
+export type PassengerReaction =
+  | 'goodSpeed'
+  | 'tooFast'
+  | 'tooSlow'
+  | 'driftGood'
+  | 'driftBad'
+  | 'rayoGood'
+  | 'rayoBad'
+  | 'collision';
+
+/**
+ * Passengers (`src/sim/passenger.ts`).
+ *
+ *   idle     - nobody is waiting. A timer runs down to the next offer.
+ *   offered  - a pin stands at a pickup stop; stopping on it raises the prompt.
+ *   riding   - someone is in the car. Satisfaction is live; the destination is marked.
+ *   results  - dropped off and paid. The fare card is up until it is dismissed.
+ */
+export type PassengerPhase = 'idle' | 'offered' | 'riding' | 'results';
+
+/** How the passenger reads one of their preferences right now. */
+export type PassengerPreferenceStatus = 'neutral' | 'good' | 'bad';
+
+/** What one finished ride was worth. Frozen at the drop-off; read by the fare card. */
+export interface PassengerResults {
+  passengerId: string;
+  passengerName: string;
+  destinationLabel: string;
+  /** Final satisfaction, 0..100. */
+  mood: number;
+  /** Which farewell was chosen. */
+  tier: 'high' | 'medium' | 'low';
+  /** Fixed at the offer: the trip's own price, paid whatever the mood. */
+  fare: number;
+  /** What the mood earned on top, 0..`PASSENGER.reward.maxTip`. */
+  tip: number;
+  /** How many discrete events moved the mood, for the breakdown. */
+  bonuses: number;
+  penalties: number;
+}
+
+/** A subtitle waiting its turn. `expires` is sim time; a stale reaction is dropped, not played late. */
+export interface PassengerQueuedLine {
+  text: string;
+  kind: PassengerLineKind;
+  priority: number;
+  expires: number;
+}
+
+/**
+ * The trip on offer or under way. Everything a ride needs is chosen HERE, before it starts:
+ * which character, which two stops, which opening — so nothing is decided while driving.
+ */
+export interface PassengerTrip {
+  passengerId: string;
+  pickupId: string;
+  destinationId: string;
+  fare: number;
+  /** Straight-line length of the trip (m), for the fare and the HUD. */
+  distance: number;
+  /** Which opening variant plays, chosen at the offer so it cannot change mid-boarding. */
+  opening: number;
+}
+
+export interface PassengerState {
+  phase: PassengerPhase;
+  /** Which activity has the car. See `RushState.locked`. */
+  locked: boolean;
+  /** Seconds until the next pin goes up, while idle. */
+  offerIn: number;
+  /** How many offers have been made; the catalogue and the stops are rotated by it. */
+  offers: number;
+  trip: PassengerTrip | null;
+  /** True while the car is stopped inside the pickup pin. */
+  atPickup: boolean;
+  /** True while the car is stopped inside the destination. */
+  atDestination: boolean;
+  /** Seconds left in which a second press of the key cancels the ride. 0 = not armed. */
+  cancelArm: number;
+  /** Satisfaction, 0..100. */
+  mood: number;
+  /** Per preference slot (0 and 1), how it reads this tick. */
+  prefStatus: PassengerPreferenceStatus[];
+  /** Seconds the car has been over a speed limit (slow) or dawdling (fast). */
+  overTime: number;
+  slowTime: number;
+  /** Seconds of continuous satisfied speed, for the "this is nice" line. */
+  goodStreak: number;
+  /** Whether the arrival line has played this ride. */
+  arrivalSaid: boolean;
+  /** Mood gained from continuous driving so far this ride, against `maxFlowGain`. */
+  flowGain: number;
+  /** Mood gained from discrete events so far this ride, against `maxEventGain`. */
+  eventGain: number;
+  /** Seconds until the next bonus of each kind may pay again. */
+  driftCooldown: number;
+  rayoCooldown: number;
+  collisionCooldown: number;
+  /** Seconds until the next reaction line may play. */
+  reactionCooldown: number;
+  /** Seconds until the next speed nag may play. */
+  speedLineCooldown: number;
+  /** One flag per electric car: whether it has already counted on this ride. */
+  counted: Uint8Array;
+  bonuses: number;
+  penalties: number;
+  /** The subtitle on screen, and how long it has left. `lineId` increments per line. */
+  line: string;
+  lineKind: PassengerLineKind;
+  lineId: number;
+  lineTimeLeft: number;
+  /** The last reaction text played, so the same line is never read twice in a row. */
+  lastText: string;
+  queue: PassengerQueuedLine[];
+  /** Deterministic pick state for line variants. */
+  seed: number;
+  results: PassengerResults | null;
+}
 
 export interface GameState {
   /** Simulation time in seconds since the session started. */
@@ -549,8 +760,10 @@ export interface GameState {
   economy: EconomyState;
   /** Present in race mode only. */
   race: RaceState | null;
-  /** Rayo Rush. Present in worlds that carry an activity marker (`ArenaLayout.rushSite`). */
+  /** Rayo Rush. Present in worlds that carry activity markers (`ArenaLayout.rushSites`). */
   rush: RushState | null;
+  /** Passenger rides. Present in worlds that carry stops (`ArenaLayout.passengerStops`). */
+  passenger: PassengerState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -658,14 +871,17 @@ export interface MinimapData {
   /** Water, drawn under the roads. */
   water?: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   /**
-   * Fixed things to go and do, marked on the map so they can be found rather than stumbled on.
-   * Today that is the RAYO RUSH marker; the array is what says a second one would not need a
-   * second field. Unlike the electric cars — which are deliberately NOT drawn, because hunting
+   * Things to go and do, marked on the map so they can be found rather than stumbled on. Today
+   * that is the RAYO RUSH marker — one entry, wherever the mission chain currently has it
+   * standing; the array is what says a second one would not need a second field. Unlike the electric cars — which are deliberately NOT drawn, because hunting
    * them is the game — an activity is a destination, and a destination the player cannot find
    * is not a destination.
    */
-  activities?: Array<{ x: number; z: number }>;
+  activities?: Array<{ x: number; z: number; kind?: ActivityMarkKind }>;
 }
+
+/** What a mark on the minimap stands for: the RAYO RUSH circle, a waiting passenger, or where they are going. */
+export type ActivityMarkKind = 'rush' | 'passenger' | 'destination';
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
 export interface ArenaLayout {
@@ -685,8 +901,20 @@ export interface ArenaLayout {
   surface: SurfaceField | null;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
-  /** Where the Rayo Rush marker stands, in worlds that have one. Null everywhere else. */
-  rushSite?: ActivitySite | null;
+  /**
+   * Where the Rayo Rush marker stands, one site per mission of `RUSH.levels` and in the same
+   * order, in worlds that carry the activity. Empty or missing everywhere else.
+   *
+   * The list is the world's answer to "where", the tuning's `levels` is the rules' answer to
+   * "how much", and `rushSiteFor` in `src/sim/rush.ts` is the only place the two are put
+   * together — including the clamp that lets a world ship fewer sites than there are missions.
+   */
+  rushSites?: ActivitySite[] | null;
+  /**
+   * Where passengers wait and where they are taken (`src/sim/passenger.ts`), in worlds that
+   * carry the activity. Every one is a stopping point on a road; the world's tests say so.
+   */
+  passengerStops?: PassengerStop[] | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   minimap: MinimapData;
@@ -760,6 +988,36 @@ export interface HudSnapshot {
   race: RaceHudSnapshot | null;
   /** Rayo Rush readout; null in a world without the activity. */
   rush: RushHudSnapshot | null;
+  /** Passenger readout; null in a world without stops. */
+  passenger: PassengerHudSnapshot | null;
+}
+
+/** What the passenger overlay needs: a flattened read-only view of `PassengerState` plus the names it cannot know. */
+export interface PassengerHudSnapshot {
+  phase: PassengerPhase;
+  passengerId: string;
+  name: string;
+  /** Handle or role under the name ("DEADAIR · STREAMER"). */
+  tagline: string;
+  /** Which portrait to draw (`src/ui/portraits.ts`). */
+  portrait: string;
+  /** True when stopping here would board / drop off (`canBoard` / `canDropOff`). */
+  canBoard: boolean;
+  canDropOff: boolean;
+  /** Seconds left in which a second press cancels; 0 when not armed. */
+  cancelArm: number;
+  destinationLabel: string;
+  /** Straight-line distance to the destination (m) while riding. */
+  distance: number;
+  fare: number;
+  mood: number;
+  /** The compact rule summary: one label per preference, and how it reads right now. */
+  prefLabels: string[];
+  prefStatus: PassengerPreferenceStatus[];
+  line: string;
+  lineKind: PassengerLineKind;
+  lineId: number;
+  results: PassengerResults | null;
 }
 
 /**
@@ -769,6 +1027,17 @@ export interface HudSnapshot {
  */
 export interface RushHudSnapshot {
   phase: RushPhase;
+  /** Mission on offer / under way (0-based), and how many there are in all. */
+  level: number;
+  levelCount: number;
+  /** How many are already finished. Equal to `levelCount` once the chain is done. */
+  cleared: number;
+  /** What the mission on offer is asking for. */
+  targetScore: number;
+  /** Where it is driven, or '' in a world that does not name its sites. */
+  levelLabel: string;
+  /** True once every mission has been cleared: the marker stays put and runs stop gating. */
+  allClear: boolean;
   /** Seconds left of the count-in. */
   countdown: number;
   /** Seconds left on the clock. */

@@ -100,11 +100,17 @@ function seeThrough(material: THREE.Material | THREE.Material[]): boolean {
   return list.every((m) => m.depthWrite === false || m.blending === THREE.AdditiveBlending);
 }
 
-/** `probeIgnore` on an object hides it and everything under it (the player's own car). */
+/**
+ * `probeIgnore` on an object hides it and everything under it (the player's own car), and so
+ * does being switched off: Three's raycaster does not test `visible`, so without this the
+ * crosshair could name a mesh that is not on screen — a hidden rush ring, a beacon on a
+ * destroyed car, anything a future pass switches off rather than removes.
+ */
 function ignored(object: THREE.Object3D): boolean {
   let node: THREE.Object3D | null = object;
   for (let depth = 0; node && depth < 8; depth++) {
     if (node.userData && node.userData.probeIgnore) return true;
+    if (!node.visible) return true;
     node = node.parent;
   }
   return false;

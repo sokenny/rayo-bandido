@@ -1,4 +1,4 @@
-import type { MinimapData, RaceCourse, RivalCar, TargetState } from '../core/types';
+import type { ActivityMarkKind, MinimapData, RaceCourse, RivalCar, TargetState } from '../core/types';
 import { MINIMAP } from '../config/tuning';
 import { slotCss } from '../core/playerColors';
 
@@ -13,8 +13,9 @@ import { slotCss } from '../core/playerColors';
  * car is quarry: a hundred white dots buried the player's own arrow and gave away a hunt that is
  * the point of the mode. The RAYO RUSH circle is somewhere to GO, and one you cannot find is one
  * that does not exist — so it is drawn, in the chrome's hazard yellow, which nothing else on
- * this map uses. It goes into the base layer with the roads: it never moves, so it costs
- * nothing per frame.
+ * this map uses. It goes into the base layer with the roads, and stays there: clearing a mission
+ * moves it (`setActivities`), which happens three times in a session and repaints the base once
+ * each — so the per-frame cost is still nothing, which is the reason it is in the base at all.
  *
  * Performance contract: no per-frame allocation, one 2D canvas of `MINIMAP.size` CSS pixels.
  */
@@ -27,6 +28,12 @@ export interface Minimap {
     targets: readonly TargetState[],
     rivals?: readonly RivalCar[],
   ): void;
+  /**
+   * Mark somewhere else. The RAYO RUSH marker moves when a mission is cleared, and the map has
+   * to move with it or it is pointing at a street corner with nothing on it. Repaints the base
+   * layer, so it is called on the event and not per frame.
+   */
+  setActivities(points: readonly { x: number; z: number; kind?: ActivityMarkKind }[]): void;
   dispose(): void;
 }
 
@@ -71,11 +78,25 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const px = (x: number): number => offX + (x - b.minX) * scale;
   const pz = (z: number): number => offZ + (z - b.minZ) * scale;
 
-  if (bctx) drawBase(bctx, data, race, px, pz, scale, dpr);
+  // A shallow copy, because `setActivities` writes to it and `data` belongs to the caller —
+  // it is the world's own `ArenaLayout.minimap`, and where the marker has got to is a fact
+  // about this session, not about the city.
+  const mapData: MinimapData = { ...data };
+  if (bctx) drawBase(bctx, mapData, race, px, pz, scale, dpr);
 
   const dotR = 2.2 * dpr;
 
   return {
+    setActivities(points) {
+      // The whole base is redrawn rather than the old mark erased: the roads under it are the
+      // cheap part, and "clear and draw everything" cannot leave a ghost behind the way
+      // painting over one dark disc with another can.
+      mapData.activities = points.map((p) => ({ x: p.x, z: p.z, kind: p.kind ?? 'rush' }));
+      if (!bctx) return;
+      bctx.clearRect(0, 0, base.width, base.height);
+      drawBase(bctx, mapData, race, px, pz, scale, dpr);
+    },
+
     update(playerX, playerZ, heading, _targets, rivals) {
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -148,7 +169,11 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
  * The bolt is a stroked zigzag rather than the filled silhouette the HUD and the world marker
  * share, because at ten pixels a filled bolt is a blob and three strokes still read as lightning.
  */
-function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number, kind: ActivityMarkKind = 'rush'): void {
+  if (kind !== 'rush') {
+    drawPassengerMark(ctx, cx, cz, dpr, kind);
+    return;
+  }
   const r = 6.6 * dpr;
   const YELLOW = '#fcee0a';
 
@@ -182,6 +207,55 @@ function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr
   ctx.restore();
 }
 
+/**
+ * A passenger on the map: a ringed dot in the chrome's violet — nothing else on this map uses
+ * it — for someone waiting, and the same ring with a hollow centre and a dark bar for where they
+ * are going. Fixed pixel size, same reason as the RUSH mark.
+ */
+function drawPassengerMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number, kind: ActivityMarkKind): void {
+  const r = 5.6 * dpr;
+  const VIOLET = '#c9a4ff';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = VIOLET;
+  ctx.shadowColor = VIOLET;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (kind === 'passenger') {
+    // A head and shoulders, four strokes: reads as a person at ten pixels.
+    ctx.fillStyle = VIOLET;
+    ctx.beginPath();
+    ctx.arc(0, -1.6 * dpr, 1.6 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 2.6 * dpr, 2.6 * dpr, Math.PI, 0);
+    ctx.fill();
+  } else {
+    // The destination: a flag on the ring.
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-1.6 * dpr, 3 * dpr);
+    ctx.lineTo(-1.6 * dpr, -3 * dpr);
+    ctx.lineTo(2.4 * dpr, -1.6 * dpr);
+    ctx.lineTo(-1.6 * dpr, 0);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 function drawBase(
   ctx: CanvasRenderingContext2D,
   data: MinimapData,
@@ -202,7 +276,8 @@ function drawBase(
   }
 
   // Road body, then a thin cold outline so the network reads against the dark panel.
-  // Viaducts and the skyway are drawn last, in magenta, so they read as a layer above.
+  // Viaducts and the skyway are drawn last, in a muted magenta, so they read as a layer above
+  // without competing with the activity marks and the player - they are scenery, not a route.
   const passes: Array<{ stroke: string; widen: number }> = [
     { stroke: 'rgba(79, 243, 255, 0.35)', widen: 1.6 * dpr },
     { stroke: 'rgba(214, 232, 255, 0.55)', widen: 0 },
@@ -229,8 +304,8 @@ function drawBase(
   }
   for (const rb of data.ribbons) {
     if (rb.hidden || !rb.elevated || rb.points.length < 2) continue;
-    ctx.strokeStyle = 'rgba(255, 61, 240, 0.85)';
-    ctx.lineWidth = Math.max(1.5 * dpr, rb.width * scale * 0.7);
+    ctx.strokeStyle = 'rgba(255, 61, 240, 0.32)';
+    ctx.lineWidth = Math.max(1 * dpr, rb.width * scale * 0.45);
     ctx.beginPath();
     ctx.moveTo(px(rb.points[0].x), pz(rb.points[0].z));
     for (let i = 1; i < rb.points.length; i++) ctx.lineTo(px(rb.points[i].x), pz(rb.points[i].z));
@@ -252,6 +327,6 @@ function drawBase(
 
   // Last, so nothing is drawn over the one mark on this map that is meant to be looked for.
   if (data.activities) {
-    for (const a of data.activities) drawActivity(ctx, px(a.x), pz(a.z), dpr);
+    for (const a of data.activities) drawActivity(ctx, px(a.x), pz(a.z), dpr, a.kind);
   }
 }

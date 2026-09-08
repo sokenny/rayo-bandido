@@ -84,6 +84,29 @@ export function attemptsLabel(left: number, total: number): string {
   return `RANKED ATTEMPTS TODAY · ${left}/${total}`;
 }
 
+/**
+ * The mission strip on the prompt: which of the chain this is and what the street is called.
+ *
+ * Once the chain is finished there is no mission left to name, and saying "MISSION 3 / 3"
+ * forever would read as a counter stuck rather than as an achievement — so it becomes the
+ * achievement, and the run underneath goes on being a run.
+ */
+export function missionLabel(level: number, count: number, place: string, allClear: boolean): string {
+  if (allClear) return place ? `ALL MISSIONS CLEAR · ${place}` : 'ALL MISSIONS CLEAR';
+  const numbered = `MISSION ${level + 1} / ${count}`;
+  return place ? `${numbered} · ${place}` : numbered;
+}
+
+/**
+ * What the prompt says the run is for. A target while there is one to hit; once the chain is
+ * done the activity has not stopped being worth driving, it has just stopped gating anything,
+ * and the sign should say so rather than dangling a number that has already been beaten.
+ */
+export function targetLabel(target: number, allClear: boolean): string {
+  if (allClear) return 'FREE RUN · SCORE GOES TO THE GLOBAL BOARD';
+  return `CLEAR IT WITH ${formatScore(target)} PTS`;
+}
+
 function pick<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector(selector);
   if (!el) throw new Error(`Rayo Bandido rush overlay: missing element "${selector}"`);
@@ -98,10 +121,13 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     // firing the lightning — `src/core/input/keyboard.ts` steps around controls on purpose.
     `<button type="button" class="rb-rush__prompt">` +
     `<span class="rb-rush__prompt-title">RAYO RUSH</span>` +
+    // Which of the three this is, and what the street is called. The mission is the first
+    // thing read after the name, because it is what has changed since the player was last here.
+    `<span class="rb-rush__prompt-mission"></span>` +
     `<span class="rb-rush__prompt-lines">` +
     `<span><b></b> ON THE CLOCK</span>` +
     `<span>DISABLE EVERY EV YOU CAN WITH THE RAYO</span>` +
-    `<span>SCORE GOES TO THE GLOBAL BOARD</span>` +
+    `<span class="rb-rush__prompt-target"></span>` +
     `</span>` +
     `<span class="rb-rush__prompt-attempts">RANKED ATTEMPTS · CHECKING</span>` +
     `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> START</span>` +
@@ -110,6 +136,9 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     `<div class="rb-rush__live">` +
     `<div class="rb-rush__clock"></div>` +
     `<div class="rb-rush__score"><span class="rb-rush__score-value">0</span><span class="rb-rush__score-unit">PTS</span></div>` +
+    // The bar the run has to clear, under the score it is being compared with — so "am I
+    // going to make it" is one glance rather than a sum.
+    `<div class="rb-rush__target"><span class="rb-rush__target-label">TARGET</span><span class="rb-rush__target-value">—</span></div>` +
     `<div class="rb-rush__streak"><span class="rb-rush__streak-value">x1</span><span class="rb-rush__streak-bar"></span></div>` +
     `</div>` +
     // The kill feed.
@@ -118,8 +147,13 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     `<div class="rb-rush__results">` +
     `<div class="rb-rush__results-head">RAYO RUSH · TIME</div>` +
     `<div class="rb-rush__results-score">0</div>` +
+    // The verdict: whether the mission fell, and what that means for where the player goes
+    // next. Above the personal best, because a mission is the thing they were trying to do
+    // and a best is the thing they were trying to do it well.
+    `<div class="rb-rush__results-mission"><b></b><span></span></div>` +
     `<div class="rb-rush__results-best"></div>` +
     `<dl class="rb-rush__results-rows">` +
+    `<div><dt>TARGET</dt><dd class="rb-rush__r-target">0</dd></div>` +
     `<div><dt>EVs DISABLED</dt><dd class="rb-rush__r-disabled">0</dd></div>` +
     `<div><dt>BEST CHAIN</dt><dd class="rb-rush__r-chain">x1</dd></div>` +
     `<div><dt>DRIFT / STYLE BONUS</dt><dd class="rb-rush__r-style">0</dd></div>` +
@@ -130,6 +164,8 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
 
   const promptEl = pick<HTMLButtonElement>(root, '.rb-rush__prompt');
   const promptAttemptsEl = pick<HTMLElement>(root, '.rb-rush__prompt-attempts');
+  const promptMissionEl = pick<HTMLElement>(root, '.rb-rush__prompt-mission');
+  const promptTargetEl = pick<HTMLElement>(root, '.rb-rush__prompt-target');
   const promptDurationEl = pick<HTMLElement>(root, '.rb-rush__prompt-lines b');
   const liveEl = pick<HTMLElement>(root, '.rb-rush__live');
   const clockEl = pick<HTMLElement>(root, '.rb-rush__clock');
@@ -137,11 +173,17 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   const streakEl = pick<HTMLElement>(root, '.rb-rush__streak');
   const streakValueEl = pick<HTMLElement>(root, '.rb-rush__streak-value');
   const streakBarEl = pick<HTMLElement>(root, '.rb-rush__streak-bar');
+  const targetEl = pick<HTMLElement>(root, '.rb-rush__target');
+  const targetValueEl = pick<HTMLElement>(root, '.rb-rush__target-value');
   const feedEls = Array.from(root.querySelectorAll<HTMLElement>('.rb-rush__line'));
   const resultsEl = pick<HTMLElement>(root, '.rb-rush__results');
   const resultsHeadEl = pick<HTMLElement>(root, '.rb-rush__results-head');
   const resultsScoreEl = pick<HTMLElement>(root, '.rb-rush__results-score');
   const resultsBestEl = pick<HTMLElement>(root, '.rb-rush__results-best');
+  const resultsMissionEl = pick<HTMLElement>(root, '.rb-rush__results-mission');
+  const resultsMissionHeadEl = pick<HTMLElement>(root, '.rb-rush__results-mission b');
+  const resultsMissionNextEl = pick<HTMLElement>(root, '.rb-rush__results-mission span');
+  const rTargetEl = pick<HTMLElement>(root, '.rb-rush__r-target');
   const rDisabledEl = pick<HTMLElement>(root, '.rb-rush__r-disabled');
   const rChainEl = pick<HTMLElement>(root, '.rb-rush__r-chain');
   const rStyleEl = pick<HTMLElement>(root, '.rb-rush__r-style');
@@ -170,6 +212,9 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   let shownMultiplier = -1;
   let shownChainStep = -1;
   let shownResults = -1;
+  let shownMission = '';
+  let shownTarget = -1;
+  let shownPassed = false;
   let feedIndex = 0;
 
   const animations = new Map<Element, Animation>();
@@ -237,6 +282,18 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
         promptAttemptsEl.textContent = attemptsLabel(rush.attemptsLeft, RUSH.dailyRankedAttempts);
         promptAttemptsEl.classList.toggle('is-spent', rush.attemptsLeft === 0);
       }
+      // Which mission is on offer here. Cached on the rendered STRING rather than on the level
+      // number: the same mission can be re-offered at the same site with nothing to rewrite,
+      // and the one case that must rewrite — the chain moving on — changes the string.
+      if (promptOn) {
+        const mission = missionLabel(rush.level, rush.levelCount, rush.levelLabel, rush.allClear);
+        if (mission !== shownMission) {
+          shownMission = mission;
+          promptMissionEl.textContent = mission;
+          promptMissionEl.classList.toggle('is-clear', rush.allClear);
+          promptTargetEl.textContent = targetLabel(rush.targetScore, rush.allClear);
+        }
+      }
 
       /* ------------------------------------------------------------ the readout */
 
@@ -263,6 +320,31 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           shownChainStep = step;
           streakBarEl.style.transform = `scaleX(${step / CHAIN_STEPS})`;
         }
+        // The bar to clear, and whether it has been cleared yet. On a free run there is no bar,
+        // so the line is not shown at all rather than shown saying nothing.
+        if (rush.targetScore !== shownTarget) {
+          shownTarget = rush.targetScore;
+          targetValueEl.textContent = formatScore(rush.targetScore);
+        }
+        const passed = !rush.allClear && rush.score >= rush.targetScore;
+        if (passed !== shownPassed) {
+          shownPassed = passed;
+          targetEl.classList.toggle('is-passed', passed);
+          // Crossing the line mid-run is the one moment in a run worth a flash of its own:
+          // everything after it is bonus, and the player should know the instant it happens.
+          if (passed) {
+            play(
+              targetEl,
+              [
+                { transform: 'scale(1)', opacity: 1 },
+                { transform: 'scale(1.18)', opacity: 1, offset: 0.35 },
+                { transform: 'scale(1)', opacity: 1 },
+              ],
+              480,
+            );
+          }
+        }
+        targetEl.classList.toggle('is-on', !rush.allClear);
       }
 
       /* ------------------------------------------------------------ the results */
@@ -272,6 +354,27 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
         shownResults = results.score;
         resultsHeadEl.textContent = results.ranked ? 'RAYO RUSH · TIME' : 'RAYO RUSH · TIME · PRACTICE';
         resultsScoreEl.textContent = formatScore(results.score);
+        // The verdict on the mission this run was FOR — read off the frozen results and not off
+        // the live state, which by now is already offering the next one.
+        //
+        // Three outcomes, not two: cleared it for the first time (and here is where you are
+        // going next), cleared a mission that was already behind you (a replay, nothing moves),
+        // or missed it (and here is the number again). `rush.levelLabel` is the site the chain
+        // has moved ON to, which is exactly what "next" means on the first of those.
+        resultsMissionEl.classList.toggle('is-cleared', results.cleared);
+        if (results.advanced) {
+          resultsMissionHeadEl.textContent = `MISSION ${results.level + 1} COMPLETE`;
+          resultsMissionNextEl.textContent = rush.allClear
+            ? 'EVERY MISSION CLEAR · THE MARKER IS YOURS'
+            : `NEXT · ${rush.levelLabel || `MISSION ${rush.level + 1}`}`;
+        } else if (results.cleared) {
+          resultsMissionHeadEl.textContent = `MISSION ${results.level + 1} · CLEARED AGAIN`;
+          resultsMissionNextEl.textContent = results.levelLabel;
+        } else {
+          resultsMissionHeadEl.textContent = `MISSION ${results.level + 1} · TARGET MISSED`;
+          resultsMissionNextEl.textContent = `${formatScore(results.targetScore - results.score)} PTS SHORT`;
+        }
+        rTargetEl.textContent = formatScore(results.targetScore);
         rDisabledEl.textContent = String(results.disabled);
         rChainEl.textContent = formatMultiplier(Math.max(1, results.bestChain));
         rStyleEl.textContent = `+${formatScore(results.styleBonus)}`;
@@ -301,6 +404,19 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           shownChainStep = -1;
           shownResults = -1;
           shownAttempts = -2;
+          shownTarget = -1;
+          // The class as well as the cache. `is-passed` is only ever written when the flag
+          // CHANGES, so a run that can never set it — a free run, once the chain is done —
+          // would otherwise inherit the last run's, and be kept invisible only by the fact
+          // that the line it is on is hidden too. Cleared here, where the run begins.
+          shownPassed = false;
+          targetEl.classList.remove('is-passed');
+          break;
+        case 'rushLevelUp':
+          // The chain moved on while the results card was still going up. The prompt behind it
+          // is now offering a different mission at a different corner, so the strip it caches
+          // has to be rewritten before it is next shown.
+          shownMission = '';
           break;
         case 'rushScore': {
           pushLine(`EV DISABLED +${formatScore(event.points)}`, 'score');

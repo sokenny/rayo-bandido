@@ -4,7 +4,8 @@ import { fetchRooms } from '../net/connection';
 import { frameDecor, menuHeader } from './chrome';
 
 /**
- * The room browser: the screen between VERSUS and the lobby.
+ * The room browser: the screen between VERSUS — the online half of the RACE menu — and the
+ * lobby.
  *
  * One server holds many rooms (`server/rooms.mjs`), so arriving at multiplayer is a choice
  * rather than a fact — make your own room and hand out its link, type the code a friend sent,
@@ -17,8 +18,8 @@ import { frameDecor, menuHeader } from './chrome';
  * room on the same server, but it is a place, not a match, and the main menu is where you go
  * into it.
  *
- * DOM only, like the rest of `src/ui`, and dressed as the main menu so the two feel like one
- * screen with two steps.
+ * DOM only, like the rest of `src/ui`, and dressed as the main menu so the whole run from
+ * RACE to the grid feels like one screen going deeper.
  */
 export interface RoomBrowser {
   dispose(): void;

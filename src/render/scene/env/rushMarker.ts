@@ -37,6 +37,12 @@ import { RUSH } from '../../../config/tuning';
 export interface RushMarkerVisual {
   group: THREE.Group;
   /**
+   * Stand somewhere else. Called when a mission is cleared and the chain moves on: the paint,
+   * the chevrons and the hologram are one group at one transform, so the whole marker relocates
+   * by writing three numbers — nothing is rebuilt, nothing is disposed and no frame is dropped.
+   */
+  moveTo(site: { x: number; z: number; y: number; heading: number }): void;
+  /**
    * How close the player is, 0 (far) .. 1 (standing in it). Drives brightness and the speed
    * of the sweep, so the marker answers the car before the prompt does.
    */
@@ -114,6 +120,12 @@ const BOLT_SPAN_Y = 0.88 - 0.12;
 
 function hex(c: number): string {
   return `#${c.toString(16).padStart(6, '0')}`;
+}
+
+/** A site onto a group's transform. The one place a heading is converted to Three's yaw. */
+function placeAt(group: THREE.Group, site: { x: number; z: number; y: number; heading: number }): void {
+  group.position.set(site.x, site.y, site.z);
+  group.rotation.y = -site.heading;
 }
 
 /** Bright faces of the bolt, and the deep colour its extruded sides are painted. */
@@ -253,9 +265,10 @@ function buildChevron(): THREE.BufferGeometry {
 export function createRushMarker(site: { x: number; z: number; y: number; heading: number }): RushMarkerVisual {
   const group = new THREE.Group();
   group.name = 'rush-marker';
-  group.position.set(site.x, site.y, site.z);
   // Same mapping the rest of the game uses: a heading is a clockwise yaw, Three's is not.
-  group.rotation.y = -site.heading;
+  // Placed through the same call the mission chain will use later, so there is one line in
+  // this file that knows how a site becomes a transform.
+  placeAt(group, site);
 
   /* ------------------------------------------------------------------ paint */
 
@@ -386,6 +399,10 @@ export function createRushMarker(site: { x: number; z: number; y: number; headin
 
   return {
     group,
+
+    moveTo(next) {
+      placeAt(group, next);
+    },
 
     setProximity(value) {
       proximity = value < 0 ? 0 : value > 1 ? 1 : value;

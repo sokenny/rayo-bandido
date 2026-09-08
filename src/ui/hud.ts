@@ -1,10 +1,11 @@
 import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/types';
-import { BOLT_ICON, RETICLE_ICON } from './icons';
+import { BOLT_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
 import { createSystemMessage } from './systemMessage';
 import { createWheelIndicator } from './wheelIndicator';
 import { createTacho } from './tacho';
 import { createRushOverlay, type RushOverlay } from './rushOverlay';
+import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -15,8 +16,9 @@ import { createRushOverlay, type RushOverlay } from './rushOverlay';
  * cyan/blue-white, nitro is magenta/violet, money is a yen counter. Original layout only.
  *
  * Reading order the HUD teaches, without a tutorial:
- *   drift (left) -> charges the bolt ring (bottom-left) -> READY -> E destroys the locked
- *   target (centre reticle) -> money goes up (top-right). The chain multiplier survives the
+ *   drift (left) -> charges the bolt ring (bottom-left) -> READY -> holding E builds the aim
+ *   meter (centre) and the bolt flies down the car's nose -> money goes up (top-right).
+ *   The chain multiplier survives the
  *   end of a drift with a draining bar, so linking drifts is discoverable.
  *
  * Performance contract:
@@ -40,6 +42,9 @@ export interface Hud {
 export interface HudOptions {
   /** Raise `PlayerCommand.activate` on the next tick. Omitted in worlds with no activity. */
   onActivate?: () => void;
+  /** Which activities this world carries. Both default to "whenever `onActivate` is given". */
+  rush?: boolean;
+  passengers?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -74,7 +79,7 @@ const PAD_CONTROLS = [
 
 const CONTROLS = [
   ['WASD', 'drive'],
-  ['SPACE', 'handbrake'],
+  ['SPACE or /', 'handbrake'],
   ['SHIFT', 'nitro'],
   ['E', 'hold: aim'],
   ['R', 'restart'],
@@ -142,9 +147,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-money__flashes"><span class="rb-reward"></span><span class="rb-reward"></span>` +
     `<span class="rb-reward"></span></div>` +
     `</div>` +
-    `<div class="rb-reticle">${RETICLE_ICON}` +
-    `<div class="rb-reticle__charge"><span class="rb-reticle__charge-fill"></span></div>` +
-    `<span class="rb-reticle__label">ON TARGET</span></div>` +
+    `<div class="rb-aim">` +
+    `<span class="rb-aim__label">ON TARGET</span>` +
+    `<div class="rb-aim__bar"><span class="rb-aim__fill"></span></div></div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-race">` +
     `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span></div>` +
@@ -199,8 +204,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
    * RAYO RUSH's screen furniture, composed in the way the tacho and the gauges are. Built only
    * where the activity exists — `onActivate` is what says so, and it is the game that knows.
    */
-  const rush: RushOverlay | null = options.onActivate ? createRushOverlay({ onActivate: options.onActivate }) : null;
+  const rush: RushOverlay | null =
+    options.onActivate && options.rush !== false ? createRushOverlay({ onActivate: options.onActivate }) : null;
   if (rush) hud.appendChild(rush.root);
+  /** The passengers' furniture, the same way. */
+  const passengers: PassengerOverlay | null =
+    options.onActivate && options.passengers !== false ? createPassengerOverlay({ onActivate: options.onActivate }) : null;
+  if (passengers) hud.appendChild(passengers.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -225,9 +235,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const nearEl = pick<HTMLElement>(hud, '.rb-money__near');
   const remainingEl = pick<HTMLElement>(hud, '.rb-money__remaining');
   const rewardEls = Array.from(hud.querySelectorAll<HTMLElement>('.rb-reward'));
-  const reticleEl = pick<HTMLElement>(hud, '.rb-reticle');
-  const reticleFillEl = pick<HTMLElement>(hud, '.rb-reticle__charge-fill');
-  const reticleLabelEl = pick<HTMLElement>(hud, '.rb-reticle__label');
+  const aimEl = pick<HTMLElement>(hud, '.rb-aim');
+  const aimFillEl = pick<HTMLElement>(hud, '.rb-aim__fill');
+  const aimLabelEl = pick<HTMLElement>(hud, '.rb-aim__label');
   const cruiseEl = pick<HTMLElement>(hud, '.rb-cruise');
   const driftEl = pick<HTMLElement>(hud, '.rb-drift');
   const driftTimeEl = pick<HTMLElement>(hud, '.rb-drift__time');
@@ -274,7 +284,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   let shownChain = -1;
   let shownChainStep = -1;
   let drifting = false;
-  let locked = false;
+  let aimVisible = false;
   let shownCharging = false;
   let shownFullCharge = false;
   let shownAimStep = -1;
@@ -383,6 +393,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
       if (s.race) updateRace(s.race);
       if (rush && s.rush) rush.update(s.rush);
+      if (passengers && s.passenger) passengers.update(s.passenger);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -498,24 +509,24 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         chainBarEl.style.transform = `scaleX(${f.toFixed(2)})`;
       }
 
-      // The reticle is up while the shot charges, and while the beam's line crosses a car.
-      // Charging, it reads out the reach the hold has bought so far — that number is the
-      // whole skill of the gun now, since nothing bends towards a target.
+      // The aim meter is up while the shot charges, and the ON TARGET line alone while the
+      // beam's line crosses a car. Charging, the bar reads out the reach the hold has bought
+      // so far — that number is the whole skill of the gun, since nothing bends to a target.
       const charging = s.aim01 > 0;
-      const showReticle = charging || s.targetAcquired;
-      if (showReticle !== locked) {
-        locked = showReticle;
-        reticleEl.classList.toggle('is-on', showReticle);
+      const showAim = charging || s.targetAcquired;
+      if (showAim !== aimVisible) {
+        aimVisible = showAim;
+        aimEl.classList.toggle('is-on', showAim);
       }
       if (charging !== shownCharging) {
         shownCharging = charging;
-        reticleEl.classList.toggle('is-charging', charging);
+        aimEl.classList.toggle('is-charging', charging);
       }
       // Full reach, still held: the meter has nothing left to say, so it says so and waits.
       const full = charging && s.aim01 >= 1;
       if (full !== shownFullCharge) {
         shownFullCharge = full;
-        reticleEl.classList.toggle('is-full', full);
+        aimEl.classList.toggle('is-full', full);
       }
       // Full reach is its own step, so the readout lands on the real maximum rather than on
       // whatever the last quantised step rounded to.
@@ -523,11 +534,11 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (aimStep !== shownAimStep) {
         shownAimStep = aimStep;
         if (aimStep < 0) {
-          reticleFillEl.style.transform = 'scaleX(0)';
-          reticleLabelEl.textContent = 'ON TARGET';
+          aimFillEl.style.transform = 'scaleX(0)';
+          aimLabelEl.textContent = 'ON TARGET';
         } else {
-          reticleFillEl.style.transform = `scaleX(${(aimStep / AIM_STEPS).toFixed(2)})`;
-          reticleLabelEl.textContent = `${Math.round(s.aimRange)}M`;
+          aimFillEl.style.transform = `scaleX(${(aimStep / AIM_STEPS).toFixed(2)})`;
+          aimLabelEl.textContent = `${Math.round(s.aimRange)}M`;
         }
       }
 
@@ -552,6 +563,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
 
     onEvent(e) {
       rush?.onEvent(e);
+      passengers?.onEvent(e);
       if (e.type === 'nearMiss') {
         // Shares the money flash column with kill rewards, but cyan, labelled, and drifting
         // DOWN instead of up: passes are frequent, and rising past the counters the way a
@@ -648,6 +660,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     dispose() {
       window.removeEventListener('gamepadconnected', onPadConnected);
       rush?.dispose();
+      passengers?.dispose();
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();

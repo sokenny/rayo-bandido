@@ -47,11 +47,21 @@ export function syncCar(car: CarVisual, v: VehicleState, pose: InterpolatedPose)
   }
 }
 
+/**
+ * The traffic.
+ *
+ * NOT CULLED BY DISTANCE, and that was measured rather than assumed. The open world holds 126
+ * of these against a 60-draw budget, so hiding the far ones looks like free money — but the
+ * city's haze is `FogExp2` (`HAZE.cityDensity`), chosen precisely so the far side of the bay
+ * keeps some contrast instead of clamping to flat fog. A car at 165 m is only about a fifth
+ * hazed, and dropping it there changes pixels by up to 100/255: a visible pop. By the distance
+ * the fog really does hide a car there is nothing left within it to cull. The draw calls are
+ * real and worth fixing — by instancing the fleet, not by hiding it.
+ */
 export function syncTargets(
   visuals: ElectricCarVisual[],
   targets: TargetState[],
   alpha: number,
-  acquiredId: number,
   time: number,
   /**
    * One flag per car, from `markRushTargets`: whether it is worth points in the Rayo Rush run
@@ -65,7 +75,6 @@ export function syncTargets(
     vis.root.position.set(lerp(t.prevX, t.x, alpha), lerp(t.prevY, t.y, alpha), lerp(t.prevZ, t.z, alpha));
     vis.root.rotation.y = -lerpAngle(t.prevHeading, t.heading, alpha);
     vis.setStatus(t.status, t.hitTime >= 0 ? time - t.hitTime : 0);
-    vis.setAcquired(t.id === acquiredId && t.status === 'active');
     vis.setRushTarget(!!rushMarks && rushMarks[t.id] === 1);
   }
 }

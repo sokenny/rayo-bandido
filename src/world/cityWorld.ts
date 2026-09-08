@@ -35,7 +35,8 @@ import {
   RADIO_TOWERS,
   RAMP_SPECS,
   RING_BILLBOARDS,
-  RUSH_SITE,
+  PASSENGER_STOPS,
+  RUSH_SITES,
   SKYWAY_SPEC,
   TRAFFIC_LOOPS,
   VIADUCT_CARS,
@@ -397,10 +398,12 @@ export function createCityWorld(): World {
     walls,
     surface,
     race: null,
-    // The free-world activity marker. A point and a heading; the rules read it
-    // (`src/sim/rush.ts`) and the art stands on it (`env/rushMarker.ts`). No collider —
-    // the boulevard under it is still just a boulevard.
-    rushSite: { ...RUSH_SITE },
+    // The free-world activity markers, one per mission and in mission order. Points and
+    // headings; the rules read them (`src/sim/rush.ts`) and the art stands on whichever is
+    // current (`env/rushMarker.ts`). No colliders — the streets under them are still streets.
+    rushSites: RUSH_SITES.map((site) => ({ ...site })),
+    // Where passengers wait. Points on roads; the rules and the art both read this list.
+    passengerStops: PASSENGER_STOPS.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },
@@ -413,9 +416,10 @@ export function createCityWorld(): World {
         elevated: !!rb.elevated,
       })),
       water: { minX: inner.minX, maxX: inner.maxX, minZ: CITY_QUAY_Z, maxZ: 270 },
-      // The same point the rules and the art are given, so the map cannot send the player
-      // somewhere the marker is not.
-      activities: [{ x: RUSH_SITE.x, z: RUSH_SITE.z }],
+      // The FIRST site only: the map marks where the marker actually is, and the marker is
+      // only ever at one of these at a time. `Minimap.setActivities` moves the mark when a
+      // cleared mission moves the marker, so the map cannot send the player somewhere it is not.
+      activities: [{ x: RUSH_SITES[0].x, z: RUSH_SITES[0].z }],
     },
   };
 
@@ -468,7 +472,7 @@ export function createCityWorld(): World {
     water,
     plaza: null,
     wantedBoard: null,
-    rushMarker: { ...RUSH_SITE },
+    rushMarkers: RUSH_SITES.map((site) => ({ ...site })),
     startLine: null,
     checkpoints: [],
     zoneAt,

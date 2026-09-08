@@ -11,21 +11,18 @@ import { attachTexture, type TextureHandle } from '../textures/load';
  * - `root` origin on the ground, nose toward local -Z. Sync sets position/rotation.
  * - `setStatus` is called every frame with the sim status and seconds since the hit
  *   (0 when never hit). 'destroyed' should read clearly: dark, sparking, tilted or sunk.
- * - `setAcquired(true)` is called when this target is the current auto-aim pick.
  * - `setRushTarget(true)` marks this car as worth points during a RAYO RUSH run
- *   (`src/sim/rush.ts`). Deliberately the SAME ring mesh the auto-aim lock uses, in the
- *   system's hazard amber and held steady rather than pulsed — a car that is merely worth
- *   points should read as noted, not as targeted, and the lock always wins when both apply.
- *   It costs no extra geometry, material or draw call: the ring is already there, unlit.
+ *   (`src/sim/rush.ts`), with a slow amber ring on the ground. That is the only thing the
+ *   ring ever means: aiming is the player's job and nothing locks on, so a car the beam
+ *   happens to line up with wears no marking at all.
  * - Share geometries/materials across instances; dispose shared resources once via
  *   `disposeElectricCarResources()`.
  *
- * Four draw calls per target: body, light bars, roof beacon, acquisition ring.
+ * Four draw calls per target: body, light bars, roof beacon, rush ring.
  */
 export interface ElectricCarVisual {
   root: THREE.Group;
   setStatus(status: TargetStatus, timeSinceHit: number): void;
-  setAcquired(acquired: boolean): void;
   setRushTarget(marked: boolean): void;
   update(frameDt: number, time: number): void;
   dispose(): void;
@@ -39,8 +36,8 @@ const POD = 0xdfe6ef;
 
 /**
  * The three paints the city's electric cars come in. Deliberately muted — the neon belongs
- * to the players, so a target reads as part of the traffic until it is locked. Which one a
- * car wears follows its index, so the mix is the same every run.
+ * to the players, so a target reads as part of the traffic. Which one a car wears follows
+ * its index, so the mix is the same every run.
  */
 const BODY_COLORS = [
   new THREE.Color(0xe8f0ff), // ice white
@@ -49,8 +46,7 @@ const BODY_COLORS = [
 ];
 const CHARRED_BODY = new THREE.Color(0x1d1b1a);
 const CLEAN_BAR = new THREE.Color(0x00e5ff);
-/** The lock ring's own cyan, and the quieter amber a Rayo Rush target wears instead. */
-const LOCK_RING = new THREE.Color(0x00e5ff);
+/** The amber a Rayo Rush target wears on the ground. */
 const RUSH_RING = new THREE.Color(0xfcee0a);
 const DEAD_BAR = new THREE.Color(0x0c0f12);
 
@@ -278,19 +274,7 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   const blinkPhase = (index * 0.37) % 1;
 
   let alive = true;
-  let acquired = false;
   let rushTarget = false;
-
-  /** Which of the two states the one ring is currently showing. */
-  const applyRing = (): void => {
-    const on = acquired || rushTarget;
-    ring.visible = on;
-    if (!on) {
-      ringMat.opacity = 0;
-      return;
-    }
-    ringMat.color.copy(acquired ? LOCK_RING : RUSH_RING);
-  };
 
   return {
     root,
@@ -323,15 +307,12 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       chassis.position.y = -0.12 * t;
       beacon.visible = false;
     },
-    setAcquired(value) {
-      if (value === acquired) return;
-      acquired = value;
-      applyRing();
-    },
     setRushTarget(value) {
       if (value === rushTarget) return;
       rushTarget = value;
-      applyRing();
+      ring.visible = value;
+      if (value) ringMat.color.copy(RUSH_RING);
+      else ringMat.opacity = 0;
     },
     update(_frameDt, time) {
       if (alive) {
@@ -342,11 +323,8 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
         const scale = flash ? 1.25 : 1;
         beacon.scale.set(scale, scale, scale);
       }
-      if (acquired) {
-        ring.rotation.y = time * 0.9;
-        ringMat.opacity = 0.55 + 0.35 * Math.sin(time * 6.5);
-      } else if (rushTarget) {
-        // A third of the lock's brightness and a fifth of its rate: present, not insistent.
+      if (rushTarget) {
+        // Slow and dim on purpose: present, not insistent.
         ring.rotation.y = time * 0.18;
         ringMat.opacity = 0.2 + 0.06 * Math.sin(time * 1.3);
       }

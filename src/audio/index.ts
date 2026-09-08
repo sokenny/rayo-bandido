@@ -113,6 +113,12 @@ export function createAudio(targetCount: number): AudioSystem {
           // Only on the way in. Rolling off a marker is not an event worth a sound.
           if (ev.on) oneShots.pickup();
           break;
+        case 'rushLevelUp':
+          // A mission cleared gets the GO beat, which is the one sound in the kit that already
+          // means "this is the good one" — and it lands on the flag, a beat before the results
+          // card, so the player hears it before they read it.
+          oneShots.countdown(true);
+          break;
         case 'restart':
           engine.reset();
           tires.reset();

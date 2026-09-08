@@ -3,6 +3,7 @@ import type { GameMode } from './core/types';
 import { createGame, type Game } from './game';
 import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
 import { showMainMenu, type MenuChoice } from './ui/mainMenu';
+import { showRaceMenu, type RaceChoice } from './ui/raceMenu';
 import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
@@ -18,11 +19,16 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 }
 
 /**
- * What to load comes from the URL: `?mode=city` (the open world), `?mode=test` (the original
- * test block), `?mode=race` (the Bandido Loop on your own), `?mode=circuit` (the versus circuit
- * inside the city, on your own — which is how you practise it) or `?mp=1` (a versus room).
- * Without any of them the main menu is shown and the choice is written into the URL, so a world
- * is always one reload away.
+ * What to load comes from the URL: `?mode=city` (the open world), `?mode=circuit` (the city
+ * circuit on your own), `?mp=1` (the same circuit in a room), `?race=1` (the screen that
+ * chooses between those two), `?mode=race` (the Bandido Loop, the original circuit — still
+ * built and still what the perf gate measures, just no longer on a menu) or `?mode=test` (the
+ * original test block). Without any of them the main menu is shown and the choice is written
+ * into the URL, so a world is always one reload away.
+ *
+ * RACE IS ONE TAB. The menu used to offer RACE and VERSUS as two cards on two different
+ * circuits; now RACE opens `?race=1`, where OFFLINE and VERSUS both lead to the Bandido Grid
+ * and the only difference is whether anybody else is on it.
  *
  * THE OPEN WORLD IS A SERVER. `?mode=city` does not build a private city any more: it joins the
  * one permanent room every server holds (`WORLD_ROOM_CODE`), so whoever else picked OPEN WORLD
@@ -56,11 +62,27 @@ function modeFromUrl(): GameMode | null {
  */
 const VERSUS_MODE: GameMode = 'circuit';
 
-/** This page with `mode`, `mp` and the room parameters replaced by whatever is asked for. */
-function urlWith(mode: GameMode | null, multiplayer = false, room = ''): string {
+/** Which screen an address asks for, for `urlWith`. Anything left out of it is cleared. */
+interface Destination {
+  mode?: GameMode;
+  /** The race menu: OFFLINE or VERSUS. */
+  race?: boolean;
+  /** Multiplayer — the room browser, or `room` when one is named. */
+  mp?: boolean;
+  room?: string;
+}
+
+/**
+ * This page with `mode`, `race`, `mp` and the room parameters replaced by whatever is asked
+ * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
+ */
+function urlWith(to: Destination = {}): string {
+  const { mode = null, race = false, mp: multiplayer = false, room = '' } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
+  if (race) params.set('race', '1');
+  else params.delete('race');
   if (multiplayer) params.set('mp', '1');
   else params.delete('mp');
   // `create` and `listed` describe one arrival and must not survive it: keeping them would
@@ -187,7 +209,7 @@ async function openWorld(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.code !== 'Escape') return;
     session?.dispose();
-    location.assign(urlWith(null));
+    location.assign(urlWith());
   });
 
   // Reloading or closing the tab gives the slot back now rather than whenever the browser gets
@@ -199,7 +221,10 @@ async function openWorld(): Promise<void> {
   });
 }
 
-/** Single player: build the world, start driving, ESC goes back to the menu. */
+/**
+ * Single player: build the world, start driving, ESC goes back to the menu — the race menu for
+ * a circuit, because that is the screen it was chosen on, and the main menu for anything else.
+ */
 async function boot(mode: GameMode): Promise<void> {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   const game = await buildGame(mode, loading, null);
@@ -207,8 +232,9 @@ async function boot(mode: GameMode): Promise<void> {
   canvas!.focus();
   void loading.hide();
 
+  const back = mode === 'circuit' || mode === 'race' ? urlWith({ race: true }) : urlWith();
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape') location.assign(urlWith(null));
+    if (e.code === 'Escape') location.assign(back);
   });
 }
 
@@ -245,7 +271,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
       // is to join a different one.
       teardownRace();
       session.dispose();
-      location.assign(urlWith(null, true));
+      location.assign(urlWith({ mp: true }));
     },
   });
 
@@ -308,7 +334,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     lobby.refresh();
     if (!addressed && session.room) {
       addressed = true;
-      history.replaceState(null, '', urlWith(null, true, session.room.code));
+      history.replaceState(null, '', urlWith({ mp: true, room: session.room.code }));
     }
     // A connection that drops mid-race leaves a world running that nobody can score.
     if ((session.phase === 'refused' || session.phase === 'closed') && game) {
@@ -319,11 +345,12 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
   });
 
   window.addEventListener('keydown', (e) => {
-    // ESC during a race leaves the match. The lobby handles its own ESC.
+    // ESC during a race leaves the match, back to the screen it was chosen on. The lobby
+    // handles its own ESC.
     if (e.code === 'Escape' && game) {
       teardownRace();
       session.dispose();
-      location.assign(urlWith(null));
+      location.assign(urlWith({ race: true }));
     }
   });
 }
@@ -348,6 +375,7 @@ function rooms(): void {
       // in the query string survives, `?server=` and `?debug=1` included.
       const params = new URLSearchParams(location.search);
       params.delete('mode');
+      params.delete('race');
       params.set('mp', '1');
       if (entry.join) params.set('room', entry.join);
       else params.delete('room');
@@ -365,7 +393,7 @@ function rooms(): void {
       setTimeout(() => location.assign(`${location.pathname}?${params.toString()}`), 120);
     },
     onBack() {
-      location.assign(urlWith(null));
+      location.assign(urlWith({ race: true }));
     },
   });
 }
@@ -374,9 +402,27 @@ function menu(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
-    const url = choice === 'multiplayer' ? urlWith(null, true) : urlWith(choice);
+    const url = choice === 'race' ? urlWith({ race: true }) : urlWith({ mode: choice });
     // A short beat for the card to light up, then reload into the chosen world.
     setTimeout(() => location.assign(url), 180);
+  });
+}
+
+/**
+ * The race menu: the second step of the RACE tab. Both cards lead to the same circuit, so the
+ * only thing chosen here is whether anybody else is on it.
+ */
+function raceMenu(): void {
+  const loading = createLoadingScreen(document.getElementById('loading-root'));
+  void loading.hide();
+  showRaceMenu(menuRoot!, {
+    onSelect(choice: RaceChoice) {
+      const url = choice === 'multiplayer' ? urlWith({ mp: true }) : urlWith({ mode: 'circuit' });
+      setTimeout(() => location.assign(url), 180);
+    },
+    onBack() {
+      location.assign(urlWith());
+    },
   });
 }
 
@@ -385,6 +431,25 @@ function menu(): void {
 // for the life of the page, whichever screen the address bar asks for.
 installMobileShell();
 
+/**
+ * BACK AND FORWARD REBUILD THE SCREEN. Every route here is an address, and each one is entered
+ * by loading it — so the browser's back button is a first-class way to move between them, and
+ * it has to arrive at a live screen rather than at the frozen one that was left behind.
+ *
+ * The back/forward cache would otherwise hand the last screen back exactly as it was at the
+ * moment it navigated away: a menu mid-exit, still wearing `is-leaving` (`opacity: 0`) and
+ * still holding the `done` flag that stops it answering a second choice — a blank page that
+ * does not respond to a click. A world is worse: a paused frame loop, a socket the server has
+ * long since given up on, a countdown that ended while the tab was in a drawer.
+ *
+ * So a restored page is reloaded. It costs the build again, which is what would have happened
+ * anyway had the browser not cached the page, and it makes every arrival identical: the
+ * address decides what is on screen, always.
+ */
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) location.reload();
+});
+
 const mode = modeFromUrl();
 if (new URLSearchParams(location.search).has('mp')) {
   const entry = roomEntryFromUrl(storedName());
@@ -392,4 +457,5 @@ if (new URLSearchParams(location.search).has('mp')) {
   else rooms();
 } else if (mode === 'city') void openWorld();
 else if (mode) void boot(mode);
+else if (new URLSearchParams(location.search).has('race')) raceMenu();
 else menu();

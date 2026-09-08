@@ -364,7 +364,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
   /* ------------------------------------------------- rayo rush marker */
 
-  const rushMarker = plan.rushMarker ? createRushMarker(plan.rushMarker) : null;
+  // Built at the first mission's site; the game moves it to whichever one the player has
+  // actually reached (`RushMarkerVisual.moveTo`) as soon as it knows their progress.
+  const rushMarker = plan.rushMarkers && plan.rushMarkers.length > 0 ? createRushMarker(plan.rushMarkers[0]) : null;
   if (rushMarker) root.add(rushMarker.group);
 
   /* ---------------------------------------------------------------- animation */

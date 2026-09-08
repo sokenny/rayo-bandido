@@ -27,7 +27,7 @@ Open http://127.0.0.1:5173 (add `?debug=1` for the performance overlay).
 | `npm run qa` | Headless Chrome drive of the whole loop; writes `artifacts/*.png` and `artifacts/qa-metrics.json` (needs the dev server running) |
 | `npm run qa:headed` | Same, in a visible Chrome window (use this for a real, vsync-limited FPS number) |
 
-Controls: WASD / arrows drive, Space handbrake, Shift nitro, E or left click fires lightning,
+Controls: WASD / arrows drive, Space (or `/` or numpad 0) handbrake, Shift nitro, E or left click fires lightning,
 R restarts, M mutes audio, F3 or backquote toggles the debug overlay, F4 reads the world
 coordinate under the crosshair and copies the whole readout to the clipboard.
 
@@ -1601,3 +1601,203 @@ score without spending an attempt. In the browser at `?mode=city`: prompt, count
 drift bonuses, the card with a new personal best, dismiss, and the same run again against a real
 server on 8088 — filed, ranked, and the prompt down to `NO RANKED ATTEMPTS LEFT TODAY · PRACTICE
 RUN` once the day was spent.
+
+## One RACE tab: the city circuit, alone or against a grid (2026-09-08)
+
+Juan: "without discarding the current circuit under Race, lets have that Race tab render the new
+city circuit we have in Versus. Also, lets just merge both tabs. Lets call it Race and one can
+choose to either race offline or Versus, by joining or creating a room."
+
+**What was wrong.** The main menu had three cards, and two of them were races on two different
+tracks: RACE was the Bandido Loop (`raceSpec.ts`, the standalone circuit) and VERSUS was the
+Bandido Grid (`circuitSpec.ts`, the lap cut through the open-world city). So the first question
+the menu asked was "which track", and the answer silently decided whether anyone else could be on
+it — you could not run the Grid alone without knowing that `?mode=circuit` existed, and you could
+not race the Loop against anyone at all. Company and track were tangled into one choice.
+
+**What it is now.** Two cards on the main menu — OPEN WORLD and RACE — and RACE opens a second
+screen (`?race=1`, `src/ui/raceMenu.ts`) with the only question that was ever really being asked:
+
+| | | |
+| --- | --- | --- |
+| OFFLINE | `?mode=circuit` | the Bandido Grid on your own, against the clock |
+| VERSUS | `?mp=1` | the room browser, then a lobby, then a grid of up to four |
+
+Both run the same circuit, so switching between them is not switching track. `VERSUS_MODE` in
+`src/main.ts` was already `'circuit'`; the offline half now points at the same constant's world
+rather than at a different one.
+
+**Nothing was discarded.** The Bandido Loop is still built, still tested (`tests/raceWorld.test.ts`,
+`tests/track.test.ts`) and still what the perf gate measures — `npm run perf -- --mode race`
+drives it, and `?mode=race` opens it. It is off the menu, not out of the build.
+
+**The shell the two menus share.** The main menu's list-plus-dossier markup moved into
+`src/ui/menuScreen.ts` and both screens are built from it, so arriving at the race menu is the
+same terminal one screen deeper rather than a second screen that happens to look similar. It also
+carries the one thing that differs between them: `setSpec` rewrites a single dossier row after
+the screen is drawn, which is how the main menu shows how busy the city is (`ONLINE 2 / 8
+DRIVING`) and how the race menu shows how many rooms are open (`ROOMS 02 OPEN`) — both polled over
+`GET /rooms`, both saying `NO SERVER` rather than `0` when there is nothing to ask.
+
+**ESC goes back where you came from**, which is now one level rather than always the top: out of a
+circuit or a match to the race menu, off the race menu to the main menu, off the room browser to
+the race menu (the lobby still goes back to the rooms, as before). The OFFLINE card keeps RACE's
+magenta and VERSUS keeps its cyan, so the colour follows the mode across the two screens.
+
+**Verified in the browser** at 800x450 on the dev server: both main-menu cards and their dossiers;
+RACE > OFFLINE building the Grid in the city with its barriers, LAP 1/2 and the countdown; ESC
+back to `?race=1`; RACE > VERSUS reaching the room browser and its ESC back to `?race=1`; the race
+menu's ESC back to the main menu; and `?mode=race` still opening the Bandido Loop, which the
+minimap tells apart from the Grid at a glance. 588 unit tests and typecheck green; no console
+errors beyond the expected `GET /rooms` refusals with no match server running.
+
+**Back and forward had to be fixed with it.** Every route here is an address entered by loading
+it, which makes the browser back button a real way to move between the screens — and it was
+landing on a blank page. The back/forward cache was handing back the screen exactly as it was
+left: a menu caught mid-exit, still wearing `is-leaving` (`opacity: 0`, a 200 ms fade against a
+180 ms navigation, so the frozen frame is already invisible) and still holding the `done` flag
+that stops it answering a second choice. Not just blank — dead to a click. A restored page now
+reloads (`pageshow` with `persisted`), which costs the build again, is what would have happened
+had the browser not cached the page at all, and makes every arrival identical: the address
+decides what is on screen, always. It fixes the worlds too, where a restore would otherwise give
+back a paused frame loop and a socket the server gave up on long ago.
+
+**A mode name is a wordmark, so it stays on one line.** `OPEN WORLD` was wrapping in the list.
+The list is wider (390px), and the name and the kicker beside it are both `nowrap` and both
+scale with the viewport (`clamp(16px, 5.4vw, 30px)`, and the kicker’s letter-spacing with it), so
+below the width where the panel stops growing they come down together rather than one of them
+folding. Full 30px at desktop, one line at 375 and at 320 with the row’s own padding intact.
+
+## Rayo Rush becomes three missions (2026-09-08)
+
+The activity now has a shape to get through rather than just a score to beat. Three missions, in
+order, each asking for more than the last — 1,200, then 3,000, then 6,000 — and each driven
+somewhere else in the city. Clear one and the marker packs up: the paint, the chevrons and the
+hologram re-appear at the next site, the map's yellow mark moves with them, and the sign there
+is asking for the bigger number.
+
+**The whole progression is one integer.** `RushState.cleared` — how many missions are finished —
+and everything else is derived from it: which mission is on offer (`rushLevelIndex`, clamped at
+the last), what it asks for (`rushTargetScore`), which street the marker stands in
+(`rushSiteFor`). There is no second copy to fall out of step, which is why the marker cannot end
+up at one corner while the target belongs to another. The rules move it forward by exactly one,
+at the flag, and only from the level it currently points at — so beating mission 1's number while
+standing on mission 2 clears nothing.
+
+**Where is the world's business, how much is the rules'.** A target score is a tuning value
+(`RUSH.levels`); a street corner is a fact about Bandido Bay (`ArenaLayout.rushSites`, one per
+mission, each carrying its own name). `rushSiteFor` is the only place the two lists meet,
+including the clamp that lets a world ship fewer sites than there are missions. The three:
+CENTRE BOULEVARD where the marker always was, DOWNTOWN CANYON on `av-main` between the towers
+with traffic on both sides of a 20 m street and `alley-e` to chain into, and THE WATERFRONT on
+`blvd-water` by the quay — the hardest to hold a streak in, because the bay takes half the
+escape routes away.
+
+**Progress is the browser's, not the board's.** `src/core/progress.ts` is localStorage and
+nothing else: no fetch, no promises, nothing to wait for. That is deliberate and it is the seam
+to cut when there is a database — every reader goes through `readRushProgress` / `writeRushProgress`
+and progress never travels any other way. It is kept apart from `src/net/leaderboard.ts` because
+that module's localStorage is a *mirror* of something the server owns, and mixing the two would
+mean a mission un-clearing itself because a fetch failed. So a run made offline, or with the
+day's three ranked attempts already spent, still advances the chain: clearing a mission is a fact
+about the driving. Everything read back is treated as untrusted — a count from a build with four
+missions in it clamps to three, a short `best` array grows, junk reads as a fresh player.
+
+**On screen.** The prompt gained a strip under the wordmark — `MISSION 2 / 3 · DOWNTOWN CANYON` —
+and its third line is now the bar to clear rather than a note about the board. The live readout
+carries `TARGET 3,000` under the score, which flashes and turns to `TARGET CLEARED` the instant
+the run crosses it, so "am I going to make it" is a glance and not a sum. The results card names
+the verdict above the personal best: a filled yellow chip and where you are going next when a
+mission falls, a red outline and how many points short when it does not. Once the chain is done
+the marker stays at the waterfront and the sign says `ALL MISSIONS CLEAR` with no target at all —
+the run goes on being worth driving for the global board, it has just stopped gating anything.
+
+**Verified in the browser** at 800x450 on the dev server, driving all three end to end: mission 1
+cleared on the boulevard, the card reading `MISSION 1 COMPLETE / NEXT · DOWNTOWN CANYON`, the
+marker group found at (-70, -124) and exactly one yellow mark on the minimap, now downtown;
+mission 2 and 3 the same; the all-clear prompt and its missing target line; and a reload picking
+the chain back up at the waterfront with the marker already standing there rather than at the
+first site. 605 unit tests and typecheck green.
+
+## Why the open world felt less smooth (2026-09-08)
+
+Juan reported the open world driving heavy on a very powerful PC while a Mac felt smoother, and
+asked whether the server was to blame. It is not: with `?mode=city&solo=1` (no socket at all) the
+city costs the same as with one open, and the sim side of a networked city is about 0.2 ms a
+frame. Three real causes, in order of size.
+
+**The browser is not using the fast GPU, and that is the whole story on this machine.** Chrome
+reports `ANGLE (Intel, Intel(R) Graphics (0x00007D67))` while an RTX 5060 sits idle beside it.
+The panel is 2560x1600 at 240 Hz with Windows on 150% scaling, so `devicePixelRatio` is 1.5 and
+the canvas is 3.36 Mpx — 2.3x what the headless perf probe measures at 1600x900. The GPU timer
+reads 5-13 ms a frame in every mode, city and circuit and race alike, which is the shape of a
+fill-rate limit rather than a scene-content one. `powerPreference: 'high-performance'` is already
+asked for in `createRenderer`; the override has to come from Windows Graphics Settings or the
+NVIDIA control panel, per browser executable. Nothing in the repo can fix it, and until it is
+fixed no code change here will make the difference Juan is asking about.
+
+**The resolution governor could not react on a 240 Hz display, and now can.** Its down rule
+compared the AVERAGE frame interval against `resolutionDownMs` (18.5 ms, the 60 Hz miss line).
+Vsync only ever presents whole refreshes, so a game mostly running at 120 FPS and regularly
+slipping to 40 averages about 16 ms and reads as healthy while every slip is a visible lurch —
+judder is a property of the spread, not the mean. `resolutionDownShare` (0.25) now steps the
+scale down when more than a quarter of the window's frames individually missed `downMs`, whatever
+the average said. The `cpuBound` and `gpuIdle` guards still apply, so a frame the main thread
+caused is still not answered with fewer pixels. Three tests cover it, including the exact
+alternating 8 ms / 29 ms mix whose mean sits under the threshold.
+
+**The city was running 1,666 Web Audio nodes to render silence.** Every electric car was given
+its own hover hum — four oscillators, a looping noise source, a bandpass and six gains, thirteen
+nodes, started at build and never stopped — and the open world holds 126 of them. `AUDIO.humFar`
+puts an exact zero on anything past 55 m, so all but a handful were audible to nobody, and each
+still took two `setTargetAtTime` writes from the main thread every frame. The voices are pooled
+now (`AUDIO.humVoices`, twelve) and handed to the nearest cars in range, re-tuned to each car's
+own pitch as they change hands; a car can only pick up a voice at the edge of `humFar` where its
+gain is zero, so a hand-off is silent by construction. Measured by counting node construction:
+open world **1,666 -> 184** nodes (506 oscillators -> 50), circuit 577 -> 187, race 184 -> 184,
+which is the point — a race never had the problem and its audio graph is untouched.
+
+**The traffic draw calls are over budget and were NOT fixed — deliberately.** `scripts/perf-drawcalls.mjs`
+(new) attributes every draw call to its object, and it is the traffic: the environment is properly
+merged at about twenty-five calls for the whole city, while 126 electric cars clone their own
+materials and cost three or four calls each, reaching **248 calls looking down a long boulevard**
+against a budget of 60. Hiding the distant ones looked free and is not: the city's haze is
+`FogExp2` at `HAZE.cityDensity`, chosen precisely so the far side of the bay keeps contrast
+instead of clamping flat, so a car at 165 m is only about a fifth hazed. A same-frame A/B (render
+the identical frame with and without the far cars, diff the pixels) put the error at up to 100/255
+against a harness noise floor of ~34 — a visible pop. By the distance the fog genuinely hides a
+car, there is nothing left within it worth culling. A draw-distance cull was written, measured,
+and reverted for that reason. The real fix is to instance the fleet, which would take those 248
+calls to single figures; it is a shader-patch job for per-instance emissive and beacon opacity,
+and it wants its own pass with the warm-up and the no-mid-play-compile gate in mind.
+
+**Also.** `src/render/probe.ts` no longer lets an invisible object answer the F4 crosshair —
+Three's raycaster does not test `visible`, so a switched-off mesh could name a surface that is
+not on screen.
+
+## Passengers: a free-world side ride (2026-09-08)
+
+Alongside RAYO RUSH, an organic pickup: a violet pin stands at a stop, the car parks inside its
+ring, `F` boards whoever is waiting, they say where they are going and how they like to be
+driven, and a tip on top of a fixed fare says how the ride went. Three characters ship as static
+data (`src/content/passengers.ts`: Mika wants speed and drifts, Vera wants calm and no sliding,
+Nico wants clean Rayo hits and a steady car); adding a fourth is adding an entry, and
+`tests/passenger.test.ts` validates every entry against the six preference kinds, the reactions
+each obliges, and the city's stops.
+
+- Rules: `src/sim/passenger.ts`, stepped after `stepRush`. Mood 0..100 moves per second for the
+  speed rules (with a grace) and in rate-limited, capped steps for drifts, Rayo kills (once per
+  car) and crashes (for everybody). A stopped car earns and loses nothing. `RushState.locked` /
+  `PassengerState.locked` are written by `stepGame` so the two activities never overlap.
+- Content is chosen before the ride (`planTrip`): character, both stops, fare, opening variant.
+  The dialogue queue plays one prewritten line at a time with priorities, a stale drop for
+  reactions, and no back-to-back repeats. No AI, no audio.
+- Stops: `PASSENGER_STOPS` in `src/world/citySpec.ts`, tagged so the catalogue never names a
+  coordinate; the test checks each is on a road, clear of junctions and of the RUSH sites.
+- Presentation: `src/ui/passengerOverlay.ts` (prompt, ride panel with an SVG portrait from
+  `src/ui/portraits.ts`, subtitle strip, fare card), `src/render/scene/env/passengerMarker.ts`
+  (ring + beam, pickup and destination roles), violet marks on the minimap.
+- Money is paid once, by `applyPassengerFare` in `src/sim/economy.ts`, on `passengerComplete`.
+  A cancelled ride (second `F` within 2.5 s, `R`, a multiplayer rescue) pays nothing. Rides
+  completed and the best tip persist under `rb.passenger.rides`.
+- Tuning: `PASSENGER` in `src/config/tuning.ts`. Automation: `__rb.passenger.offerNow()`.

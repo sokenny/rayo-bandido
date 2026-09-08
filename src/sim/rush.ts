@@ -33,13 +33,67 @@ import { RUSH } from '../config/tuning';
  * slide is over by the time the nose is pointed at anything. The drift's own length and
  * whether it survived without a collision are what the extra points are scaled by.
  *
+ * THE MISSION CHAIN. Three runs in order (`RUSH.levels`), each asking for a bigger score than
+ * the last and each driven at its own site. `RushState.cleared` is the whole of it: which
+ * mission is on offer, which site the marker stands on and what score it wants are all derived
+ * from that one number, so there is nothing to keep in step. The rules move it forward by
+ * exactly one, at the end of a run that met the target, and never in any other circumstance —
+ * they do not know how to write it down, how to read it back or what a browser is. Persisting
+ * it is the caller's job (`src/core/progress.ts`), which is why a run made offline, or with the
+ * day's ranked attempts already spent, still advances the chain: clearing a mission is a fact
+ * about the driving, not about the network.
+ *
  * Pure data in, pure data out. No Three.js, no DOM, no clock of its own, and nothing here
  * allocates per tick.
  */
 
-export function createRushState(targetCount: number): RushState {
+/** How many missions there are. One place asks `RUSH.levels` its length; everything else asks here. */
+export function rushLevelCount(): number {
+  return RUSH.levels.length;
+}
+
+/**
+ * Which mission `cleared` missions in is on offer. Clamped at the last one, so a player who has
+ * finished the chain keeps the final site and its target rather than falling off the end of the
+ * list — `rushAllClear` is what tells them apart.
+ */
+export function rushLevelIndex(cleared: number): number {
+  const last = RUSH.levels.length - 1;
+  if (!Number.isFinite(cleared) || cleared <= 0) return 0;
+  return Math.min(last, Math.floor(cleared));
+}
+
+/** The score the mission on offer is asking for. */
+export function rushTargetScore(cleared: number): number {
+  return RUSH.levels[rushLevelIndex(cleared)].target;
+}
+
+/** True once every mission has been cleared. The marker stops moving; runs stop gating. */
+export function rushAllClear(cleared: number): boolean {
+  return cleared >= RUSH.levels.length;
+}
+
+/**
+ * Where the mission on offer is driven. The ONLY place the world's list of sites and the
+ * tuning's list of levels are put together, which is what makes the mismatch harmless: a world
+ * that ships fewer sites than there are missions simply runs the last few at its last site.
+ * Returns null when the world carries no sites at all, which is how every map but the city
+ * says it does not have the activity.
+ */
+export function rushSiteFor(sites: readonly ActivitySite[] | null | undefined, cleared: number): ActivitySite | null {
+  if (!sites || sites.length === 0) return null;
+  return sites[Math.min(rushLevelIndex(cleared), sites.length - 1)];
+}
+
+/**
+ * `cleared` is how many missions this player has already finished, which the caller has read
+ * back from wherever it keeps such things. It defaults to 0 — a fresh browser starts at the
+ * first mission — and is clamped, because a stored number is an untrusted number.
+ */
+export function createRushState(targetCount: number, cleared = 0): RushState {
   return {
     phase: 'idle',
+    cleared: clampCleared(cleared),
     countdown: 0,
     timeLeft: 0,
     score: 0,
@@ -50,6 +104,7 @@ export function createRushState(targetCount: number): RushState {
     bestChain: 0,
     styleBonus: 0,
     atMarker: false,
+    locked: false,
     ranked: false,
     rearmed: true,
     scored: new Uint8Array(targetCount),
@@ -61,7 +116,28 @@ export function createRushState(targetCount: number): RushState {
   };
 }
 
-/** Back to plain free roam. Used by a restart, and by dismissing the results card. */
+/** A stored progress count, made safe: a whole number between 0 and the length of the chain. */
+function clampCleared(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(RUSH.levels.length, Math.floor(value));
+}
+
+/**
+ * Move the chain to a given point. The caller's way of restoring progress it had written down
+ * (`src/core/progress.ts`) onto a state that was built before that was known, and the only
+ * thing besides finishing a run that may move it.
+ */
+export function setRushProgress(r: RushState, cleared: number): void {
+  r.cleared = clampCleared(cleared);
+}
+
+/**
+ * Back to plain free roam. Used by a restart, and by dismissing the results card.
+ *
+ * `cleared` is deliberately NOT touched: restarting the game puts the car back at the spawn,
+ * it does not un-finish missions the player has finished. Progress leaves this state only by
+ * being overwritten with `setRushProgress`.
+ */
 export function resetRushState(r: RushState): void {
   r.phase = 'idle';
   r.countdown = 0;
@@ -177,7 +253,7 @@ export function markRushTargets(
  * never disagree — standing in a marker that has not re-armed since the last run shows nothing.
  */
 export function canStartRush(rush: RushState): boolean {
-  return rush.phase === 'idle' && rush.atMarker && rush.rearmed;
+  return rush.phase === 'idle' && rush.atMarker && rush.rearmed && !rush.locked;
 }
 
 /**
@@ -226,13 +302,37 @@ export function dismissRush(rush: RushState, events: GameEvent[]): boolean {
   return true;
 }
 
-function endRun(rush: RushState, events: GameEvent[]): void {
+/**
+ * The flag. Freezes the run into a `RushResults`, and — this is the whole of the progression —
+ * moves the chain on by one when the score met what the mission asked for AND that mission was
+ * the one still outstanding. The second half of that condition is what stops a replay of an
+ * already-cleared level from skipping the next one: `rush.cleared` is both "how many are done"
+ * and "which one is on offer", so it may only ever be incremented from the level it points at.
+ *
+ * The promotion is raised BEFORE the run itself, so a listener that moves the marker and one
+ * that shows the card see them in the order they happened.
+ */
+function endRun(rush: RushState, site: ActivitySite, events: GameEvent[]): void {
+  const level = rushLevelIndex(rush.cleared);
+  const targetScore = RUSH.levels[level].target;
+  const cleared = rush.score >= targetScore;
+  const advanced = cleared && rush.cleared === level;
+  if (advanced) {
+    rush.cleared = level + 1;
+    events.push({ type: 'rushLevelUp', level, cleared: rush.cleared, allClear: rushAllClear(rush.cleared) });
+  }
+
   const results: RushResults = {
     score: rush.score,
     disabled: rush.disabled,
     bestChain: rush.bestChain,
     styleBonus: rush.styleBonus,
     ranked: rush.ranked,
+    level,
+    targetScore,
+    levelLabel: site.label ?? '',
+    cleared,
+    advanced,
   };
   rush.phase = 'results';
   rush.timeLeft = 0;
@@ -321,7 +421,7 @@ export function stepRush(
       events.push({ type: 'rushCountdown', seconds: after });
     }
   } else if (rush.phase === 'running') {
-    stepRunningRush(rush, targets, dt, events);
+    stepRunningRush(rush, site, targets, dt, events);
   }
 
   /* ------------------------------------------------------------ the offer */
@@ -337,7 +437,7 @@ export function stepRush(
  * clock. Split out of `stepRush` only so the phases read as alternatives rather than as a
  * sequence of early returns — nothing here is called from anywhere else.
  */
-function stepRunningRush(rush: RushState, targets: TargetState[], dt: number, events: GameEvent[]): void {
+function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetState[], dt: number, events: GameEvent[]): void {
   if (rush.chainWindow > 0) {
     rush.chainWindow = Math.max(0, rush.chainWindow - dt);
     // Too long between eliminations: the streak is gone.
@@ -402,6 +502,6 @@ function stepRunningRush(rush: RushState, targets: TargetState[], dt: number, ev
     // Time expires at the END of the tick, so a kill that landed on this very tick is paid —
     // and nothing after it can be. The clock stops here; `phase` leaves the scoring loop above
     // unreachable from the next tick on.
-    endRun(rush, events);
+    endRun(rush, site, events);
   }
 }

@@ -6,7 +6,7 @@ import type { PlayerCommand } from '../types';
  * `fire` is not one of them: it reports the button's held state, because the lightning charges
  * while it is down and the simulation owns that timing (`src/sim/lightning.ts`).
  *
- * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space handbrake, Shift nitro,
+ * Bindings (docs/DECISIONS.md): WASD / arrows drive, Space (or `/` or numpad 0) handbrake, Shift nitro,
  * E held (or a held mouse button) charges and throws the lightning, R restarts, C toggles
  * cruise mode, P cycles camera view, X / Z shift up / down on a manual box, T toggles automatic / manual, F takes up (and
  * afterwards dismisses) a free-world activity — the Rayo Rush marker.
@@ -104,7 +104,14 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.throttle = forward ? 1 : 0;
       out.brake = back ? 1 : 0;
       out.steer = (right ? 1 : 0) - (left ? 1 : 0);
-      out.handbrake = down.has('Space');
+      // Space is the handbrake, but on a membrane keyboard the arrow cluster and Space can
+      // share matrix lines, and the third key of Up + Left + Space is then never delivered to
+      // the browser at all - the classic ghosting failure, and it is the hardware's, not ours.
+      // `/` and numpad 0 sit far enough away on every layout we have seen to survive it, and
+      // both fall under the right hand that is already on the arrows. Neither is a modifier,
+      // so holding one cannot turn a throttle press into a browser shortcut the way Ctrl+W
+      // would.
+      out.handbrake = down.has('Space') || down.has('Slash') || down.has('Numpad0');
       out.nitro = down.has('ShiftLeft') || down.has('ShiftRight');
       out.fire = down.has('KeyE') || firingPointers.size > 0;
       out.restart = restartLatched;
@@ -144,6 +151,8 @@ function isGameKey(code: string): boolean {
     case 'ArrowLeft':
     case 'ArrowRight':
     case 'Space':
+    case 'Slash':
+    case 'Numpad0':
     case 'ShiftLeft':
     case 'ShiftRight':
     case 'KeyE':

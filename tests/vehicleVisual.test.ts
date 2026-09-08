@@ -352,7 +352,7 @@ describe('electric car visual', () => {
       expect(Math.abs(chassis.rotation.z)).toBeGreaterThan(midTilt);
       expect(chassis.position.y).toBeLessThan(0);
 
-      target.setAcquired(true);
+      target.setRushTarget(true);
       target.update(1 / 60, 2.6);
       target.setStatus('active', 0);
       expect(chassis.rotation.z).toBe(0);

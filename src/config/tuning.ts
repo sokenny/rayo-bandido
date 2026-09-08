@@ -1017,8 +1017,19 @@ export const RENDER = {
   adaptiveResolution: true,
   minPixelRatio: 0.7,
   resolutionStep: 0.85,
-  /** Average frame interval (ms) that counts as dropping frames under 60 Hz vsync. */
+  /** Frame interval (ms) above which a frame missed 60 FPS. */
   resolutionDownMs: 18.5,
+  /**
+   * Share of frames in the window allowed to miss `resolutionDownMs` before the scale steps
+   * down, even when the AVERAGE still looks healthy.
+   *
+   * The average alone is blind on a high-refresh display. A 240 Hz panel presents whole
+   * refreshes, so a game that mostly runs at 120 FPS but regularly slips to 40 averages about
+   * 16 ms — under the threshold — while the player sees the cadence lurch on every slip, which
+   * is exactly what reads as "not smooth". Counting the frames that actually missed catches
+   * that; the average catches the steady case. Either one steps the scale down.
+   */
+  resolutionDownShare: 0.25,
   /** Average frame interval (ms) that proves a high-refresh display has headroom. */
   resolutionUpMs: 11,
   /** GPU ms per frame that leave enough room to step the scale up one notch. */
@@ -1099,6 +1110,15 @@ export const AUDIO = {
   humNear: 6,
   /** Distance (m) beyond which an electric car hum is inaudible. */
   humFar: 55,
+  /**
+   * How many hum voices exist at once. A voice is thirteen always-running Web Audio nodes,
+   * and `humFar` means a car further away than that contributes exactly nothing — so the
+   * open world's 126 cars would be 1,600-odd nodes rendering silence. The voices are pooled
+   * instead and handed to the nearest cars in range (`src/audio/electricHum.ts`). Comfortably
+   * more than can ever be within `humFar` at once; if it were not, the car dropped would be
+   * the furthest one, which is the quietest.
+   */
+  humVoices: 12,
   /** Widest stereo pan applied to a spatialized electric hum (0..1). */
   maxPan: 0.85,
 };
@@ -1300,6 +1320,31 @@ export const RUSH = {
   dailyRankedAttempts: 3,
 
   /**
+   * THE MISSION CHAIN. Three of them, in order, and the ONLY thing that separates one from the
+   * next is the number it asks for: same clock, same city, same weapon. Clear one and the
+   * marker packs up and re-paints itself somewhere else, which is what turns a leaderboard
+   * into a progression — the player is sent somewhere new rather than told to try harder in
+   * the same street.
+   *
+   * WHERE each level is driven is not here. A target score is a rule and belongs in this file;
+   * a street corner is a fact about a particular city, so it lives with that city
+   * (`ArenaLayout.rushSites`, one site per level, in this order, each carrying its own name).
+   * A world that ships fewer sites than there are levels simply reuses its last one.
+   *
+   * WHY THESE NUMBERS. A kill is 100 before the streak multiplier and a drift-charged shot
+   * pays 50-150 on top, so a run is roughly `kills x (100 x average multiplier + style)`:
+   *
+   *   ~8 kills, barely chained            ~1,200   <- level 1 is "you have understood the loop"
+   *   ~12 kills, streaks held             ~3,000   <- level 2 needs the chain window respected
+   *   ~18 kills, streaks AND clean drifts ~6,000   <- level 3 needs both at once
+   *
+   * So each level is beaten by adding one habit rather than by grinding the last one. Progress
+   * is per browser and lives in localStorage (`src/core/progress.ts`); it is deliberately NOT
+   * the global board, which keeps ranking whole runs however far through the chain you are.
+   */
+  levels: [{ target: 1200 }, { target: 3000 }, { target: 6000 }],
+
+  /**
    * The activity marker in the world, and the prompt it raises.
    *
    * THE PAINTED CIRCLE IS THE TRIGGER. `promptRadius` is not a detection range that happens to
@@ -1361,5 +1406,129 @@ export const RUSH = {
     driftBonusMaxSeconds: 4,
     /** Extra on top again when the drift was clean: held from start to finish without a hit. */
     cleanDriftBonus: 40,
+  },
+};
+
+/**
+ * PASSENGERS: the free-world side rides (`src/sim/passenger.ts`).
+ *
+ * Someone waits at a stop, gets in, says where they are going and how they like to be driven,
+ * and tips according to how the ride went. Every threshold, weight, grace and reward the rules
+ * use is here; the characters themselves — who they are and what they say — are data in
+ * `src/content/passengers.ts`, and where the stops are is the city's business
+ * (`ArenaLayout.passengerStops`).
+ *
+ * THE MOOD is one number 0..100. It starts neutral-positive and moves two ways: SLOWLY, per
+ * second, for how the car is being driven right now (a calm ride for someone who asked for one,
+ * a fast one for someone who asked for that), and IN STEPS for things that happen (a drift, a
+ * Rayo hit, a crash). Both gains are capped per ride, so nothing can be farmed; sitting still
+ * earns nothing, so the pickup and the drop-off cost nobody anything. Penalties are not capped
+ * but the mood floors at zero and a bad ride is a small tip, never a failed mission.
+ */
+export const PASSENGER = {
+  offer: {
+    /** Seconds after entering the world before the first pin goes up. */
+    firstDelay: 5,
+    /** Seconds after a ride (finished or abandoned) before the next pin goes up. */
+    reofferSeconds: 10,
+    /** A pin never goes up closer to the car than this (m): it is found, not handed over. */
+    minDistanceFromPlayer: 70,
+    /** Straight-line trip length the planner aims for (m). Long enough to be a ride, short enough to stay a side thing. */
+    minTrip: 170,
+    maxTrip: 520,
+  },
+  marker: {
+    /** Radius of the pickup and drop-off zones (m), and the radius the ring is painted at. */
+    promptRadius: 7,
+    /** Radius at which the zone lets go again (m). Slightly wider so a parked car cannot flicker it. */
+    exitRadius: 8.2,
+    /** The car has to be at or under this (m/s) to board or drop off: stopped, or as good as. */
+    stopSpeed: 1.5,
+  },
+  /** Pressing the key twice inside this window (s) ends a ride early. One press only arms it. */
+  cancelArmSeconds: 2.5,
+  mood: {
+    /** Where every ride starts. */
+    start: 62,
+    /** Ceiling on what continuous good driving may add over a whole ride. */
+    maxFlowGain: 30,
+    /** Ceiling on what discrete events (drifts, Rayo hits) may add over a whole ride. */
+    maxEventGain: 40,
+    /** Farewell tiers, by final mood. */
+    highTier: 72,
+    mediumTier: 42,
+  },
+  speed: {
+    /** Below this (m/s) the car counts as stopped: no speed rule applies either way. */
+    movingSpeed: 3,
+    /** Seconds over a limit before it starts to cost. A spike over a crest is not a habit. */
+    limitGraceSeconds: 1.2,
+    /** Mood per second while over the limit past the grace (times the preference's weight). */
+    overDrainPerSecond: 4,
+    /** Mood per second while moving under the limit. */
+    calmGainPerSecond: 1.1,
+    /** Fast-preference default threshold (km/h) when a character does not name one. */
+    fastKmh: 110,
+    /** Mood per second at or over the fast threshold. */
+    fastGainPerSecond: 1.5,
+    /** Moving below this share of the fast threshold counts as dawdling. */
+    dawdleShare: 0.45,
+    /** Seconds of dawdling before it starts to cost. Corners and traffic are not dawdling. */
+    slowGraceSeconds: 6,
+    /** Mood per second of dawdling past the grace. */
+    slowDrainPerSecond: 1.2,
+    /** Seconds of continuous satisfied driving before the passenger says so. */
+    goodStreakSeconds: 12,
+  },
+  drift: {
+    /** A slide shorter than this (s) is nobody's business either way. */
+    minSeconds: 0.8,
+    /** For a passenger who wants drifts: flat, plus per second of the slide, up to a ceiling. */
+    bonus: 6,
+    bonusPerSecond: 2,
+    bonusMax: 14,
+    /** Seconds before another drift may pay. */
+    cooldown: 3,
+    /** For a passenger who does not: the cost of one drift, and the least time between two. */
+    penalty: 8,
+    penaltyCooldown: 2,
+  },
+  rayo: {
+    /** For a passenger who wants EVs shut down: per car, once per car, no faster than the cooldown. */
+    bonus: 12,
+    cooldown: 2,
+    /** For a passenger who does not: per car, once per car. */
+    penalty: 12,
+  },
+  collision: {
+    /** Speed lost in a hit (m/s) below which it is a scrape and not a crash. */
+    minImpact: 2.5,
+    /** The cost of one crash, for everybody. */
+    penalty: 6,
+    /** Seconds before another crash counts. A grind along a wall is one crash, not sixty. */
+    cooldown: 1.5,
+  },
+  dialogue: {
+    /** A subtitle stays up for at least this long (s), plus a little per character, up to a cap. */
+    minSeconds: 2.8,
+    secondsPerChar: 0.045,
+    maxSeconds: 6.5,
+    /** Silence between two lines (s). */
+    gapSeconds: 0.5,
+    /** Least time between two incidental reactions (s), so the passenger is not a commentator. */
+    reactionCooldown: 7,
+    /** A reaction still waiting after this long (s) is dropped: the moment has passed. */
+    reactionStale: 4,
+    /** Least time between two remarks about speed (s). */
+    speedLineCooldown: 18,
+  },
+  reward: {
+    /** The fare: a flat call-out plus a rate on the trip's straight-line length. Fixed at the offer. */
+    baseFare: 120,
+    farePerMetre: 0.6,
+    /** The most a delighted passenger tips. Scales linearly from `tipFloor` mood to 100. */
+    maxTip: 300,
+    /** Mood at or under which the tip is nothing. */
+    tipFloor: 35,
   },
 };

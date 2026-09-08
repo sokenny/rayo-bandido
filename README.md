@@ -4,7 +4,7 @@ Browser arcade drift game. Drive an outlaw combustion GT86-like coupe through a 
 city, drift to charge lightning, fire it at the electric cars that replaced everything else, get paid.
 
 Desktop browser with a keyboard or a pad — and a phone, held sideways, with the on-screen pad
-(see [Phones](#phones)). Three ways in from the main menu:
+(see [Phones](#phones)). Two ways in from the main menu:
 
 - **Open World** — Bandido Bay, the big free-roam city, **and everybody else who is in it**: a
   viaduct on pillars round the whole map and out over the bay, four ramps, a skyway that climbs to
@@ -12,15 +12,19 @@ Desktop browser with a keyboard or a pad — and a phone, held sideways, with th
   cars (four of them lapping the viaduct). There is no lobby and no code — every server holds one
   permanent city and picking OPEN WORLD drops you straight into it, up to eight cars at a time,
   each a different colour. See [The open world](#the-open-world).
-- **Test** — the original free-roam city block: drift plaza, highway, JDM alley, six patrolling electric cars.
-- **Race** — the *Bandido Loop*, a 1.4 km street circuit for 2-lap races of about a minute and a
-  half: a highway straight to empty the nitro on, chained sweepers to drift through (no corner
-  sharper than 60 degrees, none tighter than 36 m), two city "bays" with tighter streets, and two
-  hidden alley shortcuts. Electric cars patrol the lap ahead of you. Checkpoints keep the laps
-  honest; the clock is the opponent.
-- **Versus** — the same circuit against up to three friends. Open a room and send the link it
-  gives you; leave it public for anyone on the server to join, or untick that and only the people
-  you sent it to are on the grid. See [Multiplayer](#multiplayer).
+- **Race** — the *Bandido Grid*, a 1.5 km street circuit cut through that same city: downtown,
+  the waterfront and the viaduct out over the bay, barriered on both sides, two laps of roughly
+  two minutes. Checkpoints keep the laps honest. Picking RACE asks one more question — who else
+  is on it:
+  - **Offline** — the circuit on your own, against the clock.
+  - **Versus** — the same two laps against up to three friends. Open a room and send the link it
+    gives you; leave it public for anyone on the server to join, or untick that and only the
+    people you sent it to are on the grid. See [Multiplayer](#multiplayer).
+
+Two more worlds are still built, and reached by address rather than by menu: `?mode=race` is the
+*Bandido Loop*, the original 1.4 km standalone circuit (see [Race mode](#race-mode)), and
+`?mode=test` is the original free-roam city block — drift plaza, highway, JDM alley, six
+patrolling electric cars.
 
 ## Run
 
@@ -32,10 +36,12 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173 for the main menu. The chosen world lives in the URL (`?mode=city`,
-`?mode=test`, `?mode=race`, `?mode=circuit`, or `?mp=1` for a versus room), so a world can be opened directly and a room link can
+`?mode=test`, `?mode=race`, `?mode=circuit`, `?race=1` for the race menu, or `?mp=1` for a versus
+room), so a world can be opened directly and a room link can
 be shared — `?mp=1` alone opens the room browser, `?mp=1&room=K7QP` goes straight into a room.
-`?mode=circuit` is the versus circuit on your own, which is how you practise it and how the QA
-and perf scripts drive it.
+`?mode=circuit` is RACE > OFFLINE: the Bandido Grid on your own, which is how you practise it and
+how the QA and perf scripts drive it. `?mode=race` is still the Bandido Loop, which is what the
+perf gate measures.
 `?mode=city` joins the shared open world; add `&solo=1` for a city with nobody else in it, which
 is what the capture and QA scripts use.
 Append `?debug=1` to start with the performance overlay open, and `?scale=1` (any 0.7-1.5) to pin
@@ -57,7 +63,7 @@ the render scale instead of letting the resolution governor pick it. For multipl
 | `npm run qa:mp:lag` | The same through an 80 ms (+20 ms jitter) relay with `--chaos`: each car rams an electric car and both fire lightning, so the shoves and kills the screens must agree about actually happen. Also counts a car flickering between destroyed and alive |
 | `npm run perf` | Performance probe: startup breakdown, worst frame while each effect appears for the first time, shaders compiled per phase, CPU/GPU ms per frame. Writes `artifacts/perf.json`. `npm run perf:headed` for vsync-limited numbers. `--mode race` probes the circuit; `--url http://127.0.0.1:4173/?debug=1&mode=test` probes the production build |
 | `node scripts/track-preview.mjs` | Circuit design tool: prints the lap's straights, corners and an estimated lap time, and writes a top-down SVG of `src/world/raceSpec.ts` to `artifacts/track-preview.svg` |
-| `node scripts/circuit-preview.mjs` | The same for the versus circuit (`src/world/circuitSpec.ts`): lap length, corners, climb, estimated lap time, the largest radius each corner will take, and whether the whole ribbon — edge to edge, at its own height — stands on a real city road. Writes `artifacts/circuit-preview.svg` |
+| `node scripts/circuit-preview.mjs` | The same for the city circuit (`src/world/circuitSpec.ts`): lap length, corners, climb, estimated lap time, the largest radius each corner will take, and whether the whole ribbon — edge to edge, at its own height — stands on a real city road. Writes `artifacts/circuit-preview.svg` |
 | `npm run perf:check` | **Perf gate.** Builds, serves `dist/` itself, probes it twice and fails on regressions that do not depend on the machine: any shader compiled mid-play, a frame over 33 ms while an effect first appears, more than 60 draw calls or 200k triangles, over 4 ms of main-thread work per frame, console errors. Run it before merging anything that touches rendering |
 
 ## Performance
@@ -88,7 +94,7 @@ Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md
 | --- | --- |
 | W / S or Up / Down | Throttle / brake (brake at standstill reverses). Braking mid-drift is a left-foot brake: it loads the front and tightens the line toward the apex rather than snapping the car straight |
 | A / D or Left / Right | Steer. Throttle or steering holds a slide; counter-steering out of it recovers grip, and releasing everything regrips within about 1.5 s |
-| Space | Handbrake (kick the rear out to start a drift) |
+| Space, `/` or numpad 0 | Handbrake (kick the rear out to start a drift). `/` and numpad 0 are there for keyboards whose matrix ghosts Up + Left + Space — see [Controls](#controls) note below |
 | T | Automatic / manual transmission (remembered). On manual you keep the gear through a corner and the limiter caps you at that gear's top speed. The box sets the tacho, the engine note and the limiter — it does not change how the car slides |
 | X / Z | Shift up / down (manual). On a pad: RB / LB |
 | Shift | Nitro (recharges gradually while driving) |
@@ -97,6 +103,18 @@ Rules of the road are in `AGENTS.md`; the measured state is in `docs/PROGRESS.md
 | C | Cruise mode: the car drives itself around the city (or the lap) at a relaxed pace. Any driving input hands control back |
 | Esc | Back to the main menu |
 | F3 or ` | Toggle the debug overlay (FPS, draw calls, triangles) |
+
+Every action is bound to both hand positions at once, so you can swap between WASD and the
+arrows mid-race without a settings screen.
+
+> **If the handbrake stops responding while you are cornering**, your keyboard is ghosting, not
+> dropping inputs in the game. Membrane keyboards wire their keys as a scan matrix, and certain
+> three-key combinations share enough matrix lines that the third keypress is never reported to
+> the OS at all — Up + Left + Space is a common one. The signature is that the same combination
+> works on the other side (Up + Right + Space) and starts working again the moment you release
+> one of the three. Three fixes, in order of effort: drive with WASD, which keyboards are
+> explicitly designed to keep clean with Space; use `/` or numpad 0 for the handbrake instead;
+> or use a keyboard with n-key rollover, which most mechanical boards have.
 
 On a phone the same actions are on the on-screen pad — see [Phones](#phones).
 
@@ -127,9 +145,10 @@ same physics, same HUD.
 
 ## Race mode
 
-RACE in the menu is the **Bandido Loop**, the standalone circuit; VERSUS races the **Bandido
-Grid**, a lap of the open-world city (see [The versus circuit](#the-versus-circuit) below). The
-rules below are the same on both.
+RACE in the menu is the **Bandido Grid**, a lap of the open-world city — alone (OFFLINE) or
+against a grid (VERSUS); see [The city circuit](#the-city-circuit) below. The **Bandido Loop**,
+the standalone circuit RACE used to open, is still built and still driven by `?mode=race`; it is
+what the perf gate measures. The rules below are the same on both.
 
 Three-second countdown on the grid, then laps through five gates: the start/finish line and
 four checkpoint arches, crossed in order. A gate crossed backwards has to be crossed again, and the
@@ -146,11 +165,12 @@ colliders, gates, grid, patrols and the city blocks around the road, and the ren
 asphalt, guardrails, lamps and the rest from the same data. Change the spec, run
 `node scripts/track-preview.mjs`, look at the SVG, run `npm test`.
 
-## The versus circuit
+## The city circuit
 
 **Bandido Grid** is not a separate map: it is the open-world city with a race drawn inside it.
 One racing line, a holographic barrier down each side of it, two laps of about 1.5 km, roughly
-two minutes. This is what VERSUS races on.
+two minutes. This is what RACE runs, whichever way you enter it: OFFLINE puts you on it alone,
+VERSUS fills the grid.
 
 A lap, in order:
 

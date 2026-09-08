@@ -20,9 +20,11 @@ import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
 import { createBuses, resetBuses, stepBuses } from './buses';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
-import { applyRewards } from './economy';
+import { applyPassengerFare, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
-import { createRushState, resetRushState, stepRush } from './rush';
+import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
+import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
+import { PASSENGERS } from '../content/passengers';
 import { settleVehicle } from './surface';
 
 /**
@@ -103,7 +105,8 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
     race: layout.race ? createRaceState(layout.race) : null,
-    rush: layout.rushSite ? createRushState(layout.targetSpawns.length) : null,
+    rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
+    passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     events: [],
   };
 }
@@ -123,6 +126,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   state.economy = createEconomyState();
   if (state.race && layout.race) resetRaceState(state.race, layout.race);
   if (state.rush) resetRushState(state.rush);
+  if (state.passenger) resetPassengerState(state.passenger);
   state.events.length = 0;
 }
 
@@ -166,6 +170,11 @@ export interface StepOptions {
    * want. A run is identical either way — an unranked one simply is not submitted.
    */
   rushRanked?: boolean;
+  /**
+   * The car was put back somewhere by the caller this tick (a multiplayer rescue): a passenger
+   * in it is let out with nothing paid. Consumed on the tick it is seen.
+   */
+  respawned?: boolean;
 }
 
 /**
@@ -187,7 +196,11 @@ export function stepGame(
   const respawnTraffic = options?.respawnTraffic ?? true;
   state.events.length = 0;
   if (cmd.restart) {
+    // A passenger aboard is let out unpaid. The reset wipes the event list along with the
+    // ride, so the cancellation is raised after it, ahead of the restart itself.
+    const aboard = state.passenger && state.passenger.phase === 'riding' && state.passenger.trip ? state.passenger.trip.passengerId : null;
     resetGameState(state, layout);
+    if (aboard !== null) state.events.push({ type: 'passengerCancel', passengerId: aboard, reason: 'restart' });
     state.events.push({ type: 'restart' });
     return;
   }
@@ -230,10 +243,20 @@ export function stepGame(
   // Last, and deliberately so: the free-world activity scores what the tick already decided
   // (`src/sim/rush.ts`). It reads the `targetDestroyed` events raised above and changes
   // nothing about the car, the traffic or the weapon.
-  if (state.rush && layout.rushSite) {
+  // Which site the marker stands on is a function of how far through the mission chain the
+  // player is, so it is looked up per tick rather than captured once: clearing a level moves
+  // the marker on the very next tick, with nothing to rebuild and nothing to notify.
+  // ONE ACTIVITY AT A TIME. Each is told whether the other has the car before either runs:
+  // a ride in progress (or its fare card) keeps the RUSH marker from offering, and a run in
+  // any phase but idle keeps a passenger from boarding. Rush is stepped first, so a tick on
+  // which both could start goes to the run.
+  const passenger = state.passenger;
+  if (state.rush) state.rush.locked = !!passenger && (passenger.phase === 'riding' || passenger.phase === 'results');
+  const rushSite = state.rush ? rushSiteFor(layout.rushSites, state.rush.cleared) : null;
+  if (state.rush && rushSite) {
     stepRush(
       state.rush,
-      layout.rushSite,
+      rushSite,
       state.vehicle,
       state.drift,
       cmd,
@@ -242,5 +265,24 @@ export function stepGame(
       dt,
       state.events,
     );
+  }
+  if (passenger && layout.passengerStops && layout.passengerStops.length > 0) {
+    passenger.locked = !!state.rush && state.rush.phase !== 'idle';
+    if (options?.respawned) cancelRide(passenger, 'respawn', state.events);
+    const from = state.events.length;
+    stepPassenger(
+      passenger,
+      PASSENGERS,
+      layout.passengerStops,
+      state.vehicle,
+      state.drift,
+      cmd,
+      state.targets,
+      dt,
+      state.time,
+      state.events,
+    );
+    // Paid here and only here, on the event the rules raise exactly once per ride.
+    applyPassengerFare(state.economy, state.events, from);
   }
 }

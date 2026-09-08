@@ -681,11 +681,13 @@ body {
   padding: 0 20px;
 }
 
+/* Wide enough for the longest row to stay on one line: a mode's name is a wordmark, and a
+   wrapped one reads as a layout that ran out of room. */
 .rb-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(310px, 84vw);
+  width: min(390px, 90vw);
 }
 
 /* A row in the boot list, not a card: index, name, and what it is. The selected row throws a
@@ -727,21 +729,25 @@ body {
   color: var(--rb-dim);
 }
 
+/* Never wrapped, and never allowed to overflow instead: below the width where the list stops
+   growing, the name and the kicker beside it come down together until they fit a phone. */
 .rb-item__name {
   font-family: var(--rb-display);
-  font-size: 30px;
+  font-size: clamp(16px, 5.4vw, 30px);
   font-weight: 700;
   font-stretch: condensed;
   line-height: 1;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .rb-item__kicker {
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.22em;
+  letter-spacing: clamp(0.12em, 0.6vw, 0.22em);
   color: var(--rb-dim);
+  white-space: nowrap;
 }
 
 .rb-item.is-selected {
@@ -764,19 +770,25 @@ body {
   text-shadow: 0 0 20px rgba(252, 238, 10, 0.35);
 }
 
-/* Each world keeps its own signature colour on the row it owns. */
-.rb-item[data-mode='race'].is-selected {
+/* Each world keeps its own signature colour on the row it owns. RACE and the OFFLINE card it
+   opens share one: they are the same circuit, one screen apart. */
+.rb-item[data-mode='race'].is-selected,
+.rb-item[data-mode='circuit'].is-selected {
   background: rgba(255, 61, 240, 0.09);
   box-shadow: inset 0 0 0 1px rgba(255, 61, 240, 0.6), 0 0 30px rgba(255, 61, 240, 0.14);
 }
 
-.rb-item[data-mode='race'].is-selected::before {
+.rb-item[data-mode='race'].is-selected::before,
+.rb-item[data-mode='circuit'].is-selected::before {
   background: var(--rb-magenta);
 }
 
 .rb-item[data-mode='race'].is-selected .rb-item__index,
 .rb-item[data-mode='race'].is-selected .rb-item__kicker,
-.rb-item[data-mode='race'].is-selected .rb-item__name {
+.rb-item[data-mode='race'].is-selected .rb-item__name,
+.rb-item[data-mode='circuit'].is-selected .rb-item__index,
+.rb-item[data-mode='circuit'].is-selected .rb-item__kicker,
+.rb-item[data-mode='circuit'].is-selected .rb-item__name {
   color: var(--rb-magenta);
 }
 
@@ -893,7 +905,8 @@ body {
   color: var(--rb-text);
 }
 
-.rb-dossier[data-mode='race'] .rb-dossier__kicker {
+.rb-dossier[data-mode='race'] .rb-dossier__kicker,
+.rb-dossier[data-mode='circuit'] .rb-dossier__kicker {
   color: var(--rb-magenta);
 }
 
@@ -1427,72 +1440,79 @@ body {
   text-shadow: 0 0 12px rgba(79, 243, 255, 0.55);
 }
 
-/* -------------------------------------------- centre: lock reticle + banner */
+/* ------------------------------------------------ centre: the aim/charge meter */
 
-.rb-reticle {
+/* Holding E charges the bolt; this is the meter for that hold, and the only aim aid there
+   is. There is no crosshair and no lock ring on the target: the bolt goes where the nose
+   points, so the one thing the player needs on screen is how much reach the hold has
+   bought. Deliberately large — it is read at a glance, mid-corner, at speed. */
+.rb-aim {
   position: absolute;
   top: 26%;
   left: 50%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   opacity: 0;
   color: var(--rb-cyan);
-  transform: translate(-50%, 0) scale(0.94);
+  transform: translate(-50%, 0) scale(0.96);
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.rb-reticle.is-on {
+.rb-aim.is-on {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
 
-.rb-reticle__svg {
-  width: 46px;
-  height: 46px;
-  filter: drop-shadow(0 0 6px rgba(79, 243, 255, 0.55));
-}
-
-.rb-reticle__label {
-  font-size: 9px;
+.rb-aim__label {
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.28em;
   text-shadow: 0 0 10px rgba(79, 243, 255, 0.5);
 }
 
 /* The hold meter: how much reach the shot has bought so far. Hidden until a shot is
-   charging, because a full-width empty bar under an idle reticle reads as a broken gauge. */
-.rb-reticle__charge {
-  width: 74px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(79, 243, 255, 0.16);
+   charging, because a full-width empty bar under an idle label reads as a broken gauge. */
+.rb-aim__bar {
+  width: min(42vw, 272px);
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid rgba(79, 243, 255, 0.5);
+  background: rgba(6, 14, 20, 0.55);
+  box-shadow: 0 0 14px rgba(79, 243, 255, 0.25), inset 0 0 10px rgba(0, 0, 0, 0.5);
+  padding: 2px;
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
-.rb-reticle.is-charging .rb-reticle__charge {
+.rb-aim.is-charging .rb-aim__bar {
   opacity: 1;
 }
 
-.rb-reticle.is-full .rb-reticle__charge {
-  box-shadow: 0 0 10px rgba(252, 238, 10, 0.4);
+.rb-aim.is-full .rb-aim__bar {
+  border-color: rgba(252, 238, 10, 0.75);
+  box-shadow: 0 0 18px rgba(252, 238, 10, 0.45), inset 0 0 10px rgba(0, 0, 0, 0.5);
 }
 
 /* Held at full reach: the meter goes hot, so the player knows waiting longer buys nothing. */
-.rb-reticle.is-full .rb-reticle__charge-fill {
+.rb-aim.is-full .rb-aim__fill {
   background: var(--rb-yellow);
-  box-shadow: 0 0 10px rgba(252, 238, 10, 0.8);
+  box-shadow: 0 0 14px rgba(252, 238, 10, 0.85);
 }
 
-.rb-reticle__charge-fill {
+.rb-aim.is-full .rb-aim__label {
+  color: var(--rb-yellow);
+  text-shadow: 0 0 12px rgba(252, 238, 10, 0.6);
+}
+
+.rb-aim__fill {
   display: block;
   width: 100%;
   height: 100%;
   border-radius: 2px;
   background: var(--rb-cyan);
-  box-shadow: 0 0 8px rgba(79, 243, 255, 0.75);
+  box-shadow: 0 0 10px rgba(79, 243, 255, 0.8);
   transform: scaleX(0);
   transform-origin: left center;
 }
@@ -3087,6 +3107,27 @@ body.rb-touch-pad .rb-minimap {
   transform: skewX(-7deg);
 }
 
+/* Which of the three missions this marker is offering, and where. Hairlined rather than filled:
+   the yellow chip above it is the activity's name and there may only be one of those on a sign —
+   a second solid bar would read as two headings arguing. */
+.rb-rush__prompt-mission {
+  padding: 0.27em 1.1em 0.2em;
+  box-shadow: inset 0 0 0 1px var(--rb-yellow);
+  font-family: var(--rb-mono);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  color: var(--rb-yellow);
+}
+
+/* The chain is finished. It fills in — the same promotion from outline to solid the results
+   card uses, so "you have done this" looks the same wherever the game says it. */
+.rb-rush__prompt-mission.is-clear {
+  background: var(--rb-yellow);
+  color: #05060a;
+}
+
 .rb-rush__prompt-lines {
   display: flex;
   flex-direction: column;
@@ -3102,6 +3143,13 @@ body.rb-touch-pad .rb-minimap {
 }
 
 .rb-rush__prompt-lines b {
+  color: var(--rb-yellow);
+  font-weight: 700;
+}
+
+/* The number the run has to beat. The one line of the sign that changes between missions, so it
+   is the one line that is not grey. */
+.rb-rush__prompt-target {
   color: var(--rb-yellow);
   font-weight: 700;
 }
@@ -3193,6 +3241,36 @@ body.rb-touch-pad .rb-minimap {
   font-weight: 700;
   letter-spacing: 0.28em;
   color: var(--rb-dim);
+}
+
+/* The bar to clear, directly under the score it is being compared with. Hidden on a free run —
+   `is-on` rather than always-on, because a target line reading "—" is worse than no line. */
+.rb-rush__target {
+  display: none;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--rb-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--rb-dim);
+}
+
+.rb-rush__target.is-on {
+  display: flex;
+}
+
+/* Cleared, with time still on the clock: everything from here on is bonus, and the line that
+   was the demand becomes the receipt. */
+.rb-rush__target.is-passed {
+  color: var(--rb-yellow);
+  text-shadow: 0 0 12px rgba(252, 238, 10, 0.5);
+}
+
+.rb-rush__target.is-passed .rb-rush__target-label::after {
+  /* Appended rather than swapped in script: the state is already in a class, and a word that
+     only exists in one state belongs with the rule that creates the state. */
+  content: ' CLEARED ·';
 }
 
 .rb-rush__streak {
@@ -3311,6 +3389,51 @@ body.rb-touch-pad .rb-minimap {
   text-shadow: 0 0 20px rgba(252, 238, 10, 0.4);
 }
 
+/* The verdict on the mission: two lines, the second quieter than the first. Red is this skin's
+   word for "this is not the thing you think it is", so a missed target wears it; a cleared one
+   is promoted to a filled yellow chip, which is the strongest thing the activity's own colour
+   can say without borrowing the game's cyan or acid. */
+.rb-rush__results-mission {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.rb-rush__results-mission b {
+  padding: 2px 10px 1px;
+  box-shadow: inset 0 0 0 1px var(--rb-red);
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--rb-red);
+}
+
+.rb-rush__results-mission span {
+  font-family: var(--rb-mono);
+  font-size: 8px;
+  letter-spacing: 0.22em;
+  color: var(--rb-dim);
+}
+
+/* Empty on a replay of a mission with nothing left to say about it: no gap where a line is not. */
+.rb-rush__results-mission span:empty {
+  display: none;
+}
+
+.rb-rush__results-mission.is-cleared b {
+  background: var(--rb-yellow);
+  box-shadow: none;
+  color: #05060a;
+}
+
+.rb-rush__results-mission.is-cleared span {
+  color: var(--rb-yellow-dim);
+}
+
 .rb-rush__results-best {
   display: none;
   padding: 2px 10px 1px;
@@ -3425,5 +3548,543 @@ body.rb-touch-pad .rb-minimap {
 
   .rb-rush__prompt-lines {
     letter-spacing: 0.1em;
+  }
+}
+
+/* =================================================================== passengers */
+
+/* The side rides (`src/ui/passengerOverlay.ts`). A layer, not a surface: only the two buttons
+   inside it take a pointer. The colour is the chrome's violet throughout: the pin on the road
+   and the mark on the map are painted in it, so the panel is the same voice. */
+.rb-pax {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --rb-pax: #c9a4ff;
+  --rb-pax-deep: #9b5cff;
+  --rb-pax-hairline: rgba(201, 164, 255, 0.28);
+}
+
+/* ----------------------------------------------------------------- the prompt */
+
+/* Same construction as the RUSH prompt: one root size, everything in em and calc() against it,
+   so the sign scales with the window as one piece. Lower and lighter than the RUSH sign: a
+   person at a kerb, not a mission. */
+.rb-pax__prompt {
+  --rb-prompt: clamp(10.4px, 1.1vw, 15.2px);
+  max-width: 92vw;
+  box-sizing: border-box;
+  position: absolute;
+  left: 50%;
+  bottom: 20%;
+  transform: translate(-50%, 0);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--rb-prompt) * 0.6);
+  margin: 0;
+  font-size: var(--rb-prompt);
+  padding: calc(var(--rb-prompt) * 1.3) calc(var(--rb-prompt) * 2.8) calc(var(--rb-prompt) * 1.1);
+  border: 0;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline), 0 0 40px rgba(0, 0, 0, 0.5);
+  clip-path: var(--rb-notch);
+  color: var(--rb-text);
+  font-family: inherit;
+  font-weight: 400;
+  font-style: normal;
+  line-height: normal;
+  text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rb-pax__prompt.is-on {
+  display: flex;
+}
+
+.rb-pax__prompt-title {
+  font-family: var(--rb-display);
+  font-size: 2.1em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-pax);
+  text-shadow: 0 0 18px rgba(201, 164, 255, 0.45);
+  line-height: 1;
+}
+
+.rb-pax__prompt-sub {
+  font-family: var(--rb-mono);
+  font-size: 0.78em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rb-dim);
+}
+
+.rb-pax__prompt-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  margin-top: 0.2em;
+  font-family: var(--rb-mono);
+  font-size: 0.86em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--rb-text);
+}
+
+.rb-pax__prompt-key .rb-key,
+.rb-pax__cancel .rb-key,
+.rb-pax__dismiss .rb-key {
+  color: var(--rb-pax);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline);
+  background: rgba(201, 164, 255, 0.08);
+}
+
+/* The cancel arm: a line above the subtitle strip, only while the second press would count. */
+.rb-pax__cancel {
+  position: absolute;
+  left: 50%;
+  bottom: 26%;
+  transform: translateX(-50%);
+  display: none;
+  padding: 6px 14px;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px rgba(255, 43, 61, 0.5);
+  clip-path: var(--rb-notch);
+  --rb-n: 8px;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--rb-red);
+  white-space: nowrap;
+}
+
+.rb-pax__cancel.is-on {
+  display: block;
+}
+
+/* ----------------------------------------------------------------- the ride panel */
+
+/* Mid-left, where nothing else lives: the controls card above it fades after ten seconds and
+   the charge gauge is in the corner below. Compact on purpose (a face, a name, a bar, two
+   rules, a destination) so the road stays the picture. */
+.rb-pax__panel {
+  position: absolute;
+  left: 26px;
+  top: 34%;
+  width: 208px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 10px;
+  box-sizing: border-box;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline), 0 0 30px rgba(0, 0, 0, 0.45);
+  clip-path: var(--rb-notch);
+  --rb-n: 10px;
+}
+
+.rb-pax__panel.is-on {
+  display: flex;
+}
+
+.rb-pax__portrait {
+  width: 72px;
+  height: 72px;
+  flex: none;
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline);
+  background: #0d0f16;
+  overflow: hidden;
+  transition: box-shadow 160ms ease-out, filter 160ms ease-out;
+  filter: saturate(0.85) brightness(0.92);
+}
+
+.rb-pax__portrait.is-talking {
+  box-shadow: inset 0 0 0 1px var(--rb-pax), 0 0 16px rgba(201, 164, 255, 0.45);
+  filter: saturate(1.05) brightness(1.08);
+}
+
+.rb-portrait__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.rb-pax__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: -2px;
+}
+
+.rb-pax__name {
+  font-family: var(--rb-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: var(--rb-pax);
+  text-shadow: 0 0 14px rgba(201, 164, 255, 0.35);
+}
+
+.rb-pax__tag {
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--rb-dim);
+}
+
+.rb-pax__mood {
+  position: relative;
+  display: grid;
+  grid-template-columns: 66px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.rb-pax__mood-word {
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--rb-text);
+}
+
+.rb-pax__mood-word[data-mood='delighted'],
+.rb-pax__mood-word[data-mood='happy'] {
+  color: var(--rb-acid);
+}
+
+.rb-pax__mood-word[data-mood='unhappy'],
+.rb-pax__mood-word[data-mood='furious'] {
+  color: var(--rb-red);
+}
+
+.rb-pax__mood-bar {
+  display: block;
+  height: 5px;
+  background: var(--rb-track);
+  box-shadow: inset 0 0 0 1px var(--rb-hairline-cold);
+  overflow: hidden;
+}
+
+.rb-pax__mood-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--rb-pax-deep), var(--rb-pax));
+  transform-origin: left center;
+  transform: scaleX(0.62);
+  transition: transform 220ms ease-out;
+}
+
+.rb-pax__mood-delta {
+  position: absolute;
+  right: 0;
+  top: -14px;
+  opacity: 0;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.rb-pax__mood-delta.is-up {
+  color: var(--rb-acid);
+}
+
+.rb-pax__mood-delta.is-down {
+  color: var(--rb-red);
+}
+
+.rb-pax__prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One rule, and how it reads right now: a mark that is grey when nothing applies, acid while
+   the rule is being kept, red while it is being broken. The words never change. */
+.rb-pax__pref {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--rb-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--rb-text);
+}
+
+.rb-pax__pref::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--rb-dim);
+  transform: rotate(45deg);
+  transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.rb-pax__pref[data-status='good']::before {
+  background: var(--rb-acid);
+  box-shadow: 0 0 8px rgba(168, 255, 62, 0.6);
+}
+
+.rb-pax__pref[data-status='bad']::before {
+  background: var(--rb-red);
+  box-shadow: 0 0 8px rgba(255, 43, 61, 0.6);
+}
+
+.rb-pax__pref[data-status='good'] {
+  color: var(--rb-acid);
+}
+
+.rb-pax__pref[data-status='bad'] {
+  color: var(--rb-red);
+}
+
+.rb-pax__dest {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rb-pax-hairline);
+  font-family: var(--rb-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  color: var(--rb-dim);
+}
+
+.rb-pax__dest-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--rb-text);
+}
+
+.rb-pax__dest-dist {
+  flex: none;
+  font-weight: 700;
+  color: var(--rb-pax);
+}
+
+/* ----------------------------------------------------------------- the subtitle */
+
+/* Low and centred, a strip and not a box: the name in violet, the words in the text colour, on
+   a dark backing wide enough to read at speed. Nothing is stacked. One line at a time is the
+   simulation's rule, and this only ever shows the one it is given. */
+.rb-pax__subtitle {
+  position: absolute;
+  left: 50%;
+  bottom: 13%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: baseline;
+  gap: 12px;
+  max-width: min(720px, 86vw);
+  padding: 9px 18px 10px;
+  box-sizing: border-box;
+  background: rgba(5, 7, 13, 0.78);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline);
+  clip-path: var(--rb-notch);
+  --rb-n: 9px;
+}
+
+.rb-pax__subtitle.is-on {
+  display: flex;
+}
+
+.rb-pax__speaker {
+  flex: none;
+  font-family: var(--rb-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--rb-pax);
+}
+
+.rb-pax__text {
+  font-family: var(--rb-mono);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--rb-text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* ----------------------------------------------------------------- the fare card */
+
+.rb-pax__results {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 22px 38px 16px;
+  background: var(--rb-panel-solid);
+  box-shadow: inset 0 0 0 1px rgba(201, 164, 255, 0.55), 0 0 60px rgba(0, 0, 0, 0.6);
+  clip-path: var(--rb-notch);
+  --rb-n: 18px;
+  pointer-events: auto;
+}
+
+.rb-pax__results.is-on {
+  display: flex;
+}
+
+.rb-pax__results-head {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--rb-dim);
+}
+
+.rb-pax__results-total {
+  font-family: var(--rb-display);
+  font-size: 54px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--rb-pax);
+  text-shadow: 0 0 22px rgba(201, 164, 255, 0.4);
+}
+
+.rb-pax__results-yen {
+  font-size: 0.6em;
+  margin-right: 4px;
+  vertical-align: 0.2em;
+}
+
+.rb-pax__results-mood {
+  font-family: var(--rb-display);
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  color: var(--rb-text);
+}
+
+.rb-pax__results-mood[data-tier='high'] {
+  color: var(--rb-acid);
+}
+
+.rb-pax__results-mood[data-tier='low'] {
+  color: var(--rb-red);
+}
+
+.rb-pax__results-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 250px;
+  margin: 6px 0 4px;
+}
+
+.rb-pax__results-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.rb-pax__results-rows dt {
+  color: var(--rb-dim);
+}
+
+.rb-pax__results-rows dd {
+  margin: 0;
+  font-weight: 700;
+  color: var(--rb-text);
+}
+
+.rb-pax__dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 16px;
+  border: 0;
+  background: rgba(201, 164, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline);
+  clip-path: var(--rb-notch);
+  --rb-n: 8px;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--rb-text);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.rb-pax__dismiss:hover {
+  background: rgba(201, 164, 255, 0.16);
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-pax__panel {
+    left: 14px;
+    top: 30%;
+    width: 168px;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .rb-pax__portrait {
+    width: 54px;
+    height: 54px;
+  }
+
+  .rb-pax__name {
+    font-size: 18px;
+  }
+
+  .rb-pax__pref {
+    font-size: 8.5px;
+  }
+
+  .rb-pax__subtitle {
+    bottom: 17%;
+    padding: 7px 12px 8px;
+    gap: 8px;
+  }
+
+  .rb-pax__speaker {
+    font-size: 13px;
+  }
+
+  .rb-pax__text {
+    font-size: 12px;
+  }
+
+  .rb-pax__prompt {
+    bottom: 24%;
+    --rb-prompt: clamp(9px, 1.6vw, 12.4px);
+  }
+
+  .rb-pax__cancel {
+    bottom: 30%;
+    font-size: 9px;
+  }
+
+  .rb-pax__results-total {
+    font-size: 42px;
+  }
+
+  .rb-pax__results-rows {
+    min-width: 200px;
   }
 }

@@ -7,6 +7,7 @@ const OPTS: ResolutionGovernorOptions = {
   minRatio: 0.7,
   stepFactor: 0.85,
   downMs: 18.5,
+  downShare: 0.25,
   upMs: 11,
   gpuUpMs: 9,
   gpuIdleMs: 8,
@@ -137,5 +138,49 @@ describe('game loop stats', () => {
     const loop = createGameLoop({ simulate() {}, render() {} }, 1 / 60);
     expect(loop.stats).toEqual({ simMs: 0, renderMs: 0, steps: 0 });
     expect(loop.running).toBe(false);
+  });
+});
+
+describe('resolution governor on a high-refresh display', () => {
+  /**
+   * The case that made the open world judder on a 240 Hz panel. Vsync only ever presents whole
+   * refreshes, so an alternating 8 ms / 29 ms mix is what "mostly 120 FPS, regularly slipping
+   * to 34" actually looks like — and it averages 18.5 ms, which the mean test alone reads as
+   * healthy. A quarter of those frames missed the budget, so the scale has to come down.
+   */
+  it('steps down on a juddering frame mix whose average looks healthy', () => {
+    const g = createResolutionGovernor(OPTS);
+    feed(g, 1.2, 8, 2, 6); // settle
+    let changed: number | null = null;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < 400 && changed === null; i++) {
+      const frameMs = i % 4 === 3 ? 29 : 8;
+      sum += frameMs;
+      n++;
+      changed = g.update(frameMs, 2, 12);
+    }
+    // The mean really is under the threshold: it is the spread that gives the judder away.
+    expect(sum / n).toBeLessThanOrEqual(OPTS.downMs);
+    expect(changed).toBeCloseTo(1.5 * 0.85, 5);
+  });
+
+  it('leaves a display that is merely fast alone', () => {
+    const g = createResolutionGovernor(OPTS);
+    feed(g, 1.2, 8, 2, 6);
+    // A solid 120 FPS with a cheap GPU: no misses at all, nothing to fix.
+    expect(feed(g, 6, 8, 2, 6)).toBeNull();
+  });
+
+  it('does not step down for judder the CPU caused', () => {
+    const g = createResolutionGovernor(OPTS);
+    feed(g, 1.2, 8, 2, 6);
+    let changed: number | null = null;
+    for (let i = 0; i < 400 && changed === null; i++) {
+      const frameMs = i % 4 === 3 ? 29 : 8;
+      // Main thread eating most of the frame: fewer pixels would not help.
+      changed = g.update(frameMs, frameMs * 0.8, 2);
+    }
+    expect(changed).toBeNull();
   });
 });

@@ -233,16 +233,61 @@ export const BUS_ROUTE_LOOPS: Rect[] = [
 export const CITY_SPAWN = { x: -66, z: -20, heading: 0 };
 
 /**
- * Where the RAYO RUSH marker stands: on `blvd-center`, a short block east of the `st-mid`
- * crossing, facing along the boulevard.
+ * Where the RAYO RUSH marker stands — one site per mission of `RUSH.levels`, in that order. The
+ * marker packs up and re-paints itself at the next one each time a mission is cleared, so this
+ * list is read as a route through the city rather than as three unrelated spots.
  *
- * Chosen for what is AROUND it rather than for the spot itself. Three of the nine traffic
- * rectangles meet here (`TRAFFIC_LOOPS` 2, 6 and 7), so there are electric cars in every
- * direction the moment the clock starts, and the boulevard is wide enough to drift on with
- * side streets close enough to chain into. It is roughly 120 m from the spawn — far enough
- * that it is come across rather than handed over, close enough to find on a first drive.
+ * EACH IS A MARK ON THE ROAD, not an object in it: nothing here is a collider, and the art
+ * (`src/render/scene/env/rushMarker.ts`) hangs its hologram well above roof height. Every one
+ * stands mid-block rather than in a junction — the ring is 15 m across and traffic drives
+ * straight through a crossing, so a marker painted on one would be a marker you cannot park on.
  *
- * It is a mark on the road, not an object in it: nothing here is a collider, and the art
- * (`src/render/scene/env/rushMarker.ts`) hangs its hologram well above roof height.
+ * They are chosen for what is AROUND them, and in an order that widens what the player has to
+ * do rather than just moving the furniture:
+ *
+ *   1  CENTRE BOULEVARD  `blvd-center`, a short block east of the `st-mid` crossing. Three of
+ *      the nine traffic rectangles meet here (`TRAFFIC_LOOPS` 2, 6, 7), so there are electric
+ *      cars in every direction the moment the clock starts, and 18 m of boulevard to drift on
+ *      with side streets close enough to chain into. ~120 m from the spawn: far enough to be
+ *      come across rather than handed over, close enough to find on a first drive.
+ *
+ *   2  DOWNTOWN CANYON   `av-main` between `blvd-north` and the mouth of `alley-e`, inside
+ *      `DOWNTOWN` — so it is driven between towers with every facade screened. Loops 1 and 2
+ *      both run the length of this avenue, which puts traffic on BOTH sides of a 20 m street,
+ *      and the alley 15 m north is the chain: duck into it and the next kill is already there.
+ *
+ *   3  THE WATERFRONT    `blvd-water` between `av-east` and `st-far-east`, out in the old town
+ *      by the quay. The hardest of the three to hold a streak in, and deliberately: the bay is
+ *      at your back, so half the escape routes of the other two simply are not there, and the
+ *      traffic that is here (loops 8 and 9 along the shore, `alley-b` a block north) has to be
+ *      chased rather than met.
  */
-export const RUSH_SITE = { x: 40, z: 60, y: 0, heading: Math.PI / 2 };
+export const RUSH_SITES = [
+  { x: 40, z: 60, y: 0, heading: Math.PI / 2, label: 'CENTRE BOULEVARD' },
+  { x: -70, z: -124, y: 0, heading: 0, label: 'DOWNTOWN CANYON' },
+  { x: 150, z: 186, y: 0, heading: Math.PI / 2, label: 'THE WATERFRONT' },
+];
+
+/**
+ * Where passengers wait and where they are taken (`src/sim/passenger.ts`).
+ *
+ * EACH IS A STOPPING POINT ON A ROAD, mid-block, well clear of every junction and of the three
+ * RUSH sites — the car has to stand still inside a 7 m ring to pick up or drop off, and a ring
+ * on a crossing is one the traffic drives through. `tests/passenger.test.ts` checks every one
+ * against the city's own road predicate, so a stop typed into a building fails a test rather
+ * than strands a passenger.
+ *
+ * The tags are what the catalogue matches on (`PassengerDef.pickupTags`): a character is
+ * "picked up downtown, taken to the waterfront", never "picked up at (-70, -200)", so the
+ * catalogue knows nothing about this city and a fourth stop is a line here.
+ */
+export const PASSENGER_STOPS = [
+  { id: 'av-main-north', x: -70, z: -205, y: 0, heading: 0, label: 'AV MAIN · NORTH GATE', tags: ['downtown'] },
+  { id: 'blvd-north-mid', x: -25, z: -160, y: 0, heading: Math.PI / 2, label: 'BLVD NORTH · THE TOWERS', tags: ['downtown'] },
+  { id: 'st-n2-west', x: -130, z: -60, y: 0, heading: Math.PI / 2, label: 'ST N2 · WEST BLOCKS', tags: ['residential'] },
+  { id: 'st-mid-market', x: 20, z: 0, y: 0, heading: 0, label: 'ST MID · THE MARKET', tags: ['market'] },
+  { id: 'av-east-yard', x: 110, z: 0, y: 0, heading: 0, label: 'AV EAST · THE YARD', tags: ['industrial'] },
+  { id: 'st-south-west', x: -110, z: 120, y: 0, heading: Math.PI / 2, label: 'ST SOUTH · THE TERRACES', tags: ['residential'] },
+  { id: 'blvd-water-quay', x: -25, z: 186, y: 0, heading: Math.PI / 2, label: 'THE QUAY', tags: ['waterfront'] },
+  { id: 'st-far-east', x: 210, z: 90, y: 0, heading: 0, label: 'ST FAR EAST · THE EDGE', tags: ['outskirts', 'industrial'] },
+];

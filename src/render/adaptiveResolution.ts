@@ -12,6 +12,12 @@
  * HOW IT DECIDES
  * - It watches the real frame interval. Over `downWindowSeconds`, an average above
  *   `downMs` means the display is dropping frames, so it steps down one notch.
+ * - It also counts the frames that individually missed `downMs`, and steps down when more
+ *   than `downShare` of them did, however good the average was. The average on its own is
+ *   blind on a high-refresh display: vsync only ever presents whole refreshes, so a 240 Hz
+ *   panel showing a game that mostly runs at 120 FPS and regularly slips to 40 averages
+ *   about 16 ms — under the threshold — while every slip is a visible lurch. Judder is a
+ *   property of the spread, not of the mean, so both are asked.
  * - It never steps down for a frame the CPU caused: when the main-thread time is most of the
  *   frame, fewer pixels would not help. With a GPU timer available it also refuses to step
  *   down while the GPU itself is well under budget (the stall is elsewhere, usually vsync).
@@ -34,8 +40,13 @@ export interface ResolutionGovernorOptions {
   minRatio: number;
   /** Multiplier applied per step down (and undone per step up). */
   stepFactor: number;
-  /** Average frame interval above which the game is dropping frames (ms). */
+  /** Frame interval above which a frame missed its budget (ms). */
   downMs: number;
+  /**
+   * Fraction of the window's frames allowed to exceed `downMs` before stepping down, whatever
+   * the average says. Catches the judder a high-refresh display hides inside a healthy mean.
+   */
+  downShare: number;
   /** Average frame interval below which the display is clearly not the limit (ms). */
   upMs: number;
   /** GPU ms per frame under which stepping up is safe. Only used when a GPU timer exists. */
@@ -72,6 +83,8 @@ export function createResolutionGovernor(o: ResolutionGovernorOptions): Resoluti
   let downAccum = 0;
   let downTime = 0;
   let downFrames = 0;
+  /** Frames in the down window that individually missed `downMs`. */
+  let downMisses = 0;
   let upAccum = 0;
   let upTime = 0;
   let upFrames = 0;
@@ -83,6 +96,7 @@ export function createResolutionGovernor(o: ResolutionGovernorOptions): Resoluti
     downAccum = 0;
     downTime = 0;
     downFrames = 0;
+    downMisses = 0;
     upAccum = 0;
     upTime = 0;
     upFrames = 0;
@@ -121,6 +135,7 @@ export function createResolutionGovernor(o: ResolutionGovernorOptions): Resoluti
       downAccum += frameMs;
       downTime += seconds;
       downFrames++;
+      if (frameMs > o.downMs) downMisses++;
       upAccum += frameMs;
       upTime += seconds;
       upFrames++;
@@ -134,10 +149,13 @@ export function createResolutionGovernor(o: ResolutionGovernorOptions): Resoluti
         const avg = downAccum / downFrames;
         const cpuAvg = cpuAccum / downFrames;
         const gpuAvg = gpuFrames > 0 ? gpuAccum / gpuFrames : -1;
+        // Steadily too slow, or smooth on average but lurching often enough to be felt.
+        const tooSlow = avg > o.downMs || downMisses > downFrames * o.downShare;
         downAccum = 0;
         downTime = 0;
         downFrames = 0;
-        if (avg > o.downMs && ratio > o.minRatio + 1e-6) {
+        downMisses = 0;
+        if (tooSlow && ratio > o.minRatio + 1e-6) {
           const cpuBound = cpuAvg > avg * 0.6;
           const gpuIdle = gpuAvg >= 0 && gpuAvg < o.gpuIdleMs;
           if (!cpuBound && !gpuIdle) {

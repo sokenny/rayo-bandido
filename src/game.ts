@@ -5,16 +5,19 @@ import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type {
+  ActivitySite,
   GameEvent,
   GameMode,
   GameState,
   HudSnapshot,
+  PassengerHudSnapshot,
+  PassengerStop,
   PlayerCommand,
   RaceHudSnapshot,
   RushHudSnapshot,
   Transmission,
 } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, RENDER, RUSH, VEHICLE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, PASSENGER, RENDER, RUSH, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -26,7 +29,20 @@ import { createGamepadInput } from './core/input/gamepad';
 import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
-import { canStartRush, markRushTargets } from './sim/rush';
+import {
+  canStartRush,
+  markRushTargets,
+  rushAllClear,
+  rushLevelCount,
+  rushLevelIndex,
+  rushSiteFor,
+  rushTargetScore,
+  setRushProgress,
+} from './sim/rush';
+import { readRideProgress, readRushProgress, recordRide, recordRushRun, writeRideProgress, writeRushProgress } from './core/progress';
+import { canBoard, canDropOff, stopById } from './sim/passenger';
+import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
+import { createPassengerMarker } from './render/scene/env/passengerMarker';
 import { createLeaderboard } from './net/leaderboard';
 import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
@@ -272,12 +288,28 @@ export function createGame(
    * before the activity existed when there is no marker, which is what keeps one code path
    * for both.
    */
-  const rushSite = layout.rushSite ?? null;
+  const rushSites = layout.rushSites ?? null;
+  const hasRush = !!(rushSites && rushSites.length > 0 && state.rush);
   // The global board and the day's allowance. It never blocks: `standing()` answers from
   // localStorage at once and refreshes behind the frame (`src/net/leaderboard.ts`).
-  const leaderboard = rushSite ? createLeaderboard() : null;
+  const leaderboard = hasRush ? createLeaderboard() : null;
   /** One flag per electric car: whether it is drawn as a target this frame. */
-  const rushMarks = rushSite ? new Uint8Array(state.targets.length) : null;
+  const rushMarks = hasRush ? new Uint8Array(state.targets.length) : null;
+  /**
+   * How far through the mission chain this browser says the player has got. Read ONCE, here,
+   * and then owned by the simulation (`RushState.cleared`) — this variable is only the thing
+   * that gets written back, so there is never a moment where the world is showing one mission
+   * and storage believes another.
+   */
+  let rushProgress = hasRush ? readRushProgress() : null;
+  if (state.rush && rushProgress) setRushProgress(state.rush, rushProgress.cleared);
+  /**
+   * Where the marker is standing right now: the site of the mission currently on offer. Asked
+   * rather than captured, because it changes the moment a mission is cleared — the same
+   * question `stepGame` asks, through the same function, so the art and the rules cannot end
+   * up at different corners.
+   */
+  const rushSite = (): ActivitySite | null => rushSiteFor(rushSites, state.rush?.cleared ?? 0);
   /**
    * A click or a tap on the prompt raises the same intent the F key does. It is queued rather
    * than applied, because the command is only meaningful on a simulation tick.
@@ -287,13 +319,36 @@ export function createGame(
   let rushPreviousBest = -1;
   let rushNewBest = false;
 
+  /* --------------------------------------------------------------- passengers */
+
+  /**
+   * The side rides, in the worlds that carry stops. Guarded the same way as the rush: null
+   * everywhere else, and nothing below runs without it.
+   */
+  const passengerStops: PassengerStop[] | null = layout.passengerStops ?? null;
+  const hasPassengers = !!(passengerStops && passengerStops.length > 0 && state.passenger);
+  /** Rides completed and the best tip, this browser's own record. */
+  let rideProgress = hasPassengers ? readRideProgress() : null;
+  /**
+   * The pin over the waiting passenger and the ring at their destination: one marker each,
+   * built once and moved. Added to the scene here rather than by the environment, because
+   * where they stand is a fact about the ride, not about the city.
+   */
+  const pickupMarker = hasPassengers ? createPassengerMarker() : null;
+  const destinationMarker = hasPassengers ? createPassengerMarker() : null;
+  if (pickupMarker) scene.add(pickupMarker.group);
+  if (destinationMarker) scene.add(destinationMarker.group);
+
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
-    onActivate: rushSite
-      ? () => {
-          activateQueued = true;
-        }
-      : undefined,
+    onActivate:
+      hasRush || hasPassengers
+        ? () => {
+            activateQueued = true;
+          }
+        : undefined,
+    rush: hasRush,
+    passengers: hasPassengers,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -309,6 +364,64 @@ export function createGame(
   const onlinePanel: OnlinePanel | null = roaming ? createOnlinePanel(hudRoot) : null;
   end();
 
+  /**
+   * Stand the marker, and put the map's mark under it, at the site of the mission on offer.
+   *
+   * Called once at boot and again on every `rushLevelUp`, which is the point of it being a
+   * function: a player returning with two missions behind them has to find the marker at the
+   * THIRD site, and "where it was built" and "where it belongs" are the same question either
+   * way. The art is built at the first site (`env/rushMarker.ts`) because something has to be
+   * built somewhere; this is what decides where it actually stands.
+   */
+  function placeRushMarker(): void {
+    const site = rushSite();
+    if (!site) return;
+    environment.rushMarker?.moveTo(site);
+    refreshMapMarks();
+  }
+
+  /**
+   * Everything the map marks, rebuilt together: the RUSH circle where the chain has it, and
+   * the passenger pin or their destination, whichever the ride is at. One writer, so the two
+   * activities cannot erase each other's mark.
+   */
+  const mapMarks: Array<{ x: number; z: number; kind: 'rush' | 'passenger' | 'destination' }> = [];
+  function refreshMapMarks(): void {
+    mapMarks.length = 0;
+    const site = rushSite();
+    if (site) mapMarks.push({ x: site.x, z: site.z, kind: 'rush' });
+    const p = state.passenger;
+    if (p && p.trip && passengerStops) {
+      if (p.phase === 'offered') {
+        const stop = stopById(passengerStops, p.trip.pickupId);
+        if (stop) mapMarks.push({ x: stop.x, z: stop.z, kind: 'passenger' });
+      } else if (p.phase === 'riding') {
+        const stop = stopById(passengerStops, p.trip.destinationId);
+        if (stop) mapMarks.push({ x: stop.x, z: stop.z, kind: 'destination' });
+      }
+    }
+    minimap.setActivities(mapMarks);
+  }
+
+  /**
+   * Stand the passenger markers where the ride is: the pin at the pickup while someone waits,
+   * the ring at the destination while they are aboard, neither otherwise. Called on the events
+   * that move the ride along, never per frame.
+   */
+  function placePassengerMarkers(): void {
+    const p = state.passenger;
+    if (!p || !pickupMarker || !destinationMarker || !passengerStops) return;
+    const pickup = p.trip ? stopById(passengerStops, p.trip.pickupId) : null;
+    const destination = p.trip ? stopById(passengerStops, p.trip.destinationId) : null;
+    if (p.phase === 'offered' && pickup) pickupMarker.place(pickup, 'pickup');
+    else pickupMarker.hide();
+    if (p.phase === 'riding' && destination) destinationMarker.place(destination, 'destination');
+    else destinationMarker.hide();
+    refreshMapMarks();
+  }
+  placeRushMarker();
+  placePassengerMarkers();
+
   /* ------------------------------------------------------------ render scale */
 
   // Starts where `createRenderer` put it; the governor only ever moves it from there.
@@ -318,6 +431,7 @@ export function createGame(
     minRatio: Math.min(startRatio, RENDER.minPixelRatio),
     stepFactor: RENDER.resolutionStep,
     downMs: RENDER.resolutionDownMs,
+    downShare: RENDER.resolutionDownShare,
     upMs: RENDER.resolutionUpMs,
     gpuUpMs: RENDER.resolutionGpuUpMs,
     gpuIdleMs: RENDER.resolutionGpuIdleMs,
@@ -375,9 +489,37 @@ export function createGame(
     mode,
     race: null,
     rush: null,
+    passenger: null,
   };
+  const passengerSnapshot: PassengerHudSnapshot = {
+    phase: 'idle',
+    passengerId: '',
+    name: '',
+    tagline: '',
+    portrait: '',
+    canBoard: false,
+    canDropOff: false,
+    cancelArm: 0,
+    destinationLabel: '',
+    distance: 0,
+    fare: 0,
+    mood: 0,
+    prefLabels: ['', ''],
+    prefStatus: ['neutral', 'neutral'],
+    line: '',
+    lineKind: 'reaction',
+    lineId: 0,
+    results: null,
+  };
+  if (hasPassengers) snapshot.passenger = passengerSnapshot;
   const rushSnapshot: RushHudSnapshot = {
     phase: 'idle',
+    level: 0,
+    levelCount: rushLevelCount(),
+    cleared: 0,
+    targetScore: 0,
+    levelLabel: '',
+    allClear: false,
     countdown: 0,
     timeLeft: 0,
     score: 0,
@@ -670,6 +812,9 @@ export function createGame(
     prevLimiterCut = 0;
     fillCameraPose(1);
     chase.snap(cameraPose);
+    // A passenger does not survive being teleported across the city: they are let out unpaid
+    // on the next tick.
+    stepOptions.respawned = true;
   }
 
   function handleEvent(ev: GameEvent): void {
@@ -706,13 +851,34 @@ export function createGame(
         // than joined. Two numbers over one car is one too many.
         effects.rushPopup(ev.x, ev.y, ev.z, ev.points);
         break;
+      case 'rushLevelUp':
+        // A mission fell, and the chain has already moved on: the marker packs up and re-paints
+        // itself at the next site, and the map points there too. Presentation only — the
+        // `rushEnd` immediately behind this event is where the new total is written down, so
+        // there is exactly one writer of the record.
+        placeRushMarker();
+        break;
       case 'rushEnd':
         // The clock has stopped and the card is already on screen; the board is told about it
         // afterwards, and never waited on. A run that cannot be filed is still a run.
         rushPreviousBest = leaderboard ? leaderboard.standing().best : -1;
         rushNewBest = ev.results.score > rushPreviousBest;
+        // The per-mission record is this browser's alone and is kept whatever the network is
+        // doing, and whether or not the run was one of the day's ranked attempts: clearing a
+        // mission is a fact about the driving. `advanced` is false here for a mission already
+        // cleared, so a replay updates the score and leaves the chain where it is.
+        if (rushProgress) {
+          rushProgress = recordRushRun(rushProgress, ev.results.level, ev.results.score, ev.results.advanced);
+          writeRushProgress(rushProgress);
+        }
         if (leaderboard && ev.results.ranked) {
-          void leaderboard.submit(ev.results, playerName()).then((result) => {
+          const run = {
+            score: ev.results.score,
+            disabled: ev.results.disabled,
+            bestChain: ev.results.bestChain,
+            styleBonus: ev.results.styleBonus,
+          };
+          void leaderboard.submit(run, playerName()).then((result) => {
             // The server may know a better previous best than this browser did (the same
             // player on another machine), so the card is corrected if the answer arrives
             // while it is still up.
@@ -732,9 +898,25 @@ export function createGame(
           net.reportBump(ev.targetId, ev.knockX ?? 0, ev.knockZ ?? 0);
         }
         break;
+      case 'passengerOffer':
+      case 'passengerBoard':
+      case 'passengerCancel':
+      case 'passengerDismissed':
+        placePassengerMarkers();
+        break;
+      case 'passengerComplete':
+        // Paid by the simulation already (`applyPassengerFare`); this is only the record and
+        // the furniture. The fare card reads the frozen results, not the live state.
+        placePassengerMarkers();
+        if (rideProgress) {
+          rideProgress = recordRide(rideProgress, ev.results.tip);
+          writeRideProgress(rideProgress);
+        }
+        break;
       case 'restart':
         rushPreviousBest = -1;
         rushNewBest = false;
+        placePassengerMarkers();
         effects.reset();
         backfire.reset();
     prevLimiterCut = 0;
@@ -824,6 +1006,8 @@ export function createGame(
     }
     stepOptions.cruising = cruising;
     stepGame(state, command, layout, dt, stepOptions);
+    // One tick's worth: the rescue that set it has been seen.
+    stepOptions.respawned = false;
     simTime = state.time;
     const events = state.events;
     for (let i = 0; i < events.length; i++) handleEvent(events[i]);
@@ -877,11 +1061,11 @@ export function createGame(
       bodyGear = v.gear;
     }
     car.update(frameDt, simTime);
-    // Which electric cars wear the target ring this frame. The nearest few only, and only
+    // Which electric cars wear the rush ring this frame. The nearest few only, and only
     // while a run is on — `markRushTargets` answers with the same rule that decides what
     // actually scores, so the two can never disagree.
     if (state.rush && rushMarks) markRushTargets(state.rush, state.targets, v.x, v.z, rushMarks);
-    syncTargets(targetVisuals, state.targets, alpha, state.lightning.acquiredTargetId, simTime, rushMarks);
+    syncTargets(targetVisuals, state.targets, alpha, simTime, rushMarks);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
     syncBuses(busVisuals, state.buses, alpha);
     // Rivals carry their own interpolation (on the network clock), so unlike everything else
@@ -959,7 +1143,8 @@ export function createGame(
     snapshot.counterSteer = v.counterSteer;
     lastNitroAmount = state.nitro.amount;
     const rush = state.rush;
-    if (rush && rushSite) {
+    const site = rush ? rushSite() : null;
+    if (rush && site) {
       rushSnapshot.phase = rush.phase;
       rushSnapshot.countdown = rush.countdown;
       rushSnapshot.timeLeft = rush.timeLeft;
@@ -976,6 +1161,13 @@ export function createGame(
       rushSnapshot.results = rush.results;
       rushSnapshot.previousBest = rushPreviousBest;
       rushSnapshot.newBest = rushNewBest;
+      // The mission on offer. All four are derived from the one progress count, so the sign
+      // over the road, the target on the clock and the site under the wheels always agree.
+      rushSnapshot.level = rushLevelIndex(rush.cleared);
+      rushSnapshot.cleared = rush.cleared;
+      rushSnapshot.targetScore = rushTargetScore(rush.cleared);
+      rushSnapshot.levelLabel = site.label ?? '';
+      rushSnapshot.allClear = rushAllClear(rush.cleared);
       // The board answers on its own schedule; the prompt shows whatever is known by now.
       rushSnapshot.attemptsLeft = leaderboard ? leaderboard.standing().attemptsLeft : -1;
 
@@ -983,13 +1175,59 @@ export function createGame(
       // over the last stretch of the approach.
       const marker = environment.rushMarker;
       if (marker) {
-        const dx = pose.x - rushSite.x;
-        const dz = pose.z - rushSite.z;
+        const dx = pose.x - site.x;
+        const dz = pose.z - site.z;
         const reach = RUSH.marker.promptRadius * 3;
         const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
         marker.setProximity(near * near);
         marker.setRunning(rush.phase === 'running' || rush.phase === 'countdown');
       }
+    }
+    const pax = state.passenger;
+    if (pax && passengerStops && pickupMarker && destinationMarker) {
+      const trip = pax.trip;
+      const def = trip ? passengerById(PASSENGERS, trip.passengerId) : null;
+      const pickup = trip ? stopById(passengerStops, trip.pickupId) : null;
+      const destination = trip ? stopById(passengerStops, trip.destinationId) : null;
+      passengerSnapshot.phase = pax.phase;
+      passengerSnapshot.passengerId = def ? def.id : '';
+      passengerSnapshot.name = def ? def.name : '';
+      passengerSnapshot.tagline = def ? def.tagline : '';
+      passengerSnapshot.portrait = def ? def.portrait : '';
+      passengerSnapshot.canBoard = canBoard(pax);
+      passengerSnapshot.canDropOff = canDropOff(pax);
+      passengerSnapshot.cancelArm = pax.cancelArm;
+      passengerSnapshot.destinationLabel = destination ? destination.label : '';
+      passengerSnapshot.fare = trip ? trip.fare : 0;
+      passengerSnapshot.mood = pax.mood;
+      passengerSnapshot.prefLabels[0] = def && def.preferences[0] ? preferenceLabel(def.preferences[0]) : '';
+      passengerSnapshot.prefLabels[1] = def && def.preferences[1] ? preferenceLabel(def.preferences[1]) : '';
+      passengerSnapshot.prefStatus[0] = pax.prefStatus[0];
+      passengerSnapshot.prefStatus[1] = pax.prefStatus[1];
+      passengerSnapshot.line = pax.line;
+      passengerSnapshot.lineKind = pax.lineKind;
+      passengerSnapshot.lineId = pax.lineId;
+      passengerSnapshot.results = pax.results;
+      // The markers answer the car the way the RUSH one does: warmer and quicker as it closes.
+      const reach = PASSENGER.marker.promptRadius * 4;
+      if (pax.phase === 'offered' && pickup) {
+        const dx = pose.x - pickup.x;
+        const dz = pose.z - pickup.z;
+        const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
+        pickupMarker.setProximity(near * near);
+      }
+      if (pax.phase === 'riding' && destination) {
+        const dx = pose.x - destination.x;
+        const dz = pose.z - destination.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        passengerSnapshot.distance = d;
+        const near = 1 - Math.min(1, d / reach);
+        destinationMarker.setProximity(near * near);
+      } else {
+        passengerSnapshot.distance = 0;
+      }
+      pickupMarker.update(simTime);
+      destinationMarker.update(simTime);
     }
     const race = state.race;
     if (race) {
@@ -1196,6 +1434,14 @@ export function createGame(
       disposeRivalCarResources();
       car.dispose();
       environment.dispose();
+      if (pickupMarker) {
+        scene.remove(pickupMarker.group);
+        pickupMarker.dispose();
+      }
+      if (destinationMarker) {
+        scene.remove(destinationMarker.group);
+        destinationMarker.dispose();
+      }
       speedBlur.dispose();
       gpuTimer.dispose();
       renderer.dispose();
@@ -1276,10 +1522,17 @@ export function createGame(
      *
      *   __rb.rush.activate()        // take up the run (or dismiss the results card)
      *   __rb.rush.state.timeLeft    // seconds on the clock
+     *   __rb.rush.progress()        // { cleared, level, target, site } — where in the chain
+     *   __rb.rush.setLevel(2)       // jump the chain to mission 3 and move the marker there
      */
-    rush: rushSite
+    rush: hasRush
       ? {
-          site: rushSite,
+          /** Where the marker is standing right now, i.e. the site of the mission on offer. */
+          get site() {
+            return rushSite();
+          },
+          /** Every site the chain runs through, in mission order. */
+          sites: rushSites,
           config: RUSH,
           get state() {
             return state.rush;
@@ -1287,8 +1540,70 @@ export function createGame(
           activate() {
             activateQueued = true;
           },
+          /** Where the chain has got to, and what the mission on offer is asking for. */
+          progress() {
+            const cleared = state.rush?.cleared ?? 0;
+            return {
+              cleared,
+              level: rushLevelIndex(cleared),
+              levelCount: rushLevelCount(),
+              target: rushTargetScore(cleared),
+              allClear: rushAllClear(cleared),
+              site: rushSite(),
+              best: rushProgress ? rushProgress.best.slice() : [],
+            };
+          },
+          /**
+           * Put the chain at a given number of cleared missions and move the marker to match.
+           * For automation and for looking at a level without first driving the two before it;
+           * it writes the record, because a debug jump that unwound itself on reload would be a
+           * worse lie than one that sticks.
+           */
+          setLevel(cleared: number) {
+            if (!state.rush) return null;
+            setRushProgress(state.rush, cleared);
+            if (rushProgress) {
+              rushProgress = { ...rushProgress, cleared: state.rush.cleared };
+              writeRushProgress(rushProgress);
+            }
+            placeRushMarker();
+            return state.rush.cleared;
+          },
           standing: () => leaderboard?.standing() ?? null,
           top: (limit?: number) => leaderboard?.top(limit) ?? Promise.resolve([]),
+        }
+      : null,
+
+    /**
+     * PASSENGERS, for automation and for tuning with the game running. `state` is the live
+     * rules state; `activate()` is the F key; `offerNow()` puts the next pin up at once;
+     * `stop(id)` looks a stop up so a script can teleport to it.
+     *
+     *   __rb.passenger.offerNow()             // skip the wait for the next pin
+     *   __rb.passenger.state.trip             // who, from where, to where, for how much
+     *   __rb.passenger.stop('the-quay')       // { x, z, ... } to drive to
+     */
+    passenger: hasPassengers
+      ? {
+          config: PASSENGER,
+          catalog: PASSENGERS,
+          stops: passengerStops,
+          get state() {
+            return state.passenger;
+          },
+          activate() {
+            activateQueued = true;
+          },
+          offerNow() {
+            if (state.passenger && state.passenger.phase === 'idle') state.passenger.offerIn = 0;
+            return state.passenger?.phase ?? null;
+          },
+          stop(id: string) {
+            return stopById(passengerStops, id);
+          },
+          progress() {
+            return rideProgress ? { ...rideProgress } : null;
+          },
         }
       : null,
 

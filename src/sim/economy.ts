@@ -8,6 +8,9 @@ import { TARGETS } from '../config/tuning';
  *   field is filled in here so presentation can show the amount.
  * - `nearMiss` pays the points the pass already earned in `src/sim/nearMiss.ts`. Those are
  *   scored once when the pass closes, so no extra guard is needed here.
+ * - `passengerComplete` pays a ride's fare and tip (`applyPassengerFare`, below). That event is
+ *   raised after this pass has run, so it has a pass of its own; it is raised exactly once per
+ *   ride by `src/sim/passenger.ts`, so it needs no guard either.
  */
 export function applyRewards(e: EconomyState, targets: TargetState[], events: GameEvent[]): void {
   for (let i = 0; i < events.length; i++) {
@@ -25,5 +28,19 @@ export function applyRewards(e: EconomyState, targets: TargetState[], events: Ga
     e.destroyed += 1;
     e.lastReward += TARGETS.reward;
     ev.reward = TARGETS.reward;
+  }
+}
+
+/**
+ * The fare and the tip of a ride that ended this tick. Read from `from`, the length the event
+ * list had before the passenger rules ran, so only what they raised is scanned.
+ */
+export function applyPassengerFare(e: EconomyState, events: GameEvent[], from = 0): void {
+  for (let i = from; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.type !== 'passengerComplete') continue;
+    const paid = ev.results.fare + ev.results.tip;
+    e.money += paid;
+    e.lastReward += paid;
   }
 }

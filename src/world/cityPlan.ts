@@ -327,11 +327,15 @@ export interface CityPlan {
   /** Where the WANTED board stands (its panel faces local +Z, rotated by rotY). */
   wantedBoard: { x: number; z: number; rotY: number } | null;
   /**
-   * Where the RAYO RUSH marker is painted, when this world carries the activity. The same
-   * point `ArenaLayout.rushSite` gives the rules, so what is drawn and what can be taken up
-   * are the same spot by construction.
+   * Where the RAYO RUSH marker may be painted, when this world carries the activity: one site
+   * per mission, in mission order. The same list `ArenaLayout.rushSites` gives the rules, so
+   * what is drawn and what can be taken up are the same spots by construction.
+   *
+   * Only ONE of them is ever standing. The art is built at the first and moved by the game as
+   * missions are cleared (`RushMarkerVisual.moveTo`), rather than three markers being built and
+   * two hidden — a marker the player can see but cannot use is worse than no marker.
    */
-  rushMarker?: { x: number; z: number; y: number; heading: number } | null;
+  rushMarkers?: Array<{ x: number; z: number; y: number; heading: number; label?: string }> | null;
   /** Race dressing: the line and the checkpoint arches. */
   startLine: TrackLineDef | null;
   checkpoints: TrackLineDef[];
