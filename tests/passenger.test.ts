@@ -205,19 +205,27 @@ describe('passenger stops in the city', () => {
 /* ================================================================== the lifecycle */
 
 describe('passenger ride: the lifecycle', () => {
-  it('offers, boards on a stopped car, talks, and pays once on drop-off', () => {
+  it('offers, boards, talks, and pays once on drop-off', () => {
     const r = rig();
     const offered = r.idle(PASSENGER.offer.firstDelay + 0.5);
     expect(offered.filter((e) => e.type === 'passengerOffer')).toHaveLength(1);
     expect(r.s.trip!.passengerId).toBe(PASSENGERS[0].id);
 
-    // Rolling through the pin is not a pickup.
+    // Rolling onto the pin raises the prompt on that very tick, at speed, exactly as the RUSH
+    // circle does — the paint is the whole condition.
     const pickup = stopById(STOPS, r.s.trip!.pickupId)!;
     r.vehicle.x = pickup.x;
     r.vehicle.z = pickup.z;
     r.vehicle.speed = 10;
-    r.tick();
+    const rolledOn = r.tick();
+    expect(canBoard(r.s)).toBe(true);
+    expect(rolledOn.filter((e) => e.type === 'passengerPrompt' && e.on)).toHaveLength(1);
+
+    // And rolling off it drops the prompt again, with the matching edge.
+    r.vehicle.x = pickup.x + 200;
+    const rolledOff = r.tick();
     expect(canBoard(r.s)).toBe(false);
+    expect(rolledOff.filter((e) => e.type === 'passengerPrompt' && !e.on)).toHaveLength(1);
 
     const who = r.board();
     // The opening plays first (on the boarding tick itself), then the brief with the

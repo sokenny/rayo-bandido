@@ -96,14 +96,22 @@ export interface EnvBuilders {
   badkala: MeshBuilder;
 }
 
-/** One built volume, as far as the wall index cares. */
-interface WallVolume {
+/**
+ * One built volume, as far as the wall index cares. The buildings register their full
+ * `Volume` (`buildingKit.ts`), so the optional fields are there for any city building and
+ * absent only for a volume registered by hand: `chamfer` is how far each corner is clipped
+ * (the axis walls start that far in) and `bands` is what the walls show at each height, both
+ * of which the Moogul's faces need to find a real pane (`render/scene/moogulTrip.ts`).
+ */
+export interface WallVolume {
   minX: number;
   maxX: number;
   minZ: number;
   maxZ: number;
   y0: number;
   y1: number;
+  chamfer?: number;
+  bands?: ReadonlyArray<{ y0: number; y1: number; style: string }>;
 }
 
 /** Grid cell (m) the index buckets footprints into. About one building. */
@@ -127,6 +135,28 @@ export class WallIndex {
         const list = this.cells.get(k);
         if (list) list.push(v);
         else this.cells.set(k, [v]);
+      }
+    }
+  }
+
+  /**
+   * Every registered volume whose footprint comes within `radius` of (x, z), into `out`
+   * (cleared first; each volume once). A handful of cells and a few dozen volumes, so this is
+   * for something asked every few seconds, not every frame.
+   */
+  collect(x: number, z: number, radius: number, out: WallVolume[]): void {
+    out.length = 0;
+    const n = Math.ceil(radius / WALL_CELL);
+    for (let ox = -n; ox <= n; ox++) {
+      for (let oz = -n; oz <= n; oz++) {
+        const list = this.cells.get(WallIndex.key(x + ox * WALL_CELL, z + oz * WALL_CELL));
+        if (!list) continue;
+        for (const v of list) {
+          if (out.includes(v)) continue;
+          const dx = x < v.minX ? v.minX - x : x > v.maxX ? x - v.maxX : 0;
+          const dz = z < v.minZ ? v.minZ - z : z > v.maxZ ? z - v.maxZ : 0;
+          if (dx * dx + dz * dz <= radius * radius) out.push(v);
+        }
       }
     }
   }

@@ -135,6 +135,44 @@ const NICO = `<svg ${BOX}>
 <path d="M66 52 q2 8 -2 14" stroke="#4ff3ff" stroke-width="1.4" fill="none"/>
 </svg>`;
 
+/**
+ * El Búho: a hood up, big round amber lenses (the nickname), a week of stubble, one corner of
+ * the mouth up. Deep teal behind him, a strip of the viaduct's sodium light along the top.
+ */
+const BUHO = `<svg ${BOX}>
+<rect width="96" height="96" fill="#061410"/>
+<circle cx="48" cy="54" r="34" fill="#0c2a24" opacity="0.6"/>
+<rect x="0" y="0" width="96" height="6" fill="#f0b34a" opacity="0.35"/>
+<!-- shoulders: a big parka -->
+<path d="M8 96 Q12 66 48 64 Q84 66 88 96 Z" fill="#3a3f2c"/>
+<path d="M30 96 Q34 78 48 76 Q62 78 66 96 Z" fill="#2a2e20"/>
+<!-- neck -->
+<rect x="41" y="58" width="14" height="14" rx="4" fill="#8a5e42"/>
+<!-- hood: a wide, deep shape round the head -->
+<path d="M18 62 Q14 20 48 12 Q82 20 78 62 Q70 44 48 40 Q26 44 18 62 Z" fill="#4a5236"/>
+<path d="M22 60 Q20 26 48 18 Q76 26 74 60 Q66 46 48 44 Q30 46 22 60 Z" fill="#2c3122"/>
+<!-- head -->
+<path d="M31 42 Q31 22 48 22 Q65 22 65 42 L63 54 Q60 66 48 67 Q36 66 33 54 Z" fill="#a8785a"/>
+<!-- stubble -->
+<path d="M36 54 Q48 70 60 54 Q58 64 48 65 Q38 64 36 54 Z" fill="#6b4a36" opacity="0.55"/>
+<!-- the lenses -->
+<circle cx="41" cy="46" r="7.2" fill="#0b0c08"/>
+<circle cx="55" cy="46" r="7.2" fill="#0b0c08"/>
+<circle cx="41" cy="46" r="6" fill="#f0b34a" opacity="0.9"/>
+<circle cx="55" cy="46" r="6" fill="#f0b34a" opacity="0.9"/>
+<circle cx="39" cy="44" r="2" fill="#fff2c8" opacity="0.8"/>
+<circle cx="53" cy="44" r="2" fill="#fff2c8" opacity="0.8"/>
+<path d="M48 46 h1" stroke="#0b0c08" stroke-width="2"/>
+<path d="M34 45 l-3 -1 M62 45 l3 -1" stroke="#0b0c08" stroke-width="1.6" stroke-linecap="round"/>
+<!-- nose, and one corner of the mouth up -->
+<path d="M48 50 l-2 6 h4" stroke="#6b4a36" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M42 59 Q48 61 56 57" stroke="#3a2418" stroke-width="2" fill="none" stroke-linecap="round"/>
+<!-- a small pin on the parka: an owl, if you like -->
+<circle cx="70" cy="80" r="3.2" fill="#0b0c08"/>
+<circle cx="69" cy="79.4" r="1" fill="#f0b34a"/>
+<circle cx="71.2" cy="79.4" r="1" fill="#f0b34a"/>
+</svg>`;
+
 /** A stranger: the fallback for a portrait id the HUD does not know. Still a face. */
 const UNKNOWN = `<svg ${BOX}>
 <rect width="96" height="96" fill="#0d0f16"/>
@@ -146,7 +184,7 @@ const UNKNOWN = `<svg ${BOX}>
 <path d="M42 59 h12" stroke="#0d0f16" stroke-width="2" stroke-linecap="round"/>
 </svg>`;
 
-const PORTRAITS: Record<string, string> = { mika: MIKA, vera: VERA, nico: NICO };
+const PORTRAITS: Record<string, string> = { mika: MIKA, vera: VERA, nico: NICO, buho: BUHO };
 
 /** The portrait for a catalogue id, or a stranger for one the HUD has no art for. */
 export function portraitFor(id: string): string {

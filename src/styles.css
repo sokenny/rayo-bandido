@@ -4088,3 +4088,51 @@ body.rb-touch-pad .rb-minimap {
     min-width: 200px;
   }
 }
+
+/* ================================================================== el búho */
+
+/* His furniture is the passenger's (prompt, portrait box, subtitle strip), re-coloured amber
+   under this root so his sign is never read as a pickup. Only the confirm and the refusals
+   are his own. */
+.rb-buho {
+  --rb-pax: #f0b34a;
+  --rb-pax-deep: #c9801a;
+  --rb-pax-hairline: rgba(240, 179, 74, 0.3);
+}
+
+/* The card is a face and a name, nothing else, and sits low on the left beside the strip. */
+.rb-buho__panel {
+  top: auto;
+  bottom: 21%;
+  width: auto;
+  max-width: 260px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.rb-buho__panel.is-on {
+  display: flex;
+}
+
+/* The second press: the hairline warms up so the sign reads as a question. */
+.rb-buho__prompt.is-confirm {
+  box-shadow: inset 0 0 0 1px rgba(240, 179, 74, 0.9), 0 0 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(240, 179, 74, 0.25);
+}
+
+.rb-buho__prompt.is-denied .rb-pax__prompt-sub {
+  color: var(--rb-red);
+}
+
+/* A refusal, or "one is plenty": nothing to press, so no key. */
+.rb-buho__prompt.is-mute .rb-pax__prompt-key {
+  display: none;
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-buho__panel {
+    top: auto;
+    bottom: 25%;
+    width: auto;
+  }
+}

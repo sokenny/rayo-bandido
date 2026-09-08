@@ -1801,3 +1801,42 @@ each obliges, and the city's stops.
   A cancelled ride (second `F` within 2.5 s, `R`, a multiplayer rescue) pays nothing. Rides
   completed and the best tip persist under `rb.passenger.rides`.
 - Tuning: `PASSENGER` in `src/config/tuning.ts`. Automation: `__rb.passenger.offerNow()`.
+
+## El Búho and the Moogul: a free-world encounter (2026-09-08)
+
+A man stands in an open bay under the viaduct's east leg — `BUHO_SITE` in `src/world/citySpec.ts`,
+reached by turning off `blvd-center` under the deck at (245, 60) and driving 30 m north — selling
+one thing. Roll onto his amber ring, `F` shows MOOGUL and the price, `F` again inside four seconds
+charges the yen counter once (`spendMoney`, `src/sim/economy.ts`), he says one line, and an
+eight-minute clock starts. What the clock drives is the city slowly coming alive and settling
+down again; nothing else — no car, traffic, weapon or other player — is touched.
+
+- Rules: `src/sim/buho.ts`, stepped last in `stepGame`. One press arms, the second buys; no money
+  or a Moogul already in the player buys nothing and says so. `locked` is written from the other
+  two activities, and a RAYO RUSH run or a passenger boarding ends the trip on the same tick.
+  The clock is simulation time (`moogulElapsed`), so it stops with the tab and never bursts.
+- Content: `src/content/buho.ts` — greetings, purchase remarks, a refusal and a "one is plenty",
+  in his own Spanish; `validateBuho` is in `tests/buho.test.ts`. Portrait `buho` in
+  `src/ui/portraits.ts`; `src/ui/buhoOverlay.ts` reuses the passenger prompt, portrait box and
+  subtitle strip re-coloured amber.
+- The envelope: `moogulIntensity` eases `MOOGUL.timeline.keys` (fractions of one `duration`), so
+  the first minute is a normal city, the picture is barely there by 2:30, climbs, peaks between
+  4:30 and 6:00 and is gone at 8:00. Each layer reads it through its own `[start, full]` window
+  (`MOOGUL.layers`), which is what keeps them from all arriving at once.
+- The picture: `src/render/scene/moogulTrip.ts` owns everything and lets go of everything. Sky,
+  fog and the two lights are pulled towards two cycling moods FROM WHAT THE ATMOSPHERE WROTE THIS
+  FRAME (a strike still flashes through it); facades and paint read two uniforms patched in at
+  build (`env/moogulSurface.ts`: the window grid drifts across the concrete, tints and paint turn
+  and pulse — no geometry moves, nothing recompiles); up to four faces stand on real panes of real
+  walls near the car (`WallIndex.collect`, the volume's floors and chamfer, the atlas's pane
+  layout), depth-tested and lifted 7 cm off the glass; a restrained colour separation and a slow
+  swim ride the nitro blur pass (`FinishAmounts`, `render/post/speedBlur.ts`), middle of the frame
+  exact. Reduced motion drops the swim and halves the rest.
+- Cleanup: expiry, interruption, `R`, a multiplayer rescue, `dispose`. The shown amount eases
+  down over `stopFadeSeconds`, then the sky re-reads `ATMOSPHERE`, the lights get their colours
+  back, the uniforms go to zero and the faces go dark. Verified in the browser: every sky, fog
+  and light colour identical before and after.
+- Tuning: `MOOGUL` in `src/config/tuning.ts`. Development: `__rb.buho.scrub(300)`,
+  `__rb.buho.timeScale(20)`, `__rb.buho.grant()`, `__rb.buho.status()`.
+- Not done: no minimap mark for the bay (he is found, not handed over); faces only stand on
+  buildings the kit registered (viaduct skirts and ground-floor modules have no panes anyway).

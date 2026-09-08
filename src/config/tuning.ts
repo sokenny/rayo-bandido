@@ -1437,13 +1437,17 @@ export const PASSENGER = {
     minTrip: 170,
     maxTrip: 520,
   },
+  /**
+   * The pickup and drop-off zones. Like the RAYO RUSH marker, the painted ring IS the trigger:
+   * standing on it is the whole condition, so the prompt is up the moment the car rolls onto
+   * the paint and gone the moment it rolls off. Nothing asks the car to have stopped first —
+   * that only made the prompt look late.
+   */
   marker: {
     /** Radius of the pickup and drop-off zones (m), and the radius the ring is painted at. */
     promptRadius: 7,
     /** Radius at which the zone lets go again (m). Slightly wider so a parked car cannot flicker it. */
     exitRadius: 8.2,
-    /** The car has to be at or under this (m/s) to board or drop off: stopped, or as good as. */
-    stopSpeed: 1.5,
   },
   /** Pressing the key twice inside this window (s) ends a ride early. One press only arms it. */
   cancelArmSeconds: 2.5,
@@ -1530,5 +1534,157 @@ export const PASSENGER = {
     maxTip: 300,
     /** Mood at or under which the tip is nothing. */
     tipFloor: 35,
+  },
+};
+
+/**
+ * EL BÚHO AND THE MOOGUL: the free-world encounter (`src/sim/buho.ts`, `src/render/scene/moogulTrip.ts`).
+ *
+ * Somebody stands under the highway selling one thing. Buying it charges the yen counter once
+ * and starts a clock; what the clock drives is the city slowly coming alive — the sky, the
+ * facades, the paint, the windows — and then slowly settling down again. Nothing here touches
+ * the car, the traffic, the weapon or another player's screen: the whole experience is local
+ * rendering, and every number that shapes it is in this block.
+ *
+ * THE ENVELOPE is one number 0..1 read off `timeline.keys` at the elapsed fraction of
+ * `timeline.duration`, eased between keys so it never steps. Each visual LAYER then reads that
+ * number through its own `[start, full]` window, which is what keeps the sky from arriving on
+ * the same beat as the faces: a layer is exactly nothing below `start`, so the first minute is
+ * genuinely a normal city and the layers stack up in order rather than all at once.
+ */
+export const MOOGUL = {
+  /** ¥. Charged once, on the confirming press. */
+  price: 400,
+  /** El Búho's ring: the bay under the deck is 12 m wide, so it is tighter than a passenger stop. */
+  marker: {
+    promptRadius: 5.5,
+    exitRadius: 6.8,
+  },
+  /** Seconds the first press keeps the confirm up. A second press inside it is the purchase. */
+  confirmSeconds: 4,
+  /** Seconds a refusal ("not enough", "one is plenty") stays on the prompt. */
+  noticeSeconds: 2.6,
+
+  timeline: {
+    /** The whole thing, seconds. Every key below is a fraction of this. */
+    duration: 480,
+    /**
+     * `[fraction of duration, intensity]`, eased between. 0-1:00 nothing at all; 1:00-2:30
+     * barely there; 2:30-4:30 climbing; 4:30-6:00 the peak; 6:00-8:00 back down to nothing.
+     */
+    keys: [
+      [0, 0],
+      [0.125, 0],
+      [0.3125, 0.12],
+      [0.5625, 0.55],
+      [0.667, 1],
+      [0.75, 0.9],
+      [1, 0],
+    ] as ReadonlyArray<readonly [number, number]>,
+  },
+
+  /** Where on the envelope each layer starts and where it is fully in. */
+  layers: {
+    sky: [0.04, 0.85],
+    fog: [0.08, 0.9],
+    lights: [0.25, 1],
+    surface: [0.15, 0.95],
+    graffiti: [0.1, 0.8],
+    faces: [0.4, 0.9],
+    chroma: [0.5, 1],
+    swim: [0.6, 1],
+  } as Record<'sky' | 'fog' | 'lights' | 'surface' | 'graffiti' | 'faces' | 'chroma' | 'swim', readonly [number, number]>,
+
+  /**
+   * The sky and the air. Two moods, cycled between over `cyclePeriod` seconds, and the live
+   * atmosphere colours are pulled `blend` of the way towards the mix at full intensity — never
+   * all the way, so the storm's own structure and the flash stay in it.
+   */
+  sky: {
+    cyclePeriod: 52,
+    blend: 0.88,
+    fogBlend: 0.55,
+    moodA: {
+      zenith: 0x1a0838,
+      middle: 0x0e4a52,
+      horizon: 0x7a2a72,
+      cloudDark: 0x2a0c3e,
+      cloudLight: 0x6fd8c4,
+      pollution: 0xf0a030,
+      fog: 0x2f2452,
+    },
+    moodB: {
+      zenith: 0x0a2438,
+      middle: 0x55144e,
+      horizon: 0xb85a18,
+      cloudDark: 0x0e2a40,
+      cloudLight: 0xe6a0d8,
+      pollution: 0x30e0c0,
+      fog: 0x38284a,
+    },
+  },
+  /** The two scene lights lean violet and teal at the peak. Fraction of the way to these. */
+  lights: {
+    hemiSky: 0x7a48c8,
+    hemiGround: 0x1c5a58,
+    key: 0xd07ad8,
+    blend: 0.55,
+  },
+  /** Facades and paint (`env/moogulSurface.ts`). */
+  surface: {
+    /** How far the window grid drifts at full, in panes. Half a pane is unmistakable, one is mush. */
+    warpPanes: 0.55,
+    /** Wavelength of the drift across a wall (m) and how fast it moves (rad/s). */
+    warpWavelength: 21,
+    warpRate: 0.42,
+    /** How far the window tints and the graffiti rotate round the hue wheel at full (rad). */
+    hue: 1.1,
+    /** How much the paint pulses in brightness at full (fraction). */
+    pulse: 0.4,
+    /** Slow variation inside the envelope (s), so the peak breathes rather than holds. */
+    breathPeriod: 17,
+  },
+  /** The faces in the windows (`moogulTrip.ts`). */
+  faces: {
+    /** At once, and how far from the car one may be put (m). */
+    max: 4,
+    range: 58,
+    minDistance: 9,
+    /** Seconds between one appearing and the next, at full; stretched out at lower intensity. */
+    interval: [2.5, 6] as readonly [number, number],
+    /** Random walls tried per attempt, and how soon an attempt that found no pane is repeated (s). */
+    attempts: 24,
+    retrySeconds: 0.6,
+    /**
+     * How often a wall outside the cone the player is looking down is passed over for one
+     * inside it, and the cone's half-angle as a cosine (0.5 = 60° either side of the nose).
+     */
+    aheadShare: 0.75,
+    aheadCos: 0.5,
+    /** Seconds to emerge, to linger, and to go. */
+    fadeIn: 1.8,
+    hold: [2.5, 6] as readonly [number, number],
+    fadeOut: 2.4,
+    /** Size on the glass (m): a little wider than a pane, a little shorter than a floor. */
+    width: 1.6,
+    height: 2.3,
+    /** Floors above the wall's base one may stand on (0 = ground floor). */
+    minFloor: 1,
+    maxFloor: 6,
+    opacity: 0.82,
+    /** Metres off the glass, so a face never fights the pane. */
+    lift: 0.07,
+  },
+  /** The finishing pass, in `render/post/speedBlur.ts`. Fractions of the frame, at the edge. */
+  post: {
+    chroma: 0.0055,
+    swim: 0.0042,
+    swimPeriod: 8.5,
+  },
+  /** Seconds the overrides take to let go when the trip is cut short. */
+  stopFadeSeconds: 0.9,
+  /** Development only: multiplies the trip clock. `__rb.buho.timeScale(20)`. */
+  debug: {
+    timeScale: 1,
   },
 };

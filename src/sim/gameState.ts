@@ -24,6 +24,7 @@ import { applyPassengerFare, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
 import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
 import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
+import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { PASSENGERS } from '../content/passengers';
 import { settleVehicle } from './surface';
 
@@ -107,6 +108,7 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     race: layout.race ? createRaceState(layout.race) : null,
     rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
+    buho: layout.buhoSite ? createBuhoState() : null,
     events: [],
   };
 }
@@ -127,6 +129,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.race && layout.race) resetRaceState(state.race, layout.race);
   if (state.rush) resetRushState(state.rush);
   if (state.passenger) resetPassengerState(state.passenger);
+  if (state.buho) resetBuhoState(state.buho);
   state.events.length = 0;
 }
 
@@ -199,8 +202,12 @@ export function stepGame(
     // A passenger aboard is let out unpaid. The reset wipes the event list along with the
     // ride, so the cancellation is raised after it, ahead of the restart itself.
     const aboard = state.passenger && state.passenger.phase === 'riding' && state.passenger.trip ? state.passenger.trip.passengerId : null;
+    // The Moogul does not survive a restart either; the reset clears it, so the end is
+    // raised afterwards, the same way the ride's cancellation is.
+    const tripping = !!state.buho && state.buho.moogulActive;
     resetGameState(state, layout);
     if (aboard !== null) state.events.push({ type: 'passengerCancel', passengerId: aboard, reason: 'restart' });
+    if (tripping) state.events.push({ type: 'moogulEnd', reason: 'restart' });
     state.events.push({ type: 'restart' });
     return;
   }
@@ -284,5 +291,23 @@ export function stepGame(
     );
     // Paid here and only here, on the event the rules raise exactly once per ride.
     applyPassengerFare(state.economy, state.events, from);
+  }
+  // Last of all: El Búho (`src/sim/buho.ts`). He sells only while nobody else has the car —
+  // no run in any phase but idle, no passenger aboard or settling up — and a run or a ride
+  // that started THIS tick ends the Moogul before it starts, on the very event that began
+  // it, so the two never overlap for even a frame.
+  const buho = state.buho;
+  if (buho && layout.buhoSite) {
+    buho.locked = (!!state.rush && state.rush.phase !== 'idle') || (!!passenger && (passenger.phase === 'riding' || passenger.phase === 'results'));
+    if (options?.respawned) endMoogul(buho, 'respawn', state.events);
+    const events = state.events;
+    for (let i = 0; i < events.length; i++) {
+      const t = events[i].type;
+      if (t === 'rushStart' || t === 'passengerBoard') {
+        endMoogul(buho, 'interrupted', state.events);
+        break;
+      }
+    }
+    stepBuho(buho, layout.buhoSite, state.vehicle, state.economy, cmd, dt, state.events);
   }
 }

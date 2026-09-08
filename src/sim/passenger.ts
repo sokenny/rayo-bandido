@@ -557,12 +557,12 @@ function stepEvents(s: PassengerState, def: PassengerDef, targets: readonly Targ
 
 /* ================================================================== the ride */
 
-/** Whether stopping here and pressing the key would board. Presentation asks this too. */
+/** Whether pressing the key here would board. Presentation asks this too. */
 export function canBoard(s: PassengerState): boolean {
   return s.phase === 'offered' && s.atPickup && !s.locked;
 }
 
-/** Whether stopping here and pressing the key would end the ride with a fare. */
+/** Whether pressing the key here would end the ride with a fare. */
 export function canDropOff(s: PassengerState): boolean {
   return s.phase === 'riding' && s.atDestination;
 }
@@ -656,13 +656,20 @@ export function dismissPassenger(s: PassengerState, events: GameEvent[]): boolea
   return true;
 }
 
-/** Whether the car is inside a zone: stopped or as good as, and within the radius (with hysteresis). */
+/**
+ * Whether the car is inside a zone: within the radius, with hysteresis on the way out.
+ *
+ * THE PAINT IS THE TRIGGER, exactly as it is for RAYO RUSH (`src/sim/rush.ts`) — rolling onto
+ * the ring raises the prompt on that tick and rolling off it drops it, with nothing else in
+ * between. It used to also ask the car to be stopped, which read as the prompt lagging: the
+ * player was standing on the paint with nothing on screen until the speed bled off.
+ */
 function inZone(v: VehicleState, stop: PassengerStop, was: boolean): boolean {
   const m = PASSENGER.marker;
   const dx = v.x - stop.x;
   const dz = v.z - stop.z;
   const limit = was ? m.exitRadius : m.promptRadius;
-  return dx * dx + dz * dz <= limit * limit && Math.abs(v.speed) <= m.stopSpeed;
+  return dx * dx + dz * dz <= limit * limit;
 }
 
 /** Whether the car is within the radius at all, moving or not. For the arrival line. */

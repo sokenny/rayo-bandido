@@ -26,12 +26,26 @@ import { SPEED_BLUR } from '../../config/tuning';
  * Readability first (docs/VISUAL_DIRECTION.md): the smear is masked out of the middle of the
  * frame, so the car, the road ahead and the target it is aiming at always stay sharp.
  */
+/**
+ * The Moogul's finishing touches, riding the same pass (`render/scene/moogulTrip.ts` owns the
+ * numbers). Both are fractions of the frame at its very edge and both are exactly nothing in
+ * the sharp middle, for the same reason the blur is.
+ */
+export interface FinishAmounts {
+  /** Colour separation: how far red and blue are pulled apart along the radius. */
+  chroma: number;
+  /** The periphery drifting on slow waves. */
+  swim: number;
+  /** Seconds, for the waves. */
+  time: number;
+}
+
 export interface SpeedBlur {
   /**
-   * Draw the frame. `strength` is 0..1; at 0 this is a plain `renderer.render` and neither the
-   * copy nor the blur pass happens.
+   * Draw the frame. `strength` is 0..1; at 0 — and with no finish asked for — this is a plain
+   * `renderer.render` and neither the copy nor the blur pass happens.
    */
-  render(scene: THREE.Scene, camera: THREE.Camera, strength: number): void;
+  render(scene: THREE.Scene, camera: THREE.Camera, strength: number, finish?: FinishAmounts | null): void;
   /**
    * Pay the pass's one-time costs now (behind the loading screen): allocate the frame texture
    * at the current drawing-buffer size and compile the blur shader, so the first boost does
@@ -43,6 +57,8 @@ export interface SpeedBlur {
 
 /** Below this the pass is not worth a copy and a second draw — the smear would be sub-pixel. */
 const MIN_STRENGTH = 0.02;
+/** Same for the finish: a separation under a fifth of a pixel at 4K is not one. */
+const MIN_FINISH = 0.00005;
 
 /**
  * How strongly the blur should be showing for a given boost intensity and speed. Nitro held at
@@ -74,6 +90,9 @@ uniform float uStrength;
 uniform float uAspect;
 uniform float uMaxShift;
 uniform float uCenterClear;
+uniform float uChroma;
+uniform float uSwim;
+uniform float uTime;
 varying vec2 vUv;
 
 /** Taps per pixel. Eight is enough for a smear this short and keeps the pass one cheap draw. */
@@ -83,12 +102,18 @@ void main() {
   vec2 fromCenter = vUv - 0.5;
   // Aspect-corrected radius so the sharp middle is a circle and not a wide ellipse.
   float radius = length(vec2(fromCenter.x * uAspect, fromCenter.y)) * 2.0;
-  float amount = uStrength * smoothstep(uCenterClear, 1.0, radius);
+  float edge = smoothstep(uCenterClear, 1.0, radius);
+  float amount = uStrength * edge;
+
+  // The swim: the periphery drifts on two slow, detuned waves. Exactly nothing in the middle.
+  vec2 base = vUv + uSwim * edge * vec2(
+    sin(vUv.y * 7.3 + uTime * 0.71) + 0.5 * sin(vUv.x * 4.1 - uTime * 0.37),
+    cos(vUv.x * 6.1 + uTime * 0.53) + 0.5 * cos(vUv.y * 3.7 + uTime * 0.29));
 
   // Smear along the radial direction, growing with the distance from the center: the classic
   // zoom blur. The kernel is centered on the pixel so the image never slides while it ramps.
   vec2 span = fromCenter * 2.0 * amount * uMaxShift;
-  vec2 uv = vUv - span * 0.5;
+  vec2 uv = base - span * 0.5;
   vec2 stride = span / float(TAPS - 1);
 
   vec3 sum = vec3(0.0);
@@ -98,7 +123,16 @@ void main() {
   }
   // In the sharp middle every tap lands on the same texel, so this is an exact copy of the frame
   // the game just drew. The pass smears the image; it never grades it.
-  gl_FragColor = vec4(sum / float(TAPS), 1.0);
+  vec3 col = sum / float(TAPS);
+
+  // Colour separation: red pulled a little out along the radius, blue a little in. Only the
+  // channels move; the green the eye reads sharpness from stays where it was.
+  if (uChroma > 0.0) {
+    vec2 split = fromCenter * uChroma * edge;
+    col.r = texture2D(tFrame, base + split).r;
+    col.b = texture2D(tFrame, base - split).b;
+  }
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -122,6 +156,9 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     uAspect: { value: 1 },
     uMaxShift: { value: SPEED_BLUR.maxShift },
     uCenterClear: { value: SPEED_BLUR.centerClear },
+    uChroma: { value: 0 },
+    uSwim: { value: 0 },
+    uTime: { value: 0 },
   };
 
   const geometry = createFullScreenTriangle();
@@ -164,13 +201,16 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     return texture;
   }
 
-  function blurPass(strength: number): void {
+  function blurPass(strength: number, chroma = 0, swim = 0, time = 0): void {
     renderer.getDrawingBufferSize(size);
     const texture = ensureFrame(size.x, size.y);
     renderer.copyFramebufferToTexture(texture);
 
     uniforms.uStrength.value = Math.min(strength, 1);
     uniforms.uAspect.value = size.y > 0 ? size.x / size.y : 1;
+    uniforms.uChroma.value = chroma;
+    uniforms.uSwim.value = swim;
+    uniforms.uTime.value = time;
     // Keep the scene's own draw calls and triangles in `renderer.info` for the debug overlay:
     // the blur pass adds to them instead of resetting them.
     renderer.info.autoReset = false;
@@ -179,11 +219,13 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
   }
 
   return {
-    render(scene, camera, strength) {
+    render(scene, camera, strength, finish = null) {
       // The scene always draws to the canvas exactly as it did before this pass existed.
       renderer.render(scene, camera);
-      if (!(strength > MIN_STRENGTH)) return;
-      blurPass(strength);
+      const chroma = finish && finish.chroma > MIN_FINISH ? finish.chroma : 0;
+      const swim = finish && finish.swim > MIN_FINISH ? finish.swim : 0;
+      if (!(strength > MIN_STRENGTH) && chroma === 0 && swim === 0) return;
+      blurPass(strength > MIN_STRENGTH ? strength : 0, chroma, swim, finish ? finish.time : 0);
     },
 
     warm() {

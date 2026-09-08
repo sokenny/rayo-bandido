@@ -281,6 +281,21 @@ export const RUSH_SITES = [
  * "picked up downtown, taken to the waterfront", never "picked up at (-70, -200)", so the
  * catalogue knows nothing about this city and a fourth stop is a line here.
  */
+/**
+ * Where El Búho stands (`src/sim/buho.ts`): the corridor under the viaduct's EAST LEG, in the
+ * open bay north of `blvd-center`. The deck at x 245 runs over bare ground between its street
+ * crossings; the columns stand 7.4 m either side of it with chain-link between them two bays
+ * in three, and this bay (z 21..33) is one of the open ones. The reclamation field puts it in
+ * a pocket, so the columns and the fences round it are painted and the junk is thick — the
+ * one place in the city that already looks like somebody lives under the highway.
+ *
+ * Reached by turning off `blvd-center` under the deck at (245, 60) and driving 30 m north up
+ * the corridor. He faces west, back to the outer column; the ring is centred on the corridor
+ * and is smaller than a passenger stop (`MOOGUL.marker`) so it stays clear of the columns.
+ * `tests/buho.test.ts` checks the ground is drivable, level, and free of colliders.
+ */
+export const BUHO_SITE = { x: 245, z: 27, y: 0, heading: -Math.PI / 2, label: 'UNDER THE VIADUCT' };
+
 export const PASSENGER_STOPS = [
   { id: 'av-main-north', x: -70, z: -205, y: 0, heading: 0, label: 'AV MAIN · NORTH GATE', tags: ['downtown'] },
   { id: 'blvd-north-mid', x: -25, z: -160, y: 0, heading: Math.PI / 2, label: 'BLVD NORTH · THE TOWERS', tags: ['downtown'] },

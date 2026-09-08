@@ -26,6 +26,7 @@ import {
   CITY_BOUNDS,
   CITY_QUAY_Z,
   DOWNTOWN,
+  BUHO_SITE,
   BUS_ROUTE_LOOPS,
   CITY_ROADS,
   CITY_SPAWN,
@@ -404,6 +405,8 @@ export function createCityWorld(): World {
     rushSites: RUSH_SITES.map((site) => ({ ...site })),
     // Where passengers wait. Points on roads; the rules and the art both read this list.
     passengerStops: PASSENGER_STOPS.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
+    // Where El Búho stands. A point under the deck; the rules and the figure both read it.
+    buhoSite: { ...BUHO_SITE },
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },

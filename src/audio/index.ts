@@ -110,7 +110,12 @@ export function createAudio(targetCount: number): AudioSystem {
           oneShots.countdown(true);
           break;
         case 'rushPrompt':
-          // Only on the way in. Rolling off a marker is not an event worth a sound.
+        case 'passengerPrompt':
+        case 'passengerDropPrompt':
+          // Every free-world marker gets the same chime: RAYO RUSH's circle and a passenger's
+          // ring are the same gesture — you have rolled onto something you can act on — and one
+          // sound for it is what makes the second activity read as part of the same game.
+          // Only on the way in; rolling off a marker is not an event worth a sound.
           if (ev.on) oneShots.pickup();
           break;
         case 'rushLevelUp':

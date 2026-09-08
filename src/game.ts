@@ -6,6 +6,7 @@ import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type {
   ActivitySite,
+  BuhoHudSnapshot,
   GameEvent,
   GameMode,
   GameState,
@@ -17,7 +18,7 @@ import type {
   RushHudSnapshot,
   Transmission,
 } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, NITRO, PASSENGER, RENDER, RUSH, VEHICLE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -43,6 +44,10 @@ import { readRideProgress, readRushProgress, recordRide, recordRushRun, writeRid
 import { canBoard, canDropOff, stopById } from './sim/passenger';
 import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
 import { createPassengerMarker } from './render/scene/env/passengerMarker';
+import { canBuyMoogul, endMoogul, grantMoogul, moogulIntensity } from './sim/buho';
+import { BUHO } from './content/buho';
+import { createBuhoFigure } from './render/scene/env/buhoFigure';
+import { createMoogulTrip } from './render/scene/moogulTrip';
 import { createLeaderboard } from './net/leaderboard';
 import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
@@ -339,16 +344,40 @@ export function createGame(
   if (pickupMarker) scene.add(pickupMarker.group);
   if (destinationMarker) scene.add(destinationMarker.group);
 
+  /* --------------------------------------------------------------- el búho */
+
+  /**
+   * The man under the highway and what he sells, in the world that has his bay. Guarded like
+   * the other two: null everywhere else. The figure stands in the scene from the start (he is
+   * part of the city); the trip controller owns everything the Moogul does to the picture and
+   * is driven once a frame from the rules' clock (`src/sim/buho.ts`), and nothing else.
+   */
+  const buhoSite: ActivitySite | null = layout.buhoSite ?? null;
+  const hasBuho = !!(buhoSite && state.buho);
+  const buhoFigure = hasBuho && buhoSite ? createBuhoFigure(buhoSite) : null;
+  if (buhoFigure) scene.add(buhoFigure.group);
+  const moogul = hasBuho
+    ? createMoogulTrip({
+        scene,
+        atmosphere: environment.atmosphere,
+        hemi: environment.moogul.hemi,
+        key: environment.moogul.key,
+        surface: environment.moogul.surface,
+        walls: environment.moogul.walls,
+      })
+    : null;
+
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
     onActivate:
-      hasRush || hasPassengers
+      hasRush || hasPassengers || hasBuho
         ? () => {
             activateQueued = true;
           }
         : undefined,
     rush: hasRush,
     passengers: hasPassengers,
+    buho: hasBuho,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -490,7 +519,24 @@ export function createGame(
     race: null,
     rush: null,
     passenger: null,
+    buho: null,
   };
+  const buhoSnapshot: BuhoHudSnapshot = {
+    name: BUHO.name,
+    tagline: BUHO.tagline,
+    portrait: BUHO.portrait,
+    item: BUHO.item,
+    price: MOOGUL.price,
+    atSite: false,
+    canBuy: false,
+    confirmArm: 0,
+    notice: null,
+    active: false,
+    intensity: 0,
+    line: '',
+    lineId: 0,
+  };
+  if (hasBuho) snapshot.buho = buhoSnapshot;
   const passengerSnapshot: PassengerHudSnapshot = {
     phase: 'idle',
     passengerId: '',
@@ -917,6 +963,8 @@ export function createGame(
         rushPreviousBest = -1;
         rushNewBest = false;
         placePassengerMarkers();
+        // A restart is a cut, not a fade: the city is put back exactly as it was.
+        moogul?.stop();
         effects.reset();
         backfire.reset();
     prevLimiterCut = 0;
@@ -1080,6 +1128,20 @@ export function createGame(
     effects.update(frameDt, simTime);
     theme.update(frameDt);
     environment.update(frameDt, simTime);
+    // After the environment, so the sky and the fog it blends from are this frame's. The
+    // envelope is read off the rules' clock: 0 the moment the Moogul is gone, and the
+    // controller's own fade takes it from there.
+    if (moogul && state.buho) {
+      moogul.update(state.buho.moogulActive ? moogulIntensity(state.buho.moogulElapsed) : 0, frameDt, pose.x, pose.z, pose.heading);
+    }
+    if (buhoFigure && buhoSite) {
+      const dx = pose.x - buhoSite.x;
+      const dz = pose.z - buhoSite.z;
+      const reach = MOOGUL.marker.promptRadius * 4;
+      const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
+      buhoFigure.setProximity(near * near);
+      buhoFigure.update(simTime);
+    }
     chase.update(cameraPose, frameDt);
     audio.update(
       frameDt,
@@ -1229,6 +1291,17 @@ export function createGame(
       pickupMarker.update(simTime);
       destinationMarker.update(simTime);
     }
+    const buho = state.buho;
+    if (buho && hasBuho) {
+      buhoSnapshot.atSite = buho.atSite;
+      buhoSnapshot.canBuy = canBuyMoogul(buho);
+      buhoSnapshot.confirmArm = buho.confirmArm;
+      buhoSnapshot.notice = buho.notice;
+      buhoSnapshot.active = buho.moogulActive;
+      buhoSnapshot.intensity = moogul ? moogul.shown : 0;
+      buhoSnapshot.line = buho.line;
+      buhoSnapshot.lineId = buho.lineId;
+    }
     const race = state.race;
     if (race) {
       raceSnapshot.phase = race.phase;
@@ -1252,7 +1325,7 @@ export function createGame(
     if (nameTags) nameTags.update(chase.camera, rivals);
 
     gpuTimer.begin();
-    speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed));
+    speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed), moogul ? moogul.finish : null);
     gpuTimer.end();
 
     readout.carX = pose.x;
@@ -1433,6 +1506,12 @@ export function createGame(
       rivalVisuals = [];
       disposeRivalCarResources();
       car.dispose();
+      // Before the environment: letting go writes the sky's own colours back through it.
+      moogul?.dispose();
+      if (buhoFigure) {
+        scene.remove(buhoFigure.group);
+        buhoFigure.dispose();
+      }
       environment.dispose();
       if (pickupMarker) {
         scene.remove(pickupMarker.group);
@@ -1603,6 +1682,65 @@ export function createGame(
           },
           progress() {
             return rideProgress ? { ...rideProgress } : null;
+          },
+        }
+      : null,
+
+    /**
+     * EL BÚHO AND THE MOOGUL, for automation and for looking at the trip without waiting eight
+     * minutes for it. `state` is the live rules state; `activate()` is the F key; the rest
+     * drives the clock directly.
+     *
+     *   __rb.buho.activate()        // the F key: arm, then buy
+     *   __rb.buho.grant(200)        // the Moogul without paying, 200 s in (development only)
+     *   __rb.buho.scrub(300)        // jump the clock to 5:00
+     *   __rb.buho.timeScale(20)     // run the clock twenty times faster
+     *   __rb.buho.status()          // { active, elapsed, intensity, shown, faces }
+     *   __rb.buho.end()             // wear it off now
+     */
+    buho: hasBuho
+      ? {
+          config: MOOGUL,
+          def: BUHO,
+          site: buhoSite,
+          /** The building index the faces are placed from, for looking at what they had to choose from. */
+          walls: environment.moogul.walls,
+          get state() {
+            return state.buho;
+          },
+          activate() {
+            activateQueued = true;
+          },
+          grant(elapsed = 0) {
+            if (state.buho) grantMoogul(state.buho, state.events, elapsed);
+            return state.buho?.moogulElapsed ?? null;
+          },
+          scrub(seconds: number) {
+            const b = state.buho;
+            if (!b) return null;
+            if (!b.moogulActive) grantMoogul(b, state.events, seconds);
+            b.moogulElapsed = Math.max(0, seconds);
+            return b.moogulElapsed;
+          },
+          timeScale(scale?: number) {
+            if (scale !== undefined) MOOGUL.debug.timeScale = Math.max(0, scale);
+            return MOOGUL.debug.timeScale;
+          },
+          end() {
+            if (state.buho) endMoogul(state.buho, 'debug', state.events);
+          },
+          status() {
+            const b = state.buho;
+            return {
+              active: !!b && b.moogulActive,
+              elapsed: b ? b.moogulElapsed : 0,
+              intensity: b && b.moogulActive ? moogulIntensity(b.moogulElapsed) : 0,
+              shown: moogul ? moogul.shown : 0,
+              faces: moogul ? moogul.faces : 0,
+              atSite: !!b && b.atSite,
+              purchases: b ? b.purchases : 0,
+              money: state.economy.money,
+            };
           },
         }
       : null,

@@ -6,6 +6,7 @@ import { createWheelIndicator } from './wheelIndicator';
 import { createTacho } from './tacho';
 import { createRushOverlay, type RushOverlay } from './rushOverlay';
 import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
+import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -45,6 +46,8 @@ export interface HudOptions {
   /** Which activities this world carries. Both default to "whenever `onActivate` is given". */
   rush?: boolean;
   passengers?: boolean;
+  /** El Búho's bay. Defaults to off: only the world that has him asks for it. */
+  buho?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -211,6 +214,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const passengers: PassengerOverlay | null =
     options.onActivate && options.passengers !== false ? createPassengerOverlay({ onActivate: options.onActivate }) : null;
   if (passengers) hud.appendChild(passengers.root);
+  /** El Búho's, the same way. */
+  const buho: BuhoOverlay | null = options.onActivate && options.buho ? createBuhoOverlay({ onActivate: options.onActivate }) : null;
+  if (buho) hud.appendChild(buho.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -394,6 +400,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (s.race) updateRace(s.race);
       if (rush && s.rush) rush.update(s.rush);
       if (passengers && s.passenger) passengers.update(s.passenger);
+      if (buho && s.buho) buho.update(s.buho);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -564,6 +571,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     onEvent(e) {
       rush?.onEvent(e);
       passengers?.onEvent(e);
+      buho?.onEvent(e);
       if (e.type === 'nearMiss') {
         // Shares the money flash column with kill rewards, but cyan, labelled, and drifting
         // DOWN instead of up: passes are frequent, and rising past the counters the way a
@@ -661,6 +669,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       window.removeEventListener('gamepadconnected', onPadConnected);
       rush?.dispose();
       passengers?.dispose();
+      buho?.dispose();
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();

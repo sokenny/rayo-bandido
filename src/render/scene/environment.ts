@@ -21,6 +21,8 @@ import { applyHaze, HAZE } from './env/haze';
 import { createAtmosphere, type AtmosphereVisual } from './env/atmosphere';
 import type { MeshBuilder } from './env/meshBuilder';
 import { createWindowActivity } from './env/windowActivity';
+import { createMoogulSurface, type MoogulSurface } from './env/moogulSurface';
+import type { WallIndex } from './env/builders';
 import { attachTexture, loadTexture } from '../textures/load';
 import { createLampFaults } from './env/lampFaults';
 import { isTouchDevice } from '../../ui/viewport';
@@ -62,6 +64,18 @@ export interface EnvironmentVisual {
    * the car is and whether a run is under way.
    */
   rushMarker: RushMarkerVisual | null;
+  /**
+   * What the Moogul may touch (`render/scene/moogulTrip.ts`): the two scene lights, the
+   * surface uniforms patched into the facade and graffiti materials, and the index of every
+   * wall the city built. The trip writes through these and through `atmosphere`, and nothing
+   * else in the environment knows it exists.
+   */
+  moogul: {
+    hemi: THREE.HemisphereLight;
+    key: THREE.DirectionalLight;
+    surface: MoogulSurface;
+    walls: WallIndex;
+  };
   /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
   ready: Promise<void>;
   /** Called once per render frame for cheap animation (blinking signs, holograms). */
@@ -252,6 +266,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   neonMat.color.setScalar(PAL.neonGain);
   glowMat.color.setScalar(PAL.glowGain);
 
+  // The Moogul's hook into the walls: two uniforms on the facades and the paint, zero for the
+  // life of a normal session (`env/moogulSurface.ts`). Patched here, at build, so the trip
+  // never compiles a shader; composed with the atlas and window patches already on them.
+  const moogulSurface = createMoogulSurface();
+  moogulSurface.applyFacade(facadeMat);
+  moogulSurface.applyDecal(decalMat);
+
   // Aerial perspective, per material family: walls fade first, lights fade last. Must come
   // after every other patch above — the window activity and the lamp faults each install
   // their own `onBeforeCompile`, and `applyHaze` composes with whatever it finds.
@@ -382,6 +403,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     root,
     atmosphere,
     rushMarker,
+    moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
       // The sky, the rain and the storm. First, because a strike rewrites the fog colour and

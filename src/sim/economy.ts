@@ -44,3 +44,14 @@ export function applyPassengerFare(e: EconomyState, events: GameEvent[], from = 
     e.lastReward += paid;
   }
 }
+
+/**
+ * The single place money is taken. False, and nothing taken, when the counter cannot cover
+ * it: a purchase is all or nothing, never a debt. `lastReward` is left alone — it is the
+ * reward flash's, and a purchase is not a reward.
+ */
+export function spendMoney(e: EconomyState, amount: number): boolean {
+  if (!(amount >= 0) || e.money < amount) return false;
+  e.money -= amount;
+  return true;
+}

@@ -598,7 +598,56 @@ export type GameEvent =
   /** The ride ended without a drop-off. Nothing is paid. */
   | { type: 'passengerCancel'; passengerId: string; reason: 'player' | 'restart' | 'respawn' }
   /** The fare card was put away; free roam continues. */
-  | { type: 'passengerDismissed' };
+  | { type: 'passengerDismissed' }
+
+  /* ---------------------------------------------------------------- el búho */
+
+  /** The car rolled onto / off El Búho's paint. */
+  | { type: 'buhoPrompt'; on: boolean }
+  /** He said something. The subtitle strip shows it for `lineSeconds`. */
+  | { type: 'buhoLine'; text: string; kind: BuhoLineKind }
+  /** Paid and taken; the Moogul's clock has started. `price` is 0 for a development grant. */
+  | { type: 'buhoPurchase'; price: number }
+  /** A press that bought nothing: no money, or one already in the player. */
+  | { type: 'buhoDenied'; reason: 'funds' | 'active' }
+  /** The Moogul wore off, or something else took the player before it could. */
+  | { type: 'moogulEnd'; reason: MoogulEndReason };
+
+/** What one of El Búho's lines is for. */
+export type BuhoLineKind = 'greeting' | 'remark' | 'broke' | 'busy';
+
+export type MoogulEndReason = 'expired' | 'interrupted' | 'restart' | 'respawn' | 'debug';
+
+/**
+ * El Búho and the Moogul (`src/sim/buho.ts`). The encounter is stateless beyond "is the car
+ * on his paint" and "is a confirm armed"; the Moogul itself is one clock.
+ */
+export interface BuhoState {
+  /** True while the car is inside his ring. */
+  atSite: boolean;
+  /** Which activity has the car. See `RushState.locked`; written by the orchestrator. */
+  locked: boolean;
+  /** Seconds left in which a second press buys. 0 = not armed. */
+  confirmArm: number;
+  /** Whether he has greeted this visit. Reset on leaving the ring. */
+  greeted: boolean;
+  /** Whether the Moogul is in the player, and for how long (simulation seconds). */
+  moogulActive: boolean;
+  moogulElapsed: number;
+  /** Purchases this session. */
+  purchases: number;
+  /** A refusal on the prompt, and how long it has left. */
+  notice: 'funds' | 'active' | null;
+  noticeFor: number;
+  /** The subtitle on screen and how long it has left. `lineId` increments per line. */
+  line: string;
+  lineKind: BuhoLineKind;
+  lineId: number;
+  lineTimeLeft: number;
+  lastText: string;
+  /** Deterministic pick state for line variants. */
+  seed: number;
+}
 
 /**
  * A place a passenger can be picked up or dropped at: a stopping point on a road, named for
@@ -764,6 +813,8 @@ export interface GameState {
   rush: RushState | null;
   /** Passenger rides. Present in worlds that carry stops (`ArenaLayout.passengerStops`). */
   passenger: PassengerState | null;
+  /** El Búho and the Moogul. Present in the world that has his bay (`ArenaLayout.buhoSite`). */
+  buho: BuhoState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -915,6 +966,11 @@ export interface ArenaLayout {
    * carry the activity. Every one is a stopping point on a road; the world's tests say so.
    */
   passengerStops?: PassengerStop[] | null;
+  /**
+   * Where El Búho stands (`src/sim/buho.ts`), in the world that has him. One point under the
+   * highway; the ring round it is `MOOGUL.marker`. Null or missing everywhere else.
+   */
+  buhoSite?: ActivitySite | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   minimap: MinimapData;
@@ -990,6 +1046,30 @@ export interface HudSnapshot {
   rush: RushHudSnapshot | null;
   /** Passenger readout; null in a world without stops. */
   passenger: PassengerHudSnapshot | null;
+  /** El Búho's readout; null in a world without his bay. */
+  buho: BuhoHudSnapshot | null;
+}
+
+/** What El Búho's overlay needs: a flattened read-only view of `BuhoState` plus the names it cannot know. */
+export interface BuhoHudSnapshot {
+  name: string;
+  tagline: string;
+  portrait: string;
+  item: string;
+  price: number;
+  /** True while the car is on his paint. */
+  atSite: boolean;
+  /** True when a press would arm or buy (`canBuyMoogul`). */
+  canBuy: boolean;
+  /** Seconds left on the confirm; 0 when not armed. */
+  confirmArm: number;
+  /** A refusal on the prompt, while it lasts. */
+  notice: 'funds' | 'active' | null;
+  /** The Moogul, for the prompt's "come back later" and for the debug overlay. */
+  active: boolean;
+  intensity: number;
+  line: string;
+  lineId: number;
 }
 
 /** What the passenger overlay needs: a flattened read-only view of `PassengerState` plus the names it cannot know. */
