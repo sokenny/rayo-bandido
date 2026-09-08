@@ -271,12 +271,35 @@ fi
 # missing dist/index.html (deploy "succeeded", domain served 404 at the root).
 log "Verifying bundle contents..."
 
+# Read the raw names out of the zip's central directory rather than asking a
+# CLI tool. `bsdtar -tf` silently rewrites `dist\index.html` to `dist/index.html`
+# when it lists, so a DOS-path bundle looks perfectly healthy through it and
+# then fails to extract on the Linux instance — which is precisely the bug this
+# section exists to catch. Node is already required above.
 list_archive() {
-  if [[ "$ARCHIVER_KIND" == "zip" ]]; then unzip -Z1 "$1"; else "$ARCHIVER" -tf "$1"; fi
+  node -e '
+    const fs = require("fs");
+    const b = fs.readFileSync(process.argv[1]);
+    const eocd = b.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));
+    if (eocd < 0) { console.error("not a zip"); process.exit(1); }
+    let n = b.readUInt16LE(eocd + 10);
+    let p = b.readUInt32LE(eocd + 16);
+    const out = [];
+    while (n-- > 0 && b.readUInt32LE(p) === 0x02014b50) {
+      const nameLen = b.readUInt16LE(p + 28);
+      const extraLen = b.readUInt16LE(p + 30);
+      const cmtLen = b.readUInt16LE(p + 32);
+      out.push(b.toString("latin1", p + 46, p + 46 + nameLen));
+      p += 46 + nameLen + extraLen + cmtLen;
+    }
+    process.stdout.write(out.join("\n") + "\n");
+  ' "$1"
 }
 NAMES=$(list_archive "$ZIP")
 
-if grep -q '\\' <<<"$NAMES"; then
+# -F, because a lone backslash is not a valid regex: `grep '\\'` fails with
+# "trailing backslash" and its non-zero exit reads as "clean bundle".
+if grep -qF '\' <<<"$NAMES"; then
   fail "Bundle contains DOS path separators — EB's Linux instance cannot extract this.
   The archiver wrote Windows paths; do not build the bundle with Compress-Archive."
 fi
