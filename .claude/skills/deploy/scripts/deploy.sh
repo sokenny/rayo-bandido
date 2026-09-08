@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ship the working tree: commit, push, build, test, then deploy to whichever
+# Ship the working tree: build, test, verify, commit, push, then deploy to whichever
 # EB environment rayobandido.com currently resolves to. See ../SKILL.md for
 # the reasoning; this file is the executable half.
 #
@@ -88,31 +88,41 @@ fi
 log "Archiver: ${ARCHIVER} (${ARCHIVER_KIND})"
 
 # =========================================================================
-# 1. Git: add, commit, push
+# 1. Build and test BEFORE committing anything
 # =========================================================================
-if [[ -z "$(git status --porcelain)" ]]; then
-  log "Working tree clean, nothing to commit."
-else
-  git add -A
-  if [[ -z "$COMMIT_MSG" ]]; then
-    fail "There are uncommitted changes but no commit message was given (pass it as the
+# Order matters here. Committing first means a red suite leaves a commit
+# already pushed to main, and it means the tree that gets tested is not
+# necessarily the tree that got committed. Build and test first, commit once
+# it is all green.
+#
+# The fingerprint guards against the other half of that problem: someone
+# editing in another window while this runs. A save that lands between the
+# tests and the commit would ship a bundle that nothing verified, and `git add
+# -A` would sweep the half-finished edit into a commit message describing
+# something else. Both have very nearly happened.
+DIRTY=""
+[[ -n "$(git status --porcelain)" ]] && DIRTY=1
+if [[ -n "$DIRTY" && -z "$COMMIT_MSG" ]]; then
+  fail "There are uncommitted changes but no commit message was given (pass it as the
   first argument). Refusing to invent one for a commit that ships to production."
-  fi
-  git commit -m "$COMMIT_MSG"
 fi
-log "Pushing to origin/main..."
-git push origin main
 
-# =========================================================================
-# 2. Build and test, so a broken build never reaches production
-# =========================================================================
+tree_fingerprint() {
+  # Names plus mtime/size of everything git would consider — cheap, and any
+  # editor save moves it.
+  git ls-files -co --exclude-standard -z \
+    | xargs -0 -r stat -c '%n %Y %s' 2>/dev/null \
+    | sort | sha1sum | cut -d' ' -f1
+}
+FINGERPRINT_BEFORE=$(tree_fingerprint)
+
 log "Building..."
 npm run build
 log "Running tests..."
 npm test
 
 # =========================================================================
-# 3. Resolve which EB environment rayobandido.com actually points to
+# 2. Resolve which EB environment rayobandido.com actually points to
 # =========================================================================
 # There is more than one EB environment in this account; the one Route53
 # resolves the domain to is the only one that matters for "is it live".
@@ -198,7 +208,7 @@ fi
 log "${DOMAIN} is served by EB environment: ${TARGET_ENV}"
 
 # =========================================================================
-# 4. Build the deploy bundle, honoring .ebignore
+# 3. Build the deploy bundle, honoring .ebignore
 # =========================================================================
 # .ebignore's presence switches EB from "deploy what git tracks" to "deploy
 # what's on disk" — that's the only way dist/ (gitignored, but required on the
@@ -264,7 +274,7 @@ else
 fi
 
 # =========================================================================
-# 5. Verify the bundle's shape before anything leaves this machine
+# 4. Verify the bundle's shape before anything leaves this machine
 # =========================================================================
 # Both of the failure modes checked here have actually shipped: a Windows-made
 # zip with DOS separators (deploy aborted, environment went Red) and a bundle
@@ -317,7 +327,7 @@ grep -qx "dist/${LOCAL_ASSET}" <<<"$NAMES" || \
 log "Bundle OK ($(list_archive "$ZIP" | wc -l) entries, $(du -h "$ZIP" | cut -f1))."
 
 # =========================================================================
-# 6. Smoke-test the exact bundle locally, before production sees it
+# 5. Smoke-test the exact bundle locally, before production sees it
 # =========================================================================
 # Boot the real server out of an extracted copy of the very archive about to
 # be uploaded and ask it for what production must answer. This is the step
@@ -360,6 +370,25 @@ kill "$SMOKE_PID" 2>/dev/null || true
 SMOKE_PID=""
 rm -rf "$SMOKE_DIR"
 log "Smoke test passed: /, ${LOCAL_ASSET} and /rooms all served from the bundle."
+
+# =========================================================================
+# 6. Commit and push — everything above is green, so this is safe to record
+# =========================================================================
+if [[ "$(tree_fingerprint)" != "$FINGERPRINT_BEFORE" ]]; then
+  fail "The working tree changed while this deploy was running.
+  The bundle that was just built and smoke-tested no longer matches what is on disk,
+  so committing now would record something nothing verified. Nothing has been
+  uploaded and production is untouched — re-run once the tree has settled."
+fi
+
+if [[ -n "$DIRTY" ]]; then
+  git add -A
+  git commit -m "$COMMIT_MSG"
+else
+  log "Working tree clean, nothing to commit."
+fi
+log "Pushing to origin/main..."
+git push origin main
 
 # =========================================================================
 # 7. Upload and register the application version
