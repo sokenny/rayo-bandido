@@ -15,6 +15,8 @@ node_modules/
 #
 # The leading slashes matter: a bare `index.html` would match at every depth and take
 # `dist/index.html` with it, leaving the server with assets but no entry document.
+# The same trap applies to `/assets/`: unanchored it would also match `dist/assets/`,
+# which is the fingerprinted JS the whole game loads.
 src/
 tests/
 scripts/
@@ -22,6 +24,11 @@ docs/
 .vite/
 artifacts/
 /index.html
+
+# Art-pipeline inputs: unoptimized model sources and moodboards. Around 32 MB, kept in
+# git because they are the retopology source for the car, but the server only ever reads
+# `dist/`, so shipping them just puts 32 MB of nothing on the instance.
+/assets/
 /vite.config.*
 /tsconfig.json
 /vitest.config.*
