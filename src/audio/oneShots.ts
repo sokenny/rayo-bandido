@@ -22,6 +22,14 @@ export interface OneShots {
    * animating in, which is the whole job — it is a "you are standing on it", not a fanfare.
    */
   pickup(): void;
+  /** A new wanted star: a police-scanner blip, two clipped tones and a crackle of static. */
+  scanner(): void;
+  /** The arrest: a falling stack and a thud. */
+  busted(): void;
+  /** The escape: two rising notes, the pickup's cousin, quieter. */
+  escaped(): void;
+  /** The Rayo meeting a shielded car: a hard metallic clink, no sizzle. */
+  shield(): void;
 }
 
 /**
@@ -179,6 +187,46 @@ export function createOneShots(core: AudioCore): OneShots {
       }
       // A bright tick on the leading edge, so the first note has something to land on.
       playNoise(t, t + 0.05, 'highpass', 5200, 5200, 0.8, 0.2 * v, 0.002);
+    },
+
+    scanner() {
+      const t = ctx.currentTime;
+      const v = AUDIO.scannerVolume;
+      // Two clipped tones through a narrow band: a radio, not an instrument.
+      playOsc('square', t, t + 0.07, 1180, 1180, 0.5 * v, 0.003, 2400);
+      playOsc('square', t + 0.09, t + 0.17, 1560, 1560, 0.45 * v, 0.003, 2600);
+      // Static under and after them.
+      playNoise(t, t + 0.22, 'bandpass', 2200, 1800, 3, 0.35 * v, 0.004);
+    },
+
+    busted() {
+      const t = ctx.currentTime;
+      const v = AUDIO.bustedVolume;
+      // The stack falling: a saw and its octave gliding down over half a second.
+      playOsc('sawtooth', t, t + 0.55, 260, 70, 0.4 * v, 0.01, 1600);
+      playOsc('sawtooth', t, t + 0.55, 130, 35, 0.3 * v, 0.01, 900);
+      // The thud that ends it.
+      playOsc('sine', t + 0.4, t + 0.75, 90, 40, 0.5 * v, 0.006);
+      playNoise(t + 0.4, t + 0.5, 'lowpass', 400, 200, 1, 0.3 * v, 0.004);
+    },
+
+    escaped() {
+      const t = ctx.currentTime;
+      const v = AUDIO.pickupVolume * 0.8;
+      const notes = [880, 1318.5];
+      for (let i = 0; i < notes.length; i++) {
+        const at = t + i * 0.09;
+        playOsc('triangle', at, at + 0.22, notes[i], notes[i], (0.45 - i * 0.1) * v, 0.004, 6000);
+      }
+    },
+
+    shield() {
+      const t = ctx.currentTime;
+      const v = AUDIO.shieldVolume;
+      // Metal: a high, short, inharmonic pair with a bright transient — the bolt bounced.
+      playOsc('triangle', t, t + 0.09, 2400, 2100, 0.5 * v, 0.002, 9000);
+      playOsc('sine', t, t + 0.12, 3170, 2900, 0.3 * v, 0.002);
+      playNoise(t, t + 0.04, 'highpass', 6000, 6000, 0.8, 0.35 * v, 0.001);
     },
 
     shutdown() {

@@ -1148,6 +1148,15 @@ export const AUDIO = {
   humVoices: 12,
   /** Widest stereo pan applied to a spatialized electric hum (0..1). */
   maxPan: 0.85,
+  /** The police (`audio/police.ts`, `audio/oneShots.ts`). */
+  sirenVolume: 0.26,
+  /** Metres: full loudness inside `sirenNear`, silent beyond `sirenFar` — heard before it is seen. */
+  sirenNear: 10,
+  sirenFar: 160,
+  policeMotorVolume: 0.07,
+  scannerVolume: 0.32,
+  bustedVolume: 0.5,
+  shieldVolume: 0.3,
 };
 
 /**
@@ -1874,5 +1883,118 @@ export const MOOGUL = {
   /** Development only: multiplies the trip clock. `__rb.buho.timeScale(20)`. */
   debug: {
     timeScale: 1,
+  },
+};
+
+/**
+ * THE POLICE (`src/sim/police.ts`). Free Roam only — never in a race, a mission or any other
+ * activity — see `isPoliceEnabledForCurrentGameState`. Everything the MVP tunes lives here.
+ *
+ * Units are traffic-shaped: they drive by position the way the electric cars do, so the
+ * numbers are metres, seconds and metres per second, never forces.
+ */
+export const POLICE = {
+  /** One patrol car for every this-many civilian electric cars. */
+  patrolRatio: 16,
+  /** Hard cap on patrol cars, whatever the ratio says. */
+  maxPatrols: 6,
+  /** Hard cap on every police car at once, patrols and pursuers together. The visual pool size. */
+  maxUnits: 9,
+  /** Seconds after the police are (re)enabled before the first car appears. */
+  resumeDelay: 6,
+  /** Seconds between patrol spawns while the ratio is short. */
+  patrolSpawnInterval: 2.5,
+  /** A car spawns no nearer than this to the player (m), and no farther than the max. */
+  spawnMinDistance: 70,
+  spawnMaxDistance: 170,
+  /** A patrol this far from the player (m) is recycled to a spawn nearer the action. */
+  patrolRecycleDistance: 260,
+  patrol: {
+    speed: 7,
+    turnRate: 1.8,
+    accel: 5,
+    brake: 14,
+  },
+  /** What a patrol has to be, relative to an offence, to have seen it. */
+  detection: {
+    /** Metres, from the patrol to either the player or the car that was hit. */
+    radius: 60,
+    /** Cosine of the half-angle: -0.2 is "in front or beside", about 100 degrees each way. */
+    forwardCos: -0.2,
+  },
+  heat: {
+    max: 100,
+    /** Offence heat by the distance the bolt crossed (m). */
+    closeRange: 25,
+    mediumRange: 60,
+    close: 35,
+    medium: 20,
+    far: 10,
+    /** On top, when a patrol saw it happen. */
+    witnessed: 15,
+    /** Heat lost per second while nothing is happening and nobody can see the car. */
+    decayPerSecond: 3,
+    /** Seconds after the last offence before decay starts. */
+    decayDelay: 5,
+  },
+  /** Heat at which each star lights: one, two, three. */
+  stars: [25, 50, 75],
+  /** Pursuing cars allowed by star count (index = stars). */
+  unitsByStars: [0, 0, 1, 3],
+  /** Radius (m) inside which an alerted patrol drives to where the offence happened. */
+  alertRadius: 120,
+  /** Seconds a one-star investigation lasts before the patrol goes back to its loop. */
+  investigateSeconds: 12,
+  pursuit: {
+    /** Top speed by star count (m/s). Below the player's, on purpose. */
+    speedByStars: [0, 0, 21, 25],
+    accelByStars: [0, 0, 7, 9],
+    turnRate: 2.6,
+    /** How far ahead of the player the chaser aims (s of the player's velocity). */
+    lead: 0.45,
+    /** Road-network lookahead (m) when steering by the route rather than straight at the car. */
+    routeLookahead: 16,
+    /** Inside this (m) with a clear line the chaser stops routing and drives straight at the car. */
+    directRange: 40,
+    /** Seconds between route recomputations (Dijkstra over the junctions). */
+    routeInterval: 0.5,
+    /** Sight: metres, and the cosine of the half-angle of the chaser's view. */
+    sightRadius: 80,
+    sightCos: 0.2,
+    /** Inside this (m) the chaser sees the player whatever way it is facing. */
+    sightNearRadius: 18,
+    /** Seconds without any chaser seeing the car before ESCAPING is shown. */
+    loseSightSeconds: 3,
+    /** A pursuit whose chasers never find the car at all gives up after this long (s). */
+    firstContactSeconds: 20,
+    /** Seconds of ESCAPING that end the pursuit. */
+    escapeSeconds: 8,
+    /** A chaser farther than this (m) is recycled to a spawn behind the player. */
+    recycleDistance: 240,
+    /** Seconds a chaser may sit against a wall before it is recycled. */
+    stuckSeconds: 3.5,
+    /** Seconds a stuck chaser reverses before trying again. */
+    reverseSeconds: 1.2,
+    /** Where a joining chaser appears: behind the player, this far away (m). */
+    joinMinDistance: 70,
+    joinMaxDistance: 130,
+  },
+  bust: {
+    /** Player slower than this (m/s) counts as stopped. */
+    speed: 2.5,
+    /** A chaser inside this (m) of the player's centre is pinning them. */
+    distance: 5,
+    /** Seconds pinned before the arrest. */
+    seconds: 2.5,
+    /** Seconds the car is held after the arrest before control comes back. */
+    holdSeconds: 3.5,
+    /** Fine by star count (index = stars). Taken from the counter, never below zero. */
+    fineByStars: [0, 200, 500, 1000],
+    /** Seconds after release before any police car may spawn again. */
+    graceSeconds: 8,
+  },
+  /** How the pursuit's knocks land on the player: the same channel the traffic uses. */
+  knock: {
+    radius: 1.15,
   },
 };

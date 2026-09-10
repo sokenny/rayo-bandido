@@ -213,6 +213,15 @@ function getShared(): SharedResources {
   return shared;
 }
 
+/**
+ * The electric car's hull and light bars, for a visual that wears the same body in other
+ * colours (the police, `policeCarVisual.ts`). Shared: the caller must not dispose them.
+ */
+export function electricCarGeometry(): { body: THREE.BufferGeometry; bars: THREE.BufferGeometry } {
+  const s = getShared();
+  return { body: s.body, bars: s.bars };
+}
+
 export function disposeElectricCarResources(): void {
   if (!shared) return;
   shared.body.dispose();

@@ -1,8 +1,9 @@
-import type { BusState, TargetState, VehicleState } from '../core/types';
+import type { BusState, PoliceUnit, TargetState, VehicleState } from '../core/types';
 import { lerp, lerpAngle } from '../core/math';
 import type { CarVisual } from './scene/carVisual';
 import type { ElectricCarVisual } from './scene/electricCarVisual';
 import type { BusVisual } from './scene/busVisual';
+import type { PoliceCarVisual } from './scene/policeCarVisual';
 
 /**
  * Simulation -> Three.js synchronization. This is the only module that maps the sim's
@@ -90,5 +91,23 @@ export function syncBuses(visuals: BusVisual[], buses: BusState[], alpha: number
     vis.root.position.set(lerp(b.prevX, b.x, alpha), 0, lerp(b.prevZ, b.z, alpha));
     vis.root.rotation.y = -lerpAngle(b.prevHeading, b.heading, alpha);
     vis.setDoors(b.doors);
+  }
+}
+
+/**
+ * The police. One visual per pool slot; a slot that is off the road hides its car. `aimed` is
+ * the unit the Rayo is lined up on (`PoliceState.aimedUnit`), or -1.
+ */
+export function syncPolice(visuals: PoliceCarVisual[], units: readonly PoliceUnit[], alpha: number, aimed: number): void {
+  for (let i = 0; i < units.length && i < visuals.length; i++) {
+    const u = units[i];
+    const vis = visuals[i];
+    const active = u.status === 'active';
+    vis.setActive(active);
+    if (!active) continue;
+    vis.root.position.set(lerp(u.prevX, u.x, alpha), lerp(u.prevY, u.y, alpha), lerp(u.prevZ, u.z, alpha));
+    vis.root.rotation.y = -lerpAngle(u.prevHeading, u.heading, alpha);
+    vis.setLights(u.lights);
+    vis.setAimed(aimed === i);
   }
 }

@@ -1925,3 +1925,35 @@ exclusion, watched live: taking up a RAYO RUSH run hides the circuit marker, the
 pin and the fare themselves while the yellow rush mark stays, and all three come back the moment
 the run ends. 712 unit tests and typecheck green.
 
+
+## 2026-09-10 — The police (MVP)
+
+**Wanted heat and short chases, in Free Roam only.** `src/sim/police.ts` is the whole rule set:
+neutralising a civilian car adds heat by how far the bolt crossed (close +35, medium +20, long
++10, and +15 more when a patrol saw it), heat lights up to three stars (25/50/75), two stars is a
+pursuit, three is a bigger one (up to three chasers, joining one at a time from behind the
+player). Staying out of every chaser's sight for 3 s shows ESCAPING and 8 s more ends it; sitting
+still with a chaser on the bumper for 2.5 s is BUSTED — the car is held, a fine by star count is
+taken from the counter (never below zero), the heat is dropped and the car handed back in place.
+`isPoliceEnabledForCurrentGameState` is the one authority: no world but the city builds police,
+any race disables them, and any engaged activity (a rush run, a fare, the circuit door) clears
+every car and the heat on the very tick it begins. They return only after a delay, never on the
+player.
+
+**Reused rather than built.** A police car is a `TargetState` with a role, so the traffic's wall
+push-out, road height, the player's shove and the beam test take it unchanged; chasers steer by
+the passengers' road graph (`routeTo`/`aimAlong`) and go straight at the car once close and in
+the clear. The visual wears the electric car's hull in navy with panels, a light bar, a strobing
+red/blue pool on the road and a hex shield ring the Rayo flares against (police cannot be
+neutralised yet). Siren and motor are synthesised voices spatialised like the hums; scanner,
+arrest and escape are one-shots. The wanted HUD (`src/ui/policeOverlay.ts`) sits top centre.
+
+**Multiplayer.** Client-local: every player runs their own police against their own car, so
+heat, chasers and arrests are per player by construction; other players do not see these cars
+(deferred), and in a shared city they do not shove host-owned traffic. All tuning is `POLICE` in
+`src/config/tuning.ts`; automation drives it through `__rb.police`.
+
+**Verified** with 18 unit tests (`tests/police.test.ts`: eligibility, heat by distance, star
+thresholds, witness, pursuit start/escape/arrest, per-player isolation, patrol density) and one
+browser pass on the dev server: patrols after the resume delay, a two-star chase with the HUD
+up, an arrest card with the fine, the release, and a rush count-in clearing the lot.

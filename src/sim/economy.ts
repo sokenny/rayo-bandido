@@ -1,4 +1,4 @@
-import type { EconomyState, GameEvent, TargetState } from '../core/types';
+import type { EconomyState, GameEvent, PoliceState, TargetState } from '../core/types';
 import { TARGETS } from '../config/tuning';
 
 /**
@@ -54,4 +54,22 @@ export function spendMoney(e: EconomyState, amount: number): boolean {
   if (!(amount >= 0) || e.money < amount) return false;
   e.money -= amount;
   return true;
+}
+
+/**
+ * The fine of an arrest (`policeBusted`, raised by `src/sim/police.ts`). Taken from the
+ * counter, never below zero — the fine is a penalty, not a debt — and what was actually taken
+ * is written back onto the event (`charged`) and the police state, so the card and the counters
+ * report the real number. Read from `from`, the length the list had before the police ran.
+ */
+export function applyPoliceFine(e: EconomyState, police: PoliceState, events: GameEvent[], from = 0): void {
+  for (let i = from; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.type !== 'policeBusted') continue;
+    const charged = Math.max(0, Math.min(e.money, ev.fine));
+    e.money -= charged;
+    ev.charged = charged;
+    police.bustedCharged = charged;
+    police.stats.finesCharged += charged;
+  }
 }

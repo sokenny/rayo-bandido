@@ -22,6 +22,7 @@
  */
 
 import type { TrackPath } from '../world/track';
+import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 
 /** Which world is loaded: the free-roam test city, the racing circuit or the big city. */
 export type GameMode = 'test' | 'race' | 'city' | 'circuit';
@@ -748,7 +749,142 @@ export type GameEvent =
   /** A press that bought nothing: no money, or one already in the player. */
   | { type: 'buhoDenied'; reason: 'funds' | 'active' }
   /** The Moogul wore off, or something else took the player before it could. */
-  | { type: 'moogulEnd'; reason: MoogulEndReason };
+  | { type: 'moogulEnd'; reason: MoogulEndReason }
+  /* ---------------------------------------------------------------- the police */
+  /** A civilian electric car was neutralised in Free Roam. `category` is the range band the heat came from. */
+  | { type: 'policeOffense'; distance: number; category: PoliceOffenseCategory; heat: number; witnessed: boolean }
+  /** A patrol saw the offence: it is alerted at once, whatever the heat says. */
+  | { type: 'policeWitness'; unit: number }
+  /** The star count changed. `cooldown` is true when the stars are the outlined, fading kind. */
+  | { type: 'wantedStars'; stars: number; prev: number; cooldown: boolean }
+  | { type: 'pursuitStart'; stars: number }
+  /** Escaped, or the pursuit ended for another reason (`cleared` when an activity began). */
+  | { type: 'pursuitEnd'; reason: 'escaped' | 'busted' | 'cleared'; duration: number }
+  | { type: 'policeEscaping'; on: boolean }
+  /**
+   * Arrested. `fine` is what the stars asked for; `charged` is what the counter could pay
+   * (`src/sim/economy.ts` fills it in — the fine is never a debt).
+   */
+  | { type: 'policeBusted'; stars: number; fine: number; charged: number; duration: number }
+  /** The hold after the arrest is over and the car is the player's again. */
+  | { type: 'policeReleased' }
+  /** The bolt met a police car: shielded, nothing happens to it. For the feedback flash only. */
+  | { type: 'policeShielded'; unit: number; x: number; y: number; z: number }
+  /** The police were switched off because the player left Free Roam for an activity. */
+  | { type: 'policeCleared' };
+
+export type PoliceOffenseCategory = 'close' | 'medium' | 'far';
+
+/**
+ * One police car (`src/sim/police.ts`). Deliberately the same shape as an electric car, so
+ * every piece of traffic infrastructure — wall push-out, road height, the player's bumps, the
+ * beam test — takes it unchanged. `status` is `'active'` on the road and `'disabled'` in the
+ * pool; nothing ever destroys one.
+ */
+export interface PoliceUnit extends TargetState {
+  role: PoliceRole;
+  /** Which civilian patrol loop (`ArenaLayout.targetPatrols` index) a patrol borrows. */
+  loop: number;
+  /** Where an investigating patrol is driving to. */
+  goalX: number;
+  goalZ: number;
+  /** Seconds left on an investigation, or a reverse, depending on the role. */
+  timer: number;
+  /** Seconds this chaser has been pressed against a wall going nowhere. */
+  stuck: number;
+  /** True while this chaser can see the player (this tick). */
+  sight: boolean;
+  /** Emergency lights and siren on. Read by presentation. */
+  lights: boolean;
+}
+
+export type PoliceRole = 'patrol' | 'investigate' | 'pursuit';
+
+/**
+ *   calm      - nothing going on. Patrols drive their loops.
+ *   alert     - one star: patrols nearby drive to where it happened, nobody chases.
+ *   pursuit   - somebody is chasing, and can see the car.
+ *   escaping  - the chasers have lost the car; the countdown is running.
+ *   busted    - arrested: the car is held and the card is up.
+ *   cooldown  - escaped: the stars fade as the heat drains, nobody is chasing.
+ */
+export type PolicePhase = 'calm' | 'alert' | 'pursuit' | 'escaping' | 'busted' | 'cooldown';
+
+/** Counters for the session, read by automation (`__rb.police.stats`). */
+export interface PoliceStats {
+  offenses: number;
+  offensesClose: number;
+  offensesMedium: number;
+  offensesFar: number;
+  witnessed: number;
+  /** Times each star was newly reached, index = stars (0 unused). */
+  starsReached: number[];
+  pursuits: number;
+  escapes: number;
+  busts: number;
+  /** Seconds spent in pursuit (escaping included), summed. */
+  pursuitSeconds: number;
+  finesCharged: number;
+}
+
+export interface PoliceState {
+  /** The pool: `POLICE.maxUnits` cars, most of them `'disabled'` most of the time. */
+  units: PoliceUnit[];
+  /** 0..`POLICE.heat.max`. THE number the wanted level is made of. */
+  heat: number;
+  stars: number;
+  phase: PolicePhase;
+  /** Seconds since the police were last allowed; spawns wait for `resumeDelay`. */
+  enabledFor: number;
+  /** Seconds until the next patrol may spawn. */
+  spawnCooldown: number;
+  /** Seconds since the last offence. */
+  sinceOffense: number;
+  /** Seconds no chaser has had sight of the player. */
+  noSight: number;
+  /** True once any chaser has seen the player during this pursuit: the escape clock runs from then. */
+  contacted: boolean;
+  /** Seconds left of ESCAPING; 0 otherwise. */
+  escapeLeft: number;
+  /** Seconds the player has been pinned by a chaser. */
+  pinned: number;
+  /** Seconds left of the post-arrest hold; 0 otherwise. */
+  holdLeft: number;
+  /** Seconds after a release during which nothing spawns. */
+  grace: number;
+  /** Sim time the current pursuit began, or -1. */
+  pursuitStart: number;
+  /** Where the last offence happened: what an alerted patrol drives to. */
+  lastOffenseX: number;
+  lastOffenseZ: number;
+  /** Which police car the beam is lined up on right now, or -1. For the shield feedback. */
+  aimedUnit: number;
+  /** The arrest card's numbers, while it is up. */
+  bustedStars: number;
+  bustedFine: number;
+  /** Whether the police were allowed on the last tick: the edge that clears them. */
+  wasEnabled: boolean;
+  /** Seed of the spawn picker, so a session is deterministic. */
+  seed: number;
+  /** Seconds until the chasers' route to the player is recomputed. */
+  routeTimer: number;
+  /** Tick counter that spreads the line-of-sight tests across ticks. */
+  losCounter: number;
+  bustedCharged: number;
+  /**
+   * The street network the chasers steer by, when the world has one. An implementation detail
+   * of `src/sim/police.ts` — built once from `ArenaLayout.roadNetwork`, never serialised.
+   */
+  nav: PoliceNav | null;
+  stats: PoliceStats;
+}
+
+export interface PoliceNav {
+  graph: RoadGraph;
+  /** Road distances to the player, refreshed every `POLICE.pursuit.routeInterval`. */
+  field: RouteField | null;
+  aim: RouteAim;
+}
 
 /** What one of El Búho's lines is for. */
 export type BuhoLineKind = 'greeting' | 'remark' | 'broke' | 'busy';
@@ -969,6 +1105,8 @@ export interface GameState {
    * entered from inside itself.
    */
   circuitGate: CircuitGateState | null;
+  /** The police (`src/sim/police.ts`). Only the open world has any. */
+  police: PoliceState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -1222,6 +1360,7 @@ export interface HudSnapshot {
   buho: BuhoHudSnapshot | null;
   /** The start line's sign; null in a world that does not carry the circuit's entrance. */
   circuitGate: CircuitGateHudSnapshot | null;
+  police: PoliceHudSnapshot | null;
 }
 
 /**
@@ -1229,6 +1368,25 @@ export interface HudSnapshot {
  * The chain's own progress is read from storage by the caller — the city carries no
  * `TimeAttackState`, because the missions are not driven in it.
  */
+export interface PoliceHudSnapshot {
+  /** 0..1 of the way to the top of the scale. */
+  heat01: number;
+  stars: number;
+  phase: PolicePhase;
+  /** Seconds left of ESCAPING (0 otherwise). */
+  escapeLeft: number;
+  /** 0..1 of the way to an arrest. */
+  bust01: number;
+  /** Seconds left of the post-arrest hold. */
+  holdLeft: number;
+  /** The beam is lined up on a police car: shielded. */
+  shielded: boolean;
+  /** The arrest card. */
+  bustedStars: number;
+  bustedFine: number;
+  bustedCharged: number;
+}
+
 export interface CircuitGateHudSnapshot {
   /** True while the sign is up: the car is on the paint and nothing else has it. */
   offering: boolean;

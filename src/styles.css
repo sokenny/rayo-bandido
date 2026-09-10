@@ -4298,3 +4298,231 @@ body.rb-touch-pad .rb-minimap {
     width: auto;
   }
 }
+
+/* ------------------------------------------------------------- the police */
+/*
+ * The wanted level (`src/ui/policeOverlay.ts`). Top centre, the one spot Free Roam leaves
+ * empty; red, because the police are not the system's yellow voice. Invisible until there is
+ * heat, and never wider than the three stars.
+ */
+.rb-wanted__panel {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.rb-wanted__panel.is-on {
+  opacity: 1;
+}
+
+.rb-wanted__stars {
+  display: flex;
+  gap: 6px;
+}
+
+.rb-wanted__star {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.rb-wanted__star svg {
+  width: 100%;
+  height: 100%;
+  fill: transparent;
+  stroke: rgba(255, 43, 61, 0.45);
+  stroke-width: 1.4;
+  transition: fill 160ms ease, stroke 160ms ease, filter 160ms ease;
+}
+
+.rb-wanted__star.is-lit svg {
+  fill: var(--rb-red);
+  stroke: #ffd2d8;
+  filter: drop-shadow(0 0 6px rgba(255, 43, 61, 0.9));
+}
+
+/* The newest star breathes: a live warrant, not a badge. */
+.rb-wanted__star.is-lit:last-of-type svg,
+.rb-wanted__star.is-lit + .rb-wanted__star:not(.is-lit) {
+  animation: none;
+}
+
+.rb-wanted__panel.is-pursuit .rb-wanted__star.is-lit svg {
+  animation: rb-blink 0.7s ease-in-out infinite;
+}
+
+.rb-wanted__star.is-cooldown svg {
+  fill: transparent;
+  stroke: var(--rb-red);
+  filter: none;
+  animation: rb-blink 1.6s ease-in-out infinite;
+}
+
+.rb-wanted__heat {
+  width: 90px;
+  height: 3px;
+  background: var(--rb-track);
+  overflow: hidden;
+}
+
+.rb-wanted__heat-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, var(--rb-red-deep), var(--rb-red));
+  transition: transform 120ms linear;
+}
+
+.rb-wanted__status {
+  min-height: 16px;
+  padding: 1px 10px;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: #fff;
+  background: rgba(138, 15, 28, 0.85);
+  clip-path: var(--rb-notch);
+  --rb-n: 6px;
+  opacity: 0;
+  transform: skewX(-7deg);
+  transition: opacity 160ms ease;
+}
+
+.rb-wanted__status.is-on {
+  opacity: 1;
+}
+
+.rb-wanted__panel.is-escaping .rb-wanted__status {
+  background: rgba(59, 69, 87, 0.85);
+  animation: rb-blink 1s ease-in-out infinite;
+}
+
+.rb-wanted__bust {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.rb-wanted__bust.is-on {
+  display: flex;
+}
+
+.rb-wanted__bust-label {
+  font-family: var(--rb-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--rb-red);
+  text-shadow: 0 0 10px rgba(255, 43, 61, 0.8);
+  animation: rb-blink 0.45s ease-in-out infinite;
+}
+
+.rb-wanted__bust-bar {
+  width: 70px;
+  height: 5px;
+  background: var(--rb-track);
+  overflow: hidden;
+}
+
+.rb-wanted__bust-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--rb-red);
+  transition: transform 100ms linear;
+}
+
+/* The beam is lined up on a car the Rayo cannot touch. Under the crosshair, where the aim line lives. */
+.rb-wanted__shield {
+  position: absolute;
+  top: 58%;
+  left: 50%;
+  transform: translateX(-50%) skewX(-7deg);
+  padding: 2px 10px;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--rb-cyan-hot);
+  background: rgba(5, 7, 13, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(79, 243, 255, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.rb-wanted__shield.is-on {
+  opacity: 1;
+}
+
+/* The arrest card. */
+.rb-wanted__card {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 44px 18px;
+  background: var(--rb-panel-solid);
+  box-shadow: inset 0 0 0 1px rgba(255, 43, 61, 0.6), 0 0 60px rgba(0, 0, 0, 0.6);
+  clip-path: var(--rb-notch);
+  --rb-n: 18px;
+  pointer-events: none;
+}
+
+.rb-wanted__card.is-on {
+  display: flex;
+}
+
+.rb-wanted__card-head {
+  padding: 3px 14px 2px;
+  background: var(--rb-red);
+  color: #fff;
+  font-family: var(--rb-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  transform: skewX(-7deg);
+}
+
+.rb-wanted__card-stars {
+  font-size: 22px;
+  letter-spacing: 0.2em;
+  color: var(--rb-red);
+  text-shadow: 0 0 10px rgba(255, 43, 61, 0.8);
+}
+
+.rb-wanted__card-fine {
+  font-family: var(--rb-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--rb-text);
+}
+
+.rb-wanted__card-note {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--rb-dim);
+}

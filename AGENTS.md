@@ -20,8 +20,11 @@
   instance of that same city, barriered on both sides, which is what VERSUS races on.
 - The City is never edited to suit the circuit. `src/world/circuitWorld.ts` instances it and
   layers the race on top; `citySpec.ts` and `cityWorld.ts` must stay unaware the circuit exists.
-- Do not add accounts, garage UI, story, police AI or multiple playable cars. The City is the
-  one open-world exception, and it stays a proof of concept until Juan says otherwise.
+- Do not add accounts, garage UI, story or multiple playable cars. The City is the one
+  open-world exception, and it stays a proof of concept until Juan says otherwise. The police
+  are the other exception, asked for on 2026-09-10 as an MVP (`src/sim/police.ts`): Free Roam
+  only, client-local, tuned from `POLICE` in `src/config/tuning.ts` — extend that, do not build a
+  second AI framework beside it.
 - Multiplayer is rooms of up to four cars on the circuit — a player opens a room and hands out
   its code — and the server is a relay: no game rules, no physics and no knowledge of the track
   live in `server/`. Keep it that way. A room is chosen once, at `hello`, and never changes for

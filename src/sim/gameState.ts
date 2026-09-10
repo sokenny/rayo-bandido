@@ -20,7 +20,7 @@ import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
 import { createBuses, resetBuses, stepBuses } from './buses';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
-import { applyPassengerFare, applyRewards } from './economy';
+import { applyPassengerFare, applyPoliceFine, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
 import { createTimeAttackState, resetTimeAttackState, stepTimeAttack } from './timeAttack';
 import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
@@ -28,6 +28,7 @@ import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } 
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
 import { lockOtherActivities } from './activities';
+import { createPoliceState, isPoliceEnabledForCurrentGameState, policeHoldsPlayer, resetPoliceState, stepPolice, type StepPoliceOptions } from './police';
 import { PASSENGERS } from '../content/passengers';
 import { settleVehicle } from './surface';
 
@@ -106,6 +107,11 @@ export interface GameStateOptions {
   /** Run the circuit mission chain on this race, starting from `timeAttackCleared` missions done. */
   timeAttack?: boolean;
   timeAttackCleared?: number;
+  /**
+   * Build the police (`src/sim/police.ts`). Only the open world wants them, and only the caller
+   * knows which world this is; defaults to off, so every other world is untouched.
+   */
+  police?: boolean;
 }
 
 export function createInitialGameState(
@@ -132,6 +138,7 @@ export function createInitialGameState(
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
+    police: options.police ? createPoliceState(layout) : null,
     events: [],
   };
 }
@@ -157,6 +164,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
+  if (state.police) resetPoliceState(state.police);
   state.events.length = 0;
 }
 
@@ -205,7 +213,15 @@ export interface StepOptions {
    * in it is let out with nothing paid. Consumed on the tick it is seen.
    */
   respawned?: boolean;
+  /**
+   * Whether police cars may shove the civilian traffic. False on a client that does not own the
+   * traffic, so a local-only chase never fights the host's reports. Defaults to true.
+   */
+  policeShoveTraffic?: boolean;
 }
+
+/** What `stepPolice` is told about the tick. One object, never reallocated. */
+const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true };
 
 /**
  * One simulation tick.
@@ -254,6 +270,14 @@ export function stepGame(
     HOLD.steer = cmd.steer;
     HOLD.fire = cmd.fire;
     HOLD.activate = cmd.activate;
+    input = HOLD;
+  }
+  // Under arrest (`src/sim/police.ts`): the car is held the way the grid holds it, and the
+  // weapon is holstered too — a BUSTED card is not a moment to be firing.
+  if (policeHoldsPlayer(state.police)) {
+    HOLD.steer = 0;
+    HOLD.fire = false;
+    HOLD.activate = false;
     input = HOLD;
   }
 
@@ -348,5 +372,16 @@ export function stepGame(
   lockOtherActivities(state);
   if (state.circuitGate && layout.circuitSite) {
     stepCircuitGate(state.circuitGate, layout.circuitSite, state.vehicle, cmd, state.events);
+  }
+  // The police, after everything: whether they may exist is a function of what the activities
+  // above decided (`isPoliceEnabledForCurrentGameState`), and an activity that began THIS tick
+  // switches them off on the same tick. Reads the tick's kills; raises its own events; the fine
+  // an arrest asks for is taken right behind it, in the one place money is taken.
+  if (state.police) {
+    POLICE_OPTIONS.enabled = isPoliceEnabledForCurrentGameState(state);
+    POLICE_OPTIONS.shoveTraffic = options?.policeShoveTraffic ?? true;
+    const from = state.events.length;
+    stepPolice(state.police, layout, state.vehicle, state.targets, state.lightning, state.time, dt, state.events, POLICE_OPTIONS);
+    applyPoliceFine(state.economy, state.police, state.events, from);
   }
 }

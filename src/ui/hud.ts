@@ -9,6 +9,7 @@ import { createPassengerOverlay, type PassengerOverlay } from './passengerOverla
 import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
 import { NEAR_MISS } from '../config/tuning';
 import { createGateOverlay, type GateOverlay } from './gateOverlay';
+import { createPoliceOverlay, type PoliceOverlay } from './policeOverlay';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -56,6 +57,8 @@ export interface HudOptions {
    * carries the door, and the circuit itself must never offer a way into the circuit.
    */
   circuitGate?: boolean;
+  /** The wanted level and the police's warnings (`src/ui/policeOverlay.ts`). Free Roam only. */
+  police?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -246,6 +249,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const gate: GateOverlay | null =
     options.onActivate && options.circuitGate ? createGateOverlay({ onActivate: options.onActivate }) : null;
   if (gate) hud.appendChild(gate.root);
+  /** The police's, only where there are police. */
+  const police: PoliceOverlay | null = options.police ? createPoliceOverlay() : null;
+  if (police) hud.appendChild(police.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -584,6 +590,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (passengers && s.passenger) passengers.update(s.passenger);
       if (buho && s.buho) buho.update(s.buho);
       if (gate && s.circuitGate) gate.update(s.circuitGate);
+      if (police && s.police) police.update(s.police);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -757,6 +764,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       rush?.onEvent(e);
       passengers?.onEvent(e);
       buho?.onEvent(e);
+      police?.onEvent(e);
       if (e.type === 'nearMiss') {
         showNearMiss(e.points);
       } else if (e.type === 'targetDestroyed') {

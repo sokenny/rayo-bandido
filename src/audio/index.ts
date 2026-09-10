@@ -1,9 +1,10 @@
-import type { GameEvent, TargetState } from '../core/types';
+import type { GameEvent, PoliceUnit, TargetState } from '../core/types';
 import { createAudioCore } from './core';
 import { createEngine, type EngineInput } from './engine';
 import { createElectricHums, type Listener } from './electricHum';
 import { createTireScreech } from './tireScreech';
 import { createOneShots } from './oneShots';
+import { createPoliceAudio } from './police';
 import { skidIntensity } from './dsp';
 
 /** Slide state for the tire scrub, read each frame. */
@@ -33,6 +34,12 @@ export interface SkidInput {
  * keydown/pointer/touch, then resumes. `setMuted` is exposed for QA/automation; the game itself
  * only wires `M` to the background theme song (`audio/theme.ts`), not to these engine/SFX voices.
  */
+/** The police cars on the road this frame, and whether a chase is on (siren). */
+export interface PoliceAudioInput {
+  units: readonly PoliceUnit[];
+  siren: boolean;
+}
+
 export interface AudioSystem {
   update(
     dt: number,
@@ -40,6 +47,8 @@ export interface AudioSystem {
     listener: Listener,
     targets: readonly TargetState[],
     skid: SkidInput,
+    /** Absent in worlds without police. */
+    police?: PoliceAudioInput | null,
   ): void;
   onEvent(ev: GameEvent): void;
   /** One exhaust pop/bang (0..1), fired from `createBackfireTrigger` in the composition root. */
@@ -70,6 +79,7 @@ export function createAudio(targetCount: number): AudioSystem {
   const tires = createTireScreech(core);
   const hums = createElectricHums(core, targetCount);
   const oneShots = createOneShots(core);
+  const police = createPoliceAudio(core);
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
   // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
@@ -80,13 +90,14 @@ export function createAudio(targetCount: number): AudioSystem {
   document.addEventListener('visibilitychange', resume);
 
   return {
-    update(dt, engineInput, listener, targets, skid) {
+    update(dt, engineInput, listener, targets, skid, policeInput = null) {
       // Cheap no-op once running; the one case that matters is a context that fell back to
       // 'suspended' while the game kept rendering, which is silence with no other symptom.
       core.resume();
       engine.update(dt, engineInput);
       tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin), skid.speed);
       hums.update(dt, listener, targets);
+      if (policeInput) police.update(dt, listener, policeInput.units, policeInput.siren);
     },
 
     onEvent(ev) {
@@ -126,10 +137,33 @@ export function createAudio(targetCount: number): AudioSystem {
           // card, so the player hears it before they read it.
           oneShots.countdown(true);
           break;
+        case 'wantedStars':
+          // A star newly lit is the scanner crackling into life. The outlined kind — the same
+          // count fading after an escape — is not news.
+          if (ev.stars > ev.prev && !ev.cooldown) oneShots.scanner();
+          break;
+        case 'pursuitStart':
+          police.setChase(true);
+          break;
+        case 'pursuitEnd':
+          police.setChase(false);
+          if (ev.reason === 'escaped') oneShots.escaped();
+          break;
+        case 'policeBusted':
+          oneShots.busted();
+          break;
+        case 'policeShielded':
+          oneShots.shield();
+          break;
+        case 'policeCleared':
+          police.setChase(false);
+          police.reset();
+          break;
         case 'restart':
           engine.reset();
           tires.reset();
           hums.reset();
+          police.reset();
           break;
         default:
           break;
@@ -144,6 +178,7 @@ export function createAudio(targetCount: number): AudioSystem {
       engine.reset();
       tires.reset();
       hums.reset();
+      police.reset();
     },
 
     setMuted(muted) {
@@ -160,6 +195,7 @@ export function createAudio(targetCount: number): AudioSystem {
       engine.dispose();
       tires.dispose();
       hums.dispose();
+      police.dispose();
       core.dispose();
     },
   };

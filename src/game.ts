@@ -20,9 +20,8 @@ import type {
   RaceHudSnapshot,
   RushHudSnapshot,
   TimeAttackHudSnapshot,
-  Transmission,
-} from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, TIME_ATTACK, VEHICLE } from './config/tuning';
+  Transmission, PoliceHudSnapshot } from './core/types';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -83,11 +82,13 @@ import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
 import { createEnvironment } from './render/scene/environment';
 import { createCarVisual } from './render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
+import { createPoliceCarVisual, disposePoliceCarResources, type PoliceCarVisual } from './render/scene/policeCarVisual';
+import { isPoliceEnabledForCurrentGameState } from './sim/police';
 import { createBusVisual, type BusVisual } from './render/scene/busVisual';
 import { createChaseCamera, type CameraPose, type CameraView } from './render/camera/chaseCamera';
 import { createWorldProbe } from './render/probe';
 import { createEffects } from './render/fx';
-import { interpolateVehicle, syncBuses, syncCar, syncTargets, type InterpolatedPose } from './render/sync';
+import { interpolateVehicle, syncBuses, syncCar, syncPolice, syncTargets, type InterpolatedPose } from './render/sync';
 import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
 import { compileScene, warmRender } from './render/warmup';
@@ -99,7 +100,7 @@ import { createOnlinePanel, type OnlinePanel } from './ui/onlinePanel';
 import { createDebugOverlay, clipboardLine, type DebugFrameInput, type WorldReadout } from './ui/debugOverlay';
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
-import { createAudio } from './audio';
+import { createAudio, type PoliceAudioInput } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
 import { msToKmh } from './core/math';
 import { slotCss } from './core/playerColors';
@@ -231,6 +232,10 @@ export function createGame(
   const state = createInitialGameState(layout, readTransmission(), {
     timeAttack: hasTimeAttack,
     timeAttackCleared: timeAttackProgress?.cleared ?? 0,
+    // THE POLICE (`src/sim/police.ts`): Free Roam only, which is the open world and nothing
+    // else. Whether they may act on any given tick is the sim's question; whether they exist
+    // at all is this one.
+    police: mode === 'city',
   });
   const command: PlayerCommand = createPlayerCommand();
   // On a phone the picture is turned sideways for as long as this game lives, so the renderer
@@ -276,6 +281,16 @@ export function createGame(
     const vis = createBusVisual();
     scene.add(vis.root);
     busVisuals.push(vis);
+  }
+  // The police pool (`src/render/scene/policeCarVisual.ts`): one visual per slot, hidden while
+  // the slot is empty, so a car joining a chase never pays for its own shaders mid-frame.
+  const policeVisuals: PoliceCarVisual[] = [];
+  if (state.police) {
+    for (let i = 0; i < state.police.units.length; i++) {
+      const vis = createPoliceCarVisual(i);
+      scene.add(vis.root);
+      policeVisuals.push(vis);
+    }
   }
   /**
    * One car per rival, built now so the warm-up compiles them too — a rival appearing in your
@@ -473,6 +488,7 @@ export function createGame(
     passengers: hasPassengers,
     buho: hasBuho,
     circuitGate: hasCircuitGate,
+    police: !!state.police,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -672,6 +688,7 @@ export function createGame(
     passenger: null,
     buho: null,
     circuitGate: null,
+    police: null,
   };
   const buhoSnapshot: BuhoHudSnapshot = {
     name: BUHO.name,
@@ -787,6 +804,21 @@ export function createGame(
     placeLabel: circuitSite?.label ?? '',
   };
   if (state.circuitGate) snapshot.circuitGate = circuitGateSnapshot;
+  const policeSnapshot: PoliceHudSnapshot = {
+    heat01: 0,
+    stars: 0,
+    phase: 'calm',
+    escapeLeft: 0,
+    bust01: 0,
+    holdLeft: 0,
+    shielded: false,
+    bustedStars: 0,
+    bustedFine: 0,
+    bustedCharged: 0,
+  };
+  if (state.police) snapshot.police = policeSnapshot;
+  /** What the siren and the police motor read each frame. The units array is the pool itself. */
+  const policeAudio: PoliceAudioInput | null = state.police ? { units: state.police.units, siren: false } : null;
   const debugInput: DebugFrameInput = { simMs: 0, renderMs: 0, gpuMs: -1, pixelRatio: startRatio, governor: governor.status };
   /* World coordinates for the overlay. The car and camera are free; the crosshair costs a
    * scene raycast, so it is only sampled while the overlay is open and only a few times a
@@ -883,7 +915,7 @@ export function createGame(
   /** Scratch list for `trafficSync.apply`; reused so a report never allocates. */
   const newlyDestroyed: number[] = [];
   /** What `stepGame` needs to know about the match. One object, never reallocated. */
-  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic(), cruising: false };
+  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic(), cruising: false, policeShoveTraffic: !net };
   /**
    * How long a non-host keeps its own kill after the host's reports stop agreeing with it.
    * A round trip plus a couple of traffic intervals covers any connection worth racing on.
@@ -1156,6 +1188,13 @@ export function createGame(
       case 'passengerDismissed':
         placePassengerMarkers();
         break;
+      case 'policeShielded':
+        // The bolt met a police car: the hex ring flares on it. The sound is the audio's.
+        policeVisuals[ev.unit]?.flashShield();
+        break;
+      case 'policeBusted':
+        chase.shake(CAMERA.shakeLightning);
+        break;
       case 'circuitEnter':
         // The key on the start line. The rules are done — this world is over — and where the
         // player goes next is the caller's to decide (`src/main.ts`), because it is the only
@@ -1331,6 +1370,10 @@ export function createGame(
     syncTargets(targetVisuals, state.targets, alpha, simTime, rushMarks);
     for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
     syncBuses(busVisuals, state.buses, alpha);
+    if (state.police) {
+      syncPolice(policeVisuals, state.police.units, alpha, state.police.aimedUnit);
+      for (let i = 0; i < policeVisuals.length; i++) policeVisuals[i].update(frameDt, simTime);
+    }
     // Rivals carry their own interpolation (on the network clock), so unlike everything else
     // here they are not blended by `alpha` — they are re-placed for this very frame instead,
     // which is what keeps them moving every frame on a display faster than the simulation.
@@ -1374,6 +1417,7 @@ export function createGame(
       pose,
       state.targets,
       { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin },
+      policeAudio,
     );
 
     // Pops and bangs: one decision, fired into the audio and the tailpipes together. Banging
@@ -1611,6 +1655,21 @@ export function createGame(
       timeAttackSnapshot.previousBest = timeAttackPreviousBest;
       timeAttackSnapshot.newBest = timeAttackNewBest;
     }
+    const police = state.police;
+    if (police) {
+      const chasing = police.phase === 'pursuit' || police.phase === 'escaping';
+      policeSnapshot.heat01 = POLICE.heat.max > 0 ? police.heat / POLICE.heat.max : 0;
+      policeSnapshot.stars = police.stars;
+      policeSnapshot.phase = police.phase;
+      policeSnapshot.escapeLeft = police.escapeLeft;
+      policeSnapshot.bust01 = POLICE.bust.seconds > 0 ? police.pinned / POLICE.bust.seconds : 0;
+      policeSnapshot.holdLeft = police.holdLeft;
+      policeSnapshot.shielded = police.aimedUnit >= 0;
+      policeSnapshot.bustedStars = police.bustedStars;
+      policeSnapshot.bustedFine = police.bustedFine;
+      policeSnapshot.bustedCharged = police.bustedCharged;
+      if (policeAudio) policeAudio.siren = chasing;
+    }
     hud.update(snapshot);
     minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
     if (standings) {
@@ -1792,6 +1851,8 @@ export function createGame(
       effects.dispose();
       for (const t of targetVisuals) t.dispose();
       for (const b of busVisuals) b.dispose();
+      for (const p of policeVisuals) p.dispose();
+      disposePoliceCarResources();
       disposeElectricCarResources();
       for (const r of rivalPool.values()) {
         scene.remove(r.root);
@@ -2117,6 +2178,34 @@ export function createGame(
 
     /** Which activity has the car right now, or null. The one answer everything else is derived from. */
     engaged: () => engagedActivity(state),
+
+    /**
+     * THE POLICE, for automation. Null everywhere but the open world.
+     *
+     *   __rb.police.state          // the live `PoliceState`
+     *   __rb.police.enabled()      // `isPoliceEnabledForCurrentGameState` right now
+     *   __rb.police.heat(60)       // set the heat (and read it back with no argument)
+     *   __rb.police.units()        // the cars on the road: id, role, position, lights, sight
+     *   __rb.police.stats()        // the session's counters
+     */
+    police: state.police
+      ? {
+          get state() {
+            return state.police;
+          },
+          enabled: () => isPoliceEnabledForCurrentGameState(state),
+          heat(value?: number) {
+            const p = state.police!;
+            if (value !== undefined) p.heat = Math.max(0, Math.min(POLICE.heat.max, value));
+            return p.heat;
+          },
+          units: () =>
+            state.police!.units
+              .filter((u) => u.status === 'active')
+              .map((u) => ({ id: u.id, role: u.role, x: u.x, z: u.z, heading: u.heading, speed: u.speed, lights: u.lights, sight: u.sight })),
+          stats: () => ({ ...state.police!.stats, starsReached: [...state.police!.stats.starsReached] }),
+        }
+      : null,
 
     /** Cruise mode. Reads the flag with no argument, sets it with one. */
     cruise(on?: boolean) {
