@@ -22,9 +22,12 @@ import { createBuses, resetBuses, stepBuses } from './buses';
 import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMiss';
 import { applyPassengerFare, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
+import { createTimeAttackState, resetTimeAttackState, stepTimeAttack } from './timeAttack';
 import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
 import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
+import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
+import { lockOtherActivities } from './activities';
 import { PASSENGERS } from '../content/passengers';
 import { settleVehicle } from './surface';
 
@@ -84,14 +87,32 @@ export function createNitroState(): NitroState {
 }
 
 export function createLightningState(): LightningState {
-  return { charge: 0, acquiredTargetId: -1, hold: 0, charging: false, armed: true, cooldown: 0, arcTimer: 0, lastTargetId: -1 };
+  return { charge: 0, acquiredTargetId: -1, hold: 0, spent: 0, charging: false, armed: true, cooldown: 0, arcTimer: 0, lastTargetId: -1 };
 }
 
 export function createEconomyState(): EconomyState {
   return { money: 0, destroyed: 0, lastReward: 0 };
 }
 
-export function createInitialGameState(layout: ArenaLayout, transmission: Transmission = 'auto'): GameState {
+/**
+ * What the caller decides about a fresh state, beyond the layout.
+ *
+ * `timeAttack` is the circuit mission chain, and it is here rather than derived from the layout
+ * because the layout cannot tell the two circuits apart: the solo lap and the versus race are
+ * driven on the same course, and only the caller knows which one this is. It defaults to off,
+ * so every world that has never heard of the chain is unaffected.
+ */
+export interface GameStateOptions {
+  /** Run the circuit mission chain on this race, starting from `timeAttackCleared` missions done. */
+  timeAttack?: boolean;
+  timeAttackCleared?: number;
+}
+
+export function createInitialGameState(
+  layout: ArenaLayout,
+  transmission: Transmission = 'auto',
+  options: GameStateOptions = {},
+): GameState {
   const s = layout.playerSpawn;
   return {
     transmission,
@@ -106,9 +127,11 @@ export function createInitialGameState(layout: ArenaLayout, transmission: Transm
     nearMiss: createNearMissState(layout.targetSpawns.length),
     economy: createEconomyState(),
     race: layout.race ? createRaceState(layout.race) : null,
+    timeAttack: layout.race && options.timeAttack ? createTimeAttackState(options.timeAttackCleared ?? 0) : null,
     rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
+    circuitGate: layout.circuitSite ? createCircuitGateState() : null,
     events: [],
   };
 }
@@ -127,9 +150,13 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   resetNearMissState(state.nearMiss);
   state.economy = createEconomyState();
   if (state.race && layout.race) resetRaceState(state.race, layout.race);
+  // The chain's own progress survives this, the way the rush's does: a restart puts the car
+  // back on the grid, it does not un-finish missions that were finished.
+  if (state.timeAttack) resetTimeAttackState(state.timeAttack);
   if (state.rush) resetRushState(state.rush);
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
+  if (state.circuitGate) resetCircuitGateState(state.circuitGate);
   state.events.length = 0;
 }
 
@@ -247,18 +274,23 @@ export function stepGame(
   stepLightning(state.lightning, state.vehicle, state.targets, state.drift, input, state.time, dt, state.events);
   applyRewards(state.economy, state.targets, state.events);
   if (race && layout.race) stepRace(race, layout.race, state.vehicle, state.time, dt, state.events);
+  // Right behind the race, and only ever watching it: the circuit mission chain judges the
+  // finish `stepRace` decided on this tick against the crashes the collision pass raised
+  // earlier on it (`src/sim/timeAttack.ts`). It cannot change the outcome of a lap.
+  if (race && state.timeAttack) stepTimeAttack(state.timeAttack, race, dt, state.events);
   // Last, and deliberately so: the free-world activity scores what the tick already decided
   // (`src/sim/rush.ts`). It reads the `targetDestroyed` events raised above and changes
   // nothing about the car, the traffic or the weapon.
   // Which site the marker stands on is a function of how far through the mission chain the
   // player is, so it is looked up per tick rather than captured once: clearing a level moves
   // the marker on the very next tick, with nothing to rebuild and nothing to notify.
-  // ONE ACTIVITY AT A TIME. Each is told whether the other has the car before either runs:
-  // a ride in progress (or its fare card) keeps the RUSH marker from offering, and a run in
-  // any phase but idle keeps a passenger from boarding. Rush is stepped first, so a tick on
-  // which both could start goes to the run.
+  // ONE ACTIVITY AT A TIME, decided in one place (`src/sim/activities.ts`): whichever of them
+  // has the car locks the other three out of offering, starting or taking the key. Asked again
+  // before each one rather than once for the tick, so an activity that began on THIS tick
+  // already has the car by the time the next is stepped — which is what makes the order below
+  // the tie-break for a tick on which two of them could have started.
   const passenger = state.passenger;
-  if (state.rush) state.rush.locked = !!passenger && (passenger.phase === 'riding' || passenger.phase === 'results');
+  lockOtherActivities(state);
   const rushSite = state.rush ? rushSiteFor(layout.rushSites, state.rush.cleared) : null;
   if (state.rush && rushSite) {
     stepRush(
@@ -273,8 +305,8 @@ export function stepGame(
       state.events,
     );
   }
+  lockOtherActivities(state);
   if (passenger && layout.passengerStops && layout.passengerStops.length > 0) {
-    passenger.locked = !!state.rush && state.rush.phase !== 'idle';
     if (options?.respawned) cancelRide(passenger, 'respawn', state.events);
     const from = state.events.length;
     stepPassenger(
@@ -292,22 +324,29 @@ export function stepGame(
     // Paid here and only here, on the event the rules raise exactly once per ride.
     applyPassengerFare(state.economy, state.events, from);
   }
-  // Last of all: El Búho (`src/sim/buho.ts`). He sells only while nobody else has the car —
-  // no run in any phase but idle, no passenger aboard or settling up — and a run or a ride
-  // that started THIS tick ends the Moogul before it starts, on the very event that began
-  // it, so the two never overlap for even a frame.
+  // El Búho (`src/sim/buho.ts`). He sells only while nobody else has the car — no run in any
+  // phase but idle, no passenger aboard or settling up, nobody on their way to the circuit —
+  // and a run, a ride or a departure that started THIS tick ends the Moogul before it starts,
+  // on the very event that began it, so the two never overlap for even a frame.
   const buho = state.buho;
+  lockOtherActivities(state);
   if (buho && layout.buhoSite) {
-    buho.locked = (!!state.rush && state.rush.phase !== 'idle') || (!!passenger && (passenger.phase === 'riding' || passenger.phase === 'results'));
     if (options?.respawned) endMoogul(buho, 'respawn', state.events);
     const events = state.events;
     for (let i = 0; i < events.length; i++) {
       const t = events[i].type;
-      if (t === 'rushStart' || t === 'passengerBoard') {
+      if (t === 'rushStart' || t === 'passengerBoard' || t === 'circuitEnter') {
         endMoogul(buho, 'interrupted', state.events);
         break;
       }
     }
     stepBuho(buho, layout.buhoSite, state.vehicle, state.economy, cmd, dt, state.events);
+  }
+  // The door to the circuit missions (`src/sim/circuitGate.ts`), last of all: it is the one
+  // activity that ends this world rather than happening inside it, so it is offered only once
+  // everything else has had its say about whether the car is free.
+  lockOtherActivities(state);
+  if (state.circuitGate && layout.circuitSite) {
+    stepCircuitGate(state.circuitGate, layout.circuitSite, state.vehicle, cmd, state.events);
   }
 }

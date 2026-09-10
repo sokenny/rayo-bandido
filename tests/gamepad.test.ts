@@ -12,25 +12,36 @@ import type { PlayerCommand } from '../src/core/types';
 interface FakePad {
   axes: number[];
   buttons: Array<{ pressed: boolean; value: number }>;
+  mapping: string;
 }
 
-function pad(overrides: Partial<{ axes: number[]; down: number[]; values: Record<number, number> }> = {}): FakePad {
+function pad(
+  overrides: Partial<{ axes: number[]; down: number[]; values: Record<number, number>; mapping: string }> = {},
+): FakePad {
   const down = new Set(overrides.down ?? []);
   const values = overrides.values ?? {};
   const buttons = Array.from({ length: 17 }, (_, i) => ({
     pressed: down.has(i),
     value: values[i] ?? (down.has(i) ? 1 : 0),
   }));
-  return { axes: overrides.axes ?? [0, 0, 0, 0], buttons };
+  return { axes: overrides.axes ?? [0, 0, 0, 0], buttons, mapping: overrides.mapping ?? 'standard' };
 }
 
-/** Install a fake Gamepad API. `set(null)` unplugs the pad. */
-function mockPads(): (p: FakePad | null) => void {
-  let current: FakePad | null = null;
+/**
+ * A wheel rig's shifter or pedal box: the browser cannot map it, so `mapping` is empty, and it
+ * rests with a switch closed on whatever button number that switch happens to be.
+ */
+function rig(down: number[] = [3]): FakePad {
+  return pad({ down, mapping: '' });
+}
+
+/** Install a fake Gamepad API. `set(null)` unplugs everything; several pads may be plugged in. */
+function mockPads(): (...p: Array<FakePad | null>) => void {
+  let current: Array<FakePad | null> = [];
   (globalThis as { navigator?: unknown }).navigator = {
-    getGamepads: () => [current ? { ...current, connected: true } : null],
+    getGamepads: () => current.map((p) => (p ? { ...p, connected: true } : null)),
   };
-  return (p) => {
+  return (...p) => {
     current = p;
   };
 }
@@ -177,6 +188,27 @@ describe('gamepad input', () => {
     input.poll(cmd);
     expect(cmd.handbrake).toBe(false);
     expect(cmd.nitro).toBe(false);
+  });
+
+  it('ignores a rig the browser could not map, whatever it is resting on', () => {
+    // A G29 shifter sits with button 3 closed. Button 3 is Y, and Y cycles the camera: read as
+    // a pad, it would cut to the front view on the first tick of every session.
+    const set = mockPads();
+    const input = createGamepadInput();
+    const cmd = createPlayerCommand();
+    set(rig(), rig([0, 3]));
+    input.poll(cmd);
+    expect(cmd).toEqual(createPlayerCommand());
+  });
+
+  it('finds a real pad plugged in behind the rig', () => {
+    const set = mockPads();
+    const input = createGamepadInput();
+    const cmd = createPlayerCommand();
+    set(rig(), pad({ down: [0] }));
+    input.poll(cmd);
+    expect(cmd.handbrake).toBe(true);
+    expect(cmd.pov).toBe(false);
   });
 
   it('releases everything when the pad is unplugged mid-press', () => {

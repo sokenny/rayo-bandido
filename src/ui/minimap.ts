@@ -13,7 +13,13 @@ import { slotCss } from '../core/playerColors';
  * car is quarry: a hundred white dots buried the player's own arrow and gave away a hunt that is
  * the point of the mode. The RAYO RUSH circle is somewhere to GO, and one you cannot find is one
  * that does not exist — so it is drawn, in the chrome's hazard yellow, which nothing else on
- * this map uses. It goes into the base layer with the roads, and stays there: clearing a mission
+ * this map uses. The same goes for the other activities, each in a colour of its own: violet for
+ * a fare, magenta for the start line the circuit missions are entered on. ONE COLOUR EACH is the
+ * whole scheme — the mark is recognised before its shape is, especially at a glance at speed.
+ *
+ * ONLY THE ACTIVITY IN HAND. While one of them has the car, the others are not marked at all
+ * (`src/sim/activities.ts`): the game passes the list it wants drawn, and a run is driven on a
+ * map with nothing on it but the run. It goes into the base layer with the roads, and stays there: clearing a mission
  * moves it (`setActivities`), which happens three times in a session and repaints the base once
  * each — so the per-frame cost is still nothing, which is the reason it is in the base at all.
  *
@@ -170,6 +176,10 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
  * share, because at ten pixels a filled bolt is a blob and three strokes still read as lightning.
  */
 function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number, kind: ActivityMarkKind = 'rush'): void {
+  if (kind === 'circuit') {
+    drawCircuitMark(ctx, cx, cz, dpr);
+    return;
+  }
   if (kind !== 'rush') {
     drawPassengerMark(ctx, cx, cz, dpr, kind);
     return;
@@ -203,6 +213,50 @@ function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr
   ctx.lineTo(1.3 * dpr, 0.2 * dpr);
   ctx.lineTo(-1.4 * dpr, 3.4 * dpr);
   ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
+ * The circuit missions on the map: a ringed chequered flag in the magenta this game already
+ * paints a start line with — which is what the mark stands on, so the colour is doing the same
+ * job here as it does on the race's own minimap.
+ *
+ * The chequer is four filled squares in a 2x2, which at this size is the most of one that still
+ * reads: eight of them at three pixels each is a grey smear. Fixed pixel size, same reason as
+ * the RUSH mark — a thing the player has to be able to spot is sized for the eye.
+ */
+function drawCircuitMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+  const r = 6.2 * dpr;
+  const MAGENTA = '#ff3df0';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  // Dark disc, so the mark never has to compete with the road under it.
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = MAGENTA;
+  ctx.shadowColor = MAGENTA;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // The chequer: two squares on one diagonal, so the eye fills in the two that are not there.
+  const cell = 1.9 * dpr;
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = MAGENTA;
+  ctx.fillRect(-cell, -cell, cell, cell);
+  ctx.fillRect(0, 0, cell, cell);
+  // And the two that are, hairlined, so the block never reads as one bar.
+  ctx.lineWidth = 1 * dpr;
+  ctx.strokeRect(0, -cell, cell, cell);
+  ctx.strokeRect(-cell, 0, cell, cell);
 
   ctx.restore();
 }

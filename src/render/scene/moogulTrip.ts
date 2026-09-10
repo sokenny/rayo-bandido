@@ -11,7 +11,7 @@ import type { FinishAmounts } from '../post/speedBlur';
  * THE MOOGUL: what the city looks like from inside it.
  *
  * One controller owns the whole experience. It is handed an envelope (0..1, from the rules'
- * clock through `moogulIntensity`) once a frame and turns it into four things, each on its own
+ * clock through `moogulIntensity`) once a frame and turns it into five things, each on its own
  * threshold of the envelope so they arrive one after another rather than all at once
  * (`MOOGUL.layers`):
  *
@@ -28,18 +28,26 @@ import type { FinishAmounts } from '../post/speedBlur';
  *    a pane sits on a floor — a few centimetres off the glass, depth-tested against everything,
  *    and faded in, held and faded out over several seconds each. They are the one thing here
  *    that is an object rather than a number, and there are never more than four.
+ *  - THE LIGHTS. Every light in the frame — lit panes, hairlines, lamps, tail lights, the wet
+ *    road under them — grown into a soft halo in a colour that is not quite its own
+ *    (`render/post/lightBleed.ts`), widening and reaching further down the brightness range as
+ *    the trip deepens. The windows themselves burn a little harder to feed it. This is the one
+ *    layer that touches the whole frame rather than its edge, and the reason the city reads as
+ *    SOFT rather than merely coloured.
  *  - THE FINISH. A restrained colour separation and a slow swim in the periphery, on the pass
  *    the nitro blur already owns; the middle of the frame — the car, the road — stays exact.
  *
  * SLOW EVERYWHERE. Every modulation inside the envelope is a sine with a period in the tens of
  * seconds; nothing here strobes, flickers or steps. Under `prefers-reduced-motion` the swim is
- * off and the drift and the separation are cut back, and the colour and the faces remain.
+ * off and the drift and the separation are cut back; the colour, the halo and the faces remain
+ * — a diffuse light is not a moving one.
  *
  * LETTING GO. When the envelope falls to zero — naturally, or because the rules cut it short —
  * the shown amount eases down over `stopFadeSeconds`, then the sky re-reads its own config, the
- * lights get their own colours back, the uniforms go to zero and the faces go dark. Repeating
- * the trip reuses every object; nothing is allocated after construction but the face textures,
- * drawn once.
+ * lights get their own colours back, the uniforms and the halo go to zero — which is the whole
+ * chain in `lightBleed.ts` not running at all — and the faces go dark. Repeating the trip
+ * reuses every object; nothing is allocated after construction but the face textures, drawn
+ * once, and the halo's three small render targets, kept for the life of the session.
  */
 export interface MoogulTripHooks {
   scene: THREE.Scene;
@@ -394,7 +402,23 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
 
   /* ---------------------------------------------------------------- the frame */
 
-  const finish: FinishAmounts = { chroma: 0, swim: 0, time: 0 };
+  const BLEED = MOOGUL.bleed;
+  const finish: FinishAmounts = {
+    chroma: 0,
+    swim: 0,
+    time: 0,
+    bleed: {
+      amount: 0,
+      threshold: BLEED.threshold[0],
+      knee: BLEED.knee,
+      hue: 0,
+      saturation: 1,
+      radius: BLEED.radius[0],
+      stretch: BLEED.stretch,
+      fringe: 0,
+      centre: BLEED.centre,
+    },
+  };
   let shown = 0;
   let tripTime = 0;
   /** True while something has been written that release() must take back. */
@@ -407,9 +431,11 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
     hemi.color.copy(baseHemiSky);
     hemi.groundColor.copy(baseHemiGround);
     key.color.copy(baseKey);
-    surface.set(0, 0, 0, 0, 0);
+    surface.set(0, 0, 0, 0, 0, 0);
     finish.chroma = 0;
     finish.swim = 0;
+    finish.bleed.amount = 0;
+    finish.bleed.fringe = 0;
     for (const face of faces) if (face.active) retireFace(face);
     nextFaceIn = 0;
     tripTime = 0;
@@ -479,6 +505,7 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
       surface.set(
         surfaceAmount * MOOGUL.surface.warpPanes * (reduced ? 0.4 : 1),
         surfaceAmount * MOOGUL.surface.hue,
+        layerAmount(shown, L.glow) * MOOGUL.surface.glow,
         paintAmount * MOOGUL.surface.hue,
         paintAmount * MOOGUL.surface.pulse,
         tripTime,
@@ -495,6 +522,27 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
       finish.chroma = chromaAmount * MOOGUL.post.chroma * (reduced ? 0.5 : 1);
       finish.swim = reduced ? 0 : layerAmount(shown, L.swim) * MOOGUL.post.swim;
       finish.time = (twoPi * tripTime) / MOOGUL.post.swimPeriod;
+
+      // The halo. It comes on with the sky, before anything else is obviously wrong, and it
+      // deepens by widening and by asking less of a pixel — so the light creeps outwards from
+      // the lamps until the whole city is made of it. Its colour turns on its own slow cycle,
+      // independently of the sky's, which is what keeps a halo from ever matching its light.
+      const bleedAmount = layerAmount(shown, L.bleed);
+      const bleedBreath = 0.82 + 0.18 * Math.sin((twoPi * tripTime) / BLEED.breathPeriod);
+      const bleed = finish.bleed;
+      bleed.amount = bleedAmount * BLEED.amount * bleedBreath;
+      bleed.threshold = BLEED.threshold[0] + (BLEED.threshold[1] - BLEED.threshold[0]) * bleedAmount;
+      bleed.radius = BLEED.radius[0] + (BLEED.radius[1] - BLEED.radius[0]) * bleedAmount;
+      bleed.hue = BLEED.hue * Math.sin((twoPi * tripTime) / BLEED.huePeriod);
+      bleed.saturation = 1 + (BLEED.saturation - 1) * bleedAmount;
+      // Read every frame rather than once, so a number changed on the running game
+      // (`__rb.buho.config.bleed`) is on screen the next frame like all the others.
+      bleed.knee = BLEED.knee;
+      bleed.stretch = BLEED.stretch;
+      bleed.centre = BLEED.centre;
+      // The prismatic split rides the separation's own layer: the halos are diffuse from the
+      // start and only come apart into colour late on.
+      bleed.fringe = chromaAmount * BLEED.fringe * (reduced ? 0.4 : 1);
     },
 
     stop() {

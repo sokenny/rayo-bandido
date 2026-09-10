@@ -12,7 +12,7 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
-import { createRushMarker, type RushMarkerVisual } from './env/rushMarker';
+import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
 import { createBadkalaPoster } from './env/badkalaPoster';
 import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
@@ -63,7 +63,13 @@ export interface EnvironmentVisual {
    * it is the one piece of scenery that answers the player: `src/game.ts` tells it how close
    * the car is and whether a run is under way.
    */
-  rushMarker: RushMarkerVisual | null;
+  rushMarker: ActivityMarkerVisual | null;
+  /**
+   * The circuit missions' marker, on the Bandido Grid's start line in the open world; null
+   * everywhere else, the circuit included. Same object, same contract — a second activity is a
+   * second spec (`env/activityMarker.ts`), not a second kind of marker.
+   */
+  circuitMarker: ActivityMarkerVisual | null;
   /**
    * What the Moogul may touch (`render/scene/moogulTrip.ts`): the two scene lights, the
    * surface uniforms patched into the facade and graffiti materials, and the index of every
@@ -383,12 +389,16 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const wantedBoard = createWantedBillboard(plan.wantedBoard ?? { x: 0, z: -10_000, rotY: 0 });
   if (plan.wantedBoard) root.add(wantedBoard.group);
 
-  /* ------------------------------------------------- rayo rush marker */
+  /* ------------------------------------------------- activity markers */
 
   // Built at the first mission's site; the game moves it to whichever one the player has
-  // actually reached (`RushMarkerVisual.moveTo`) as soon as it knows their progress.
-  const rushMarker = plan.rushMarkers && plan.rushMarkers.length > 0 ? createRushMarker(plan.rushMarkers[0]) : null;
+  // actually reached (`ActivityMarkerVisual.moveTo`) as soon as it knows their progress.
+  const rushMarker = plan.rushMarkers && plan.rushMarkers.length > 0 ? createActivityMarker(plan.rushMarkers[0], RUSH_MARKER) : null;
   if (rushMarker) root.add(rushMarker.group);
+
+  // The circuit missions' door. It never moves: the start line is where the start line is.
+  const circuitMarker = plan.circuitMarker ? createActivityMarker(plan.circuitMarker, CIRCUIT_MARKER) : null;
+  if (circuitMarker) root.add(circuitMarker.group);
 
   /* ---------------------------------------------------------------- animation */
 
@@ -403,6 +413,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     root,
     atmosphere,
     rushMarker,
+    circuitMarker,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
@@ -442,13 +453,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
       // The plaza WANTED board strobes subtly.
       wantedBoard.update(time);
-      // The activity marker breathes, and quickens as the player closes on it.
+      // The activity markers breathe, and quicken as the player closes on one.
       rushMarker?.update(time);
+      circuitMarker?.update(time);
     },
     dispose() {
       atmosphere.dispose();
       wantedBoard.dispose();
       rushMarker?.dispose();
+      circuitMarker?.dispose();
       badkala.dispose();
       graffiti.dispose();
       roadArt.dispose();

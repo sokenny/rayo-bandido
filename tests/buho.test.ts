@@ -189,17 +189,19 @@ describe('el búho: the purchase', () => {
 /* ================================================================== the envelope */
 
 describe('the moogul: the envelope', () => {
-  it('is nothing for the first minute, barely there by two and a half, peaks between 4:30 and 6:00, and is gone at eight', () => {
+  it('is on inside twenty seconds, climbs to a peak in the middle, and is gone at five minutes', () => {
     expect(moogulIntensity(0)).toBe(0);
-    expect(moogulIntensity(30)).toBe(0);
-    expect(moogulIntensity(60)).toBe(0);
-    expect(moogulIntensity(90)).toBeLessThan(0.05);
-    expect(moogulIntensity(150)).toBeLessThanOrEqual(0.13);
-    expect(moogulIntensity(150)).toBeGreaterThan(0.08);
-    expect(moogulIntensity(270)).toBeGreaterThan(0.45);
+    // The whole point of the front of the envelope: the player does not wait for it.
+    expect(moogulIntensity(20)).toBeGreaterThan(0.15);
+    expect(moogulIntensity(20)).toBeLessThan(0.3);
+    // ...and it is not all there at once either. Twenty seconds is a start, not the trip.
+    expect(moogulIntensity(10)).toBeGreaterThan(0);
+    expect(moogulIntensity(10)).toBeLessThan(moogulIntensity(20));
+    expect(moogulIntensity(75)).toBeGreaterThan(0.4);
+    expect(moogulIntensity(150)).toBeGreaterThan(0.7);
     let peak = 0;
     let peakAt = 0;
-    for (let t = 0; t <= 480; t += 1) {
+    for (let t = 0; t <= 300; t += 1) {
       const v = moogulIntensity(t);
       if (v > peak) {
         peak = v;
@@ -207,9 +209,9 @@ describe('the moogul: the envelope', () => {
       }
     }
     expect(peak).toBeGreaterThan(0.98);
-    expect(peakAt).toBeGreaterThanOrEqual(270);
-    expect(peakAt).toBeLessThanOrEqual(360);
-    expect(moogulIntensity(480)).toBe(0);
+    expect(peakAt).toBeGreaterThanOrEqual(170);
+    expect(peakAt).toBeLessThanOrEqual(230);
+    expect(moogulIntensity(300)).toBe(0);
     expect(moogulIntensity(600)).toBe(0);
   });
 
@@ -217,10 +219,10 @@ describe('the moogul: the envelope', () => {
     let prev = 0;
     let biggest = 0;
     let rising = true;
-    for (let t = 0; t <= 480; t += 0.5) {
+    for (let t = 0; t <= 300; t += 0.5) {
       const v = moogulIntensity(t);
       biggest = Math.max(biggest, Math.abs(v - prev));
-      if (rising && v < prev - 1e-9 && t > 300) rising = false;
+      if (rising && v < prev - 1e-9 && t > 200) rising = false;
       if (!rising) expect(v).toBeLessThanOrEqual(prev + 1e-9);
       prev = v;
     }
@@ -230,7 +232,8 @@ describe('the moogul: the envelope', () => {
 
   it('scales with the duration and keys the layers on their own windows', () => {
     const short = { duration: 60, keys: MOOGUL.timeline.keys };
-    expect(moogulIntensity(7, short)).toBe(0);
+    expect(moogulIntensity(0, short)).toBe(0);
+    expect(moogulIntensity(4, short)).toBeGreaterThan(0.15);
     expect(moogulIntensity(40, short)).toBeGreaterThan(0.95);
     expect(moogulIntensity(60, short)).toBe(0);
     expect(layerAmount(0.3, [0.4, 0.9])).toBe(0);

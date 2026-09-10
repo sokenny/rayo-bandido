@@ -51,8 +51,18 @@ export function applyDeadzone(value: number, deadzone: number): number {
 }
 
 /**
- * The pad we drive with: the first connected one. Returns null when the Gamepad API is missing
- * (jsdom, old browsers) or nothing is plugged in.
+ * The pad we drive with: the first connected one the browser reports in the *standard*
+ * mapping. Returns null when the Gamepad API is missing (jsdom, old browsers), nothing is
+ * plugged in, or the only things plugged in are not pads.
+ *
+ * The mapping check is not a nicety. Every index below is a standard-mapping index, so a
+ * device the browser could not map — a wheel, a pedal box, a shifter, a handbrake, a flight
+ * stick — has its buttons land on whatever action shares their number. Those rigs also sit
+ * with switches closed at rest (a shifter in gear, a pedal's microswitch), so the first poll
+ * of the session reads a press nobody made: a G29 shifter holding its button 3 cycles the
+ * camera to the front view on every single start, because button 3 is Y. Ignoring them costs
+ * nothing — the bindings never fitted those devices anyway — and it leaves a real pad plugged
+ * in beside one still working, because the search skips past the rig to find it.
  */
 export function readActiveGamepad(): Gamepad | null {
   const nav = typeof navigator === 'undefined' ? undefined : navigator;
@@ -60,7 +70,7 @@ export function readActiveGamepad(): Gamepad | null {
   const pads = nav.getGamepads();
   for (let i = 0; i < pads.length; i++) {
     const pad = pads[i];
-    if (pad && pad.connected) return pad;
+    if (pad && pad.connected && pad.mapping === 'standard') return pad;
   }
   return null;
 }

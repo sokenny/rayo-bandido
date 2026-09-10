@@ -13,6 +13,7 @@ import {
 } from '../src/sim/passenger';
 import { PASSENGERS, preferenceLabel, validatePassengerCatalog, type PassengerDef } from '../src/content/passengers';
 import { hasPortrait } from '../src/ui/portraits';
+import { hasPassengerLook } from '../src/render/scene/env/passengerFigure';
 import { createDriftState, createInitialGameState, createVehicleState, stepGame } from '../src/sim/gameState';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { PASSENGER, RUSH } from '../src/config/tuning';
@@ -142,10 +143,13 @@ function rig(catalog: readonly PassengerDef[] = PASSENGERS, targetCount = 6) {
 describe('passenger catalogue', () => {
   const { layout } = createCityWorld();
 
-  it('is valid against the city, and every character has a face', () => {
+  it('is valid against the city, and every character has a face and a body', () => {
     expect(validatePassengerCatalog(PASSENGERS, layout.passengerStops)).toEqual([]);
     expect(PASSENGERS.length).toBeGreaterThanOrEqual(3);
     for (const p of PASSENGERS) expect(hasPortrait(p.portrait), `${p.id} has no portrait`).toBe(true);
+    // The person standing at the stop is drawn from the same key as the portrait, so a
+    // character added without a look would wait at their pin as a stranger in a grey coat.
+    for (const p of PASSENGERS) expect(hasPassengerLook(p.portrait), `${p.id} has no figure`).toBe(true);
   });
 
   it('gives every rule a readable label', () => {
@@ -245,7 +249,9 @@ describe('passenger ride: the lifecycle', () => {
     expect(results.fare).toBe(r.s.results!.fare);
     expect(results.tip).toBe(tipFor(results.mood));
     // The farewell, and nothing after it.
-    const after = linesIn(done).concat(linesIn(r.idle(PASSENGER.dialogue.maxSeconds + 1)));
+    // Stopping short of `resultsHoldSeconds`: past that the card puts itself away, which is
+    // the next thing this test checks on purpose rather than by accident.
+    const after = linesIn(done).concat(linesIn(r.idle(PASSENGER.resultsHoldSeconds - 1)));
     expect(after).toHaveLength(1);
     expect(who.farewell[r.s.results!.tier]).toContain(after[0]);
 
@@ -255,6 +261,23 @@ describe('passenger ride: the lifecycle', () => {
     expect(r.s.phase).toBe('idle');
     expect(r.s.line).toBe('');
     expect(r.s.queue).toHaveLength(0);
+  });
+
+  it('puts the fare card away on its own once nobody presses the key', () => {
+    const r = rig();
+    r.board();
+    r.dropOff();
+    expect(r.s.phase).toBe('results');
+
+    // A second before the hold is up it is still the player's card.
+    r.idle(PASSENGER.resultsHoldSeconds - 1);
+    expect(r.s.phase).toBe('results');
+
+    const events = r.idle(2);
+    expect(events.some((e) => e.type === 'passengerDismissed')).toBe(true);
+    expect(r.s.phase).toBe('idle');
+    expect(r.s.results).toBe(null);
+    expect(r.s.resultsHold).toBe(0);
   });
 
   it('cancels on the second press of the key and pays nothing', () => {
@@ -367,7 +390,7 @@ describe('passenger mood', () => {
     r.board();
     r.cruise(50);
     const start = r.s.mood;
-    const kill = (id: number): GameEvent => ({ type: 'targetDestroyed', targetId: id, x: 0, y: 0, z: 0, reward: 0 });
+    const kill = (id: number): GameEvent => ({ type: 'targetDestroyed', targetId: id, x: 0, y: 0, z: 0, reward: 0, distance: 0 });
     r.tick([kill(2)]);
     const once = r.s.mood;
     expect(once).toBeGreaterThan(start);

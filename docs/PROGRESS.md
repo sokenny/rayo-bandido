@@ -1840,3 +1840,88 @@ down again; nothing else — no car, traffic, weapon or other player — is touc
   `__rb.buho.timeScale(20)`, `__rb.buho.grant()`, `__rb.buho.status()`.
 - Not done: no minimap mark for the bay (he is found, not handed over); faces only stand on
   buildings the kit registered (viaduct skirts and ground-floor modules have no panes anyway).
+
+## Circuit missions, and one activity at a time (2026-09-10)
+
+A second mission chain, asked for the way the first one was: three levels, its own icon, its own
+place on the map — but about the circuit rather than the street. Two laps of the Bandido Grid,
+each mission asking for a shorter time AND a smaller crash allowance than the last:
+
+    1 SHAKEDOWN     2:40, up to three crashes   <- get round it without parking it
+    2 ON THE PACE   2:20, one crash             <- carry speed, and mostly stay off the walls
+    3 SPOTLESS      2:05, none at all           <- the fast lap, without touching anything
+
+**Time and crashes together, which is the whole idea.** A time on its own is beaten by throwing
+the car at the barriers and bouncing off in roughly the right direction; the allowance is what
+makes the last mission ask for a lap that is fast BECAUSE it is tidy. The numbers were measured,
+not guessed — a line-following driver through the real simulation does the two laps in ~141 s
+driving carefully, ~117 s committed and clean, ~111 s on the limit while scraping the barriers
+eight times — so mission 1 is inside a careful lap, mission 2 needs a committed one, and mission
+3 asks for a committed lap driven clean, with the nitro and the hidden shortcuts as the margin.
+`tests/timeAttack.test.ts` drives the real circuit to hold those three numbers honest.
+
+**The chain judges; it never plays.** `src/sim/timeAttack.ts` owns no clock, no course, no gates
+and no car. The race times the laps exactly as it always did and the collision pass raises the
+impacts exactly as it always did; this watches both and decides whether what happened met what
+was asked. There is no "start a run" and no key: the race going back to `countdown` IS the start
+of one and reaching `finished` IS the flag. So the same circuit is still driven as a versus race
+with the chain simply absent — `GameStateOptions.timeAttack`, which only the caller can know,
+because the layout cannot tell a solo lap from a grid of four. A crash is a `collision` at 5 m/s
+or more INTO a surface, and one accident is one crash (`crashCooldown` covers the bounce and the
+ride down the wall). Spending the allowance fails the mission but does NOT stop the race: the lap
+is still worth driving and the time still counts as a personal best.
+
+**Found in the street, not in a menu.** The missions are entered where the race actually starts:
+a ring painted across the Bandido Grid's start/finish line on av-main, with a chequered flag
+turning over it and TIME ATTACK under it. Roll on, press F, and the circuit loads with the
+mission on offer; ESC comes back out to the street you drove in from rather than to a menu you
+never opened (`?from=city`). `src/sim/circuitGate.ts` is the door and nothing else — no target,
+no crash count, no idea what a mission is — and it is deliberately a door rather than a pretence
+that the street IS the track: the circuit has barriers down both sides, a grid, gates and traffic
+thinned to run one way round, so it really is another world.
+
+**The door is a layer over the city, never a part of it.** `citySpec.ts` and `cityWorld.ts` stay
+unaware the circuit exists (`AGENTS.md`); `src/world/cityCircuitGate.ts` puts the ring on, and
+where it stands is `CIRCUIT_GATES[0]` projected onto the lap rather than a pair of coordinates
+typed twice — move the start line and the door moves with it, squared up with the racing line so
+the chevrons point down it. The city's own tests hold the ring: every point of it on a road,
+none of it solid, and far enough from every other activity that two signs can never argue over
+one key press.
+
+**One marker, two activities.** `env/rushMarker.ts` became `env/activityMarker.ts`: the same
+painted ring at the same height, the same chevrons, the same halo, wordmark and proximity
+response, with three things different because they are the three a driver has to tell apart at
+fifty metres — the glyph (an extruded bolt, or a chequered flag built out of solid squares with a
+ripple through it so it never comes edge-on), the word, and the neon. RAYO RUSH keeps its cyan;
+the circuit is the magenta this game already paints a start line in. On the map they are a yellow
+bolt and a magenta chequer; on screen the sign is the rush prompt's own DOM re-used
+(`src/ui/gateOverlay.ts`) in the same hazard yellow, because yellow is the system talking and
+there is only one system.
+
+**ONE ACTIVITY AT A TIME (`src/sim/activities.ts`).** Juan asked for the other missions to get
+out of the way while you are inside one, and the fix was to stop asking the question in four
+places. One module answers "who has the car", and both halves follow from it: the RULES lock
+everything else (each module already understood `locked` as "do not offer, do not start, do not
+take the key"), and the PICTURE takes their markers off the street, their people off the
+pavement and their marks off the map. So a run is driven in a city with nothing in it but the
+run. Engaged means HAS the car, not "is available" — a fare waiting at a kerb is an offer, and
+hiding them does not cancel them; they are standing there again the moment the run ends. The
+Moogul is the exception that shows the rule: it is bought, not driven, so it never locks anything
+— starting a run or picking a fare up interrupts it on that tick, as before — and El Búho stays
+standing under his viaduct while his ring stops answering, because a man is not scenery you
+switch off.
+
+**And the race is just the race.** The circuit inherits an instance of the city, which meant it
+had been quietly inheriting the city's activities too: a RAYO RUSH ring painted across the racing
+line, a fare waiting at a kerb sealed off by the barrier, and a sign inviting the player to start
+the race they were already driving. `circuitWorld.ts` now clears all four at the source, so
+nothing has to be hidden later.
+
+**Verified in the browser** at 800x450 on the dev server: the ring, the flag and the sign on
+av-main; the prompt reading `MISSION 1 / 3 · SHAKEDOWN` and `FINISH INSIDE 2:40 · 3 CRASHES
+ALLOWED`; F loading the circuit with `LAP 1/2` and the mission strip reading `TARGET 2:40 /
+CRASHES 0/3` and no city activity anywhere on the course; ESC back to the city. And the
+exclusion, watched live: taking up a RAYO RUSH run hides the circuit marker, the waiting fare's
+pin and the fare themselves while the yellow rush mark stays, and all three come back the moment
+the run ends. 712 unit tests and typecheck green.
+

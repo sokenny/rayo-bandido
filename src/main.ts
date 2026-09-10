@@ -70,6 +70,14 @@ interface Destination {
   /** Multiplayer — the room browser, or `room` when one is named. */
   mp?: boolean;
   room?: string;
+  /**
+   * Where this arrival came FROM, when it was not a menu: today only `city`, written by the
+   * start line in the open world (`src/sim/circuitGate.ts`). All it decides is where ESC goes
+   * — back out to the street the player drove in from, rather than to a menu they never opened
+   * — and like every other parameter here it is cleared unless the destination asks for it, so
+   * it cannot survive a trip through the menus and send a later ESC somewhere surprising.
+   */
+  from?: GameMode;
 }
 
 /**
@@ -77,10 +85,12 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, race = false, mp: multiplayer = false, room = '' } = to;
+  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
+  if (from) params.set('from', from);
+  else params.delete('from');
   if (race) params.set('race', '1');
   else params.delete('race');
   if (multiplayer) params.set('mp', '1');
@@ -117,12 +127,17 @@ function roomEntryFromUrl(name: string): RoomEntry | null {
  * race, which is why the loading screen is passed in rather than made here: a match reuses
  * one screen across its races.
  */
-async function buildGame(mode: GameMode, loading: LoadingScreen, net: NetSession | null): Promise<Game> {
+async function buildGame(
+  mode: GameMode,
+  loading: LoadingScreen,
+  net: NetSession | null,
+  options: { onEnterCircuit?: () => void } = {},
+): Promise<Game> {
   loading.set(mode === 'race' || mode === 'circuit' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
 
-  const game = createGame(canvas!, hudRoot!, debugRoot!, mode, { net });
+  const game = createGame(canvas!, hudRoot!, debugRoot!, mode, { net, onEnterCircuit: options.onEnterCircuit });
   // `?nowarm=1` skips the warm-up to reproduce the first-use hitches on purpose (A/B, and the
   // negative test for the perf gate: `node scripts/perf-probe.mjs --check --url ...?nowarm=1`).
   if (new URLSearchParams(location.search).has('nowarm')) {
@@ -201,7 +216,26 @@ async function openWorld(): Promise<void> {
     }
   }
 
-  const game = await buildGame('city', loading, session);
+  /**
+   * THE DOOR OUT OF THE CITY. The circuit missions are found on the Bandido Grid's start line
+   * in the open world (`src/sim/circuitGate.ts`), and taking them means leaving this world for
+   * the circuit — which here means an address, exactly as every other screen change does.
+   *
+   * The socket goes back first: the city is a server, and a player who drives off to the
+   * circuit should give their colour up now rather than when the browser gets round to
+   * dropping the connection. `latch` is because a load is not instant — the frame loop keeps
+   * running until the new page takes over, and a key held down is a key pressed on every one
+   * of those frames.
+   */
+  let leaving = false;
+  const toCircuit = (): void => {
+    if (leaving) return;
+    leaving = true;
+    session?.dispose();
+    setTimeout(() => location.assign(urlWith({ mode: 'circuit', from: 'city' })), 120);
+  };
+
+  const game = await buildGame('city', loading, session, { onEnterCircuit: toCircuit });
   game.start();
   canvas!.focus();
   void loading.hide();
@@ -232,7 +266,14 @@ async function boot(mode: GameMode): Promise<void> {
   canvas!.focus();
   void loading.hide();
 
-  const back = mode === 'circuit' || mode === 'race' ? urlWith({ race: true }) : urlWith();
+  // ESC goes back the way the player came in: the street, when they drove onto the start line
+  // to get here, and otherwise the screen they chose the world on.
+  const cameFromCity = new URLSearchParams(location.search).get('from') === 'city';
+  const back = cameFromCity
+    ? urlWith({ mode: 'city' })
+    : mode === 'circuit' || mode === 'race'
+      ? urlWith({ race: true })
+      : urlWith();
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') location.assign(back);
   });

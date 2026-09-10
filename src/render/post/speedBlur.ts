@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp01 } from '../../core/math';
 import { SPEED_BLUR } from '../../config/tuning';
+import { createLightBleed, type BleedAmounts } from './lightBleed';
 
 /**
  * Nitro speed blur: a radial (zoom) smear that opens up from the edges of the frame while the
@@ -28,8 +29,10 @@ import { SPEED_BLUR } from '../../config/tuning';
  */
 /**
  * The Moogul's finishing touches, riding the same pass (`render/scene/moogulTrip.ts` owns the
- * numbers). Both are fractions of the frame at its very edge and both are exactly nothing in
- * the sharp middle, for the same reason the blur is.
+ * numbers). The separation and the swim are fractions of the frame at its very edge and both
+ * are exactly nothing in the sharp middle, for the same reason the blur is. The halo is the
+ * one thing here that reaches the whole frame — a city of diffuse lights is the point of it —
+ * and it too is turned down in the middle so the road stays readable.
  */
 export interface FinishAmounts {
   /** Colour separation: how far red and blue are pulled apart along the radius. */
@@ -38,6 +41,12 @@ export interface FinishAmounts {
   swim: number;
   /** Seconds, for the waves. */
   time: number;
+  /**
+   * The lights, spread: `lightBleed.ts` draws the halo off this same copy of the frame and
+   * this pass adds it back. Unlike the two above, this one is NOT only at the edge — the
+   * whole city softens — though it is held back in the middle by `bleed.centre`.
+   */
+  bleed: BleedAmounts;
 }
 
 export interface SpeedBlur {
@@ -59,6 +68,21 @@ export interface SpeedBlur {
 const MIN_STRENGTH = 0.02;
 /** Same for the finish: a separation under a fifth of a pixel at 4K is not one. */
 const MIN_FINISH = 0.00005;
+/** And for the halo, which costs four draws: below this nobody could tell it was on. */
+const MIN_BLEED = 0.002;
+
+/** What `warm` builds the halo chain with. The amount is zero; only the shapes matter. */
+const WARM_BLEED: BleedAmounts = {
+  amount: 0,
+  threshold: 0.7,
+  knee: 0.3,
+  hue: 0,
+  saturation: 1,
+  radius: 0.04,
+  stretch: 1,
+  fringe: 0,
+  centre: 1,
+};
 
 /**
  * How strongly the blur should be showing for a given boost intensity and speed. Nitro held at
@@ -93,6 +117,10 @@ uniform float uCenterClear;
 uniform float uChroma;
 uniform float uSwim;
 uniform float uTime;
+uniform sampler2D tBleed;
+uniform float uBleed;
+uniform float uBleedFringe;
+uniform float uBleedCentre;
 varying vec2 vUv;
 
 /** Taps per pixel. Eight is enough for a smear this short and keeps the pass one cheap draw. */
@@ -132,6 +160,25 @@ void main() {
     col.r = texture2D(tFrame, base + split).r;
     col.b = texture2D(tFrame, base - split).b;
   }
+
+  // The halo, added back. Sampled at the swum uv rather than the plain one, so it drifts with
+  // the periphery instead of sitting still behind it. Held back in the middle of the frame,
+  // and given less room the brighter the pixel already is — one scalar, so a light haloes
+  // without its colour turning to white.
+  if (uBleed > 0.0) {
+    vec3 halo;
+    if (uBleedFringe > 0.0) {
+      vec2 split = fromCenter * uBleedFringe;
+      halo.r = texture2D(tBleed, base + split).r;
+      halo.g = texture2D(tBleed, base).g;
+      halo.b = texture2D(tBleed, base - split).b;
+    } else {
+      halo = texture2D(tBleed, base).rgb;
+    }
+    float keep = mix(uBleedCentre, 1.0, smoothstep(0.0, 1.0, radius));
+    float room = 1.0 - 0.5 * clamp(max(col.r, max(col.g, col.b)), 0.0, 1.0);
+    col += halo * (uBleed * keep * room);
+  }
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -159,9 +206,18 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     uChroma: { value: 0 },
     uSwim: { value: 0 },
     uTime: { value: 0 },
+    tBleed: { value: null as THREE.Texture | null },
+    uBleed: { value: 0 },
+    uBleedFringe: { value: 0 },
+    uBleedCentre: { value: 1 },
   };
 
   const geometry = createFullScreenTriangle();
+  // The halo chain, which borrows the triangle above. No render target exists and no shader of
+  // it is compiled until the first frame that asks for a halo — or `warm`, which asks for one
+  // behind the loading screen so the trip never pays for it mid-drive.
+  const bleedChain = createLightBleed(renderer, geometry);
+  uniforms.tBleed.value = bleedChain.texture;
   const material = new THREE.ShaderMaterial({
     name: 'speedBlur',
     uniforms,
@@ -201,7 +257,7 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     return texture;
   }
 
-  function blurPass(strength: number, chroma = 0, swim = 0, time = 0): void {
+  function blurPass(strength: number, chroma = 0, swim = 0, time = 0, bleed: BleedAmounts | null = null): void {
     renderer.getDrawingBufferSize(size);
     const texture = ensureFrame(size.x, size.y);
     renderer.copyFramebufferToTexture(texture);
@@ -212,8 +268,17 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     uniforms.uSwim.value = swim;
     uniforms.uTime.value = time;
     // Keep the scene's own draw calls and triangles in `renderer.info` for the debug overlay:
-    // the blur pass adds to them instead of resetting them.
+    // the blur pass adds to them instead of resetting them. The halo's four small draws are
+    // inside the same guard, so they show up there too.
     renderer.info.autoReset = false;
+    if (bleed) {
+      uniforms.tBleed.value = bleedChain.build(texture, size.x, size.y, bleed);
+      uniforms.uBleed.value = bleed.amount;
+      uniforms.uBleedFringe.value = bleed.fringe;
+      uniforms.uBleedCentre.value = bleed.centre;
+    } else {
+      uniforms.uBleed.value = 0;
+    }
     renderer.render(quadScene, quadCamera);
     renderer.info.autoReset = true;
   }
@@ -224,15 +289,20 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
       renderer.render(scene, camera);
       const chroma = finish && finish.chroma > MIN_FINISH ? finish.chroma : 0;
       const swim = finish && finish.swim > MIN_FINISH ? finish.swim : 0;
-      if (!(strength > MIN_STRENGTH) && chroma === 0 && swim === 0) return;
-      blurPass(strength > MIN_STRENGTH ? strength : 0, chroma, swim, finish ? finish.time : 0);
+      const bleed = finish && finish.bleed.amount > MIN_BLEED ? finish.bleed : null;
+      if (!(strength > MIN_STRENGTH) && chroma === 0 && swim === 0 && !bleed) return;
+      blurPass(strength > MIN_STRENGTH ? strength : 0, chroma, swim, finish ? finish.time : 0, bleed);
     },
 
     warm() {
-      blurPass(0);
+      // With the halo in it, so the trip's first haloed frame neither compiles a shader nor
+      // allocates a render target. It is drawn at an amount of zero and changes nothing.
+      blurPass(0, 0, 0, 0, WARM_BLEED);
     },
 
     dispose() {
+      bleedChain.dispose();
+      uniforms.tBleed.value = null;
       geometry.dispose();
       material.dispose();
       if (frame) {

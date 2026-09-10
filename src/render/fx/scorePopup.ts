@@ -5,6 +5,10 @@ import { ringNext } from './shapes';
  * Floating "+X" score pops at the point of a kill, the way a shooter rewards a takedown:
  * the number punches in slightly oversized, drifts up off the wreck and fades.
  *
+ * Only rewards that happen to something that STAYS PUT belong here. A near miss does not: the
+ * car it was scored on is doing 200 in the other direction, so its pay is written on the HUD
+ * (`.rb-nearmiss`) instead, where it can be read after the fact.
+ *
  * One pooled `THREE.Sprite` per slot (billboarded by Three, so the number always faces the
  * camera) with its own small canvas texture. The label is only re-rasterized when a slot is
  * spawned, never per frame, and the pool allocates nothing after creation.
@@ -47,14 +51,12 @@ const HOLD = 0.55;
 
 /** The reward colour, matching the HUD money flash (`--rb-acid`) rather than lightning cyan. */
 const ACID = '#a8ff3e';
-/** The near-miss colour, matching the cyan the HUD uses for a pass. */
-const CYAN = '#4ff3ff';
 /** The chrome's hazard yellow (`--rb-yellow`): in this game's palette, the system speaking. */
 const YELLOW = '#fcee0a';
 
 /**
  * What a pop looks like. Two exist, and they are deliberately unmistakable at a glance: a kill
- * is a bare acid-green number over a wreck, a near miss is a cyan number under a small caption.
+ * is a bare acid-green number over a wreck, a RAYO RUSH score is yellow under a small caption.
  * Same pool, same animation — only the raster differs.
  */
 export interface ScorePopupStyle {
@@ -82,14 +84,6 @@ export const POPUP_RUSH: ScorePopupStyle = {
   accent: YELLOW,
   midTone: '#fff8a8',
   caption: 'EV DISABLED',
-  scale: 1.16,
-};
-
-/** A car shaved at speed: cyan, captioned, so it never reads as a kill. */
-export const POPUP_NEAR_MISS: ScorePopupStyle = {
-  accent: CYAN,
-  midTone: '#c2f7ff',
-  caption: 'NEAR MISS',
   scale: 1.16,
 };
 

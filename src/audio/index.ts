@@ -110,11 +110,13 @@ export function createAudio(targetCount: number): AudioSystem {
           oneShots.countdown(true);
           break;
         case 'rushPrompt':
+        case 'circuitPrompt':
         case 'passengerPrompt':
         case 'passengerDropPrompt':
-          // Every free-world marker gets the same chime: RAYO RUSH's circle and a passenger's
-          // ring are the same gesture — you have rolled onto something you can act on — and one
-          // sound for it is what makes the second activity read as part of the same game.
+          // Every free-world marker gets the same chime: RAYO RUSH's circle, the circuit's start
+          // line and a passenger's ring are the same gesture — you have rolled onto something
+          // you can act on — and one sound for it is what makes each new activity read as part
+          // of the same game rather than as a thing bolted onto it.
           // Only on the way in; rolling off a marker is not an event worth a sound.
           if (ev.on) oneShots.pickup();
           break;

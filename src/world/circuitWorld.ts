@@ -211,6 +211,22 @@ export function createCircuitWorld(seed: number = (Math.random() * 0xffffffff) >
   layout.cruiseRoute = cruiseRoute;
   layout.playerSpawn = { ...grid[0] };
   layout.race = course;
+  /**
+   * THE RACE IS JUST THE RACE. The city's own activities come along with the instance it is cut
+   * out of — this world is `createCityWorld()` with a ribbon laid over it — and every one of
+   * them would be wrong here: a RAYO RUSH ring painted across the racing line, a fare waiting at
+   * a kerb the barrier has sealed off, a man under the viaduct selling something to a car on a
+   * flying lap, and a sign inviting the player to start the race they are already driving.
+   *
+   * So they are taken off at the source rather than hidden later. The rules build no state for
+   * an activity whose site is missing (`src/sim/gameState.ts`), the art builds no marker for a
+   * plan that carries none, and the mission chain the circuit DOES run (`src/sim/timeAttack.ts`)
+   * is left with the whole course to itself.
+   */
+  layout.rushSites = null;
+  layout.passengerStops = null;
+  layout.buhoSite = null;
+  layout.circuitSite = null;
   // The minimap draws the race, not the city it is cut out of.
   layout.minimap = {
     ...layout.minimap,
@@ -228,6 +244,9 @@ export function createCircuitWorld(seed: number = (Math.random() * 0xffffffff) >
   /* ---------------------------------------------------------- plan */
 
   plan.neonWalls = neonWalls;
+  // The art side of the same decision: nothing to paint for an activity that is not here.
+  plan.rushMarkers = null;
+  plan.circuitMarker = null;
   plan.startLine = lineDef(line);
   plan.checkpoints = gates.slice(1).map((g) => {
     const p = projectOntoPath(path, (g.ax + g.bx) / 2, (g.az + g.bz) / 2, createProjection());

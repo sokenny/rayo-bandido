@@ -426,6 +426,11 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
             const label = event.cleanDrift ? 'CLEAN DRIFT CHARGE BONUS' : 'DRIFT CHARGE BONUS';
             pushLine(`${label} +${formatScore(event.driftBonus)}`, 'style');
           }
+          // The distance is in the line because it is the thing the player is being paid for:
+          // "LONG SHOT +40" alone reads as a mystery, "62M" says what to do again.
+          if (event.rangeBonus > 0) {
+            pushLine(`LONG SHOT ${Math.round(event.shotDistance)}M +${formatScore(event.rangeBonus)}`, 'style');
+          }
           break;
         }
         case 'rushDismissed':

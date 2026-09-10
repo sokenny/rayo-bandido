@@ -1,5 +1,7 @@
 import { MAX_PLAYERS } from '../net/protocol';
 import { fetchRooms } from '../net/connection';
+import { readTimeAttackProgress } from '../core/progress';
+import { timeAttackAllClear, timeAttackLevel, timeAttackLevelCount, timeAttackLevelIndex } from '../sim/timeAttack';
 import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuScreen';
 
 /**
@@ -7,7 +9,7 @@ import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuS
  * Grid, the street course cut through the open-world city (`circuitSpec.ts`) — so the only
  * question this screen asks is who else is on the grid.
  *
- *   OFFLINE  `?mode=circuit`  the circuit on your own, against the clock
+ *   OFFLINE  `?mode=circuit`  the circuit on your own, against the clock and the mission chain
  *   VERSUS   `?mp=1`          the room browser, then a lobby, then a grid of up to four
  *
  * RACE and VERSUS used to be two cards on the main menu running two different circuits, which
@@ -28,17 +30,27 @@ export type RaceChoice = 'circuit' | 'multiplayer';
 const POLL_MS = 5000;
 /** The dossier row that carries it, so the poll can find it without re-rendering the rest. */
 const ROOMS_LABEL = 'ROOMS';
+/** The two dossier rows the circuit mission chain fills in from this browser's progress. */
+const MISSION_LABEL = 'MISSION';
+const TARGET_LABEL = 'TARGET';
+
+/** `160` -> `2:40`. The card wants the target time the way a pit board would write it. */
+function lapTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds - m * 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
 
 const ENTRIES: Array<MenuScreenEntry<RaceChoice>> = [
   {
     id: 'circuit',
     kicker: 'TIME ATTACK',
     name: 'OFFLINE',
-    desc: 'The Bandido Grid on your own. Two laps of the city, no grid to hold you up and nobody to blame. Learn where the barriers bite before you race anyone on it.',
+    desc: 'The Bandido Grid on your own. Two laps of the city against a target time AND a crash allowance, three missions deep: get round it, then carry speed, then do it without touching a thing.',
     spec: [
-      ['CIRCUIT', 'BANDIDO GRID'],
-      ['LENGTH', '1.5 KM'],
-      ['LAPS', '02'],
+      ['CIRCUIT', 'BANDIDO GRID · 1.5 KM · 02 LAPS'],
+      [MISSION_LABEL, 'MISSION 1/3'],
+      [TARGET_LABEL, '--'],
       ['FIELD', 'YOU · CITY TRAFFIC'],
     ],
   },
@@ -99,6 +111,28 @@ export function showRaceMenu(root: HTMLElement, callbacks: RaceMenuCallbacks): R
       callbacks.onBack();
     },
   });
+
+  /**
+   * Which mission the OFFLINE card is actually offering. Read from the same storage the game
+   * reads on boot (`src/core/progress.ts`) and named through the same helpers the rules use, so
+   * the card cannot promise a mission the circuit is not about to run. Static once the screen is
+   * up: nothing can clear a mission while this screen is the thing on screen.
+   */
+  const progress = readTimeAttackProgress();
+  const level = timeAttackLevelIndex(progress.cleared);
+  const spec = timeAttackLevel(progress.cleared);
+  screen.setSpec(
+    'circuit',
+    MISSION_LABEL,
+    timeAttackAllClear(progress.cleared)
+      ? `ALL ${timeAttackLevelCount()} CLEAR · ${spec.name}`
+      : `${level + 1}/${timeAttackLevelCount()} · ${spec.name}`,
+  );
+  screen.setSpec(
+    'circuit',
+    TARGET_LABEL,
+    `${lapTime(spec.seconds)} · ${spec.crashes === 0 ? 'NO CONTACT' : `${spec.crashes} CRASH${spec.crashes === 1 ? '' : 'ES'} MAX`}`,
+  );
 
   void pollRooms();
   const poll = window.setInterval(() => void pollRooms(), POLL_MS);

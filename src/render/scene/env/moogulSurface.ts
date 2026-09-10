@@ -16,21 +16,27 @@ import { FACADE_GRID } from './facadeAtlas';
  * silhouette and everything the car collides with stay exactly where they are. The wave is
  * long (`MOOGUL.surface.warpWavelength`) and slow, so a facade breathes rather than shivers.
  * On top of that the window tints and the paint turn round the hue wheel, each wall on its
- * own phase, and the paint pulses — "alive", not "flickering".
+ * own phase, the lit panes burn harder — which is what the halo in `render/post/lightBleed.ts`
+ * feeds on — and the paint pulses: "alive", not "flickering".
  *
  * Cost: a few sines per fragment on two materials, behind an `if` on a uniform that is zero
  * outside a trip, so the city pays nothing for the feature when it is not in use.
  */
 export interface MoogulSurface {
   /** x: window drift (tile UV units). y: facade hue (rad). z: paint hue (rad). w: paint pulse (0..1). */
-  readonly uniforms: { uMoogul: { value: THREE.Vector4 }; uMoogulTime: { value: number } };
+  readonly uniforms: {
+    uMoogul: { value: THREE.Vector4 };
+    uMoogulTime: { value: number };
+    /** How much harder the lit panes burn (0..1 of `MOOGUL.surface.glow`). */
+    uMoogulGlow: { value: number };
+  };
   applyFacade(material: THREE.Material): void;
   applyDecal(material: THREE.Material): void;
   /** Write this frame's amounts. Every argument 0 puts the walls exactly as they were. */
-  set(warpPanes: number, facadeHue: number, decalHue: number, decalPulse: number, time: number): void;
+  set(warpPanes: number, facadeHue: number, facadeGlow: number, decalHue: number, decalPulse: number, time: number): void;
 }
 
-const CACHE_KEY = 'rb-moogul-v1';
+const CACHE_KEY = 'rb-moogul-v2';
 
 function f(n: number): string {
   return Number.isInteger(n) ? `${n}.0` : `${n}`;
@@ -49,6 +55,7 @@ const FRAGMENT_PARS = `
 varying vec3 vMoogulPos;
 uniform vec4 uMoogul;
 uniform float uMoogulTime;
+uniform float uMoogulGlow;
 // A turn round the grey axis: cheap, and it keeps the brightness the window activity set.
 vec3 rbMoogulHue( vec3 c, float a ) {
   const vec3 k = vec3( 0.57735027 );
@@ -80,6 +87,13 @@ const FACADE_HUE = `
     float mAng = uMoogul.y * sin( uMoogulTime * 0.21 + vMoogulPos.x * 0.023 + vMoogulPos.z * 0.019 + vMoogulPos.y * 0.05 );
     totalEmissiveRadiance = rbMoogulHue( totalEmissiveRadiance, mAng );
   }
+  // The lit panes burn harder, each wall on its own slow beat. Small by itself: what it is
+  // really for is giving the halo in the finishing pass something to catch. Only the emissive
+  // is touched, so the concrete between the windows stays exactly as dark as it was.
+  if ( uMoogulGlow > 0.0 ) {
+    float mGlow = 0.72 + 0.28 * sin( uMoogulTime * 0.29 + vMoogulPos.x * 0.071 + vMoogulPos.z * 0.059 + vMoogulPos.y * 0.11 );
+    totalEmissiveRadiance *= 1.0 + uMoogulGlow * mGlow;
+  }
   #include <lights_physical_fragment>
 `;
 
@@ -98,6 +112,7 @@ export function createMoogulSurface(): MoogulSurface {
   const uniforms = {
     uMoogul: { value: new THREE.Vector4(0, 0, 0, 0) },
     uMoogulTime: { value: 0 },
+    uMoogulGlow: { value: 0 },
   };
 
   function patch(material: THREE.Material, fragment: (src: string) => string): void {
@@ -106,6 +121,7 @@ export function createMoogulSurface(): MoogulSurface {
       inner.call(material, shader, renderer);
       shader.uniforms.uMoogul = uniforms.uMoogul;
       shader.uniforms.uMoogulTime = uniforms.uMoogulTime;
+      shader.uniforms.uMoogulGlow = uniforms.uMoogulGlow;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\n${VERTEX_PARS}`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERTEX_BODY}`);
@@ -125,9 +141,10 @@ export function createMoogulSurface(): MoogulSurface {
     applyDecal(material) {
       patch(material, (src) => src.replace('#include <lights_physical_fragment>', DECAL_HUE));
     },
-    set(warpPanes, facadeHue, decalHue, decalPulse, time) {
+    set(warpPanes, facadeHue, facadeGlow, decalHue, decalPulse, time) {
       // The warp is asked for in panes and written in tile units: eight panes to a tile.
       uniforms.uMoogul.value.set(warpPanes / FACADE_GRID.cols, facadeHue, decalHue, decalPulse);
+      uniforms.uMoogulGlow.value = facadeGlow;
       uniforms.uMoogulTime.value = time;
     },
   };

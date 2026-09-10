@@ -405,6 +405,10 @@ export function createCityWorld(): World {
     rushSites: RUSH_SITES.map((site) => ({ ...site })),
     // Where passengers wait. Points on roads; the rules and the art both read this list.
     passengerStops: PASSENGER_STOPS.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
+    // The streets, as centrelines, for `src/world/roadGraph.ts` to route a passenger home over.
+    // Ground only: the viaduct and its ramps are left out because every stop is a kerb, and a
+    // deck crossing over a street is not a turning off it.
+    roadNetwork: ground.map((rb) => ({ points: rb.path.samples.map((sm) => ({ x: sm.x, z: sm.z })) })),
     // Where El Búho stands. A point under the deck; the rules and the figure both read it.
     buhoSite: { ...BUHO_SITE },
     busRoutes,

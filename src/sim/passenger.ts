@@ -71,6 +71,7 @@ export function createPassengerState(targetCount: number): PassengerState {
     atPickup: false,
     atDestination: false,
     cancelArm: 0,
+    resultsHold: 0,
     mood: PASSENGER.mood.start,
     prefStatus: ['neutral', 'neutral'],
     overTime: 0,
@@ -106,6 +107,7 @@ export function resetPassengerState(s: PassengerState): void {
   s.atPickup = false;
   s.atDestination = false;
   s.cancelArm = 0;
+  s.resultsHold = 0;
   clearRide(s);
   s.results = null;
 }
@@ -620,6 +622,7 @@ export function completeRide(s: PassengerState, def: PassengerDef, destination: 
   };
   s.phase = 'results';
   s.results = results;
+  s.resultsHold = PASSENGER.resultsHoldSeconds;
   s.cancelArm = 0;
   // Whatever they were about to say about the driving no longer matters; the farewell does.
   dropReactions(s);
@@ -650,6 +653,7 @@ export function dismissPassenger(s: PassengerState, events: GameEvent[]): boolea
   s.phase = 'idle';
   s.trip = null;
   s.results = null;
+  s.resultsHold = 0;
   s.offerIn = PASSENGER.offer.reofferSeconds;
   clearRide(s);
   events.push({ type: 'passengerDismissed' });
@@ -708,6 +712,12 @@ export function stepPassenger(
   if (s.rayoCooldown > 0) s.rayoCooldown = Math.max(0, s.rayoCooldown - dt);
   if (s.collisionCooldown > 0) s.collisionCooldown = Math.max(0, s.collisionCooldown - dt);
   if (s.cancelArm > 0) s.cancelArm = Math.max(0, s.cancelArm - dt);
+  // The fare card puts itself away, same as the rush results do: the farewell has been read
+  // long before this runs out, and a card left up is a world the player cannot drive.
+  if (s.phase === 'results' && s.resultsHold > 0) {
+    s.resultsHold = Math.max(0, s.resultsHold - dt);
+    if (s.resultsHold === 0) dismissPassenger(s, events);
+  }
 
   /* ------------------------------------------------------------ where the car is */
 

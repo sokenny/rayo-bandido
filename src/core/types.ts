@@ -195,7 +195,12 @@ export interface LightningState {
   acquiredTargetId: number;
   /** Seconds the fire button has been held on the shot being charged (0 when not charging). */
   hold: number;
-  /** True while a shot is charging: fire is held and the shot was paid for at the press. */
+  /**
+   * Charge drawn so far by the shot being charged (0 when not charging). The load is paid for
+   * as it is loaded, so this is what a fumble has to hand back.
+   */
+  spent: number;
+  /** True while a shot is charging: fire is held and the load is being paid for as it builds. */
   charging: boolean;
   /** False until fire is released, so one press only ever charges one shot. */
   armed: boolean;
@@ -396,6 +401,12 @@ export interface RushState {
    */
   rearmed: boolean;
   /**
+   * Seconds left before the results card puts itself away. Counts down only while the card is
+   * up, so a player who has walked off after a run gets the world back rather than a screen
+   * waiting on a key that is never coming. Pressing F still dismisses it early.
+   */
+  resultsHold: number;
+  /**
    * One flag per electric car: whether it has already paid out during THIS run. An EV that is
    * shot, respawns and is shot again is worth nothing the second time. Sized to the traffic
    * at creation and cleared at the start of every run; never grows.
@@ -462,6 +473,86 @@ export interface RaceState {
 }
 
 /**
+ * TIME ATTACK (`src/sim/timeAttack.ts`): the mission chain wrapped round the offline circuit.
+ *
+ * It owns no clock and no course of its own — the race already has both. All this holds is
+ * how far through the chain the player is, what the run under way has cost them in crashes,
+ * and the card the last one ended on.
+ */
+export interface TimeAttackState {
+  /**
+   * How many missions of `TIME_ATTACK.levels` this player has finished, 0..levels.length. THE
+   * one number the chain is made of: which mission is on offer and what it asks for are both
+   * derived from it, so there is no second copy to fall out of step with it. Mirrored to
+   * localStorage by the caller (`src/core/progress.ts`).
+   */
+  cleared: number;
+  /** Crashes counted in the run under way. */
+  crashes: number;
+  /** Seconds left in which another impact is still the same accident. 0 = ready to count one. */
+  crashCooldown: number;
+  /**
+   * True once the crash allowance has been spent: the run can no longer clear the mission
+   * however fast it finishes. The race is NOT stopped — the lap is still worth driving, and
+   * the time still counts as a personal best — the mission simply cannot be passed.
+   */
+  failed: boolean;
+  /** The race phase this state has already reacted to, so a start and a finish are seen once. */
+  phase: RacePhase;
+  /** The finished run, or null until there is one. */
+  results: TimeAttackResults | null;
+}
+
+/** What one finished run was worth. Frozen at the flag; read by the results card. */
+export interface TimeAttackResults {
+  /** Which mission this run was for (0-based) and what it asked for, frozen: by the time the
+   * card is up the chain may already have moved on to the next one. */
+  level: number;
+  levelName: string;
+  targetTime: number;
+  crashLimit: number;
+  /** The race's own finish time (s) and what the run actually cost in crashes. */
+  time: number;
+  crashes: number;
+  /** The two halves of the verdict, kept apart so the card can say WHICH one was missed. */
+  withinTime: boolean;
+  withinCrashes: boolean;
+  /** True when both were met. */
+  cleared: boolean;
+  /** True when this run was the one that unlocked the next mission (so: cleared, and first). */
+  advanced: boolean;
+}
+
+/**
+ * THE WAY INTO THE CHAIN, from the street (`src/sim/circuitGate.ts`).
+ *
+ * The missions themselves are judged on the circuit; this is the ring painted across the
+ * Bandido Grid's start/finish line in the open world, which is how they are found at all. It
+ * holds nothing but where the car is in relation to that ring and whether the offer is live —
+ * the chain's own progress lives in `TimeAttackState`, on the other side of the load.
+ */
+export interface CircuitGateState {
+  /** True while the car is standing on the paint. */
+  atSite: boolean;
+  /**
+   * Another activity has the car, so this one is not on offer. Written by the orchestrator
+   * (`src/sim/gameState.ts`) before this module runs, exactly as it is for the other three.
+   */
+  locked: boolean;
+  /**
+   * False from the moment the key is taken until the car has driven `rearmRadius` clear. What
+   * stops a player who comes back out of the circuit landing on the ring and being sent
+   * straight back into it.
+   */
+  rearmed: boolean;
+  /**
+   * True once the key has been pressed. The rules are done at that point — the caller is
+   * loading another world — and this is what stops a second press raising a second entry.
+   */
+  entering: boolean;
+}
+
+/**
  * Another player's car, as this client currently believes it to be.
  *
  * Plain data like everything else here, and deliberately shaped like the parts of
@@ -516,9 +607,31 @@ export type GameEvent =
   | { type: 'nitroStart' }
   | { type: 'nitroEnd' }
   /** `targetId` is -1 when the shot went out and hit nothing. */
-  | { type: 'lightningFired'; targetId: number; fromX: number; fromY: number; fromZ: number; toX: number; toY: number; toZ: number }
+  | {
+      type: 'lightningFired';
+      targetId: number;
+      fromX: number;
+      fromY: number;
+      fromZ: number;
+      toX: number;
+      toY: number;
+      toZ: number;
+      /** How far the bolt travelled (m), to the car it hit or to where its reach ran out. */
+      distance: number;
+      /** Charge the shot took, down payment and hold together. */
+      spent: number;
+    }
   | { type: 'lightningDenied'; reason: 'noCharge' | 'noTarget' | 'cooldown' | 'short' }
-  | { type: 'targetDestroyed'; targetId: number; x: number; y: number; z: number; reward: number }
+  | {
+      type: 'targetDestroyed';
+      targetId: number;
+      x: number;
+      y: number;
+      z: number;
+      reward: number;
+      /** Muzzle-to-car distance of the shot that did it (m). 0 when nothing shot it. */
+      distance: number;
+    }
   | { type: 'nearMiss'; targetId: number; x: number; y: number; z: number; points: number; quality: number }
   | {
       type: 'collision';
@@ -538,6 +651,26 @@ export type GameEvent =
   | { type: 'lapComplete'; lap: number; time: number; best: boolean }
   | { type: 'raceFinish'; total: number; bestLap: number }
   | { type: 'wrongWay'; on: boolean }
+  /**
+   * A crash was counted against the run's allowance. `crashes` is the new total, `allowance`
+   * what the mission permits and `fatal` whether this was the one that spent it.
+   */
+  | { type: 'timeAttackCrash'; crashes: number; allowance: number; impact: number; fatal: boolean }
+  /** The run ended. Raised at the chequered flag, after `raceFinish`. */
+  | { type: 'timeAttackEnd'; results: TimeAttackResults }
+  /** A mission was cleared for the first time and the chain moved on. Raised before `timeAttackEnd`. */
+  | { type: 'timeAttackLevelUp'; level: number; cleared: number; allClear: boolean }
+  /**
+   * The start line started or stopped offering the circuit missions — the car rolled onto the
+   * painted ring, or off it. Presentation only, exactly like `rushPrompt`.
+   */
+  | { type: 'circuitPrompt'; on: boolean }
+  /**
+   * The key was pressed on the start line: take the player to the circuit. The rules stop here
+   * — leaving one world for another is the caller's business (`src/game.ts` hands it up to
+   * `src/main.ts`, which is the only thing here that knows what an address is).
+   */
+  | { type: 'circuitEnter' }
   | { type: 'transmission'; mode: Transmission }
   /**
    * The marker started or stopped offering a run — the car rolled onto the painted circle, or
@@ -565,6 +698,10 @@ export type GameEvent =
       driftSeconds: number;
       /** True when that drift ran from start to finish without a collision. */
       cleanDrift: boolean;
+      /** Points inside `points` paid for the shot's reach: 0 for anything fired up close. */
+      rangeBonus: number;
+      /** How far the bolt travelled to get there (m). */
+      shotDistance: number;
     }
   | { type: 'rushEnd'; results: RushResults }
   /**
@@ -752,6 +889,11 @@ export interface PassengerState {
   atPickup: boolean;
   /** True while the car is stopped inside the destination. */
   atDestination: boolean;
+  /**
+   * Seconds left before the fare card puts itself away, counted only while it is up. See
+   * `RushState.resultsHold` — the same promise, that no card waits forever on a key.
+   */
+  resultsHold: number;
   /** Seconds left in which a second press of the key cancels the ride. 0 = not armed. */
   cancelArm: number;
   /** Satisfaction, 0..100. */
@@ -811,10 +953,22 @@ export interface GameState {
   race: RaceState | null;
   /** Rayo Rush. Present in worlds that carry activity markers (`ArenaLayout.rushSites`). */
   rush: RushState | null;
+  /**
+   * The circuit mission chain. Present only when the caller asked for it — the solo circuit —
+   * because the same course is also driven as a versus race, where a private mission has no
+   * business judging anybody.
+   */
+  timeAttack: TimeAttackState | null;
   /** Passenger rides. Present in worlds that carry stops (`ArenaLayout.passengerStops`). */
   passenger: PassengerState | null;
   /** El Búho and the Moogul. Present in the world that has his bay (`ArenaLayout.buhoSite`). */
   buho: BuhoState | null;
+  /**
+   * The circuit chain's marker in the street. Present in worlds that carry the site
+   * (`ArenaLayout.circuitSite`) — the open-world city, and nothing else: the circuit is not
+   * entered from inside itself.
+   */
+  circuitGate: CircuitGateState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -931,8 +1085,11 @@ export interface MinimapData {
   activities?: Array<{ x: number; z: number; kind?: ActivityMarkKind }>;
 }
 
-/** What a mark on the minimap stands for: the RAYO RUSH circle, a waiting passenger, or where they are going. */
-export type ActivityMarkKind = 'rush' | 'passenger' | 'destination';
+/**
+ * What a mark on the minimap stands for: the RAYO RUSH circle, a waiting passenger, where they
+ * are going, or the start line the circuit missions are entered on.
+ */
+export type ActivityMarkKind = 'rush' | 'passenger' | 'destination' | 'circuit';
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
 export interface ArenaLayout {
@@ -967,10 +1124,23 @@ export interface ArenaLayout {
    */
   passengerStops?: PassengerStop[] | null;
   /**
+   * The drivable street centrelines, for working out a route between two points on them
+   * (`src/world/roadGraph.ts`): today the destination arrow that leads a fare home. Ground
+   * level only — an elevated road belongs here only if a car can get onto it from a junction
+   * in this same list. Missing in worlds nothing needs to navigate.
+   */
+  roadNetwork?: Array<{ points: Array<{ x: number; z: number }> }> | null;
+  /**
    * Where El Búho stands (`src/sim/buho.ts`), in the world that has him. One point under the
    * highway; the ring round it is `MOOGUL.marker`. Null or missing everywhere else.
    */
   buhoSite?: ActivitySite | null;
+  /**
+   * Where the circuit missions are entered from the street (`src/sim/circuitGate.ts`): the
+   * Bandido Grid's own start/finish line, in the city the race is cut through. Null or missing
+   * in every other world, the circuit included — a race is not somewhere you enter a race from.
+   */
+  circuitSite?: ActivitySite | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   minimap: MinimapData;
@@ -1044,10 +1214,34 @@ export interface HudSnapshot {
   race: RaceHudSnapshot | null;
   /** Rayo Rush readout; null in a world without the activity. */
   rush: RushHudSnapshot | null;
+  /** Circuit mission readout; null outside the solo circuit. */
+  timeAttack: TimeAttackHudSnapshot | null;
   /** Passenger readout; null in a world without stops. */
   passenger: PassengerHudSnapshot | null;
   /** El Búho's readout; null in a world without his bay. */
   buho: BuhoHudSnapshot | null;
+  /** The start line's sign; null in a world that does not carry the circuit's entrance. */
+  circuitGate: CircuitGateHudSnapshot | null;
+}
+
+/**
+ * What the start line's sign needs: whether it is offering, and which mission it is offering.
+ * The chain's own progress is read from storage by the caller — the city carries no
+ * `TimeAttackState`, because the missions are not driven in it.
+ */
+export interface CircuitGateHudSnapshot {
+  /** True while the sign is up: the car is on the paint and nothing else has it. */
+  offering: boolean;
+  /** Mission on offer (0-based), how many there are, and what it asks for. */
+  level: number;
+  levelCount: number;
+  levelName: string;
+  targetTime: number;
+  crashLimit: number;
+  /** True once every mission has been cleared: the circuit is still there, it just stops gating. */
+  allClear: boolean;
+  /** What the world calls this place, from the site itself. */
+  placeLabel: string;
 }
 
 /** What El Búho's overlay needs: a flattened read-only view of `BuhoState` plus the names it cannot know. */
@@ -1147,6 +1341,33 @@ export interface RushHudSnapshot {
   /** The finished run, or null. */
   results: RushResults | null;
   /** True when `results.score` beat `previousBest`. */
+  newBest: boolean;
+}
+
+/**
+ * What the circuit mission needs on screen: the mission on offer, and how the run under way is
+ * doing against it. A flattened read-only view of `TimeAttackState` plus the numbers the rules
+ * keep in the tuning file rather than in the state.
+ */
+export interface TimeAttackHudSnapshot {
+  /** Mission under way (0-based), how many there are in all, and how many are already done. */
+  level: number;
+  levelCount: number;
+  cleared: number;
+  levelName: string;
+  /** What it asks for: a finish time (s) and a crash allowance. */
+  targetTime: number;
+  crashLimit: number;
+  /** How the run under way stands. */
+  crashes: number;
+  failed: boolean;
+  /** True once every mission has been cleared. The chain stops gating and keeps the last one. */
+  allClear: boolean;
+  /** The finished run, or null. */
+  results: TimeAttackResults | null;
+  /** Best finish time on this mission before this run, or -1 when there is none. */
+  previousBest: number;
+  /** True when the run that just finished beat it. */
   newBest: boolean;
 }
 

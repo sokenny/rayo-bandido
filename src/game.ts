@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
+import { addCircuitGate } from './world/cityCircuitGate';
 import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
 import type {
+  ActivityMarkKind,
   ActivitySite,
   BuhoHudSnapshot,
   GameEvent,
@@ -14,11 +16,13 @@ import type {
   PassengerHudSnapshot,
   PassengerStop,
   PlayerCommand,
+  CircuitGateHudSnapshot,
   RaceHudSnapshot,
   RushHudSnapshot,
+  TimeAttackHudSnapshot,
   Transmission,
 } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, VEHICLE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, TIME_ATTACK, VEHICLE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -40,10 +44,34 @@ import {
   rushTargetScore,
   setRushProgress,
 } from './sim/rush';
-import { readRideProgress, readRushProgress, recordRide, recordRushRun, writeRideProgress, writeRushProgress } from './core/progress';
+import {
+  readRideProgress,
+  readRushProgress,
+  readTimeAttackProgress,
+  recordRide,
+  recordRushRun,
+  recordTimeAttackRun,
+  writeRideProgress,
+  writeRushProgress,
+  writeTimeAttackProgress,
+} from './core/progress';
+import {
+  setTimeAttackProgress,
+  timeAttackAllClear,
+  timeAttackLevel,
+  timeAttackLevelCount,
+  timeAttackLevelIndex,
+} from './sim/timeAttack';
+import { canEnterCircuit } from './sim/circuitGate';
+import { activitySuppressed, engagedActivity, type ActivityKind } from './sim/activities';
+import { canAffordShot } from './sim/lightning';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
 import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
 import { createPassengerMarker } from './render/scene/env/passengerMarker';
+import { createPassengerFigure } from './render/scene/env/passengerFigure';
+import { createDestinationArrow } from './render/scene/env/destinationArrow';
+import { aimAlong, buildRoadGraph, createRouteAim, routeTo } from './world/roadGraph';
+import type { RoadGraph, RouteField } from './world/roadGraph';
 import { canBuyMoogul, endMoogul, grantMoogul, moogulIntensity } from './sim/buho';
 import { BUHO } from './content/buho';
 import { createBuhoFigure } from './render/scene/env/buhoFigure';
@@ -106,6 +134,13 @@ export interface Game {
  */
 export interface GameOptions {
   net?: NetSession | null;
+  /**
+   * Take the player to the circuit missions. Raised when the key is pressed on the start line
+   * in the open world (`src/sim/circuitGate.ts`), and left to the caller because leaving one
+   * world for another is `src/main.ts`'s business — it is the only thing here that knows what
+   * an address is. Omitted in worlds without the door, where it can never fire.
+   */
+  onEnterCircuit?: () => void;
 }
 
 /** Metres past the last gate a multiplayer respawn puts the car (see `rescue`). */
@@ -148,7 +183,10 @@ export function createGame(
       : mode === 'circuit'
         ? createCircuitWorld(options.net?.match?.raceId)
         : mode === 'city'
-          ? createCityWorld()
+          ? // The open world, with a way onto the circuit painted on its start line. A layer over
+            // the city rather than a part of it (`src/world/cityCircuitGate.ts`), for the same
+            // reason the circuit itself is one: the city does not know the race exists.
+            addCircuitGate(createCityWorld())
           : createArenaWorld();
   const layout = world.layout;
 
@@ -180,7 +218,20 @@ export function createGame(
    */
   const ownsTraffic = (): boolean => !!net && net.isHost;
 
-  const state = createInitialGameState(layout, readTransmission());
+  /**
+   * THE CIRCUIT MISSION CHAIN, and whether this session is running it at all.
+   *
+   * Only the solo circuit: the same course is driven as a versus race, where a private mission
+   * judging one car has no business existing, so the deciding fact is the one only this caller
+   * has — the mode, and whether there is a match. Read before the state is built, because the
+   * chain's starting point is part of how the state is created (`GameStateOptions`).
+   */
+  const hasTimeAttack = mode === 'circuit' && !net;
+  let timeAttackProgress = hasTimeAttack ? readTimeAttackProgress() : null;
+  const state = createInitialGameState(layout, readTransmission(), {
+    timeAttack: hasTimeAttack,
+    timeAttackCleared: timeAttackProgress?.cleared ?? 0,
+  });
   const command: PlayerCommand = createPlayerCommand();
   // On a phone the picture is turned sideways for as long as this game lives, so the renderer
   // below is sized for the landscape layer rather than for the portrait window.
@@ -323,6 +374,13 @@ export function createGame(
   /** What the last finished run was compared against, frozen before the board is told about it. */
   let rushPreviousBest = -1;
   let rushNewBest = false;
+  /**
+   * The circuit mission's own version of the same pair: the best time on the mission that just
+   * finished, frozen BEFORE the run is folded into the record, so the card can say whether it
+   * was beaten. -1 when the mission has never been finished.
+   */
+  let timeAttackPreviousBest = -1;
+  let timeAttackNewBest = false;
 
   /* --------------------------------------------------------------- passengers */
 
@@ -343,6 +401,26 @@ export function createGame(
   const destinationMarker = hasPassengers ? createPassengerMarker() : null;
   if (pickupMarker) scene.add(pickupMarker.group);
   if (destinationMarker) scene.add(destinationMarker.group);
+  /**
+   * The arrow over the street ahead while a fare is aboard, and the street network it is aimed
+   * along. The graph is built once, here, because it is a fact about the world; the route field
+   * is rebuilt per ride, in `placePassengerMarkers`, because it is a fact about the trip. A
+   * world with stops but no network still runs — it simply has no arrow.
+   */
+  const roadGraph: RoadGraph | null =
+    hasPassengers && layout.roadNetwork && layout.roadNetwork.length > 0 ? buildRoadGraph(layout.roadNetwork) : null;
+  const destinationArrow = roadGraph ? createDestinationArrow() : null;
+  if (destinationArrow) scene.add(destinationArrow.group);
+  let routeField: RouteField | null = null;
+  const routeAim = createRouteAim();
+  /**
+   * The person under the pin. The marker says a ride is here; this is who is waiting for it,
+   * built out of the same body El Búho is (`render/scene/env/humanFigure.ts`) and standing at
+   * the kerb rather than in the middle of their own zone — which is why it is handed the
+   * world's road test, the one thing that knows where the kerb is.
+   */
+  const passengerFigure = hasPassengers ? createPassengerFigure((x, z, pad) => world.plan.isRoad(x, z, pad)) : null;
+  if (passengerFigure) scene.add(passengerFigure.group);
 
   /* --------------------------------------------------------------- el búho */
 
@@ -354,6 +432,22 @@ export function createGame(
    */
   const buhoSite: ActivitySite | null = layout.buhoSite ?? null;
   const hasBuho = !!(buhoSite && state.buho);
+
+  /* --------------------------------------------------- the circuit's door */
+
+  /**
+   * The start line in the street, in the world that carries it: the open-world city and nothing
+   * else. Guarded like the other three.
+   *
+   * Its sign has to name the mission on offer, and this world has no `TimeAttackState` to ask —
+   * the chain is judged on the circuit, on the other side of a page load. So the progress is
+   * read from the same storage the circuit reads on boot (`src/core/progress.ts`), once, here.
+   * Once is enough BECAUSE of the load: nothing that happens in the city can clear a mission,
+   * and coming back from one that did means coming back through `createGame`.
+   */
+  const circuitSite: ActivitySite | null = layout.circuitSite ?? null;
+  const hasCircuitGate = !!(circuitSite && state.circuitGate);
+  const circuitProgress = hasCircuitGate ? readTimeAttackProgress() : null;
   const buhoFigure = hasBuho && buhoSite ? createBuhoFigure(buhoSite) : null;
   if (buhoFigure) scene.add(buhoFigure.group);
   const moogul = hasBuho
@@ -370,7 +464,7 @@ export function createGame(
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
     onActivate:
-      hasRush || hasPassengers || hasBuho
+      hasRush || hasPassengers || hasBuho || hasCircuitGate
         ? () => {
             activateQueued = true;
           }
@@ -378,6 +472,7 @@ export function createGame(
     rush: hasRush,
     passengers: hasPassengers,
     buho: hasBuho,
+    circuitGate: hasCircuitGate,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -410,17 +505,30 @@ export function createGame(
   }
 
   /**
-   * Everything the map marks, rebuilt together: the RUSH circle where the chain has it, and
-   * the passenger pin or their destination, whichever the ride is at. One writer, so the two
-   * activities cannot erase each other's mark.
+   * Everything the map marks, rebuilt together: the RUSH circle where the chain has it, the
+   * circuit's start line, and the passenger pin or their destination, whichever the ride is at.
+   * One writer, so no activity can erase another's mark.
+   *
+   * ONE ACTIVITY AT A TIME (`src/sim/activities.ts`). While one of them has the car, the others
+   * are not marked at all: a run, a ride or a Moogul is driven on a map with nothing on it but
+   * the thing being driven. It is the same rule the rules themselves run on — the others are
+   * `locked`, so a mark on the map would be pointing at something the key would refuse — and it
+   * is asked here rather than remembered, because "who has the car" is a question with one
+   * answer and one place that answers it.
    */
-  const mapMarks: Array<{ x: number; z: number; kind: 'rush' | 'passenger' | 'destination' }> = [];
+  const mapMarks: Array<{ x: number; z: number; kind: ActivityMarkKind }> = [];
   function refreshMapMarks(): void {
     mapMarks.length = 0;
-    const site = rushSite();
-    if (site) mapMarks.push({ x: site.x, z: site.z, kind: 'rush' });
+    const engaged = engagedActivity(state);
+    if (!activitySuppressed(engaged, 'rush')) {
+      const site = rushSite();
+      if (site) mapMarks.push({ x: site.x, z: site.z, kind: 'rush' });
+    }
+    if (!activitySuppressed(engaged, 'circuit') && circuitSite) {
+      mapMarks.push({ x: circuitSite.x, z: circuitSite.z, kind: 'circuit' });
+    }
     const p = state.passenger;
-    if (p && p.trip && passengerStops) {
+    if (p && p.trip && passengerStops && !activitySuppressed(engaged, 'passenger')) {
       if (p.phase === 'offered') {
         const stop = stopById(passengerStops, p.trip.pickupId);
         if (stop) mapMarks.push({ x: stop.x, z: stop.z, kind: 'passenger' });
@@ -433,19 +541,61 @@ export function createGame(
   }
 
   /**
-   * Stand the passenger markers where the ride is: the pin at the pickup while someone waits,
-   * the ring at the destination while they are aboard, neither otherwise. Called on the events
-   * that move the ride along, never per frame.
+   * Which of the ride's furniture is standing in the street right now: the pin at the pickup
+   * while someone waits, the ring at the destination while they are aboard, the person at
+   * whichever of the two they are actually at, and none of it while another activity has the
+   * car (`src/sim/activities.ts`).
+   *
+   * SPLIT OUT of `placePassengerMarkers` below because it is asked two different ways. The ride
+   * moving on is an event and brings a new route with it; a RAYO RUSH run starting is not an
+   * event this cares about beyond "get out of the way", and re-running the route search for it
+   * would be paying for a Dijkstra to hide a lamppost.
+   *
+   * The waiting fare is only HIDDEN, never cancelled: their offer goes on running underneath
+   * and they are standing there again the moment the run is over. Being busy is not the same as
+   * turning somebody down.
+   */
+  function showPassengerFurniture(): void {
+    const p = state.passenger;
+    if (!p || !pickupMarker || !destinationMarker || !passengerStops) return;
+    const off = activitySuppressed(engagedActivity(state), 'passenger');
+    const pickup = p.trip ? stopById(passengerStops, p.trip.pickupId) : null;
+    const destination = p.trip ? stopById(passengerStops, p.trip.destinationId) : null;
+    if (!off && p.phase === 'offered' && pickup) pickupMarker.place(pickup, 'pickup');
+    else pickupMarker.hide();
+    if (!off && p.phase === 'riding' && destination) destinationMarker.place(destination, 'destination');
+    else destinationMarker.hide();
+    if (passengerFigure) {
+      const def = p.trip ? passengerById(PASSENGERS, p.trip.passengerId) : null;
+      if (off) passengerFigure.hide();
+      else if (def && p.phase === 'offered' && pickup) passengerFigure.show(def.portrait, pickup);
+      else if (def && p.phase === 'results' && destination) passengerFigure.show(def.portrait, destination);
+      else passengerFigure.hide();
+    }
+  }
+
+  /**
+   * The ride moved on: work out the route home, then stand everything where the new phase wants
+   * it. Called on the events that move the ride along, never per frame.
+   *
+   * The passenger themselves follows the same rule with one more phase to it. They stand at the
+   * kerb by the pin while they are waiting, they are in the car for the length of the ride, and
+   * they are back on the pavement at the destination for as long as the fare card is up — which
+   * is the only moment in a ride when the player can look at the person they just drove.
    */
   function placePassengerMarkers(): void {
     const p = state.passenger;
     if (!p || !pickupMarker || !destinationMarker || !passengerStops) return;
-    const pickup = p.trip ? stopById(passengerStops, p.trip.pickupId) : null;
     const destination = p.trip ? stopById(passengerStops, p.trip.destinationId) : null;
-    if (p.phase === 'offered' && pickup) pickupMarker.place(pickup, 'pickup');
-    else pickupMarker.hide();
-    if (p.phase === 'riding' && destination) destinationMarker.place(destination, 'destination');
-    else destinationMarker.hide();
+    // The route is worked out once, when the fare gets in: Dijkstra over the street network,
+    // outward from the drop-off. Everything the arrow does for the rest of the ride reads that
+    // one answer, so a ride costs a single search however far the player wanders inside it.
+    routeField = roadGraph && p.phase === 'riding' && destination ? routeTo(roadGraph, destination) : null;
+    if (destinationArrow) {
+      if (routeField) destinationArrow.snap();
+      else destinationArrow.hide();
+    }
+    showPassengerFurniture();
     refreshMapMarks();
   }
   placeRushMarker();
@@ -518,8 +668,10 @@ export function createGame(
     mode,
     race: null,
     rush: null,
+    timeAttack: null,
     passenger: null,
     buho: null,
+    circuitGate: null,
   };
   const buhoSnapshot: BuhoHudSnapshot = {
     name: BUHO.name,
@@ -598,6 +750,43 @@ export function createGame(
     lapFraction: 0,
   };
   if (state.race) snapshot.race = raceSnapshot;
+  /**
+   * The mission readout. Present only in the session that runs the chain, so the HUD strip is
+   * decided once, here, rather than re-tested every frame.
+   */
+  const timeAttackSnapshot: TimeAttackHudSnapshot = {
+    level: 0,
+    levelCount: timeAttackLevelCount(),
+    cleared: 0,
+    levelName: '',
+    targetTime: 0,
+    crashLimit: 0,
+    crashes: 0,
+    failed: false,
+    allClear: false,
+    results: null,
+    previousBest: -1,
+    newBest: false,
+  };
+  if (state.timeAttack) snapshot.timeAttack = timeAttackSnapshot;
+  /**
+   * The start line's sign. Everything but `offering` is fixed for the life of the session, for
+   * the reason above — the chain cannot move while the player is in the city — so it is filled
+   * in once here and only the one live field is written per frame.
+   */
+  const circuitLevel = circuitProgress ? timeAttackLevelIndex(circuitProgress.cleared) : 0;
+  const circuitSpec = circuitProgress ? timeAttackLevel(circuitProgress.cleared) : null;
+  const circuitGateSnapshot: CircuitGateHudSnapshot = {
+    offering: false,
+    level: circuitLevel,
+    levelCount: timeAttackLevelCount(),
+    levelName: circuitSpec ? circuitSpec.name : '',
+    targetTime: circuitSpec ? circuitSpec.seconds : 0,
+    crashLimit: circuitSpec ? circuitSpec.crashes : 0,
+    allClear: !!circuitProgress && timeAttackAllClear(circuitProgress.cleared),
+    placeLabel: circuitSite?.label ?? '',
+  };
+  if (state.circuitGate) snapshot.circuitGate = circuitGateSnapshot;
   const debugInput: DebugFrameInput = { simMs: 0, renderMs: 0, gpuMs: -1, pixelRatio: startRatio, governor: governor.status };
   /* World coordinates for the overlay. The car and camera are free; the crosshair costs a
    * scene raycast, so it is only sampled while the overlay is open and only a few times a
@@ -615,6 +804,12 @@ export function createGame(
    * simulation may run several ticks between frames — comparing the gear the body knows about
    * with the one the car is in catches the change whatever the frame rate is doing. */
   let bodyGear = state.vehicle.gear;
+  /**
+   * Which activity had the car on the last frame that looked. `undefined` until the first one,
+   * so the opening frame always writes — `null` is a real answer here ("nobody"), and a
+   * sentinel that collides with a real answer is a first frame that never happens.
+   */
+  let shownEngaged: ActivityKind | null | undefined = undefined;
   let simTime = 0;
   let ready = false;
   // Exhaust pops. One trigger feeds both the bang and the flame so they land on the same frame.
@@ -888,9 +1083,6 @@ export function createGame(
           net.reportFinish(ev.total, ev.bestLap);
         }
         break;
-      case 'nearMiss':
-        effects.nearMissPopup(ev.x, ev.y, ev.z, ev.points);
-        break;
       case 'rushScore':
         // The run's points, over the wreck, INSTEAD of the ¥ pop the same kill also earned —
         // `targetDestroyed` runs first and has already spawned one, so it is replaced rather
@@ -933,6 +1125,20 @@ export function createGame(
           });
         }
         break;
+      case 'timeAttackEnd': {
+        // The flag has already been shown and the card is up; this is only the record. The
+        // chain has moved on by now if it was going to (`timeAttackLevelUp` came first), so
+        // `advanced` is what says whether it did, and a replay of a cleared mission updates
+        // the time and leaves the chain where it is.
+        const best = timeAttackProgress ? timeAttackProgress.best[ev.results.level] ?? -1 : -1;
+        timeAttackPreviousBest = best;
+        timeAttackNewBest = ev.results.time > 0 && (best < 0 || ev.results.time < best);
+        if (timeAttackProgress) {
+          timeAttackProgress = recordTimeAttackRun(timeAttackProgress, ev.results.level, ev.results.time, ev.results.advanced);
+          writeTimeAttackProgress(timeAttackProgress);
+        }
+        break;
+      }
       case 'collision':
         effects.collision(ev.x, ev.y, ev.z, ev.impact);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
@@ -950,6 +1156,13 @@ export function createGame(
       case 'passengerDismissed':
         placePassengerMarkers();
         break;
+      case 'circuitEnter':
+        // The key on the start line. The rules are done — this world is over — and where the
+        // player goes next is the caller's to decide (`src/main.ts`), because it is the only
+        // thing here that knows what an address is. Nothing else happens on this frame: the
+        // car keeps driving until the new page takes over, which is what a load looks like.
+        options.onEnterCircuit?.();
+        break;
       case 'passengerComplete':
         // Paid by the simulation already (`applyPassengerFare`); this is only the record and
         // the furniture. The fare card reads the frozen results, not the live state.
@@ -962,6 +1175,8 @@ export function createGame(
       case 'restart':
         rushPreviousBest = -1;
         rushNewBest = false;
+        timeAttackPreviousBest = -1;
+        timeAttackNewBest = false;
         placePassengerMarkers();
         // A restart is a cut, not a fade: the city is put back exactly as it was.
         moogul?.stop();
@@ -1139,7 +1354,10 @@ export function createGame(
       const dz = pose.z - buhoSite.z;
       const reach = MOOGUL.marker.promptRadius * 4;
       const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
-      buhoFigure.setProximity(near * near);
+      // He stays where he is while somebody else has the car — a man is not scenery you switch
+      // off, and the bay would be a strange empty pocket without him — but his ring stops
+      // answering, because it is the part of him that is an offer, and the offer is not open.
+      buhoFigure.setProximity(activitySuppressed(engagedActivity(state), 'moogul') ? 0 : near * near);
       buhoFigure.update(simTime);
     }
     chase.update(cameraPose, frameDt);
@@ -1175,7 +1393,10 @@ export function createGame(
     snapshot.nitro = state.nitro.amount / NITRO.capacity;
     snapshot.nitroActive = state.nitro.active;
     snapshot.charge = state.lightning.charge / LIGHTNING.capacity;
-    snapshot.canFire = state.lightning.charge >= LIGHTNING.cost;
+    // READY means "a shot is possible", which — since the load is paid for as it is held — is
+    // the cheapest shot, not a full one. What is in the meter decides how FAR the next bolt
+    // reaches, not whether there is one.
+    snapshot.canFire = canAffordShot(state.lightning.charge);
     snapshot.drifting = state.drift.active;
     snapshot.driftDuration = state.drift.duration;
     snapshot.chain = state.drift.chain;
@@ -1204,6 +1425,23 @@ export function createGame(
     snapshot.steer = v.steerAngle / VEHICLE.maxSteerAngle;
     snapshot.counterSteer = v.counterSteer;
     lastNitroAmount = state.nitro.amount;
+    /**
+     * ONE ACTIVITY AT A TIME, on screen (`src/sim/activities.ts`). One question, asked once a
+     * frame, and everything the other activities put in front of the player comes off: their
+     * marker off the street, their person off the pavement, their mark off the map. The rules
+     * already refuse them (`locked`), so this is the picture agreeing with what the key does
+     * rather than a second opinion about it.
+     */
+    const engaged = engagedActivity(state);
+    // The EDGE, not the state: taking a run up, or finishing one, is what puts the other
+    // activities' furniture away and brings it back. Both of the things it drives repaint
+    // something (the minimap's base layer, a marker's transform), so they are paid for when the
+    // answer actually changes and never per frame.
+    if (engaged !== shownEngaged) {
+      shownEngaged = engaged;
+      showPassengerFurniture();
+      refreshMapMarks();
+    }
     const rush = state.rush;
     const site = rush ? rushSite() : null;
     if (rush && site) {
@@ -1243,6 +1481,23 @@ export function createGame(
         const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
         marker.setProximity(near * near);
         marker.setRunning(rush.phase === 'running' || rush.phase === 'countdown');
+        marker.setHidden(activitySuppressed(engaged, 'rush'));
+      }
+    }
+
+    /* ------------------------------------------------- the circuit's door */
+
+    const gate = state.circuitGate;
+    if (gate && circuitSite) {
+      circuitGateSnapshot.offering = canEnterCircuit(gate);
+      const marker = environment.circuitMarker;
+      if (marker) {
+        const dx = pose.x - circuitSite.x;
+        const dz = pose.z - circuitSite.z;
+        const reach = TIME_ATTACK.marker.promptRadius * 3;
+        const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
+        marker.setProximity(near * near);
+        marker.setHidden(activitySuppressed(engaged, 'circuit'));
       }
     }
     const pax = state.passenger;
@@ -1288,8 +1543,30 @@ export function createGame(
       } else {
         passengerSnapshot.distance = 0;
       }
+      // The arrow rides the car and only turns: `follow` is the car's own pose, and the heading
+      // is the bearing FROM the car TO a point a fixed distance up the route. So it lies down
+      // the street while the street is the way and swings across as the junction comes up,
+      // while never leaving the screen. It goes away rather than point at nothing when the walk
+      // finds no way — off the network, or nowhere left to go.
+      if (destinationArrow && roadGraph && routeField) {
+        if (aimAlong(roadGraph, routeField, pose.x, pose.z, PASSENGER.arrow.lookahead, routeAim)) {
+          const toAimX = routeAim.x - pose.x;
+          const toAimZ = routeAim.z - pose.z;
+          destinationArrow.follow(pose.x, pose.y, pose.z, pose.heading);
+          // Standing on the aim point itself there is no bearing to take, so the road's own
+          // direction there stands in — which is what the player would do anyway.
+          if (toAimX * toAimX + toAimZ * toAimZ > 1) destinationArrow.face(toAimX, toAimZ);
+          else destinationArrow.face(routeAim.dirX, routeAim.dirZ);
+          destinationArrow.setDive(1 - Math.min(1, routeAim.remaining / PASSENGER.arrow.diveDistance));
+          destinationArrow.show();
+        } else {
+          destinationArrow.hide();
+        }
+        destinationArrow.update(frameDt, simTime);
+      }
       pickupMarker.update(simTime);
       destinationMarker.update(simTime);
+      passengerFigure?.update(simTime);
     }
     const buho = state.buho;
     if (buho && hasBuho) {
@@ -1315,6 +1592,24 @@ export function createGame(
       raceSnapshot.finishTime = race.finishTime;
       raceSnapshot.wrongWay = race.wrongWay;
       raceSnapshot.lapFraction = race.progress - Math.floor(race.progress);
+    }
+    const timeAttack = state.timeAttack;
+    if (timeAttack) {
+      // Which mission is on offer, and what it asks for, are both read off `cleared` through
+      // the same helpers the rules use — so the strip and the verdict can never disagree.
+      const level = timeAttackLevelIndex(timeAttack.cleared);
+      const spec = timeAttackLevel(timeAttack.cleared);
+      timeAttackSnapshot.level = level;
+      timeAttackSnapshot.cleared = timeAttack.cleared;
+      timeAttackSnapshot.levelName = spec.name;
+      timeAttackSnapshot.targetTime = spec.seconds;
+      timeAttackSnapshot.crashLimit = spec.crashes;
+      timeAttackSnapshot.crashes = timeAttack.crashes;
+      timeAttackSnapshot.failed = timeAttack.failed;
+      timeAttackSnapshot.allClear = timeAttackAllClear(timeAttack.cleared);
+      timeAttackSnapshot.results = timeAttack.results;
+      timeAttackSnapshot.previousBest = timeAttackPreviousBest;
+      timeAttackSnapshot.newBest = timeAttackNewBest;
     }
     hud.update(snapshot);
     minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
@@ -1521,6 +1816,14 @@ export function createGame(
         scene.remove(destinationMarker.group);
         destinationMarker.dispose();
       }
+      if (passengerFigure) {
+        scene.remove(passengerFigure.group);
+        passengerFigure.dispose();
+      }
+      if (destinationArrow) {
+        scene.remove(destinationArrow.group);
+        destinationArrow.dispose();
+      }
       speedBlur.dispose();
       gpuTimer.dispose();
       renderer.dispose();
@@ -1654,6 +1957,50 @@ export function createGame(
       : null,
 
     /**
+     * THE CIRCUIT MISSIONS, for automation and for tuning with the game running. Null in every
+     * session that is not the solo circuit — including the versus race on the same course.
+     *
+     *   __rb.timeAttack.state.crashes   // crashes counted in the run under way
+     *   __rb.timeAttack.progress()      // { cleared, level, target, crashLimit, best }
+     *   __rb.timeAttack.setLevel(2)     // jump the chain to mission 3 (and write it down)
+     */
+    timeAttack: state.timeAttack
+      ? {
+          config: TIME_ATTACK,
+          get state() {
+            return state.timeAttack;
+          },
+          progress() {
+            const cleared = state.timeAttack?.cleared ?? 0;
+            const spec = timeAttackLevel(cleared);
+            return {
+              cleared,
+              level: timeAttackLevelIndex(cleared),
+              levelCount: timeAttackLevelCount(),
+              name: spec.name,
+              target: spec.seconds,
+              crashLimit: spec.crashes,
+              allClear: timeAttackAllClear(cleared),
+              best: timeAttackProgress ? timeAttackProgress.best.slice() : [],
+            };
+          },
+          /**
+           * Put the chain at a given number of cleared missions. Like the rush's, it writes the
+           * record: a debug jump that unwound itself on reload would be the worse lie.
+           */
+          setLevel(cleared: number) {
+            if (!state.timeAttack) return null;
+            setTimeAttackProgress(state.timeAttack, cleared);
+            if (timeAttackProgress) {
+              timeAttackProgress = { ...timeAttackProgress, cleared: state.timeAttack.cleared };
+              writeTimeAttackProgress(timeAttackProgress);
+            }
+            return state.timeAttack.cleared;
+          },
+        }
+      : null,
+
+    /**
      * PASSENGERS, for automation and for tuning with the game running. `state` is the live
      * rules state; `activate()` is the F key; `offerNow()` puts the next pin up at once;
      * `stop(id)` looks a stop up so a script can teleport to it.
@@ -1695,7 +2042,7 @@ export function createGame(
      *   __rb.buho.grant(200)        // the Moogul without paying, 200 s in (development only)
      *   __rb.buho.scrub(300)        // jump the clock to 5:00
      *   __rb.buho.timeScale(20)     // run the clock twenty times faster
-     *   __rb.buho.status()          // { active, elapsed, intensity, shown, faces }
+     *   __rb.buho.status()          // { active, elapsed, intensity, shown, faces, finish }
      *   __rb.buho.end()             // wear it off now
      */
     buho: hasBuho
@@ -1740,10 +2087,36 @@ export function createGame(
               atSite: !!b && b.atSite,
               purchases: b ? b.purchases : 0,
               money: state.economy.money,
+              /** What the finishing pass is being asked for this frame, halo included. */
+              finish: moogul ? moogul.finish : null,
             };
           },
         }
       : null,
+
+    /**
+     * THE CIRCUIT MISSIONS' DOOR, for automation. Null everywhere but the open world.
+     *
+     *   __rb.circuitGate.site()      // { x, z, heading, label } — where to drive to
+     *   __rb.circuitGate.offering()  // is the sign up right now
+     *   __rb.circuitGate.mission()   // which mission the sign is offering, from storage
+     *
+     * There is deliberately no `enter()`: taking the door loads another page, and a script that
+     * wants that should press the key (`__rb.inject({ activate: true })`) the way a player does.
+     */
+    circuitGate: state.circuitGate
+      ? {
+          get state() {
+            return state.circuitGate;
+          },
+          site: () => (circuitSite ? { ...circuitSite } : null),
+          offering: () => (state.circuitGate ? canEnterCircuit(state.circuitGate) : false),
+          mission: () => ({ ...circuitGateSnapshot }),
+        }
+      : null,
+
+    /** Which activity has the car right now, or null. The one answer everything else is derived from. */
+    engaged: () => engagedActivity(state),
 
     /** Cruise mode. Reads the flag with no argument, sets it with one. */
     cruise(on?: boolean) {

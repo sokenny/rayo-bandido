@@ -1,4 +1,4 @@
-import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot } from '../core/types';
+import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot, TimeAttackHudSnapshot } from '../core/types';
 import { BOLT_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
 import { createSystemMessage } from './systemMessage';
@@ -7,6 +7,8 @@ import { createTacho } from './tacho';
 import { createRushOverlay, type RushOverlay } from './rushOverlay';
 import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
 import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
+import { NEAR_MISS } from '../config/tuning';
+import { createGateOverlay, type GateOverlay } from './gateOverlay';
 
 /**
  * Floating DOM HUD. Receives a `HudSnapshot` every render frame and discrete `GameEvent`s
@@ -18,7 +20,8 @@ import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
  *
  * Reading order the HUD teaches, without a tutorial:
  *   drift (left) -> charges the bolt ring (bottom-left) -> READY -> holding E builds the aim
- *   meter (centre) and the bolt flies down the car's nose -> money goes up (top-right).
+ *   meter (centre) WHILE THE RING DRAINS, because reach is bought with charge, and the bolt
+ *   flies down the car's nose -> money goes up (top-right).
  *   The chain multiplier survives the
  *   end of a drift with a draining bar, so linking drifts is discoverable.
  *
@@ -48,6 +51,11 @@ export interface HudOptions {
   passengers?: boolean;
   /** El Búho's bay. Defaults to off: only the world that has him asks for it. */
   buho?: boolean;
+  /**
+   * The start line the circuit missions are entered on. Defaults to off: only the open world
+   * carries the door, and the circuit itself must never offer a way into the circuit.
+   */
+  circuitGate?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -62,6 +70,8 @@ const DRIVE_HINT_EVERY = 8;
 const CHAIN_STEPS = 20;
 /** Quantisation of the aim charge bar, in steps over the full hold. */
 const AIM_STEPS = 30;
+/** Seconds the near-miss tally stays up after the last pass in it. */
+const NEAR_MISS_HOLD = 2;
 
 /**
  * Same card, pad labels, shown instead of the keys once a controller is plugged in. The order
@@ -150,6 +160,11 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-money__flashes"><span class="rb-reward"></span><span class="rb-reward"></span>` +
     `<span class="rb-reward"></span></div>` +
     `</div>` +
+    // Deliberately not in the money column: a reward nobody looks at is not a reward. This
+    // lands over the car, where the eyes already are (see `.rb-nearmiss`).
+    `<div class="rb-nearmiss"><span class="rb-nearmiss__label">NEAR MISS` +
+    `<span class="rb-nearmiss__chain"></span></span>` +
+    `<span class="rb-nearmiss__value">+¥0</span></div>` +
     `<div class="rb-aim">` +
     `<span class="rb-aim__label">ON TARGET</span>` +
     `<div class="rb-aim__bar"><span class="rb-aim__fill"></span></div></div>` +
@@ -160,12 +175,22 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-race__laps"><span class="rb-race__last">LAST --:--.--</span><span class="rb-race__best">BEST --:--.--</span></div>` +
     `<div class="rb-race__split"></div>` +
     `</div>` +
+    // The circuit mission, under the race readout: what this run has to beat, and what it has
+    // spent so far. Hidden outside the solo circuit, where there is no mission to report.
+    `<div class="rb-mission">` +
+    `<div class="rb-mission__head"><span class="rb-mission__level">MISSION 1/3</span>` +
+    `<span class="rb-mission__name">SHAKEDOWN</span></div>` +
+    `<div class="rb-mission__rules"><span class="rb-mission__target">TARGET --:--.--</span>` +
+    `<span class="rb-mission__crashes">CRASHES 0/0</span></div>` +
+    `</div>` +
     `<div class="rb-countdown"></div>` +
     `<div class="rb-wrongway">WRONG WAY</div>` +
     `<div class="rb-results">` +
     `<div class="rb-results__title">FINISH</div>` +
     `<div class="rb-results__time">0:00.00</div>` +
     `<div class="rb-results__meta"></div>` +
+    `<div class="rb-results__verdict"></div>` +
+    `<div class="rb-results__mission"></div>` +
     `<div class="rb-results__keys"><span class="rb-key">R</span> race again <span class="rb-key">ESC</span> menu</div>` +
     `</div>` +
     `<div class="rb-stack rb-stack--left">` +
@@ -217,6 +242,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   /** El Búho's, the same way. */
   const buho: BuhoOverlay | null = options.onActivate && options.buho ? createBuhoOverlay({ onActivate: options.onActivate }) : null;
   if (buho) hud.appendChild(buho.root);
+  /** And the circuit missions' sign, which is one prompt and nothing else. */
+  const gate: GateOverlay | null =
+    options.onActivate && options.circuitGate ? createGateOverlay({ onActivate: options.onActivate }) : null;
+  if (gate) hud.appendChild(gate.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -241,6 +270,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const nearEl = pick<HTMLElement>(hud, '.rb-money__near');
   const remainingEl = pick<HTMLElement>(hud, '.rb-money__remaining');
   const rewardEls = Array.from(hud.querySelectorAll<HTMLElement>('.rb-reward'));
+  const nearMissEl = pick<HTMLElement>(hud, '.rb-nearmiss');
+  const nearMissChainEl = pick<HTMLElement>(hud, '.rb-nearmiss__chain');
+  const nearMissValueEl = pick<HTMLElement>(hud, '.rb-nearmiss__value');
   const aimEl = pick<HTMLElement>(hud, '.rb-aim');
   const aimFillEl = pick<HTMLElement>(hud, '.rb-aim__fill');
   const aimLabelEl = pick<HTMLElement>(hud, '.rb-aim__label');
@@ -269,11 +301,18 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   const raceLastEl = pick<HTMLElement>(hud, '.rb-race__last');
   const raceBestEl = pick<HTMLElement>(hud, '.rb-race__best');
   const raceSplitEl = pick<HTMLElement>(hud, '.rb-race__split');
+  const missionEl = pick<HTMLElement>(hud, '.rb-mission');
+  const missionLevelEl = pick<HTMLElement>(hud, '.rb-mission__level');
+  const missionNameEl = pick<HTMLElement>(hud, '.rb-mission__name');
+  const missionTargetEl = pick<HTMLElement>(hud, '.rb-mission__target');
+  const missionCrashesEl = pick<HTMLElement>(hud, '.rb-mission__crashes');
   const countdownEl = pick<HTMLElement>(hud, '.rb-countdown');
   const wrongWayEl = pick<HTMLElement>(hud, '.rb-wrongway');
   const resultsEl = pick<HTMLElement>(hud, '.rb-results');
   const resultsTimeEl = pick<HTMLElement>(hud, '.rb-results__time');
   const resultsMetaEl = pick<HTMLElement>(hud, '.rb-results__meta');
+  const resultsVerdictEl = pick<HTMLElement>(hud, '.rb-results__verdict');
+  const resultsMissionEl = pick<HTMLElement>(hud, '.rb-results__mission');
 
   // Displayed-value cache. Sentinels guarantee a first write for every field.
   let shownSpeed = -1;
@@ -300,6 +339,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   let cruising = false;
   let controlsUntil = CONTROLS_INTRO;
   let rewardIndex = 0;
+  // Near-miss tally. Held on the glass rather than flown past on a wreck, so a pass scored at
+  // 200 km/h can still be read once the corner is over.
+  let nearMissOn = false;
+  let nearMissCount = 0;
+  let nearMissTotal = 0;
+  /** Sim time of the last pass, or `-Infinity` before the first one of a session. */
+  let nearMissAt = -Infinity;
   let lastDriveHint = -DRIVE_HINT_EVERY;
   // Race readout cache.
   let shownLap = -1;
@@ -309,6 +355,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   let shownBestLap = -2;
   let shownPhase = '';
   let wrongWay = false;
+  // Circuit mission cache.
+  let missionOn = false;
+  let shownMissionLevel = -1;
+  let shownMissionCrashes = -1;
+  let shownMissionLimit = -1;
+  let shownMissionFailed = false;
 
   const animations = new Map<Element, Animation>();
 
@@ -335,7 +387,132 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     );
   }
 
-  function updateRace(r: RaceHudSnapshot): void {
+  /**
+   * Put a scored pass on the glass, over the car. Inside `NEAR_MISS.chainWindow` of the previous
+   * one it adds to the line already up - `NEAR MISS ×3  +¥140` - and re-punches it; outside that
+   * window it starts a fresh tally. Either way it holds where it is until `NEAR_MISS_HOLD` runs
+   * out in `update`, instead of drifting anywhere. The chime in `audio/oneShots.ts` climbs on
+   * the same window, so the number and the note step together.
+   */
+  function showNearMiss(points: number): void {
+    const now = lastFrameTime;
+    if (!(now - nearMissAt <= NEAR_MISS.chainWindow)) {
+      nearMissCount = 0;
+      nearMissTotal = 0;
+    }
+    nearMissAt = now;
+    nearMissCount++;
+    nearMissTotal += points;
+    nearMissChainEl.textContent = nearMissCount > 1 ? `×${nearMissCount}` : '';
+    nearMissValueEl.textContent = `+¥${formatMoney(nearMissTotal)}`;
+    if (!nearMissOn) {
+      nearMissOn = true;
+      nearMissEl.classList.add('is-on');
+    }
+    // Transform only: the class holds the opacity, so a pass landing mid-fade snaps back to
+    // full instead of finishing somebody else's fade out. It overshoots hard on the way in -
+    // the overshoot IS the hit, and it re-fires on every pass of a run, so a burst pulses.
+    play(
+      nearMissEl,
+      [
+        { transform: 'scale(0.72)' },
+        { transform: 'scale(1.22)', offset: 0.26 },
+        { transform: 'scale(1)' },
+      ],
+      380,
+    );
+  }
+
+  /** Drop the tally, on a restart or once it has been up long enough to read. */
+  function clearNearMiss(): void {
+    nearMissCount = 0;
+    nearMissTotal = 0;
+    nearMissAt = -Infinity;
+    if (!nearMissOn) return;
+    nearMissOn = false;
+    nearMissEl.classList.remove('is-on');
+  }
+
+  /** `-12.30` / `+3.04`: how a finish time stands against what the mission asked for. */
+  function formatDelta(seconds: number): string {
+    const sign = seconds < 0 ? '-' : '+';
+    return `${sign}${formatRaceTime(Math.abs(seconds)).replace(/^0:/, '')}`;
+  }
+
+  /** A target time, which is set in whole seconds: `2:40`, not `2:40.00`. */
+  function formatTarget(seconds: number): string {
+    return formatRaceTime(seconds).replace(/\.00$/, '');
+  }
+
+  /**
+   * `CRASHES 2/3` — or, where the allowance is none, what "none" actually reads as: there is no
+   * fraction of zero, so the last mission says what it wants and then what it got.
+   */
+  function crashText(crashes: number, limit: number): string {
+    if (limit > 0) return `CRASHES ${crashes}/${limit}`;
+    return crashes > 0 ? `CONTACT ×${crashes}` : 'NO CONTACT';
+  }
+
+  /**
+   * The mission strip under the race readout. Only ever up on the solo circuit: everywhere else
+   * — including the versus race on the very same course — the snapshot carries no mission and
+   * the strip stays off.
+   */
+  function updateMission(t: TimeAttackHudSnapshot | null): void {
+    if (!!t !== missionOn) {
+      missionOn = !!t;
+      missionEl.classList.toggle('is-on', missionOn);
+    }
+    if (!t) return;
+    if (t.level !== shownMissionLevel) {
+      shownMissionLevel = t.level;
+      missionLevelEl.textContent = t.allClear
+        ? `MISSION ${t.level + 1}/${t.levelCount} · ALL CLEAR`
+        : `MISSION ${t.level + 1}/${t.levelCount}`;
+      missionNameEl.textContent = t.levelName;
+      missionTargetEl.textContent = `TARGET ${formatTarget(t.targetTime)}`;
+    }
+    // The allowance changes with the mission, and the count does not have to change with it:
+    // clearing one with a clean run leaves 0 crashes against a smaller limit.
+    if (t.crashes !== shownMissionCrashes || t.crashLimit !== shownMissionLimit) {
+      shownMissionCrashes = t.crashes;
+      shownMissionLimit = t.crashLimit;
+      missionCrashesEl.textContent = crashText(t.crashes, t.crashLimit);
+    }
+    if (t.failed !== shownMissionFailed) {
+      shownMissionFailed = t.failed;
+      missionEl.classList.toggle('is-failed', t.failed);
+    }
+  }
+
+  /**
+   * The two mission lines on the finish card. Written once, on the frame the race finishes,
+   * from the results the rules froze at the flag — never from the live state, which by then has
+   * already moved the chain on to the next mission.
+   */
+  function fillMissionResult(t: TimeAttackHudSnapshot | null): void {
+    const r = t?.results ?? null;
+    resultsEl.classList.toggle('is-cleared', !!r && r.cleared);
+    resultsEl.classList.toggle('is-failed', !!r && !r.cleared);
+    if (!r) {
+      resultsVerdictEl.textContent = '';
+      resultsMissionEl.textContent = '';
+      return;
+    }
+    resultsVerdictEl.textContent = r.advanced
+      ? `MISSION ${r.level + 1} CLEARED · NEXT ONE UNLOCKED`
+      : r.cleared
+        ? `MISSION ${r.level + 1} CLEARED`
+        : !r.withinCrashes
+          ? `MISSION FAILED · ${r.crashLimit > 0 ? 'TOO MANY CRASHES' : 'CONTACT'}`
+          : 'MISSION FAILED · TOO SLOW';
+    const delta = formatDelta(r.time - r.targetTime);
+    const best = t && t.newBest ? ' · NEW BEST' : '';
+    resultsMissionEl.textContent =
+      `${r.levelName} · TARGET ${formatTarget(r.targetTime)} (${delta}) · ${crashText(r.crashes, r.crashLimit)}${best}`;
+  }
+
+  function updateRace(r: RaceHudSnapshot, t: TimeAttackHudSnapshot | null): void {
     if (r.lap !== shownLap || r.laps !== shownLaps) {
       shownLap = r.lap;
       shownLaps = r.laps;
@@ -362,9 +539,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       shownPhase = r.phase;
       raceEl.classList.toggle('is-finished', r.phase === 'finished');
       resultsEl.classList.toggle('is-on', r.phase === 'finished');
+      // Back on the grid: the card's verdict goes with it, so a restart cannot leave last
+      // run's colours on a card the next finish is about to fill in.
+      if (r.phase !== 'finished') fillMissionResult(null);
       if (r.phase === 'finished') {
         resultsTimeEl.textContent = formatRaceTime(r.finishTime);
         resultsMetaEl.textContent = `${r.laps} ${r.laps === 1 ? 'LAP' : 'LAPS'} · BEST LAP ${formatRaceTime(r.bestLap)}`;
+        fillMissionResult(t);
         play(
           resultsEl,
           [
@@ -397,10 +578,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     update(s) {
       // A restart rewinds sim time; drop stale throttles so hints work again.
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
-      if (s.race) updateRace(s.race);
+      updateMission(s.timeAttack);
+      if (s.race) updateRace(s.race, s.timeAttack);
       if (rush && s.rush) rush.update(s.rush);
       if (passengers && s.passenger) passengers.update(s.passenger);
       if (buho && s.buho) buho.update(s.buho);
+      if (gate && s.circuitGate) gate.update(s.circuitGate);
 
       if (s.cruising !== cruising) {
         cruising = s.cruising;
@@ -561,6 +744,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         shownNearMisses = s.nearMisses;
         nearEl.textContent = `near miss ${s.nearMisses}`;
       }
+      // Read off sim time, not a timer, so it does not keep counting while the tab is asleep.
+      if (nearMissOn && !(s.time - nearMissAt <= NEAR_MISS_HOLD)) clearNearMiss();
       if (s.targetsRemaining !== shownRemaining || s.targetsTotal !== shownTotal) {
         shownRemaining = s.targetsRemaining;
         shownTotal = s.targetsTotal;
@@ -573,31 +758,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       passengers?.onEvent(e);
       buho?.onEvent(e);
       if (e.type === 'nearMiss') {
-        // Shares the money flash column with kill rewards, but cyan, labelled, and drifting
-        // DOWN instead of up: passes are frequent, and rising past the counters the way a
-        // kill does would keep covering them.
-        const el = rewardEls[rewardIndex % rewardEls.length];
-        rewardIndex++;
-        if (el) {
-          el.textContent = `NEAR MISS +¥${formatMoney(e.points)}`;
-          el.classList.add('rb-reward--near');
-          play(
-            el,
-            [
-              { opacity: 0, transform: 'translateY(-4px)' },
-              { opacity: 1, transform: 'translateY(2px)', offset: 0.15 },
-              { opacity: 1, transform: 'translateY(10px)', offset: 0.65 },
-              { opacity: 0, transform: 'translateY(20px)' },
-            ],
-            1100,
-          );
-        }
+        showNearMiss(e.points);
       } else if (e.type === 'targetDestroyed') {
         const el = rewardEls[rewardIndex % rewardEls.length];
         rewardIndex++;
         if (el) {
           el.textContent = `+¥${formatMoney(e.reward)}`;
-          el.classList.remove('rb-reward--near');
           play(
             el,
             [
@@ -635,6 +801,17 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         // the name of the thing, in the hot GO treatment.
         if (e.seconds > 0) showCountdown(String(e.seconds), false);
         else showCountdown('RAYO RUSH', true);
+      } else if (e.type === 'timeAttackCrash') {
+        // Said on the same line the splits are said on: it is a fact about the run's time, and
+        // the player is looking there anyway. The one that spends the allowance shouts.
+        showNote(
+          raceSplitEl,
+          e.fatal
+            ? e.allowance > 0
+              ? 'MISSION FAILED · CRASHES SPENT'
+              : 'MISSION FAILED · CONTACT'
+            : crashText(e.crashes, e.allowance),
+        );
       } else if (e.type === 'checkpoint') {
         showNote(raceSplitEl, `CHECKPOINT ${e.index} · ${formatRaceTime(e.split)}`);
       } else if (e.type === 'lapComplete') {
@@ -658,6 +835,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         controlsUntil = CONTROLS_REPLAY;
         lastDriveHint = -DRIVE_HINT_EVERY;
         lastFrameTime = -1;
+        // Sim time rewinds here, so a tally left up would compare against a future timestamp
+        // and never expire.
+        clearNearMiss();
         tacho.reset(0);
         shownPhase = '';
         resultsEl.classList.remove('is-on');
@@ -670,6 +850,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       rush?.dispose();
       passengers?.dispose();
       buho?.dispose();
+      gate?.dispose();
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();

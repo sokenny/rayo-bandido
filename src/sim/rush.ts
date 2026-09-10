@@ -1,5 +1,5 @@
 import type { ActivitySite, DriftState, GameEvent, PlayerCommand, RushResults, RushState, TargetState, VehicleState } from '../core/types';
-import { RUSH } from '../config/tuning';
+import { LIGHTNING, RUSH } from '../config/tuning';
 
 /**
  * RAYO RUSH: the free-world time attack.
@@ -32,6 +32,12 @@ import { RUSH } from '../config/tuning';
  * or within `driftChargeGrace` of one ending — which is what actually happens, because the
  * slide is over by the time the nose is pointed at anything. The drift's own length and
  * whether it survived without a collision are what the extra points are scaled by.
+ *
+ * REACH. The other half of style is the shot itself: a bolt that crosses the street pays more
+ * than one fired into the bumper in front, ramped by the distance it travelled. That is not a
+ * flourish, it is what keeps the weapon honest — reaching that far costs a long hold, and a
+ * long hold costs charge (`src/sim/lightning.ts`), so without it the cheapest shot would also
+ * be the most efficient one and the whole activity would be tailgating.
  *
  * THE MISSION CHAIN. Three runs in order (`RUSH.levels`), each asking for a bigger score than
  * the last and each driven at its own site. `RushState.cleared` is the whole of it: which
@@ -107,6 +113,7 @@ export function createRushState(targetCount: number, cleared = 0): RushState {
     locked: false,
     ranked: false,
     rearmed: true,
+    resultsHold: 0,
     scored: new Uint8Array(targetCount),
     driftSeconds: 0,
     driftClean: false,
@@ -152,6 +159,7 @@ export function resetRushState(r: RushState): void {
   r.atMarker = false;
   r.ranked = false;
   r.rearmed = true;
+  r.resultsHold = 0;
   r.scored.fill(0);
   r.driftSeconds = 0;
   r.driftClean = false;
@@ -176,6 +184,23 @@ export function styleBonusFor(seconds: number, clean: boolean): number {
   const s = RUSH.scoring;
   const held = Math.min(seconds, s.driftBonusMaxSeconds);
   return Math.round(s.driftChargeBonus + held * s.driftBonusPerSecond + (clean ? s.cleanDriftBonus : 0));
+}
+
+/**
+ * Points paid for the reach of one shot, given how far the bolt travelled (m). Nothing up to
+ * `longShotFrom`, then a straight ramp to the full `longShotBonus` at the weapon's maximum
+ * range — a ramp rather than a threshold, so there is no metre on the road where the same shot
+ * is suddenly worth eighty more.
+ *
+ * The ceiling is `LIGHTNING.range` because that is the furthest a bolt can go; a distance past
+ * it can only be a rounding artefact, and is paid the maximum rather than more than it.
+ */
+export function rangeBonusFor(distance: number): number {
+  const s = RUSH.scoring;
+  const span = LIGHTNING.range - s.longShotFrom;
+  if (!(span > 0) || !(distance > s.longShotFrom)) return 0;
+  const t = Math.min(1, (distance - s.longShotFrom) / span);
+  return Math.round(s.longShotBonus * t);
 }
 
 /**
@@ -294,6 +319,7 @@ export function dismissRush(rush: RushState, events: GameEvent[]): boolean {
   if (rush.phase !== 'results') return false;
   rush.phase = 'idle';
   rush.results = null;
+  rush.resultsHold = 0;
   rush.chain = 0;
   rush.multiplier = 1;
   rush.chainWindow = 0;
@@ -335,6 +361,7 @@ function endRun(rush: RushState, site: ActivitySite, events: GameEvent[]): void 
     advanced,
   };
   rush.phase = 'results';
+  rush.resultsHold = RUSH.resultsHoldSeconds;
   rush.timeLeft = 0;
   rush.chainWindow = 0;
   rush.results = results;
@@ -385,6 +412,14 @@ export function stepRush(
   // Take it up, and afterwards put it away: the same key, because from where the player sits
   // it is the same gesture. Handled before the clock so it works in every phase, and before
   // the count-in below so a run taken up now counts in from this tick rather than the next.
+  // The card is on a clock of its own: it says its piece and then hands the world back, so
+  // the run does not end in a screen that waits forever on a key. Ticked before the button so
+  // a press on the same frame it runs out is not swallowed by a card that is already gone.
+  if (rush.phase === 'results' && rush.resultsHold > 0) {
+    rush.resultsHold = Math.max(0, rush.resultsHold - dt);
+    if (rush.resultsHold === 0) dismissRush(rush, events);
+  }
+
   if (cmd.activate) {
     if (rush.phase === 'results') dismissRush(rush, events);
     else if (rush.phase === 'idle') startRush(rush, ranked, events);
@@ -472,13 +507,17 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
     const driftSeconds = driftCharged ? rush.driftSeconds : 0;
     const cleanDrift = driftCharged && rush.driftClean;
     const driftBonus = driftCharged ? styleBonusFor(driftSeconds, cleanDrift) : 0;
-    // The multiplier rewards the chain, the bonus rewards the driving; multiplying the bonus
-    // too would make a late-run streak worth more than everything before it put together.
-    const points = Math.round(RUSH.scoring.disable * rush.multiplier) + driftBonus;
+    // How far the bolt crossed to get there, carried on the event by the weapon that fired it.
+    const shotDistance = ev.distance;
+    const rangeBonus = rangeBonusFor(shotDistance);
+    // The multiplier rewards the chain, the bonuses reward the shot; multiplying those too
+    // would make a late-run streak worth more than everything before it put together.
+    const points = Math.round(RUSH.scoring.disable * rush.multiplier) + driftBonus + rangeBonus;
 
     rush.score += points;
     rush.disabled += 1;
-    rush.styleBonus += driftBonus;
+    // Both bonuses are style — the card's STYLE line is everything the base kill did not pay.
+    rush.styleBonus += driftBonus + rangeBonus;
 
     events.push({
       type: 'rushScore',
@@ -492,6 +531,8 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
       driftBonus,
       driftSeconds,
       cleanDrift,
+      rangeBonus,
+      shotDistance,
     });
   }
 

@@ -1,5 +1,5 @@
 import type { AudioCore } from './core';
-import { AUDIO } from '../config/tuning';
+import { AUDIO, NEAR_MISS } from '../config/tuning';
 
 export interface OneShots {
   /** The lightning weapon firing: a sharp electric crack with a sizzling tail. */
@@ -7,8 +7,11 @@ export interface OneShots {
   /** An electric car losing power and going out of service: a descending spin-down + fizzle. */
   shutdown(): void;
   /**
-   * The doppler whoosh of shaving past a car. `quality` 0..1 (how good the pass was) makes it
-   * louder, brighter and snappier, so a paint-scraping pass sounds different from a wide one.
+   * The doppler whoosh of shaving past a car, plus the ping that says it PAID. `quality` 0..1
+   * (how good the pass was) makes the whoosh louder, brighter and snappier, so a paint-scraping
+   * pass sounds different from a wide one. Passes inside `NEAR_MISS.chainWindow` of each other
+   * walk the ping up a pentatonic ladder, so threading a line of traffic plays a rising figure
+   * instead of the same note four times.
    */
   nearMiss(quality: number): void;
   /** Race countdown tick; `go` is the longer, higher note on the lights going out. */
@@ -98,6 +101,17 @@ export function createOneShots(core: AudioCore): OneShots {
     };
   }
 
+  /**
+   * Semitones above `CHIME_ROOT` for the 1st, 2nd, 3rd... pass of a run. Major pentatonic, so
+   * any prefix of it is consonant and a long run climbs an octave and a half and then holds
+   * rather than disappearing into dog-whistle territory.
+   */
+  const CHAIN_LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19];
+  /** A6-ish: over the engine, under the lightning crack, out of the way of both. */
+  const CHIME_ROOT = 880;
+  let nearMissStep = 0;
+  let lastNearMissAt = -Infinity;
+
   return {
     lightning() {
       const t = ctx.currentTime;
@@ -122,6 +136,18 @@ export function createOneShots(core: AudioCore): OneShots {
       playNoise(t, t + dur, 'bandpass', 1500 + 1900 * q, 320, 1.6, 0.85 * v, 0.05 + 0.05 * (1 - q));
       // Body: the low pressure wave under the whoosh, only on a genuinely close pass.
       if (q > 0.25) playOsc('sine', t + 0.02, t + 0.24, 150, 60, 0.35 * v * q, 0.05);
+
+      // The reward. Deliberately a separate thing from the whoosh: the whoosh happens whether
+      // or not it scored, this only ever plays when the pass paid. A hair behind the air so it
+      // lands as the CONSEQUENCE of it rather than part of it.
+      nearMissStep = t - lastNearMissAt <= NEAR_MISS.chainWindow ? Math.min(nearMissStep + 1, CHAIN_LADDER.length - 1) : 0;
+      lastNearMissAt = t;
+      const f = CHIME_ROOT * Math.pow(2, CHAIN_LADDER[nearMissStep] / 12);
+      const cv = AUDIO.nearMissChimeVolume * (0.6 + 0.4 * q);
+      const at = t + 0.04;
+      // Triangle body with a sine an octave over it: bell-ish without being a literal bell.
+      playOsc('triangle', at, at + 0.3, f, f, 0.6 * cv, 0.003, f * 3.5);
+      playOsc('sine', at, at + 0.19, f * 2, f * 2, 0.3 * cv, 0.003);
     },
 
     countdown(go) {

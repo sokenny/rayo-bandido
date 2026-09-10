@@ -459,7 +459,23 @@ export const NITRO = {
 
 export const LIGHTNING = {
   capacity: 100,
+  /**
+   * WHAT A SHOT COSTS is not one number, because a shot is not one thing: the gun is loaded by
+   * holding it, and it draws charge the whole time it is being loaded. `minCost` is taken at
+   * the press — the down payment on the shortest shot that is not a fumble — and the rest is
+   * drawn steadily over `maxHold`, so a full-reach bolt costs `cost` and a snap shot costs
+   * little more than the down payment. The meter drains as the player holds, which is the
+   * whole point: the trade between reach and ammunition is visible while it is being made,
+   * not discovered afterwards.
+   *
+   * A hold the meter cannot pay for simply stops growing — the shot is still there, it just
+   * reaches as far as the charge bought. And a fumble refunds every unit it took, because
+   * nothing left the car.
+   */
+  /** Charge a full-reach shot costs, spent gradually across the hold. */
   cost: 50,
+  /** Charge taken at the press. The floor under every shot, and what a snap shot costs. */
+  minCost: 14,
   /**
    * The shot is aimed, not locked on: it leaves the nose along the car's heading and stops at
    * whatever `range` the hold bought. Nothing curves towards a car, so pointing counts.
@@ -602,6 +618,12 @@ export const NEAR_MISS = {
   minSpeed: 18,
   /** Speed at which the speed factor saturates (m/s). Above the un-boosted top speed on purpose. */
   fullSpeed: 59,
+  /**
+   * Seconds after a pass in which the next one counts as part of the same run of them. Used by
+   * presentation only - the HUD tally counts up in place inside this window (`ui/hud.ts`) and
+   * the reward chime climbs a step (`audio/oneShots.ts`). One number so the two never disagree.
+   */
+  chainWindow: 1.6,
   /** Award floor for any qualifying pass. */
   minPoints: 10,
   /** Award ceiling. Only a paint-scraping pass on nitro gets here. */
@@ -1098,6 +1120,11 @@ export const AUDIO = {
   shutdownVolume: 0.5,
   /** Near-miss whoosh level. Scaled down further by how good the pass was. */
   nearMissVolume: 0.45,
+  /**
+   * The bright ping ON TOP of that whoosh: the whoosh is the physics, this is the reward. Held
+   * a little under the whoosh so a long run of passes never turns into a xylophone solo.
+   */
+  nearMissChimeVolume: 0.3,
   /** Nitro spool whoosh level. */
   nitroVolume: 0.4,
   /** Race countdown beeps level. */
@@ -1229,6 +1256,76 @@ export const RACE = {
   gridSlots: 8,
 };
 
+/**
+ * TIME ATTACK: the mission chain on the city circuit (`src/sim/timeAttack.ts`).
+ *
+ * The offline circuit was always a lap against the clock with nothing at stake. This is what
+ * is at stake: three runs of the same two laps of the Bandido Grid, in order, each asking for
+ * a shorter time AND a cleaner one than the last. Nothing about the race changes — same
+ * course, same gates, same traffic, same restart — the chain only watches the race that was
+ * going to happen anyway, the way RAYO RUSH watches the free world.
+ *
+ * TIME AND CRASHES TOGETHER, which is the whole idea. A time on its own is beaten by throwing
+ * the car at the barriers and bouncing off in roughly the right direction; the crash allowance
+ * is what makes the last mission ask for a lap that is fast BECAUSE it is tidy rather than in
+ * spite of not being. So the two tighten together:
+ *
+ *   1 SHAKEDOWN     2:40, up to three crashes  <- get round it without parking it
+ *   2 ON THE PACE   2:20, one crash            <- carry speed, and mostly stay off the walls
+ *   3 SPOTLESS      2:05, none at all          <- the fast lap, without touching anything
+ *
+ * WHY THESE NUMBERS. Measured, not guessed: a line-following driver taken round the real
+ * circuit through the real simulation, with no nitro and no shortcuts, finishes the two laps
+ * in about 141 s driving carefully, 117 s committed and clean, and 111 s on the limit while
+ * scraping the barriers eight times. So the first mission is inside a careful lap, the second
+ * needs the pace of a committed one, and the third asks for a committed lap driven clean —
+ * with the nitro and the hidden shortcuts, which that driver never used, as the margin.
+ *
+ * WHAT COUNTS AS A CRASH. Not every touch: a `collision` at `crashImpact` or more of velocity
+ * INTO the surface, which is the difference between brushing a barrier on the exit of a corner
+ * (~1-4 m/s) and hitting it (~7-9 m/s). And one accident is one crash — a real impact raises
+ * a burst of events over the next few ticks as the car bounces and rides down the wall, so
+ * `crashCooldown` seconds pass before another can be counted.
+ */
+export const TIME_ATTACK = {
+  /**
+   * The chain, in order. `seconds` is the whole race (every lap), not one lap: the mission is
+   * to complete the circuit, and the finish time is the number the race already puts on that.
+   * `crashes` is how many are ALLOWED — 0 means the run is over the moment the car hits
+   * anything.
+   */
+  levels: [
+    { name: 'SHAKEDOWN', seconds: 160, crashes: 3 },
+    { name: 'ON THE PACE', seconds: 140, crashes: 1 },
+    { name: 'SPOTLESS', seconds: 125, crashes: 0 },
+  ],
+  /** Velocity into a surface at or above which a contact is a crash (m/s). */
+  crashImpact: 5,
+  /** Seconds after a counted crash in which further impacts are the same accident. */
+  crashCooldown: 1.2,
+
+  /**
+   * THE WAY IN, from the street. The chain is driven on the circuit, but it is FOUND in the
+   * open world: a ring painted across the Bandido Grid's own start/finish line, at the point
+   * of the city the race is cut through (`ArenaLayout.circuitSite`). Roll onto it, press the
+   * key, and the circuit loads with the mission on offer.
+   *
+   * Same shape as `RUSH.marker` and for the same reason: the painted circle IS the trigger,
+   * `src/render/scene/env/activityMarker.ts` draws it at exactly `promptRadius`, so the sign
+   * is up while the car is standing on the paint and gone the moment it rolls off.
+   *
+   * `rearmRadius` is what the other markers use to stop a dismissed card dropping straight back
+   * into its own prompt. Nothing here is dismissed — the key leaves the world altogether — but
+   * ESC out of the circuit puts the car back at the city's spawn, not on this ring, so the
+   * number is only ever the guard against a re-entry the player did not ask for.
+   */
+  marker: {
+    promptRadius: 7.5,
+    exitRadius: 8.4,
+    rearmRadius: 18,
+  },
+};
+
 /** The minimap in the top-right corner of the HUD (`src/ui/minimap.ts`). */
 export const MINIMAP = {
   /** Canvas size in CSS pixels (square). */
@@ -1316,6 +1413,11 @@ export const RUSH = {
   durationSeconds: 90,
   /** `3 - 2 - 1 - RAYO RUSH` before the clock starts (s). */
   countdownSeconds: 3,
+  /**
+   * How long the results card stays up before it puts itself away (s). F still dismisses it
+   * the moment the player is done reading; this is only the promise that they never have to.
+   */
+  resultsHoldSeconds: 7,
   /** Ranked attempts one player may submit to the global board per calendar day. */
   dailyRankedAttempts: 3,
 
@@ -1331,18 +1433,23 @@ export const RUSH = {
    * (`ArenaLayout.rushSites`, one site per level, in this order, each carrying its own name).
    * A world that ships fewer sites than there are levels simply reuses its last one.
    *
-   * WHY THESE NUMBERS. A kill is 100 before the streak multiplier and a drift-charged shot
-   * pays 50-150 on top, so a run is roughly `kills x (100 x average multiplier + style)`:
+   * WHY THESE NUMBERS. A kill is 100 before the streak multiplier, a drift-charged shot pays
+   * 50-150 on top and a bolt thrown the length of a street up to `longShotBonus` more, so a run
+   * is roughly `kills x (100 x average multiplier + style)`:
    *
-   *   ~8 kills, barely chained            ~1,200   <- level 1 is "you have understood the loop"
-   *   ~12 kills, streaks held             ~3,000   <- level 2 needs the chain window respected
-   *   ~18 kills, streaks AND clean drifts ~6,000   <- level 3 needs both at once
+   *   ~5 kills, barely chained              ~720   <- level 1 is "you have understood the loop"
+   *   ~7 kills, streaks held               ~1,800   <- level 2 needs the chain window respected
+   *   ~11 kills, streaks AND clean drifts  ~3,600   <- level 3 needs both at once
+   *
+   * The reach bonus is deliberately not written into those figures: it is the newest of the
+   * habits and the one a player picks up last, so it reads as a run going better than expected
+   * rather than as a target that cannot be met without it.
    *
    * So each level is beaten by adding one habit rather than by grinding the last one. Progress
    * is per browser and lives in localStorage (`src/core/progress.ts`); it is deliberately NOT
    * the global board, which keeps ranking whole runs however far through the chain you are.
    */
-  levels: [{ target: 1200 }, { target: 3000 }, { target: 6000 }],
+  levels: [{ target: 720 }, { target: 1800 }, { target: 3600 }],
 
   /**
    * The activity marker in the world, and the prompt it raises.
@@ -1406,6 +1513,24 @@ export const RUSH = {
     driftBonusMaxSeconds: 4,
     /** Extra on top again when the drift was clean: held from start to finish without a hit. */
     cleanDriftBonus: 40,
+
+    /**
+     * THE LONG SHOT. A bolt that crosses the street is worth more than one fired into the car
+     * in front, and it has to be: reaching that far means holding the trigger down, and a long
+     * hold drains the meter (`LIGHTNING.cost` against `LIGHTNING.minCost`). Without the bonus
+     * the cheapest shot would also be the most efficient one, and the whole gun would collapse
+     * into driving up behind a car and tapping.
+     *
+     * Ramped, not a threshold: the extra grows from nothing at `longShotFrom` to
+     * `longShotBonus` at the weapon's full `LIGHTNING.range`, so there is no line on the road
+     * where a metre further pays 80 more points. Measured muzzle to car — the distance the
+     * bolt actually travelled, not the reach the hold bought, so a full hold into a car six
+     * metres away is a close shot and is paid like one.
+     */
+    /** Distance at which a shot starts paying for its reach (m). Below this, nothing extra. */
+    longShotFrom: 32,
+    /** The extra a shot at maximum reach pays. Roughly what a good drift charge is worth. */
+    longShotBonus: 80,
   },
 };
 
@@ -1449,8 +1574,27 @@ export const PASSENGER = {
     /** Radius at which the zone lets go again (m). Slightly wider so a parked car cannot flicker it. */
     exitRadius: 8.2,
   },
+  /**
+   * The destination arrow: the chevron over the street ahead while a fare is aboard
+   * (`render/scene/env/destinationArrow.ts`), aimed along the roads by `world/roadGraph.ts`.
+   * Underground 2's idea — the answer to "left or right" arrives before the junction does.
+   */
+  arrow: {
+    /**
+     * How far up the route it hovers (m). Far enough that it has already turned into the next
+     * street while the car is still in this one; near enough to read at a glance.
+     */
+    lookahead: 34,
+    /**
+     * Road distance to the drop-off (m) at which the arrow starts nosing down at it, reaching
+     * fully down at zero. The last stretch is not a direction any more, it is an address.
+     */
+    diveDistance: 22,
+  },
   /** Pressing the key twice inside this window (s) ends a ride early. One press only arms it. */
   cancelArmSeconds: 2.5,
+  /** How long the fare card stays up before it puts itself away (s). F still ends it early. */
+  resultsHoldSeconds: 7,
   mood: {
     /** Where every ride starts. */
     start: 62,
@@ -1549,8 +1693,8 @@ export const PASSENGER = {
  * THE ENVELOPE is one number 0..1 read off `timeline.keys` at the elapsed fraction of
  * `timeline.duration`, eased between keys so it never steps. Each visual LAYER then reads that
  * number through its own `[start, full]` window, which is what keeps the sky from arriving on
- * the same beat as the faces: a layer is exactly nothing below `start`, so the first minute is
- * genuinely a normal city and the layers stack up in order rather than all at once.
+ * the same beat as the faces: a layer is exactly nothing below `start`, so the layers stack up
+ * in order rather than all at once, the sky and the air first and the faces last.
  */
 export const MOOGUL = {
   /** ¥. Charged once, on the confirming press. */
@@ -1567,18 +1711,20 @@ export const MOOGUL = {
 
   timeline: {
     /** The whole thing, seconds. Every key below is a fraction of this. */
-    duration: 480,
+    duration: 300,
     /**
-     * `[fraction of duration, intensity]`, eased between. 0-1:00 nothing at all; 1:00-2:30
-     * barely there; 2:30-4:30 climbing; 4:30-6:00 the peak; 6:00-8:00 back down to nothing.
+     * `[fraction of duration, intensity]`, eased between. It comes on inside the first twenty
+     * seconds rather than making the player wait for it: 0-0:20 rising out of nothing;
+     * 0:20-1:15 clearly on and still climbing; 1:15-3:20 up to the peak; 3:20-5:00 back down
+     * to nothing. Five minutes end to end.
      */
     keys: [
       [0, 0],
-      [0.125, 0],
-      [0.3125, 0.12],
-      [0.5625, 0.55],
+      [0.0667, 0.2],
+      [0.25, 0.45],
+      [0.5, 0.75],
       [0.667, 1],
-      [0.75, 0.9],
+      [0.8, 0.85],
       [1, 0],
     ] as ReadonlyArray<readonly [number, number]>,
   },
@@ -1593,7 +1739,12 @@ export const MOOGUL = {
     faces: [0.4, 0.9],
     chroma: [0.5, 1],
     swim: [0.6, 1],
-  } as Record<'sky' | 'fog' | 'lights' | 'surface' | 'graffiti' | 'faces' | 'chroma' | 'swim', readonly [number, number]>,
+    bleed: [0.06, 0.9],
+    glow: [0.2, 1],
+  } as Record<
+    'sky' | 'fog' | 'lights' | 'surface' | 'graffiti' | 'faces' | 'chroma' | 'swim' | 'bleed' | 'glow',
+    readonly [number, number]
+  >,
 
   /**
    * The sky and the air. Two moods, cycled between over `cyclePeriod` seconds, and the live
@@ -1641,6 +1792,12 @@ export const MOOGUL = {
     hue: 1.1,
     /** How much the paint pulses in brightness at full (fraction). */
     pulse: 0.4,
+    /**
+     * How much brighter the lit windows burn at full (fraction). Small on its own — a window
+     * cannot be made to glare without looking like a bug — but it is what pushes the panes
+     * over `bleed.threshold`, so what it really buys is the halo round them.
+     */
+    glow: 0.85,
     /** Slow variation inside the envelope (s), so the peak breathes rather than holds. */
     breathPeriod: 17,
   },
@@ -1680,6 +1837,37 @@ export const MOOGUL = {
     chroma: 0.0055,
     swim: 0.0042,
     swimPeriod: 8.5,
+  },
+  /**
+   * THE LIGHTS, SPREAD (`render/post/lightBleed.ts`). The layer that does the most work for the
+   * least: every lit pane, hairline, lamp and tail light in the frame grows a soft halo in a
+   * colour that is not quite its own, so the city stops being made of points and starts being
+   * made of light. It reaches the whole frame, not just the edge.
+   */
+  bleed: {
+    /** How much of the halo goes back into the frame at full. Past ~2 it stops being a city. */
+    amount: 1.15,
+    /**
+     * Brightness a pixel must reach before it bleeds: `[at the layer's start, at full]`. It
+     * FALLS as the trip deepens — first only the actual lights halo, and by the peak so does
+     * anything merely bright, which is what turns a haze round the lamps into a soft city.
+     */
+    threshold: [0.68, 0.34] as readonly [number, number],
+    /** How much brighter than the threshold a pixel must be to bleed fully. Wide: no pane pops. */
+    knee: 0.34,
+    /** How far the halo's colour turns off its light's, and how far off white it is pushed. */
+    hue: 1.5,
+    huePeriod: 23,
+    saturation: 1.45,
+    /** Halo width as a fraction of the frame's height, `[start, full]`, and its sideways stretch. */
+    radius: [0.03, 0.075] as readonly [number, number],
+    stretch: 1.35,
+    /** Slow variation inside the envelope (s), so the glow breathes with the walls. */
+    breathPeriod: 13,
+    /** How far the halo's channels split along the radius at full (fraction of the frame). */
+    fringe: 0.006,
+    /** How much halo survives in the middle of the frame, where the car and the road are. */
+    centre: 0.55,
   },
   /** Seconds the overrides take to let go when the trip is cut short. */
   stopFadeSeconds: 0.9,

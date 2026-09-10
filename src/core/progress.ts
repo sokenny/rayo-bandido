@@ -1,8 +1,9 @@
-import { RUSH } from '../config/tuning';
+import { RUSH, TIME_ATTACK } from '../config/tuning';
 
 /**
- * What this browser remembers about a player between sessions — today, only how far they have
- * got through the RAYO RUSH mission chain and what they scored on each one.
+ * What this browser remembers about a player between sessions: how far they have got through
+ * the RAYO RUSH mission chain and what they scored on each one, how far through the CIRCUIT
+ * chain and their best time on each of those, and the side rides they have run.
  *
  * WHY IT IS ITS OWN MODULE. `src/net/leaderboard.ts` already keeps a personal best in
  * localStorage, but it keeps it as a MIRROR of something the server owns: the board is the
@@ -113,6 +114,88 @@ export function recordRushRun(progress: RushProgress, level: number, score: numb
   const best = progress.best.slice();
   if (level >= 0 && level < best.length && score > best[level]) best[level] = Math.floor(score);
   const cleared = advanced ? Math.max(progress.cleared, clampCleared(level + 1)) : progress.cleared;
+  return { cleared, best };
+}
+
+/* ================================================================ time attack */
+
+const CIRCUIT_KEY = 'rb.circuit.missions';
+
+/**
+ * The circuit mission chain (`src/sim/timeAttack.ts`), remembered the same way and under the
+ * same contract as the rush chain above: no server, never throws, garbage reads as a player who
+ * has not started, and everything read back is rebuilt against the chain that exists NOW.
+ */
+export interface TimeAttackProgress {
+  /** Missions finished, 0..`TIME_ATTACK.levels.length`. */
+  cleared: number;
+  /**
+   * Best FINISH TIME on each mission (s), `-1` where it has never been finished. Always exactly
+   * as long as `TIME_ATTACK.levels`, so a caller may index it by level without checking.
+   *
+   * A time is kept whether or not the run passed the mission: a lap driven three crashes over
+   * the allowance was still driven, and the number the player wants to beat next time is the
+   * time they actually did. Whether the mission was cleared is `cleared`, and that is separate.
+   */
+  best: number[];
+}
+
+export function emptyTimeAttackProgress(): TimeAttackProgress {
+  return { cleared: 0, best: TIME_ATTACK.levels.map(() => -1) };
+}
+
+/** A stored count made safe: a whole number no bigger than the chain that exists now. */
+function clampCircuitCleared(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(TIME_ATTACK.levels.length, Math.floor(n));
+}
+
+/** A stored time made safe: a positive number of seconds, or -1 for "never finished". */
+function clampTime(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return -1;
+  return n;
+}
+
+export function readTimeAttackProgress(): TimeAttackProgress {
+  const raw = readRaw(CIRCUIT_KEY);
+  if (!raw) return emptyTimeAttackProgress();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return emptyTimeAttackProgress();
+  }
+  if (!parsed || typeof parsed !== 'object') return emptyTimeAttackProgress();
+  const record = parsed as { cleared?: unknown; best?: unknown };
+  const storedBest = Array.isArray(record.best) ? record.best : [];
+  const best = TIME_ATTACK.levels.map((_, i) => clampTime(storedBest[i]));
+  return { cleared: clampCircuitCleared(record.cleared), best };
+}
+
+export function writeTimeAttackProgress(progress: TimeAttackProgress): void {
+  writeRaw(CIRCUIT_KEY, JSON.stringify({ cleared: clampCircuitCleared(progress.cleared), best: progress.best }));
+}
+
+/**
+ * Fold one finished run into a progress record and return the result. Pure: the caller decides
+ * whether to write it.
+ *
+ * A best time is the SMALLEST one, which is the only place this differs from the rush's record
+ * of best scores. `cleared` only ever moves forward, and only to `level + 1`; the simulation has
+ * already made that decision (`src/sim/timeAttack.ts` raises `timeAttackLevelUp`), so this takes
+ * the caller's word for it via `advanced` and merely refuses to let it move backwards.
+ */
+export function recordTimeAttackRun(
+  progress: TimeAttackProgress,
+  level: number,
+  time: number,
+  advanced: boolean,
+): TimeAttackProgress {
+  const best = progress.best.slice();
+  if (level >= 0 && level < best.length && time > 0 && (best[level] < 0 || time < best[level])) best[level] = time;
+  const cleared = advanced ? Math.max(progress.cleared, clampCircuitCleared(level + 1)) : progress.cleared;
   return { cleared, best };
 }
 

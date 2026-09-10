@@ -1430,14 +1430,67 @@ body {
   white-space: nowrap;
 }
 
-/* A near miss is not a kill: same column, cyan instead of acid, so the two read apart. */
-.rb-reward--near {
-  top: 24px;
+/* A near miss is not a kill, and it is not a flyby either. The car it was scored on is gone by
+   the time a number over it could be read, so the pay is written on the glass - and it is
+   written WHERE THE PLAYER IS ALREADY LOOKING, just above the roof of their own car, which is
+   the one place on screen their eyes never leave at speed. Anything in a corner goes unread:
+   the reward has to land in the same glance as the pass that earned it.
+
+   It holds for two seconds instead of drifting, and a run of passes counts up in place (x3)
+   rather than throwing three numbers past each other. The running total stays in the money
+   column top-right; this is the hit, not the record. */
+.rb-nearmiss {
+  position: absolute;
+  /* Full width and centred, so the punch below can scale about the screen's centre line
+     without a translate of its own to preserve. */
+  left: 0;
+  right: 0;
+  /* Just clear of the car's roof in the chase view, and well under the aim meter above it. */
+  top: 52%;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms ease-out;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+
+.rb-nearmiss.is-on {
+  opacity: 1;
+}
+
+.rb-nearmiss__label {
   font-family: var(--rb-mono);
-  font-size: 12px;
-  letter-spacing: 0.14em;
+  font-size: 13px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
   color: var(--rb-cyan);
-  text-shadow: 0 0 12px rgba(79, 243, 255, 0.55);
+  /* Dark casing before the glow: this sits over neon signs and headlights, not over a panel. */
+  text-shadow:
+    0 1px 3px rgba(4, 8, 16, 0.95),
+    0 0 14px rgba(79, 243, 255, 0.55);
+}
+
+/* Only there from the second pass of a run on, so it reads as "this is still going". */
+.rb-nearmiss__chain:not(:empty) {
+  margin-left: 9px;
+  color: var(--rb-cyan-hot);
+}
+
+.rb-nearmiss__value {
+  font-family: var(--rb-display);
+  font-size: 34px;
+  font-weight: 700;
+  font-stretch: condensed;
+  letter-spacing: 0.02em;
+  color: var(--rb-cyan-hot);
+  text-shadow:
+    0 2px 4px rgba(4, 8, 16, 0.95),
+    0 0 22px rgba(79, 243, 255, 0.7);
 }
 
 /* ------------------------------------------------ centre: the aim/charge meter */
@@ -2354,6 +2407,14 @@ body {
   .rb-money__value {
     font-size: 26px;
   }
+
+  .rb-nearmiss__value {
+    font-size: 26px;
+  }
+
+  .rb-nearmiss__label {
+    font-size: 11px;
+  }
 }
 
 /* ------------------------------------------------------- debug overlay */
@@ -2583,6 +2644,72 @@ body {
   text-shadow: 0 0 10px rgba(79, 243, 255, 0.45);
 }
 
+/* ------------------------------------------------- circuit mission (time attack) */
+
+/*
+ * Under the race readout, and shaped like it: the same panel, the same notch, one step down.
+ * Off by default — it is only ever up on the solo circuit, and the versus race on the same
+ * course must not grow a private mission.
+ */
+.rb-mission {
+  position: absolute;
+  top: 152px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 16px 6px;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-hairline);
+  clip-path: var(--rb-notch);
+  --rb-n: 9px;
+  white-space: nowrap;
+}
+
+.rb-hud.is-race .rb-mission.is-on {
+  display: flex;
+}
+
+.rb-mission__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 8px;
+  letter-spacing: 0.24em;
+  color: var(--rb-dim);
+}
+
+.rb-mission__name {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--rb-yellow);
+}
+
+.rb-mission__rules {
+  display: flex;
+  gap: 12px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--rb-cyan);
+}
+
+.rb-mission__crashes {
+  color: var(--rb-dim);
+}
+
+/* Allowance spent: the run can still be driven out, it just cannot pass any more. */
+.rb-mission.is-failed .rb-mission__crashes {
+  color: var(--rb-violet-hot);
+}
+
+.rb-mission.is-failed .rb-mission__name {
+  color: var(--rb-violet-hot);
+  opacity: 0.8;
+}
+
 .rb-countdown {
   position: absolute;
   top: 40%;
@@ -2680,6 +2807,35 @@ body {
 .rb-results__meta {
   font-size: 9px;
   letter-spacing: 0.2em;
+  color: var(--rb-dim);
+}
+
+/* The mission's verdict on the finish card, between the time and the lap meta. */
+.rb-results__verdict {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  color: var(--rb-yellow);
+}
+
+.rb-results__verdict:empty,
+.rb-results__mission:empty {
+  display: none;
+}
+
+.rb-results.is-cleared .rb-results__verdict {
+  color: var(--rb-cyan-hot);
+  text-shadow: 0 0 12px rgba(79, 243, 255, 0.45);
+}
+
+.rb-results.is-failed .rb-results__verdict {
+  color: var(--rb-violet-hot);
+  text-shadow: 0 0 12px rgba(255, 61, 240, 0.4);
+}
+
+.rb-results__mission {
+  font-size: 9px;
+  letter-spacing: 0.16em;
   color: var(--rb-dim);
 }
 
@@ -2920,6 +3076,7 @@ body.rb-rotated .rb-touch {
 body.rb-touch-pad .rb-controls,
 body.rb-touch-pad .rb-keys,
 body.rb-touch-pad .rb-money,
+body.rb-touch-pad .rb-nearmiss,
 body.rb-touch-pad .rb-cluster {
   display: none;
 }
@@ -3047,6 +3204,11 @@ body.rb-touch-pad .rb-minimap {
 }
 
 /* ----------------------------------------------------------------- the prompt */
+
+/* SHARED. `src/ui/gateOverlay.ts` builds the circuit missions' sign out of these same classes
+   under a `.rb-gate` layer, deliberately: yellow is the system talking to the player and there
+   is only one system, so what tells two signs apart is what they say and where they stand, not
+   how they are dressed. Anything added here is added to both. */
 
 /* Sized off one number. A card built out of a dozen loose px values is a card that drifts apart
    the next time it is asked to move — so the type inside it is in `em` against this root size and

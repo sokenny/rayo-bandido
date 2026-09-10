@@ -11,6 +11,7 @@ import {
   rushLevelCount,
   rushLevelIndex,
   rushSiteFor,
+  rangeBonusFor,
   rushTargetScore,
   setRushProgress,
   startRush,
@@ -19,7 +20,7 @@ import {
 } from '../src/sim/rush';
 import { createVehicleState, createDriftState } from '../src/sim/gameState';
 import { createPlayerCommand } from '../src/core/input/keyboard';
-import { RUSH } from '../src/config/tuning';
+import { LIGHTNING, RUSH } from '../src/config/tuning';
 import { createCityWorld } from '../src/world/cityWorld';
 import type { ActivitySite, DriftState, GameEvent, PlayerCommand, TargetState, VehicleState } from '../src/core/types';
 
@@ -67,12 +68,15 @@ function rig(targetCount = 8, cleared = 0) {
   for (let i = 0; i < targetCount; i++) targets.push(makeTarget(i, i * 4, -10));
   let events: GameEvent[] = [];
 
-  /** One tick. `kills` are target ids destroyed by the lightning on this very tick. */
-  function tick(kills: number[] = [], ranked = true): GameEvent[] {
+  /**
+   * One tick. `kills` are target ids destroyed by the lightning on this very tick, all of them
+   * shot from `distance` metres away — 0, a point-blank shot, unless a test is about the reach.
+   */
+  function tick(kills: number[] = [], ranked = true, distance = 0): GameEvent[] {
     events = [];
     for (const id of kills) {
       targets[id].status = 'destroyed';
-      events.push({ type: 'targetDestroyed', targetId: id, x: targets[id].x, y: 0, z: targets[id].z, reward: 0 });
+      events.push({ type: 'targetDestroyed', targetId: id, x: targets[id].x, y: 0, z: targets[id].z, reward: 0, distance });
     }
     stepRush(rush, SITE, vehicle, drift, cmd, targets, ranked, DT, events);
     cmd.activate = false;
@@ -296,6 +300,37 @@ describe('rayo rush: scoring', () => {
     expect(styleBonusFor(4, false)).toBeLessThan(styleBonusFor(4, true));
   });
 
+  it('pays more for a long shot than a close one, ramped by the distance', () => {
+    const close = rig();
+    close.begin();
+    const closeEvents = close.tick([0], true, 4);
+    const closeScore = closeEvents.find((e) => e.type === 'rushScore') as
+      | { points: number; rangeBonus: number; shotDistance: number }
+      | undefined;
+    // Point blank pays the bare kill: there is no bonus to be had for driving into a bumper.
+    expect(closeScore?.rangeBonus).toBe(0);
+    expect(closeScore?.points).toBe(RUSH.scoring.disable);
+    expect(closeScore?.shotDistance).toBe(4);
+
+    const far = rig();
+    far.begin();
+    const farEvents = far.tick([0], true, LIGHTNING.range);
+    const farScore = farEvents.find((e) => e.type === 'rushScore') as
+      | { points: number; rangeBonus: number }
+      | undefined;
+    expect(farScore?.rangeBonus).toBe(RUSH.scoring.longShotBonus);
+    expect(farScore?.points).toBe(RUSH.scoring.disable + RUSH.scoring.longShotBonus);
+    // And it counts as style, so the results card accounts for it.
+    expect(far.rush.styleBonus).toBe(RUSH.scoring.longShotBonus);
+
+    // The ramp: nothing at the threshold, half way at half way, capped at the weapon's reach.
+    const mid = (RUSH.scoring.longShotFrom + LIGHTNING.range) / 2;
+    expect(rangeBonusFor(RUSH.scoring.longShotFrom)).toBe(0);
+    expect(rangeBonusFor(mid)).toBe(Math.round(RUSH.scoring.longShotBonus / 2));
+    expect(rangeBonusFor(LIGHTNING.range + 40)).toBe(RUSH.scoring.longShotBonus);
+    expect(rangeBonusFor(mid)).toBeGreaterThan(rangeBonusFor(mid - 10));
+  });
+
   it('drops the drift credit once the grace has run out', () => {
     const r = rig();
     r.begin();
@@ -403,6 +438,28 @@ describe('rayo rush: the clock', () => {
     expect(r.rush.results).toBeNull();
     // A second dismissal is not an event.
     expect(dismissRush(r.rush, events)).toBe(false);
+  });
+
+  it('puts the card away on its own when nobody presses the key', () => {
+    const r = rig();
+    r.begin();
+    r.rush.timeLeft = DT;
+    r.tick();
+    expect(r.rush.phase).toBe('results');
+    expect(r.rush.resultsHold).toBeCloseTo(RUSH.resultsHoldSeconds, 5);
+
+    // A second short of the hold the card is still the player's to read.
+    r.idle(RUSH.resultsHoldSeconds - 1);
+    expect(r.rush.phase).toBe('results');
+
+    let dismissed = false;
+    for (let i = 0; i < Math.round(2 / DT); i++) {
+      if (r.tick().some((e) => e.type === 'rushDismissed')) dismissed = true;
+    }
+    expect(dismissed).toBe(true);
+    expect(r.rush.phase).toBe('idle');
+    expect(r.rush.results).toBeNull();
+    expect(r.rush.resultsHold).toBe(0);
   });
 });
 

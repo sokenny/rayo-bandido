@@ -14,7 +14,7 @@ import {
 import { createLightningArc, BOLT_FROM_Y, BOLT_TO_Y } from './lightningArc';
 import { createSparkFx } from './sparks';
 import { createShockRings } from './explosion';
-import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS, POPUP_RUSH } from './scorePopup';
+import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
 
 /**
  * Pooled visual effects. Everything here is pre-allocated at creation; nothing allocates
@@ -29,8 +29,8 @@ import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS, POPUP_RUSH } from './sc
  *   the bang from the audio layer (both are driven by the same trigger in `game.ts`).
  * - `explosion(x, z)` on `targetDestroyed`: stylized burst (sparks, flash, short-lived debris).
  * - `scorePopup(x, z, amount)` on `targetDestroyed`: a floating "+X" over the wreck.
- * - `nearMissPopup(x, z, amount)` on `nearMiss`: the same pop in cyan, captioned, over the car
- *   that was just shaved. Shares the one popup pool with kills.
+ *   A near miss has no world pop: it is paid on the HUD, because the car it was scored on is
+ *   already behind the camera by the time a number over it could be read.
  * - `collision(x, z, impact)` on collisions: a few sparks.
  * - `reset()` on restart: hide every live effect.
  *
@@ -38,9 +38,8 @@ import { createScorePopups, POPUP_KILL, POPUP_NEAR_MISS, POPUP_RUSH } from './sc
  * - 10 draw calls when absolutely everything is on screen at once, fewer when idle
  *   (each pool hides itself when empty): tire smoke, skid marks, nitro flames, nitro trail,
  *   bolt core, bolt glow, bolt branches, shock rings, sparks, flashes; plus one per live
- *   score popup (5 slots, all hidden when nothing was scored recently). Kills and near misses
- *   share that one pool, so a flurry of passes can evict the oldest pop early - deliberate,
- *   since five numbers alive at once is already past what anyone reads at speed.
+ *   score popup (5 slots, all hidden when nothing was scored recently). Only kills spend that
+ *   pool now, so five wrecks in a row is the worst it ever sees.
  * - ~2.6k triangles worst case (points are two triangles each).
  * - No allocation in `setCarPose`, `update` or any of the event entry points.
  */
@@ -63,11 +62,6 @@ export interface EffectsSystem {
   backfire(strength: number): void;
   /** Floating acid-green "+X" reward number over a kill. */
   scorePopup(x: number, y: number, z: number, amount: number): void;
-  /**
-   * Floating cyan "NEAR MISS +X" over the car that was just shaved. Fired at the closest
-   * approach, while that car is still alongside and on screen.
-   */
-  nearMissPopup(x: number, y: number, z: number, amount: number): void;
   /**
    * Floating yellow "EV DISABLED +X" over a wreck during a RAYO RUSH run. Replaces the ¥ pop
    * for that kill rather than joining it: two numbers over one wreck is one too many.
@@ -233,10 +227,6 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
     scorePopup(x, y, z, amount) {
       popups.spawn(x, y, z, amount, POPUP_KILL);
-    },
-
-    nearMissPopup(x, y, z, amount) {
-      popups.spawn(x, y, z, amount, POPUP_NEAR_MISS);
     },
 
     rushPopup(x, y, z, amount) {

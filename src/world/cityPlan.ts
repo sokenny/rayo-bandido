@@ -336,6 +336,15 @@ export interface CityPlan {
    * two hidden — a marker the player can see but cannot use is worse than no marker.
    */
   rushMarkers?: Array<{ x: number; z: number; y: number; heading: number; label?: string }> | null;
+  /**
+   * Where the circuit missions are entered from the street, when this world carries the door
+   * (`src/sim/circuitGate.ts`). The same point `ArenaLayout.circuitSite` gives the rules, so
+   * the ring that is painted and the ring that answers the key are one spot by construction.
+   *
+   * Null in the circuit itself, which is what stops the race being run past an invitation to
+   * start the race.
+   */
+  circuitMarker?: { x: number; z: number; y: number; heading: number; label?: string } | null;
   /** Race dressing: the line and the checkpoint arches. */
   startLine: TrackLineDef | null;
   checkpoints: TrackLineDef[];

@@ -16,7 +16,7 @@ import {
   popupRise,
   popupScale,
   POPUP_KILL,
-  POPUP_NEAR_MISS,
+  POPUP_RUSH,
 } from '../src/render/fx/scorePopup';
 import { createNitroExhaust } from '../src/render/fx/nitroExhaust';
 import { speedBlurStrength } from '../src/render/post/speedBlur';
@@ -272,12 +272,13 @@ describe('score popups', () => {
     expect(popupRise(1)).toBeGreaterThan(1);
   });
 
-  it('keeps a kill and a near miss visually unmistakable', () => {
-    // A kill is a bare acid number; a pass is cyan and captioned. Sharing the pool is fine,
-    // sharing a look is not.
+  it('keeps a kill and a rush score visually unmistakable', () => {
+    // A kill is a bare acid number; a run's points are yellow and captioned. Sharing the pool
+    // is fine, sharing a look is not. A near miss has no world pop at all - it is paid on the
+    // HUD, because the car it was scored on is behind the camera by then.
     expect(POPUP_KILL.caption).toBeUndefined();
-    expect(POPUP_NEAR_MISS.caption).toBe('NEAR MISS');
-    expect(POPUP_NEAR_MISS.accent).not.toBe(POPUP_KILL.accent);
+    expect(POPUP_RUSH.caption).toBe('EV DISABLED');
+    expect(POPUP_RUSH.accent).not.toBe(POPUP_KILL.accent);
   });
 
   it('turns a style accent into an rgb triplet for its glow', () => {
