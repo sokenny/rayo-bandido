@@ -1,5 +1,5 @@
 import type { ActivityMarkKind, MinimapData, RaceCourse, RivalCar, TargetState } from '../core/types';
-import { MINIMAP } from '../config/tuning';
+import { MINIMAP, STREET_RACE } from '../config/tuning';
 import { slotCss } from '../core/playerColors';
 
 /**
@@ -180,6 +180,10 @@ function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr
     drawCircuitMark(ctx, cx, cz, dpr);
     return;
   }
+  if (kind === 'street') {
+    drawStreetMark(ctx, cx, cz, dpr);
+    return;
+  }
   if (kind !== 'rush') {
     drawPassengerMark(ctx, cx, cz, dpr, kind);
     return;
@@ -257,6 +261,42 @@ function drawCircuitMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, 
   ctx.lineWidth = 1 * dpr;
   ctx.strokeRect(0, -cell, cell, cell);
   ctx.strokeRect(-cell, 0, cell, cell);
+
+  ctx.restore();
+}
+
+/**
+ * A STREET RACE meetup on the map: a ring in the series' own amber (`STREET_RACE.icon`) with
+ * two car silhouettes nose to nose inside it — the same duel the world marker hangs, at ten
+ * pixels. Fixed pixel size, same reason as the RUSH mark.
+ */
+function drawStreetMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+  const r = 6.2 * dpr;
+  const AMBER = STREET_RACE.icon.mapColour;
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = AMBER;
+  ctx.shadowColor = AMBER;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Two cars in profile, one above the other, facing each other: a bar and a cabin each.
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = AMBER;
+  ctx.fillRect(-3.6 * dpr, -2.9 * dpr, 4.6 * dpr, 1.5 * dpr);
+  ctx.fillRect(-2.6 * dpr, -3.9 * dpr, 2 * dpr, 1 * dpr);
+  ctx.fillRect(-1 * dpr, 1.4 * dpr, 4.6 * dpr, 1.5 * dpr);
+  ctx.fillRect(0.6 * dpr, 0.4 * dpr, 2 * dpr, 1 * dpr);
 
   ctx.restore();
 }

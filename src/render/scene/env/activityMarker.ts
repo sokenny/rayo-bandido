@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PAL } from './palette';
 import { mergeParts, part } from '../vehicles/geometryKit';
-import { RUSH, TIME_ATTACK } from '../../../config/tuning';
+import { RUSH, STREET_RACE, TIME_ATTACK } from '../../../config/tuning';
 
 /**
  * ACTIVITY MARKERS: what somewhere-to-go looks like from the driver's seat.
@@ -64,7 +64,7 @@ export interface ActivityMarkerSpec {
   glyphCap: number;
   glyphSide: number;
   /** Which glyph turns inside the halo. */
-  glyph: 'bolt' | 'flag';
+  glyph: 'bolt' | 'flag' | 'duel';
 }
 
 /**
@@ -95,6 +95,22 @@ export const CIRCUIT_MARKER: ActivityMarkerSpec = {
   glyphCap: 0xf4f8ff,
   glyphSide: 0x2a0a2c,
   glyph: 'flag',
+};
+
+/**
+ * STREET RACE: two cars nose to nose, in an amber none of the other rings use. Not a stopwatch
+ * (that is TIME ATTACK's) and not a flag alone (that is the circuit's): the thing on offer here
+ * is a rival, so the glyph is the two cars. Every word of the marker comes from the tuning, so
+ * the mission can be renamed or recoloured in one place (`STREET_RACE.icon`).
+ */
+export const STREET_MARKER: ActivityMarkerSpec = {
+  name: 'street-marker',
+  caption: STREET_RACE.icon.caption,
+  radius: STREET_RACE.marker.promptRadius,
+  tint: STREET_RACE.icon.tint,
+  glyphCap: 0xfff1dc,
+  glyphSide: 0x3a1806,
+  glyph: STREET_RACE.icon.glyph,
 };
 
 export interface ActivityMarkerVisual {
@@ -301,6 +317,44 @@ function buildFlag(cap: number, side: number): THREE.BufferGeometry {
 }
 
 /**
+ * THE DUEL: two car silhouettes in profile, nose to nose, one bright and one deep so they read
+ * as two even when the turn brings them edge on. Boxes, like the flag: a body, a cabin and two
+ * wheels each, merged into one geometry.
+ */
+const DUEL_BODY_LEN = 2.5;
+const DUEL_BODY_H = 0.62;
+const DUEL_CABIN_LEN = 1.25;
+const DUEL_CABIN_H = 0.5;
+const DUEL_DEPTH = 0.7;
+const DUEL_WHEEL = 0.42;
+const DUEL_GAP = 0.35;
+
+function buildCar(cap: number, side: number, flip: number, lift: number): THREE.BufferGeometry[] {
+  const parts: THREE.BufferGeometry[] = [];
+  const body = new THREE.BoxGeometry(DUEL_BODY_LEN, DUEL_BODY_H, DUEL_DEPTH);
+  body.translate(0, lift + DUEL_WHEEL * 0.5 + DUEL_BODY_H * 0.5, 0);
+  parts.push(part(body, cap));
+  const cabin = new THREE.BoxGeometry(DUEL_CABIN_LEN, DUEL_CABIN_H, DUEL_DEPTH * 0.82);
+  // The cabin sits back from the nose, which is what says which way the car faces.
+  cabin.translate(-0.25 * flip, lift + DUEL_WHEEL * 0.5 + DUEL_BODY_H + DUEL_CABIN_H * 0.5, 0);
+  parts.push(part(cabin, side));
+  for (const wx of [-0.78, 0.78]) {
+    const wheel = new THREE.BoxGeometry(DUEL_WHEEL, DUEL_WHEEL, DUEL_DEPTH * 1.1);
+    wheel.translate(wx, lift + DUEL_WHEEL * 0.5, 0);
+    parts.push(part(wheel, side));
+  }
+  // Nose to nose: the whole car is pushed to its side of the gap.
+  const dx = (DUEL_BODY_LEN * 0.5 + DUEL_GAP * 0.5) * -flip;
+  for (const p of parts) p.translate(dx, 0, 0);
+  return parts;
+}
+
+function buildDuel(cap: number, side: number): THREE.BufferGeometry {
+  const parts = [...buildCar(cap, side, 1, -0.9), ...buildCar(side, cap, -1, -0.3)];
+  return mergeParts(parts);
+}
+
+/**
  * The halo around the bolt: four arcs of a torus with gaps between them, the city's own signage
  * idiom, merged into one geometry so the whole ring is a single draw. Named apart from the paint
  * ring on the road, which is a different thing at a different height.
@@ -448,7 +502,12 @@ export function createActivityMarker(
   glyph.position.y = GLYPH_Y;
   group.add(glyph);
 
-  const glyphGeo = spec.glyph === 'flag' ? buildFlag(spec.glyphCap, spec.glyphSide) : buildBolt(spec.glyphCap, spec.glyphSide);
+  const glyphGeo =
+    spec.glyph === 'flag'
+      ? buildFlag(spec.glyphCap, spec.glyphSide)
+      : spec.glyph === 'duel'
+        ? buildDuel(spec.glyphCap, spec.glyphSide)
+        : buildBolt(spec.glyphCap, spec.glyphSide);
   const glyphMat = new THREE.MeshBasicMaterial({
     vertexColors: true,
     transparent: true,

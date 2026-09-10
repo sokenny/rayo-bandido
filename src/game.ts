@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { addCircuitGate } from './world/cityCircuitGate';
+import { addStreetSites } from './world/cityStreetSites';
+import { createStreetWorld } from './world/streetWorld';
 import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
@@ -17,11 +19,13 @@ import type {
   PassengerStop,
   PlayerCommand,
   CircuitGateHudSnapshot,
+  StreetGateHudSnapshot,
+  StreetRaceHudSnapshot,
   RaceHudSnapshot,
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -62,6 +66,19 @@ import {
   timeAttackLevelIndex,
 } from './sim/timeAttack';
 import { canEnterCircuit } from './sim/circuitGate';
+import { canEnterStreetRace, streetEventOpen, streetNewestEvent } from './sim/streetGate';
+import {
+  createStreetRaceState,
+  interpolateStreetRivals,
+  rankingProgress,
+  resetStreetRace,
+  snapStreetRivals,
+  stepStreetRace,
+  streetEvent,
+  streetPosition,
+  type StreetRaceState,
+} from './sim/streetRace';
+import { readStreetRaceProgress, recordStreetRace, writeStreetRaceProgress } from './core/progress';
 import { activitySuppressed, engagedActivity, type ActivityKind } from './sim/activities';
 import { canAffordShot } from './sim/lightning';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
@@ -142,6 +159,8 @@ export interface GameOptions {
    * an address is. Omitted in worlds without the door, where it can never fire.
    */
   onEnterCircuit?: () => void;
+  /** Take the player to a STREET RACE event. Raised by the rings in the open world. */
+  onEnterStreetRace?: (event: number) => void;
 }
 
 /** Metres past the last gate a multiplayer respawn puts the car (see `rescue`). */
@@ -183,11 +202,14 @@ export function createGame(
       ? createRaceWorld(options.net?.match?.raceId)
       : mode === 'circuit'
         ? createCircuitWorld(options.net?.match?.raceId)
+        : mode === 'street'
+          ? // The Street Race's own instance of the city (`src/world/streetWorld.ts`).
+            createStreetWorld()
         : mode === 'city'
           ? // The open world, with a way onto the circuit painted on its start line. A layer over
             // the city rather than a part of it (`src/world/cityCircuitGate.ts`), for the same
             // reason the circuit itself is one: the city does not know the race exists.
-            addCircuitGate(createCityWorld())
+            addStreetSites(addCircuitGate(createCityWorld()))
           : createArenaWorld();
   const layout = world.layout;
 
@@ -229,14 +251,25 @@ export function createGame(
    */
   const hasTimeAttack = mode === 'circuit' && !net;
   let timeAttackProgress = hasTimeAttack ? readTimeAttackProgress() : null;
+  /**
+   * STREET RACE (`src/sim/streetRace.ts`): the solo race against rivals, in its own world, and
+   * the series' record — read here too by the city, whose rings have to know which events are
+   * open. Read once; the race that changes it is on the other side of a page load.
+   */
+  const hasStreetRace = mode === 'street' && !net;
+  let streetProgress = hasStreetRace || mode === 'city' ? readStreetRaceProgress() : null;
   const state = createInitialGameState(layout, readTransmission(), {
     timeAttack: hasTimeAttack,
     timeAttackCleared: timeAttackProgress?.cleared ?? 0,
+    streetRaceCleared: streetProgress?.cleared ?? 0,
     // THE POLICE (`src/sim/police.ts`): Free Roam only, which is the open world and nothing
     // else. Whether they may act on any given tick is the sim's question; whether they exist
     // at all is this one.
     police: mode === 'city',
   });
+  // The field: built from the grid, clamped to the events this browser has unlocked.
+  const streetRace: StreetRaceState | null =
+    hasStreetRace && layout.race ? createStreetRaceState(layout.race, Number(params.get('event') ?? 0), streetProgress?.cleared ?? 0) : null;
   const command: PlayerCommand = createPlayerCommand();
   // On a phone the picture is turned sideways for as long as this game lives, so the renderer
   // below is sized for the landscape layer rather than for the portrait window.
@@ -298,7 +331,9 @@ export function createGame(
    * array and its CONTENTS change when the city's roster does, so the visuals are kept by
    * player id and re-aligned with it by `syncRivalVisuals` on every roster event.
    */
-  const rivals = net ? net.rivals : [];
+  // In a Street Race the rivals are local (`streetRace.cars`), and everything below that reads
+  // `rivals` — visuals, tags, map, standings, collision — treats them exactly as it treats a room's.
+  const rivals = net ? net.rivals : streetRace ? streetRace.cars : [];
   const rivalPool = new Map<string, RivalCarVisual>();
   /** The same visuals in `rivals` order, so the render loop can walk the two together. */
   let rivalVisuals: RivalCarVisual[] = [];
@@ -463,6 +498,9 @@ export function createGame(
   const circuitSite: ActivitySite | null = layout.circuitSite ?? null;
   const hasCircuitGate = !!(circuitSite && state.circuitGate);
   const circuitProgress = hasCircuitGate ? readTimeAttackProgress() : null;
+  /** The Street Race rings, in the world that carries them (the open city). */
+  const streetSites: ActivitySite[] | null = layout.streetSites ?? null;
+  const hasStreetGate = !!(streetSites && streetSites.length > 0 && state.streetGate);
   const buhoFigure = hasBuho && buhoSite ? createBuhoFigure(buhoSite) : null;
   if (buhoFigure) scene.add(buhoFigure.group);
   const moogul = hasBuho
@@ -479,7 +517,7 @@ export function createGame(
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
     onActivate:
-      hasRush || hasPassengers || hasBuho || hasCircuitGate
+      hasRush || hasPassengers || hasBuho || hasCircuitGate || hasStreetGate
         ? () => {
             activateQueued = true;
           }
@@ -488,6 +526,7 @@ export function createGame(
     passengers: hasPassengers,
     buho: hasBuho,
     circuitGate: hasCircuitGate,
+    streetGate: hasStreetGate,
     police: !!state.police,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
@@ -496,7 +535,7 @@ export function createGame(
   const debug = createDebugOverlay(debugRoot, params.has('debug'), { precise: () => sampleProbe(true) });
   // Live classification and floating names, only when there is a field to classify.
   const lapLength = layout.race ? layout.race.path.length : 0;
-  const standings: Standings | null = match ? createStandings(hudRoot, lapLength, rivals.length + 1) : null;
+  const standings: Standings | null = match || streetRace ? createStandings(hudRoot, lapLength, rivals.length + 1) : null;
   // In a race the field is fixed, so tags are only worth making when there is one. In the city
   // somebody can drive up at any moment, so the layer exists from the start and fills in.
   const nameTags: NameTags | null = roaming || rivals.length > 0 ? createNameTags(hudRoot, rivals) : null;
@@ -542,6 +581,11 @@ export function createGame(
     }
     if (!activitySuppressed(engaged, 'circuit') && circuitSite) {
       mapMarks.push({ x: circuitSite.x, z: circuitSite.z, kind: 'circuit' });
+    }
+    // Every open Street Race ring: won events stay on the map, the newest one with them.
+    if (!activitySuppressed(engaged, 'street') && streetSites && state.streetGate) {
+      const open = streetNewestEvent(state.streetGate.cleared);
+      for (let i = 0; i <= open && i < streetSites.length; i++) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street' });
     }
     const p = state.passenger;
     if (p && p.trip && passengerStops && !activitySuppressed(engaged, 'passenger')) {
@@ -688,6 +732,8 @@ export function createGame(
     passenger: null,
     buho: null,
     circuitGate: null,
+    streetGate: null,
+    streetRace: null,
     police: null,
   };
   const buhoSnapshot: BuhoHudSnapshot = {
@@ -804,6 +850,38 @@ export function createGame(
     placeLabel: circuitSite?.label ?? '',
   };
   if (state.circuitGate) snapshot.circuitGate = circuitGateSnapshot;
+  const streetRaceSnapshot: StreetRaceHudSnapshot = {
+    event: 0,
+    eventCount: STREET_RACE.events.length,
+    eventName: '',
+    difficulty: '',
+    position: 1,
+    field: 1,
+    shortcut: -1,
+    results: null,
+  };
+  if (streetRace) {
+    const spec = streetEvent(streetRace.event);
+    streetRaceSnapshot.event = streetRace.event;
+    streetRaceSnapshot.eventName = spec.name;
+    streetRaceSnapshot.difficulty = spec.difficulty;
+    streetRaceSnapshot.field = streetRace.rivals.length + 1;
+    snapshot.streetRace = streetRaceSnapshot;
+  }
+  const streetGateSnapshot: StreetGateHudSnapshot = {
+    offering: false,
+    event: 0,
+    eventCount: STREET_RACE.events.length,
+    eventName: '',
+    difficulty: '',
+    blurb: '',
+    rivals: 1,
+    completed: false,
+    placeLabel: '',
+  };
+  /** Which event the sign was last written for, so its text is rewritten only when that changes. */
+  let streetGateShown = -1;
+  if (state.streetGate) snapshot.streetGate = streetGateSnapshot;
   const policeSnapshot: PoliceHudSnapshot = {
     heat01: 0,
     stars: 0,
@@ -915,7 +993,12 @@ export function createGame(
   /** Scratch list for `trafficSync.apply`; reused so a report never allocates. */
   const newlyDestroyed: number[] = [];
   /** What `stepGame` needs to know about the match. One object, never reallocated. */
-  const stepOptions: StepOptions = { rivals: net ? net.rivals : null, respawnTraffic: !net || ownsTraffic(), cruising: false, policeShoveTraffic: !net };
+  const stepOptions: StepOptions = {
+    rivals: net ? net.rivals : streetRace ? streetRace.cars : null,
+    respawnTraffic: !net || ownsTraffic(),
+    cruising: false,
+    policeShoveTraffic: !net,
+  };
   /**
    * How long a non-host keeps its own kill after the host's reports stop agreeing with it.
    * A round trip plus a couple of traffic intervals covers any connection worth racing on.
@@ -1000,10 +1083,10 @@ export function createGame(
    */
   const standingsRows: StandingsRow[] = [];
   const standingsOrder: StandingsRow[] = [];
-  if (match) {
+  if (match || streetRace) {
     standingsRows.push({
       name: net?.self?.name ?? 'YOU',
-      slot: match.slot,
+      slot: match ? match.slot : 0,
       progress: 0,
       gap: 0,
       self: true,
@@ -1029,7 +1112,9 @@ export function createGame(
     if (standingsRows.length === 0) return;
     const race = state.race;
     const mine = standingsRows[0];
-    mine.progress = race ? race.progress : 0;
+    // Against local rivals the row is ranked the way they are (`rankingProgress`): a car still
+    // behind the line on lap 1 must not read as nearly a lap ahead of one that has crossed it.
+    mine.progress = race ? (streetRace ? rankingProgress(race) : race.progress) : 0;
     mine.finished = !!race && race.phase === 'finished';
     mine.finishTime = race ? race.finishTime : -1;
     for (let i = 0; i < rivals.length; i++) {
@@ -1195,6 +1280,18 @@ export function createGame(
       case 'policeBusted':
         chase.shake(CAMERA.shakeLightning);
         break;
+      case 'streetRaceEnter':
+        // The key on a Street Race ring: which event is the caller's to load (`src/main.ts`).
+        options.onEnterStreetRace?.(ev.event);
+        break;
+      case 'streetRaceEnd':
+        // The reward was paid by the rules; this is only the record. `advanced` says whether the
+        // series moved on, and a lost or replayed race leaves it where it was.
+        if (streetProgress) {
+          streetProgress = recordStreetRace(streetProgress, ev.results.event, ev.results.placement, ev.results.advanced);
+          writeStreetRaceProgress(streetProgress);
+        }
+        break;
       case 'circuitEnter':
         // The key on the start line. The rules are done — this world is over — and where the
         // player goes next is the caller's to decide (`src/main.ts`), because it is the only
@@ -1307,10 +1404,18 @@ export function createGame(
       else cruiseControl.step(state.vehicle, command, dt);
     }
     stepOptions.cruising = cruising;
+    // The rivals' public records back on their tick poses, so the player's collision pass sees
+    // where they are and not where the last frame drew them.
+    if (streetRace) snapStreetRivals(streetRace);
     stepGame(state, command, layout, dt, stepOptions);
     // One tick's worth: the rescue that set it has been seen.
     stepOptions.respawned = false;
     simTime = state.time;
+    // The field, after the player: rivals drive, collide and are judged on this same tick.
+    if (streetRace && layout.race) {
+      if (command.restart) resetStreetRace(streetRace, layout.race);
+      else stepStreetRace(streetRace, layout, state, dt, state.events);
+    }
     const events = state.events;
     for (let i = 0; i < events.length; i++) handleEvent(events[i]);
 
@@ -1378,6 +1483,7 @@ export function createGame(
     // here they are not blended by `alpha` — they are re-placed for this very frame instead,
     // which is what keeps them moving every frame on a display faster than the simulation.
     if (net) net.interpolateRivals(frameDt);
+    if (streetRace) interpolateStreetRivals(streetRace, alpha, frameDt);
     for (let i = 0; i < rivalVisuals.length; i++) {
       rivalVisuals[i].sync(rivals[i]);
       rivalVisuals[i].update(frameDt, simTime);
@@ -1544,6 +1650,40 @@ export function createGame(
         marker.setHidden(activitySuppressed(engaged, 'circuit'));
       }
     }
+
+    /* ------------------------------------------------- the street race rings */
+
+    const sgate = state.streetGate;
+    if (sgate && streetSites) {
+      streetGateSnapshot.offering = canEnterStreetRace(sgate);
+      const shown = sgate.atSite >= 0 ? sgate.atSite : streetNewestEvent(sgate.cleared);
+      if (shown !== streetGateShown) {
+        streetGateShown = shown;
+        const spec = streetEvent(shown);
+        streetGateSnapshot.event = shown;
+        streetGateSnapshot.eventName = spec.name;
+        streetGateSnapshot.difficulty = spec.difficulty;
+        streetGateSnapshot.blurb = spec.blurb;
+        streetGateSnapshot.rivals = spec.rivals;
+        streetGateSnapshot.completed = shown < sgate.cleared;
+        streetGateSnapshot.placeLabel = streetSites[shown]?.label ?? '';
+      }
+      const markers = environment.streetMarkers;
+      const newest = streetNewestEvent(sgate.cleared);
+      for (let i = 0; i < markers.length; i++) {
+        const site = streetSites[i];
+        if (!site) continue;
+        const marker = markers[i];
+        const dx = pose.x - site.x;
+        const dz = pose.z - site.z;
+        const reach = STREET_RACE.marker.promptRadius * 3;
+        const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
+        marker.setProximity(near * near);
+        // Won events stay open but go quiet; the newest one is the loud one.
+        marker.setRunning(i < newest);
+        marker.setHidden(!streetEventOpen(sgate.cleared, i) || activitySuppressed(engaged, 'street'));
+      }
+    }
     const pax = state.passenger;
     if (pax && passengerStops && pickupMarker && destinationMarker) {
       const trip = pax.trip;
@@ -1654,6 +1794,11 @@ export function createGame(
       timeAttackSnapshot.results = timeAttack.results;
       timeAttackSnapshot.previousBest = timeAttackPreviousBest;
       timeAttackSnapshot.newBest = timeAttackNewBest;
+    }
+    if (streetRace && state.race) {
+      streetRaceSnapshot.position = streetPosition(streetRace, state.race);
+      streetRaceSnapshot.shortcut = state.race.shortcut;
+      streetRaceSnapshot.results = streetRace.results;
     }
     const police = state.police;
     if (police) {
@@ -1900,6 +2045,33 @@ export function createGame(
     /** Multiplayer, for automation: the rival cars as this client currently sees them. */
     multiplayer: !!net,
     rivals,
+    /**
+     * The Street Race, for automation: the rivals (car, race state, driver) and the results.
+     *
+     *   __rb.streetRace.status()   // { event, phase, position, rivals: [{ name, lap, progress, station, route }] }
+     */
+    streetRace: streetRace
+      ? {
+          state: streetRace,
+          status: () => ({
+            event: streetRace.event,
+            cleared: streetRace.cleared,
+            phase: state.race?.phase ?? 'countdown',
+            position: state.race ? streetPosition(streetRace, state.race) : 1,
+            results: streetRace.results,
+            rivals: streetRace.rivals.map((r) => ({
+              name: r.car.name,
+              lap: r.race.lap,
+              progress: r.race.progress,
+              station: r.ai.station,
+              route: r.ai.route,
+              speed: r.v.speed,
+              finishTime: r.race.finishTime,
+              recovering: r.ai.recovering,
+            })),
+          }),
+        }
+      : null,
     /** True in the open world: a networked city rather than a race. */
     openWorld: roaming,
     /** Grid slot and paint of the local car, and the paint of each rival, for the colour QA. */

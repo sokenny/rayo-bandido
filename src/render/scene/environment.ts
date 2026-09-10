@@ -12,7 +12,7 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
-import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
+import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
 import { createBadkalaPoster } from './env/badkalaPoster';
 import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
@@ -70,6 +70,8 @@ export interface EnvironmentVisual {
    * second spec (`env/activityMarker.ts`), not a second kind of marker.
    */
   circuitMarker: ActivityMarkerVisual | null;
+  /** The STREET RACE rings, one per event, in the open world; empty everywhere else. */
+  streetMarkers: ActivityMarkerVisual[];
   /**
    * What the Moogul may touch (`render/scene/moogulTrip.ts`): the two scene lights, the
    * surface uniforms patched into the facade and graffiti materials, and the index of every
@@ -400,6 +402,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const circuitMarker = plan.circuitMarker ? createActivityMarker(plan.circuitMarker, CIRCUIT_MARKER) : null;
   if (circuitMarker) root.add(circuitMarker.group);
 
+  // The Street Race rings: all three built, and hidden by the game until their event is reached.
+  const streetMarkers = (plan.streetMarkers ?? []).map((site) => createActivityMarker(site, STREET_MARKER));
+  for (const m of streetMarkers) root.add(m.group);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -414,6 +420,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     atmosphere,
     rushMarker,
     circuitMarker,
+    streetMarkers,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number) {
@@ -456,12 +463,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       // The activity markers breathe, and quicken as the player closes on one.
       rushMarker?.update(time);
       circuitMarker?.update(time);
+      for (let i = 0; i < streetMarkers.length; i++) streetMarkers[i].update(time);
     },
     dispose() {
       atmosphere.dispose();
       wantedBoard.dispose();
       rushMarker?.dispose();
       circuitMarker?.dispose();
+      for (const m of streetMarkers) m.dispose();
       badkala.dispose();
       graffiti.dispose();
       roadArt.dispose();

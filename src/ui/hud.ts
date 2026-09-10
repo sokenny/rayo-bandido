@@ -1,4 +1,5 @@
-import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot, TimeAttackHudSnapshot } from '../core/types';
+import type { GameEvent, GameMode, HudSnapshot, RaceHudSnapshot, StreetRaceHudSnapshot, TimeAttackHudSnapshot } from '../core/types';
+import { createStreetOverlay, type StreetOverlay } from './streetOverlay';
 import { BOLT_ICON } from './icons';
 import { createRingGauge } from './ringGauge';
 import { createSystemMessage } from './systemMessage';
@@ -59,6 +60,8 @@ export interface HudOptions {
   circuitGate?: boolean;
   /** The wanted level and the police's warnings (`src/ui/policeOverlay.ts`). Free Roam only. */
   police?: boolean;
+  /** The STREET RACE rings' sign (`src/ui/streetOverlay.ts`). The open world only. */
+  streetGate?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -144,7 +147,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   root.innerHTML = '';
 
   const hud = document.createElement('div');
-  hud.className = `rb-hud${mode === 'race' || mode === 'circuit' ? ' is-race' : ''}`;
+  const isRace = mode === 'race' || mode === 'circuit' || mode === 'street';
+  hud.className = `rb-hud${isRace ? ' is-race' : ''}`;
   // R restarts on your own; in a match it cannot, because the race belongs to everybody — it
   // puts the car back on the road at the last gate instead, with the clock still running.
   function controlsFor(source: string[][]): string {
@@ -173,7 +177,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-aim__bar"><span class="rb-aim__fill"></span></div></div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-race">` +
-    `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span></div>` +
+    `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span>` +
+    // The Street Race's position, on the lap line: `P2 / 3`. Off everywhere else.
+    `<span class="rb-race__pos"><span class="rb-race__pos-value">P1</span><span class="rb-race__pos-field">/ 2</span></span></div>` +
     `<div class="rb-race__time">0:00.00</div>` +
     `<div class="rb-race__laps"><span class="rb-race__last">LAST --:--.--</span><span class="rb-race__best">BEST --:--.--</span></div>` +
     `<div class="rb-race__split"></div>` +
@@ -194,7 +200,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-results__meta"></div>` +
     `<div class="rb-results__verdict"></div>` +
     `<div class="rb-results__mission"></div>` +
-    `<div class="rb-results__keys"><span class="rb-key">R</span> race again <span class="rb-key">ESC</span> menu</div>` +
+    (mode === 'street'
+      ? `<div class="rb-results__keys"><span class="rb-key">R</span> retry <span class="rb-key">ESC</span> free roam</div>`
+      : `<div class="rb-results__keys"><span class="rb-key">R</span> race again <span class="rb-key">ESC</span> menu</div>`) +
     `</div>` +
     `<div class="rb-stack rb-stack--left">` +
     `<div class="rb-driftline">` +
@@ -252,6 +260,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   /** The police's, only where there are police. */
   const police: PoliceOverlay | null = options.police ? createPoliceOverlay() : null;
   if (police) hud.appendChild(police.root);
+  /** The Street Race rings' sign, the same way as the circuit's. */
+  const street: StreetOverlay | null =
+    options.onActivate && options.streetGate ? createStreetOverlay({ onActivate: options.onActivate }) : null;
+  if (street) hud.appendChild(street.root);
 
   const controlsEl = pick<HTMLElement>(hud, '.rb-controls');
   const fireKeyEl = pick<HTMLElement>(hud, '.rb-key--fire');
@@ -303,6 +315,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   pick<HTMLElement>(hud, '.rb-cluster__readout').insertBefore(wheels.root, gearEl);
   const raceEl = pick<HTMLElement>(hud, '.rb-race');
   const raceLapEl = pick<HTMLElement>(hud, '.rb-race__lap-value');
+  const racePosEl = pick<HTMLElement>(hud, '.rb-race__pos');
+  const racePosValueEl = pick<HTMLElement>(hud, '.rb-race__pos-value');
+  const racePosFieldEl = pick<HTMLElement>(hud, '.rb-race__pos-field');
   const raceTimeEl = pick<HTMLElement>(hud, '.rb-race__time');
   const raceLastEl = pick<HTMLElement>(hud, '.rb-race__last');
   const raceBestEl = pick<HTMLElement>(hud, '.rb-race__best');
@@ -354,6 +369,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   let nearMissAt = -Infinity;
   let lastDriveHint = -DRIVE_HINT_EVERY;
   // Race readout cache.
+  let shownPosition = -1;
+  let shownField = -1;
+  let posOn = false;
   let shownLap = -1;
   let shownLaps = -1;
   let shownCentis = -1;
@@ -518,7 +536,47 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       `${r.levelName} · TARGET ${formatTarget(r.targetTime)} (${delta}) · ${crashText(r.crashes, r.crashLimit)}${best}`;
   }
 
-  function updateRace(r: RaceHudSnapshot, t: TimeAttackHudSnapshot | null): void {
+  /**
+   * The Street Race's verdict on the finish card: the placement, and what winning unlocked.
+   * Written once, from the results the rules froze at the flag.
+   */
+  function fillStreetResult(sr: StreetRaceHudSnapshot | null): void {
+    const r = sr?.results ?? null;
+    if (!r) return;
+    resultsEl.classList.toggle('is-cleared', r.won);
+    resultsEl.classList.toggle('is-failed', !r.won);
+    const place = `P${r.placement} OF ${r.field}`;
+    resultsVerdictEl.textContent = r.won
+      ? r.unlockedName
+        ? `WINNER · ${r.unlockedName} UNLOCKED`
+        : r.allClear && r.advanced
+          ? 'WINNER · SERIES COMPLETE'
+          : 'WINNER'
+      : `${place} · BEATEN`;
+    const reward = r.reward > 0 ? ` · +¥${r.reward}` : '';
+    resultsMissionEl.textContent = r.won
+      ? `${r.eventName} · ${place}${reward}${r.unlockedName ? ' · A NEW RIVAL WAITS IN THE CITY' : ''}`
+      : `${r.eventName} · RETRY, OR HEAD BACK TO FREE ROAM`;
+  }
+
+  /** The live position on the lap line, Street Race only. */
+  function updatePosition(sr: StreetRaceHudSnapshot | null): void {
+    if (!!sr !== posOn) {
+      posOn = !!sr;
+      racePosEl.classList.toggle('is-on', posOn);
+    }
+    if (!sr) return;
+    if (sr.position !== shownPosition) {
+      shownPosition = sr.position;
+      racePosValueEl.textContent = `P${sr.position}`;
+    }
+    if (sr.field !== shownField) {
+      shownField = sr.field;
+      racePosFieldEl.textContent = `/ ${sr.field}`;
+    }
+  }
+
+  function updateRace(r: RaceHudSnapshot, t: TimeAttackHudSnapshot | null, sr: StreetRaceHudSnapshot | null = null): void {
     if (r.lap !== shownLap || r.laps !== shownLaps) {
       shownLap = r.lap;
       shownLaps = r.laps;
@@ -552,6 +610,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         resultsTimeEl.textContent = formatRaceTime(r.finishTime);
         resultsMetaEl.textContent = `${r.laps} ${r.laps === 1 ? 'LAP' : 'LAPS'} · BEST LAP ${formatRaceTime(r.bestLap)}`;
         fillMissionResult(t);
+        fillStreetResult(sr);
         play(
           resultsEl,
           [
@@ -585,11 +644,13 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       // A restart rewinds sim time; drop stale throttles so hints work again.
       if (s.time < lastDriveHint) lastDriveHint = -DRIVE_HINT_EVERY;
       updateMission(s.timeAttack);
-      if (s.race) updateRace(s.race, s.timeAttack);
+      updatePosition(s.streetRace);
+      if (s.race) updateRace(s.race, s.timeAttack, s.streetRace);
       if (rush && s.rush) rush.update(s.rush);
       if (passengers && s.passenger) passengers.update(s.passenger);
       if (buho && s.buho) buho.update(s.buho);
       if (gate && s.circuitGate) gate.update(s.circuitGate);
+      if (street && s.streetGate) street.update(s.streetGate);
       if (police && s.police) police.update(s.police);
 
       if (s.cruising !== cruising) {
@@ -820,6 +881,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
               : 'MISSION FAILED · CONTACT'
             : crashText(e.crashes, e.allowance),
         );
+      } else if (e.type === 'streetRaceShortcut') {
+        // Said where the splits are said: a fact about the lap, in the player's glance.
+        if (e.shortcut >= 0) showNote(raceSplitEl, 'SHORTCUT');
       } else if (e.type === 'checkpoint') {
         showNote(raceSplitEl, `CHECKPOINT ${e.index} · ${formatRaceTime(e.split)}`);
       } else if (e.type === 'lapComplete') {
@@ -859,6 +923,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       passengers?.dispose();
       buho?.dispose();
       gate?.dispose();
+      street?.dispose();
       root.classList.remove('is-cruise-clean');
       message.dispose();
       tacho.dispose();

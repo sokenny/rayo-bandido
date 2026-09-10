@@ -2605,6 +2605,36 @@ body {
   opacity: 1;
 }
 
+/* The Street Race's position, beside the lap count. Off unless a race puts it on. */
+.rb-race__pos {
+  display: none;
+  align-items: baseline;
+  gap: 4px;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 138, 42, 0.35);
+  color: #ff8a2a;
+  opacity: 1;
+}
+
+.rb-race__pos.is-on {
+  display: flex;
+}
+
+.rb-race__pos-value {
+  font-family: var(--rb-display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 10px rgba(255, 138, 42, 0.45);
+}
+
+.rb-race__pos-field {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+}
+
 .rb-race__time {
   font-family: var(--rb-display);
   font-size: 34px;

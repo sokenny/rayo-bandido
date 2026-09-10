@@ -1998,3 +1998,114 @@ export const POLICE = {
     radius: 1.15,
   },
 };
+
+/**
+ * STREET RACE: the PvE race series against AI rivals (`src/sim/streetRace.ts`), met at three
+ * rings around the open world (`src/sim/streetGate.ts`) and driven on its own street circuit
+ * (`src/world/streetSpec.ts`, `src/world/streetWorld.ts`).
+ *
+ * EVERYTHING TUNABLE IS HERE: the names, the field per event, the AI tiers, the rubber band,
+ * the recovery thresholds and the rewards. The geometry (route, shortcuts, barriers, marker
+ * sites) is in `streetSpec.ts`, the only other file to touch for the shape of the thing.
+ *
+ * FIRST-PASS VALUES, deliberately: nothing below has been balanced against a human. The AI tiers
+ * were measured only against themselves, through the real simulation with nobody in the way
+ * (`tests/streetRace.test.ts`): EASY finishes the two laps in ~125 s, MEDIUM in ~110 s and HARD
+ * in ~100 s. Nobody has raced them by hand yet. Tune in play.
+ */
+export const STREET_RACE = {
+  /** The player-facing name of the mission type. */
+  label: 'STREET RACE',
+  /** The icon: which glyph the marker hangs, and the neon it and the map mark are lit in. */
+  icon: { glyph: 'duel' as const, tint: 0xff8a2a, mapColour: '#ff8a2a', caption: 'STREET RACE' },
+  laps: 2,
+  /** Grid slots the course builds: the player and up to three rivals. */
+  gridSlots: 4,
+  /** Electric cars patrolling the lap beside the racing line (targets for the Rayo). */
+  trafficCount: 6,
+  /**
+   * The series, in order. `rivals` is the size of the AI field, `ai` picks the tier below,
+   * `reward` is paid once, on the first win. Names are what the standings and the name tags show.
+   */
+  events: [
+    {
+      name: 'STREET RACE I',
+      difficulty: 'EASY',
+      blurb: 'ONE RIVAL, TWO LAPS OF THE QUAY CIRCUIT. HE IS LEARNING TOO.',
+      rivals: 1,
+      ai: 'easy' as const,
+      reward: 300,
+      rivalNames: ['ROOKIE'],
+    },
+    {
+      name: 'STREET RACE II',
+      difficulty: 'MEDIUM',
+      blurb: 'TWO RIVALS WHO KNOW THE ALLEYS. KEEP IT TIDY AND TAKE THE CUTS.',
+      rivals: 2,
+      ai: 'medium' as const,
+      reward: 700,
+      rivalNames: ['SHIN', 'ORO'],
+    },
+    {
+      name: 'STREET RACE III',
+      difficulty: 'HARD',
+      blurb: 'THREE OF THE FAST ONES. NO ROOM, NO MERCY, NO SECOND CHANCES.',
+      rivals: 3,
+      ai: 'hard' as const,
+      reward: 1500,
+      rivalNames: ['KAITO', 'VELVET', 'GHOST'],
+    },
+  ],
+  /**
+   * The AI tiers (`src/sim/rivalAi.ts`). One controller, three parameter sets.
+   *
+   *   topSpeed       ceiling the rival asks for on a straight (m/s); the player's car does 57
+   *   throttleGain   throttle per m/s of speed deficit
+   *   cornerGrip     lateral acceleration the rival believes it has (m/s²): corner speed is
+   *                  sqrt(cornerGrip / curvature); confidence, not physics
+   *   brakeDecel     deceleration the braking plan assumes (m/s²): lower = brakes earlier
+   *   brakeGain      brake per m/s over the plan
+   *   lookaheadBase  metres ahead the steering aims at, plus `lookaheadPerSpeed` per m/s
+   *   steerGain      steer per radian of heading error; `steerDamp` per rad/s of yaw
+   *   lineNoise      how far off the centreline the rival wanders (m, amplitude)
+   *   mistakeEvery   seconds between rolls of a mistake, `mistakeChance` the odds, and
+   *                  `mistakeSeconds` how long one lasts (late braking, a wide line)
+   *   shortcutChance odds of taking a shortcut when its mouth comes up
+   *   stuckSeconds   standing still under throttle before reversing out for `reverseSeconds`
+   */
+  ai: {
+    easy: {
+      topSpeed: 34, throttleGain: 0.35, cornerGrip: 9, brakeDecel: 6, brakeGain: 0.5,
+      lookaheadBase: 9, lookaheadPerSpeed: 0.55, steerGain: 2.4, steerDamp: 0.18,
+      lineNoise: 1.6, mistakeEvery: 8, mistakeChance: 0.55, mistakeSeconds: 1.4,
+      shortcutChance: 0.1, stuckSeconds: 2.2, reverseSeconds: 1.3,
+    },
+    medium: {
+      topSpeed: 40, throttleGain: 0.5, cornerGrip: 12, brakeDecel: 8, brakeGain: 0.6,
+      lookaheadBase: 10, lookaheadPerSpeed: 0.55, steerGain: 2.8, steerDamp: 0.16,
+      lineNoise: 1.0, mistakeEvery: 12, mistakeChance: 0.35, mistakeSeconds: 1.0,
+      shortcutChance: 0.45, stuckSeconds: 2.0, reverseSeconds: 1.2,
+    },
+    hard: {
+      topSpeed: 46, throttleGain: 0.7, cornerGrip: 16, brakeDecel: 10, brakeGain: 0.7,
+      lookaheadBase: 11, lookaheadPerSpeed: 0.55, steerGain: 3.2, steerDamp: 0.14,
+      lineNoise: 0.5, mistakeEvery: 18, mistakeChance: 0.2, mistakeSeconds: 0.8,
+      shortcutChance: 0.8, stuckSeconds: 1.8, reverseSeconds: 1.1,
+    },
+  },
+  /**
+   * Rubber band: a rival's top speed is scaled by how far behind (faster) or ahead (slower) of
+   * the player it is, `gain` per `span` metres, capped. Never a teleport, never extra grip —
+   * only the speed it asks for on the straights.
+   */
+  rubberBand: { enabled: true, span: 150, gainBehind: 0.12, capBehind: 0.12, gainAhead: 0.1, capAhead: 0.08 },
+  /**
+   * Recovery. A rival further than `offRouteMetres` from its route for `offRouteSeconds` is put
+   * back on the racing line at its last station — but only when the player is at least
+   * `respawnMinPlayerDistance` away, so a rival is never seen to teleport. Nearer than that it
+   * keeps driving back on its own.
+   */
+  recovery: { offRouteMetres: 24, offRouteSeconds: 4, respawnMinPlayerDistance: 90, wrongWayMaxSpeed: 12 },
+  /** The rings in the street. Same shape and reasons as `TIME_ATTACK.marker`. */
+  marker: { promptRadius: 7.5, exitRadius: 8.4, rearmRadius: 18 },
+};

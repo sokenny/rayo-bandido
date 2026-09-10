@@ -1,4 +1,4 @@
-import type { BuhoState, CircuitGateState, GameState, PassengerState, RushState } from '../core/types';
+import type { BuhoState, CircuitGateState, GameState, PassengerState, RushState, StreetGateState } from '../core/types';
 
 /**
  * ONE ACTIVITY AT A TIME: the one place that decides which of them has the car.
@@ -41,7 +41,7 @@ import type { BuhoState, CircuitGateState, GameState, PassengerState, RushState 
  * The four activities, named. Three of them can hold the car; `'moogul'` is here because it can
  * be suppressed, not because it can ever be the one doing the suppressing.
  */
-export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit';
+export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit' | 'street';
 
 /** A RAYO RUSH run, from the count-in to the results card being put away. */
 export function rushEngaged(rush: RushState | null | undefined): boolean {
@@ -73,6 +73,11 @@ export function circuitEngaged(gate: CircuitGateState | null | undefined): boole
   return !!gate && gate.entering;
 }
 
+/** A STREET RACE ring's key taken: the same handful of frames on the way out, for the same reason. */
+export function streetEngaged(gate: StreetGateState | null | undefined): boolean {
+  return !!gate && gate.entering;
+}
+
 /**
  * Which activity has the car, or null when the player is simply driving. Never `'moogul'`: a
  * trip is not something that has the car.
@@ -85,10 +90,12 @@ export function engagedActivity(state: {
   rush?: RushState | null;
   passenger?: PassengerState | null;
   circuitGate?: CircuitGateState | null;
+  streetGate?: StreetGateState | null;
 }): ActivityKind | null {
   if (rushEngaged(state.rush)) return 'rush';
   if (passengerEngaged(state.passenger)) return 'passenger';
   if (circuitEngaged(state.circuitGate)) return 'circuit';
+  if (streetEngaged(state.streetGate)) return 'street';
   return null;
 }
 
@@ -111,6 +118,7 @@ export function lockOtherActivities(state: GameState): ActivityKind | null {
   if (state.rush) state.rush.locked = activitySuppressed(engaged, 'rush');
   if (state.passenger) state.passenger.locked = activitySuppressed(engaged, 'passenger');
   if (state.circuitGate) state.circuitGate.locked = activitySuppressed(engaged, 'circuit');
+  if (state.streetGate) state.streetGate.locked = activitySuppressed(engaged, 'street');
   // El Búho, who is never the one holding it: he sells while nobody at all has the car, which
   // is the same sentence as `activitySuppressed(engaged, 'moogul')` and is written out here
   // because "he is never engaged" is the fact worth reading at the point it is relied on.

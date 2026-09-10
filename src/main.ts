@@ -52,7 +52,7 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  */
 function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
-  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' ? mode : null;
+  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' ? mode : null;
 }
 
 /**
@@ -78,6 +78,8 @@ interface Destination {
    * it cannot survive a trip through the menus and send a later ESC somewhere surprising.
    */
   from?: GameMode;
+  /** Which STREET RACE event `mode=street` is asked for, 0-based. Cleared unless asked for. */
+  event?: number;
 }
 
 /**
@@ -85,10 +87,12 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null } = to;
+  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null, event } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
+  if (event !== undefined) params.set('event', String(event));
+  else params.delete('event');
   if (from) params.set('from', from);
   else params.delete('from');
   if (race) params.set('race', '1');
@@ -131,13 +135,17 @@ async function buildGame(
   mode: GameMode,
   loading: LoadingScreen,
   net: NetSession | null,
-  options: { onEnterCircuit?: () => void } = {},
+  options: { onEnterCircuit?: () => void; onEnterStreetRace?: (event: number) => void } = {},
 ): Promise<Game> {
-  loading.set(mode === 'race' || mode === 'circuit' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
+  loading.set(mode === 'race' || mode === 'circuit' || mode === 'street' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
 
-  const game = createGame(canvas!, hudRoot!, debugRoot!, mode, { net, onEnterCircuit: options.onEnterCircuit });
+  const game = createGame(canvas!, hudRoot!, debugRoot!, mode, {
+    net,
+    onEnterCircuit: options.onEnterCircuit,
+    onEnterStreetRace: options.onEnterStreetRace,
+  });
   // `?nowarm=1` skips the warm-up to reproduce the first-use hitches on purpose (A/B, and the
   // negative test for the perf gate: `node scripts/perf-probe.mjs --check --url ...?nowarm=1`).
   if (new URLSearchParams(location.search).has('nowarm')) {
@@ -235,7 +243,15 @@ async function openWorld(): Promise<void> {
     setTimeout(() => location.assign(urlWith({ mode: 'circuit', from: 'city' })), 120);
   };
 
-  const game = await buildGame('city', loading, session, { onEnterCircuit: toCircuit });
+  // THE DOOR TO A STREET RACE: the same shape, to a different world, carrying which event.
+  const toStreetRace = (event: number): void => {
+    if (leaving) return;
+    leaving = true;
+    session?.dispose();
+    setTimeout(() => location.assign(urlWith({ mode: 'street', from: 'city', event })), 120);
+  };
+
+  const game = await buildGame('city', loading, session, { onEnterCircuit: toCircuit, onEnterStreetRace: toStreetRace });
   game.start();
   canvas!.focus();
   void loading.hide();

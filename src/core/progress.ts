@@ -1,4 +1,4 @@
-import { RUSH, TIME_ATTACK } from '../config/tuning';
+import { RUSH, STREET_RACE, TIME_ATTACK } from '../config/tuning';
 
 /**
  * What this browser remembers about a player between sessions: how far they have got through
@@ -244,4 +244,72 @@ export function writeRideProgress(progress: RideProgress): void {
 /** Fold one completed ride in. Pure; the caller writes. */
 export function recordRide(progress: RideProgress, tip: number): RideProgress {
   return { completed: progress.completed + 1, bestTip: Math.max(progress.bestTip, clampCount(tip)) };
+}
+
+/* ================================================================ street race */
+
+const STREET_KEY = 'rb.street.races';
+
+/**
+ * The STREET RACE series (`src/sim/streetRace.ts`), remembered the same way and under the same
+ * contract as the two chains above: no server, never throws, garbage reads as a player who has
+ * not started, and everything read back is rebuilt against the series that exists NOW.
+ *
+ * THE SEAM. Every reader of street progress goes through `readStreetRaceProgress` /
+ * `writeStreetRaceProgress`; when accounts arrive, these two are what get a server behind them.
+ */
+export interface StreetRaceProgress {
+  /** Events won, 0..`STREET_RACE.events.length`. Events 0..cleared are open. */
+  cleared: number;
+  /** Best placement on each event (1 = won), `-1` where it has never been finished. */
+  best: number[];
+}
+
+export function emptyStreetRaceProgress(): StreetRaceProgress {
+  return { cleared: 0, best: STREET_RACE.events.map(() => -1) };
+}
+
+function clampStreetClearedCount(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(STREET_RACE.events.length, Math.floor(n));
+}
+
+/** A stored placement made safe: a whole number of at least 1, or -1 for "never finished". */
+function clampPlacement(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1) return -1;
+  return Math.floor(n);
+}
+
+export function readStreetRaceProgress(): StreetRaceProgress {
+  const raw = readRaw(STREET_KEY);
+  if (!raw) return emptyStreetRaceProgress();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return emptyStreetRaceProgress();
+  }
+  if (!parsed || typeof parsed !== 'object') return emptyStreetRaceProgress();
+  const record = parsed as { cleared?: unknown; best?: unknown };
+  const storedBest = Array.isArray(record.best) ? record.best : [];
+  const best = STREET_RACE.events.map((_, i) => clampPlacement(storedBest[i]));
+  return { cleared: clampStreetClearedCount(record.cleared), best };
+}
+
+export function writeStreetRaceProgress(progress: StreetRaceProgress): void {
+  writeRaw(STREET_KEY, JSON.stringify({ cleared: clampStreetClearedCount(progress.cleared), best: progress.best }));
+}
+
+/**
+ * Fold one finished race in. Pure; the caller writes. A best placement is the SMALLEST one;
+ * `cleared` only ever moves forward, and only to `event + 1`, on the simulation's say-so
+ * (`advanced`) — losing, or replaying a won event, leaves the series where it is.
+ */
+export function recordStreetRace(progress: StreetRaceProgress, event: number, placement: number, advanced: boolean): StreetRaceProgress {
+  const best = progress.best.slice();
+  if (event >= 0 && event < best.length && placement >= 1 && (best[event] < 0 || placement < best[event])) best[event] = Math.floor(placement);
+  const cleared = advanced ? Math.max(progress.cleared, clampStreetClearedCount(event + 1)) : progress.cleared;
+  return { cleared, best };
 }

@@ -200,7 +200,13 @@ export function stepRace(race: RaceState, course: RaceCourse, v: VehicleState, t
   const N = gates.length;
   for (let k = 0; k < N; k++) {
     const g = gates[k];
-    const cross = gateCrossing(v.prevX, v.prevZ, v.x, v.z, g.ax, g.az, g.bx, g.bz, g.fx, g.fz);
+    let cross = gateCrossing(v.prevX, v.prevZ, v.x, v.z, g.ax, g.az, g.bx, g.bz, g.fx, g.fz);
+    // A branch gate is one checkpoint laid across two roads: its alternate segment across the
+    // shortcut counts exactly as the main one does, forwards and backwards alike.
+    if (cross === 0 && g.alt) {
+      const a = g.alt;
+      cross = gateCrossing(v.prevX, v.prevZ, v.x, v.z, a.ax, a.az, a.bx, a.bz, a.fx, a.fz);
+    }
     if (cross === 0) continue;
     if (cross > 0) {
       if (k !== race.nextGate) continue;

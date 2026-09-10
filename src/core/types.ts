@@ -25,7 +25,7 @@ import type { TrackPath } from '../world/track';
 import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 
 /** Which world is loaded: the free-roam test city, the racing circuit or the big city. */
-export type GameMode = 'test' | 'race' | 'city' | 'circuit';
+export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street';
 
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {
@@ -672,6 +672,14 @@ export type GameEvent =
    * `src/main.ts`, which is the only thing here that knows what an address is).
    */
   | { type: 'circuitEnter' }
+  /** A STREET RACE ring started or stopped offering its event. Presentation only. */
+  | { type: 'streetRacePrompt'; on: boolean; event: number }
+  /** The key was pressed on a STREET RACE ring: take the player to that event. */
+  | { type: 'streetRaceEnter'; event: number }
+  /** The player's car entered (index) or left (-1) a shortcut during a STREET RACE. */
+  | { type: 'streetRaceShortcut'; shortcut: number }
+  /** The player took the flag in a STREET RACE: the placement, and whether the chain moved on. */
+  | { type: 'streetRaceEnd'; results: StreetRaceResults }
   | { type: 'transmission'; mode: Transmission }
   /**
    * The marker started or stopped offering a run — the car rolled onto the painted circle, or
@@ -1105,6 +1113,11 @@ export interface GameState {
    * entered from inside itself.
    */
   circuitGate: CircuitGateState | null;
+  /**
+   * The STREET RACE meetup markers (`src/sim/streetGate.ts`). Present in worlds that carry the
+   * sites (`ArenaLayout.streetSites`) — the open-world city, and nothing else.
+   */
+  streetGate: StreetGateState | null;
   /** The police (`src/sim/police.ts`). Only the open world has any. */
   police: PoliceState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
@@ -1183,6 +1196,13 @@ export interface RaceGate {
   fz: number;
   /** Station of the gate along the lap (m). */
   s: number;
+  /**
+   * An alternate segment that ALSO satisfies this gate: the same checkpoint, laid across a
+   * shortcut. A branch in the route is a mandatory gate before it, one gate here with its main
+   * segment on the main road and `alt` across the alley, and a mandatory gate after it — so
+   * either branch counts and neither can be skipped (`src/sim/race.ts`).
+   */
+  alt?: { ax: number; az: number; bx: number; bz: number; fx: number; fz: number };
 }
 
 /** A shortcut off the main lap: its own path, and the main-lap stations where it leaves and rejoins. */
@@ -1227,7 +1247,7 @@ export interface MinimapData {
  * What a mark on the minimap stands for: the RAYO RUSH circle, a waiting passenger, where they
  * are going, or the start line the circuit missions are entered on.
  */
-export type ActivityMarkKind = 'rush' | 'passenger' | 'destination' | 'circuit';
+export type ActivityMarkKind = 'rush' | 'passenger' | 'destination' | 'circuit' | 'street';
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
 export interface ArenaLayout {
@@ -1279,6 +1299,11 @@ export interface ArenaLayout {
    * in every other world, the circuit included — a race is not somewhere you enter a race from.
    */
   circuitSite?: ActivitySite | null;
+  /**
+   * Where the STREET RACE events are met in the street (`src/sim/streetGate.ts`), one site per
+   * event of `STREET_RACE.events` and in that order. Null or missing in every other world.
+   */
+  streetSites?: ActivitySite[] | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   minimap: MinimapData;
@@ -1360,7 +1385,73 @@ export interface HudSnapshot {
   buho: BuhoHudSnapshot | null;
   /** The start line's sign; null in a world that does not carry the circuit's entrance. */
   circuitGate: CircuitGateHudSnapshot | null;
+  /** The STREET RACE rings' sign; null in a world that does not carry the sites. */
+  streetGate: StreetGateHudSnapshot | null;
+  /** The STREET RACE readout; null outside a Street Race. */
+  streetRace: StreetRaceHudSnapshot | null;
   police: PoliceHudSnapshot | null;
+}
+
+/**
+ * STREET RACE (`src/sim/streetGate.ts`, `src/sim/streetRace.ts`): the meetup rings in the open
+ * world, and the race against AI rivals they lead to.
+ */
+export interface StreetGateState {
+  /** Index of the open event whose ring the car is standing on, or -1. */
+  atSite: number;
+  /** Another activity has the car (`src/sim/activities.ts`). */
+  locked: boolean;
+  /** False from the moment the key is taken until the car has driven clear of the ring. */
+  rearmed: boolean;
+  /** True once the key has been pressed: the caller is loading the race. */
+  entering: boolean;
+  /** Events won, 0..`STREET_RACE.events.length`. Events 0..cleared (clamped) are open. */
+  cleared: number;
+}
+
+export interface StreetRaceResults {
+  event: number;
+  eventName: string;
+  /** 1 = winner. */
+  placement: number;
+  /** Cars in the race, the player included. */
+  field: number;
+  time: number;
+  won: boolean;
+  /** First win of this event: the chain moved on by one. */
+  advanced: boolean;
+  /** Money granted for a first win, 0 otherwise. */
+  reward: number;
+  /** Name of the event just unlocked, or null. */
+  unlockedName: string | null;
+  allClear: boolean;
+}
+
+export interface StreetRaceHudSnapshot {
+  event: number;
+  eventCount: number;
+  eventName: string;
+  difficulty: string;
+  /** Live position, 1-based, and the size of the field. */
+  position: number;
+  field: number;
+  /** Index of the shortcut the player is inside, or -1. */
+  shortcut: number;
+  results: StreetRaceResults | null;
+}
+
+export interface StreetGateHudSnapshot {
+  offering: boolean;
+  /** The event on offer (the ring the car is on, or the newest open one). */
+  event: number;
+  eventCount: number;
+  eventName: string;
+  difficulty: string;
+  blurb: string;
+  rivals: number;
+  /** True when this event has already been won. */
+  completed: boolean;
+  placeLabel: string;
 }
 
 /**

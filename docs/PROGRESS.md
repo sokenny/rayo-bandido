@@ -1957,3 +1957,49 @@ heat, chasers and arrests are per player by construction; other players do not s
 thresholds, witness, pursuit start/escape/arrest, per-player isolation, patrol density) and one
 browser pass on the dev server: patrols after the resume delay, a two-star chase with the HUD
 up, an arrest card with the fine, the release, and a rush count-in clearing the lot.
+
+## Street Race (MVP, 2026-09-10)
+
+**What.** A PvE race series against AI rivals, met at three rings around the open world and
+driven on its own street circuit inside the same city. Three events (`STREET_RACE.events` in
+`src/config/tuning.ts`): I one rival (easy), II two (medium), III three (hard); winning the
+outstanding event unlocks the next ring at another spot in the city and pays a one-off reward
+into the session counter. Progress is local storage behind `readStreetRaceProgress` /
+`writeStreetRaceProgress` (`src/core/progress.ts`), the seam for a database later.
+
+**The circuit.** `src/world/streetSpec.ts` is the Quay Circuit: st-south, av-east, the quay bay
+along blvd-water and st-far-east, blvd-center, av-east north, st-n2, av-diag's two sweepers,
+blvd-center west and the west bay down st-west — clockwise, ~1180 m, two laps, never on the
+viaduct. Two alley shortcuts (alley-b, alley-c) cut the two bays 72 and 80 m short. A branch is
+a BRANCH GATE: one checkpoint with a segment across the main road and `RaceGate.alt` across the
+alley (`src/sim/race.ts`), between two mandatory gates, so either route validates and neither
+can be skipped. `src/world/streetWorld.ts` instances the city as `circuitWorld.ts` does, with
+the same kerb-unit barriers but only at corners, junction mouths and the shortcut framings
+(`STREET_BARRIERS`), a four-slot grid and the lap's own targets.
+
+**The rivals.** One controller, `src/sim/rivalAi.ts`: aim at a point ahead on the centreline
+(main lap or alley), plan speed from the tightest curvature within braking distance and from
+the alley mouths, wander, make timed mistakes, roll the shortcuts, reverse out when stuck, and
+only ever get put back on the line out of the player's sight. Each rival is a real
+`VehicleState` through `stepVehicle`, the wall, traffic and rival collision passes and its own
+`RaceState` (`src/sim/streetRace.ts`), mirrored into a `RivalCar` so the multiplayer visuals,
+name tags, minimap, standings and the player's collision pass take it unchanged. Tiers
+(`STREET_RACE.ai`) were only measured against themselves: EASY ~119 s for the two laps,
+MEDIUM ~105 s, HARD ~99 s. Rubber band and recovery are `STREET_RACE.rubberBand` / `.recovery`.
+
+**Around it.** A distinct amber ring with two cars nose to nose (`STREET_MARKER`, the `duel`
+glyph; the same mark on the minimap), a prompt in the street (`src/ui/streetOverlay.ts`), the
+race HUD extended with `P2 / 3` and a verdict on the finish card (R retry, ESC Free Roam).
+Police exist only in the city and are off from the key press (`streetGate.entering` is an
+engaged activity). A Street Race is a page load with no session, so rivals, results and
+progress are this browser's only; other Free Roam players never take part.
+
+**Verified** with `tests/streetRace.test.ts` (ribbon on the city's roads edge to edge, barrier
+plan, branch gates both ways and the skip refused, difficulty selection, unlock/reward once,
+storage round trip, rings' offering and police off, reset, and three hard rivals driving the
+real lap to the flag) and one browser pass: ring I prompt in the city, the key loading the race,
+the rival driving, the HUD position, the finish card with the unlock, ring II open afterwards.
+
+**Left for tuning** (deliberately not iterated here): every AI number, the barrier spans and
+lead, the shortcut mouth speed, the marker glyph proportions, rivals exiting alley-c a few
+metres wide onto st-south's pavement, and nobody has yet raced the tiers by hand.

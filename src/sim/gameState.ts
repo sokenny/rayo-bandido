@@ -27,6 +27,7 @@ import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
 import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
+import { createStreetGateState, resetStreetGateState, stepStreetGate } from './streetGate';
 import { lockOtherActivities } from './activities';
 import { createPoliceState, isPoliceEnabledForCurrentGameState, policeHoldsPlayer, resetPoliceState, stepPolice, type StepPoliceOptions } from './police';
 import { PASSENGERS } from '../content/passengers';
@@ -112,6 +113,8 @@ export interface GameStateOptions {
    * knows which world this is; defaults to off, so every other world is untouched.
    */
   police?: boolean;
+  /** How many STREET RACE events are won, for the rings in the street (`src/sim/streetGate.ts`). */
+  streetRaceCleared?: number;
 }
 
 export function createInitialGameState(
@@ -138,6 +141,7 @@ export function createInitialGameState(
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
+    streetGate: layout.streetSites && layout.streetSites.length > 0 ? createStreetGateState(options.streetRaceCleared ?? 0) : null,
     police: options.police ? createPoliceState(layout) : null,
     events: [],
   };
@@ -164,6 +168,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
+  if (state.streetGate) resetStreetGateState(state.streetGate);
   if (state.police) resetPoliceState(state.police);
   state.events.length = 0;
 }
@@ -359,7 +364,7 @@ export function stepGame(
     const events = state.events;
     for (let i = 0; i < events.length; i++) {
       const t = events[i].type;
-      if (t === 'rushStart' || t === 'passengerBoard' || t === 'circuitEnter') {
+      if (t === 'rushStart' || t === 'passengerBoard' || t === 'circuitEnter' || t === 'streetRaceEnter') {
         endMoogul(buho, 'interrupted', state.events);
         break;
       }
@@ -372,6 +377,11 @@ export function stepGame(
   lockOtherActivities(state);
   if (state.circuitGate && layout.circuitSite) {
     stepCircuitGate(state.circuitGate, layout.circuitSite, state.vehicle, cmd, state.events);
+  }
+  // The STREET RACE rings (`src/sim/streetGate.ts`): the same kind of door, to a different race.
+  lockOtherActivities(state);
+  if (state.streetGate && layout.streetSites && layout.streetSites.length > 0) {
+    stepStreetGate(state.streetGate, layout.streetSites, state.vehicle, cmd, state.events);
   }
   // The police, after everything: whether they may exist is a function of what the activities
   // above decided (`isPoliceEnabledForCurrentGameState`), and an activity that began THIS tick

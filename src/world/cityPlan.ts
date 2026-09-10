@@ -345,6 +345,11 @@ export interface CityPlan {
    * start the race.
    */
   circuitMarker?: { x: number; z: number; y: number; heading: number; label?: string } | null;
+  /**
+   * The STREET RACE rings (`src/sim/streetGate.ts`), one per event, in worlds that carry them.
+   * The same points `ArenaLayout.streetSites` gives the rules. Null in the race worlds.
+   */
+  streetMarkers?: Array<{ x: number; z: number; y: number; heading: number; label?: string }> | null;
   /** Race dressing: the line and the checkpoint arches. */
   startLine: TrackLineDef | null;
   checkpoints: TrackLineDef[];
