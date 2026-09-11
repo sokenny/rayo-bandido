@@ -6,6 +6,7 @@ import { createSystemMessage } from './systemMessage';
 import { createWheelIndicator } from './wheelIndicator';
 import { createTacho } from './tacho';
 import { createRushOverlay, type RushOverlay } from './rushOverlay';
+import { createFlairOverlay, type FlairOverlay } from './flairOverlay';
 import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
 import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
 import { NEAR_MISS } from '../config/tuning';
@@ -260,6 +261,12 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   /** The police's, only where there are police. */
   const police: PoliceOverlay | null = options.police ? createPoliceOverlay() : null;
   if (police) hud.appendChild(police.root);
+  /**
+   * The reactive phrases (`src/ui/flairOverlay.ts`). Built wherever RAYO RUSH is, because that
+   * is the only place the rules say anything — one flag, the same one the overlay is.
+   */
+  const flair: FlairOverlay | null = options.onActivate && options.rush !== false ? createFlairOverlay() : null;
+  if (flair) hud.appendChild(flair.root);
   /** The Street Race rings' sign, the same way as the circuit's. */
   const street: StreetOverlay | null =
     options.onActivate && options.streetGate ? createStreetOverlay({ onActivate: options.onActivate }) : null;
@@ -823,6 +830,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
 
     onEvent(e) {
       rush?.onEvent(e);
+      flair?.onEvent(e);
       passengers?.onEvent(e);
       buho?.onEvent(e);
       police?.onEvent(e);
@@ -920,6 +928,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     dispose() {
       window.removeEventListener('gamepadconnected', onPadConnected);
       rush?.dispose();
+      flair?.dispose();
       passengers?.dispose();
       buho?.dispose();
       gate?.dispose();

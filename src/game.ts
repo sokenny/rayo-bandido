@@ -26,7 +26,7 @@ import type {
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -87,6 +87,7 @@ import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installInt
 import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanFigure';
 import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
 import { canAffordShot } from './sim/lightning';
+import { MESSAGES as FLAIR_MESSAGES, flairSeconds } from './sim/flair';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
 import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
 import { createPassengerMarker } from './render/scene/env/passengerMarker';
@@ -2344,6 +2345,29 @@ export function createGame(
     view(next?: CameraView) {
       if (next) chase.setView(next);
       return chase.view;
+    },
+    /**
+     * The reactive phrases (`src/sim/flair.ts`), for automation and for looking at them without
+     * having to earn one. `state` is the live streak; `say(id)` puts a phrase on the glass right
+     * now, presentation only — it goes straight to the HUD and the audio and never touches the
+     * streak, so it can neither grant nor spend anything the rules care about.
+     *
+     *   __rb.flair.state.units        // internal units in the streak under way
+     *   __rb.flair.say('auraInfinita')
+     *   __rb.flair.messages           // every phrase the game is allowed to say
+     */
+    flair: {
+      get state() {
+        return state.flair;
+      },
+      config: FLAIR,
+      messages: FLAIR_MESSAGES.map((m) => m.id),
+      say(id: string) {
+        const m = FLAIR_MESSAGES.find((x) => x.id === id);
+        if (!m) return false;
+        handleEvent({ type: 'flair', id: m.id, text: m.text, tier: m.tier, seconds: flairSeconds(m.tier) });
+        return true;
+      },
     },
     /**
      * RAYO RUSH, for automation and for tuning with the game running. `state.rush` is the live

@@ -182,23 +182,32 @@ export const INTRO = {
     /**
      * THE MEET: the corridor under the viaduct's east leg, north of Boulevard Centre and south of
      * El Búho's bay. Turn off the boulevard under the deck at (245, 60) and it is straight ahead.
+     * The radius is what the arrival actually is — the clip starts the moment the car crosses
+     * it, so the circle's SOUTH edge is where the player ends up looking from. It is kept tight
+     * and the cars are parked a dozen metres beyond it: coming off the boulevard the player
+     * rolls to a stop with the meet filling the windscreen, not with it somewhere up ahead.
      */
-    meetup: { x: 245, z: 44, radius: 11 },
+    meetup: { x: 245, z: 44, radius: 6 },
   },
 
   /* ------------------------------------------------------------- the meet */
 
   meetup: {
-    /** Parked along the columns, north of El Búho's bay, nose to the deck. */
+    /**
+     * Parked between the column lines (x 241 and 249; the pillars themselves are at 236–239
+     * and 251–254), in the bay the player reaches FIRST, south of El Búho's pool — so the
+     * arrival is the cars, and his amber light and the rest of the corridor are behind them.
+     */
     cars: [
-      { x: 241, z: 15, heading: 0, slot: 1 },
-      { x: 241, z: 9.4, heading: 0, slot: 4 },
-      { x: 249, z: 12.5, heading: Math.PI, slot: 3 },
+      { x: 241, z: 38, heading: 0, slot: 1 },
+      { x: 241, z: 32.4, heading: 0, slot: 4 },
+      { x: 249, z: 35.5, heading: Math.PI, slot: 3 },
     ] as IntroParkedCar[],
     /** Half extents of the box each parked car is solid as (m). */
     carHalf: { x: 0.95, z: 2.25 },
-    /** Where BadKala stands: the west column line, between the cars and the bay, facing the arrival. */
-    badkala: { x: 241.4, z: 30, heading: Math.PI },
+    /** Where BadKala stands: the west column line, a step ahead of where the car stops, between
+     * the player and the parked cars, facing the arrival. */
+    badkala: { x: 241.4, z: 41.5, heading: Math.PI },
     badkalaLook: BADKALA_LOOK,
   },
 
@@ -244,13 +253,14 @@ export const INTRO = {
     // Stage B — entering the city
     line('b1', 'Mientras no estabas, cambiaron los motores por baterías. Casi no queda nadie haciendo ruido.', { gap: 1.4 }),
     line('b2', 'Nosotros seguimos con combustión. Y con un par de modificaciones que no pasan la revisión.', { gap: 1.4 }),
-    line('b3', 'La que te importa a vos la llevás en el auto: el módulo del Rayo. Te enseño a usarlo ahora mismo.', { gap: 1.2 }),
+    line('b3', 'La modificación que te importa a vos la llevás en el auto: el módulo del Rayo. Te enseño a usarlo ahora mismo.', { gap: 1.2 }),
     line('b4', 'Son dos pasos: primero lo cargás derrapando, y después le descargás ese rayo encima a un eléctrico.', { gap: 1.3 }),
     // Stage C — first drift
     line('c1', 'Probemos si todavía te acordás. Tomá velocidad, doblá y apretá la barra espaciadora: es el freno de mano. Soltá la cola.', {
       instructional: 'drift',
     }),
     line('c2', 'Ahí está. De costado todavía te entiendo.', { gap: 1.2 }),
+    line('c3', 'Ah, y no te olvides del nitro: es shift. Guardalo para cuando tengas que salir rápido de algún lado.', { gap: 1.2 }),
     line('c-hint', 'Entrá con un poco de velocidad, doblá y mantené la barra espaciadora un momento. No hace falta dar la vuelta entera.', {
       instructional: 'drift',
     }),

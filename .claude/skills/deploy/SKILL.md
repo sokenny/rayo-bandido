@@ -27,6 +27,27 @@ account has no IAM Identity Center). The script picks it up automatically if
 the default profile isn't configured, so `AWS_PROFILE` does not need setting
 by hand.
 
+## Write the changelog first
+
+The game has a CHANGELOG tab on its main menu, and it reads
+`src/content/changelog.ts`. **Before running the script**, add today's entry
+at the top of that file — the script refuses a deploy whose newest entry is
+not dated today, and it checks this before the build so the line never gets
+written in a hurry at the end of a run.
+
+```ts
+{ date: '2026-09-11', items: ['Police: heat, stars and short chases while you free roam.'] },
+```
+
+Newest first, one entry per day: a second deploy on the same day adds its
+lines to today's entry rather than opening another block of it. Write what a
+player would notice from the driver's seat, one line per change — not commit
+subjects, not module names, not "refactored X". A change nobody can see from
+the car does not earn a line; if that is the whole deploy, say so plainly
+("Stability and speed fixes under the hood."). Keep lines under ~120
+characters, which is what `tests/changelog.test.ts` enforces along with the
+ordering and the one-entry-per-day rule.
+
 ## Run it
 
 ```bash
@@ -50,9 +71,10 @@ The script does, in order:
 0. Preflight — checks `node`, `curl`, `aws`, working credentials, and an
    archiver that writes POSIX paths, all up front. These used to surface
    minutes in, after a full build and test run had already gone by.
-1. `npm run build` then `npm test`, **before** any commit — a red suite must
-   not leave a commit already pushed to `main`. It also fingerprints the
-   working tree here, to catch someone editing in another window mid-run.
+1. Checks the changelog (see below), then `npm run build` and `npm test`,
+   **before** any commit — a red suite must not leave a commit already pushed
+   to `main`. It also fingerprints the working tree here, to catch someone
+   editing in another window mid-run.
 2. Resolves `rayobandido.com`'s Route53 A record to find what it actually
    points to (a load balancer or an environment's own CNAME), then matches
    that against every `Ready` environment under the `rayo-bandido`

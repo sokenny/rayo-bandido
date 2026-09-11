@@ -4,6 +4,7 @@ import { createGame, type Game } from './game';
 import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
 import { showMainMenu, type MenuChoice } from './ui/mainMenu';
 import { showRaceMenu, type RaceChoice } from './ui/raceMenu';
+import { createChangelogScreen } from './ui/changelog';
 import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
@@ -67,6 +68,8 @@ interface Destination {
   mode?: GameMode;
   /** The race menu: OFFLINE or VERSUS. */
   race?: boolean;
+  /** The changelog tab: what shipped and when. Reads, drives nothing. */
+  log?: boolean;
   /** Multiplayer — the room browser, or `room` when one is named. */
   mp?: boolean;
   room?: string;
@@ -93,7 +96,7 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
+  const { mode = null, race = false, log = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
@@ -105,6 +108,8 @@ function urlWith(to: Destination = {}): string {
   else params.delete('from');
   if (race) params.set('race', '1');
   else params.delete('race');
+  if (log) params.set('log', '1');
+  else params.delete('log');
   if (multiplayer) params.set('mp', '1');
   else params.delete('mp');
   // `create` and `listed` describe one arrival and must not survive it: keeping them would
@@ -468,9 +473,24 @@ function menu(): void {
   void loading.hide();
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
     const url =
-      choice === 'race' ? urlWith({ race: true }) : choice === 'intro' ? urlWith({ mode: 'city', intro: true }) : urlWith({ mode: choice });
+      choice === 'race'
+        ? urlWith({ race: true })
+        : choice === 'changelog'
+          ? urlWith({ log: true })
+          : choice === 'intro'
+            ? urlWith({ mode: 'city', intro: true })
+            : urlWith({ mode: choice });
     // A short beat for the card to light up, then reload into the chosen world.
     setTimeout(() => location.assign(url), 180);
+  });
+}
+
+/** The changelog tab: a screen to read, and ESC back to the menu. Nothing is loaded from here. */
+function changelog(): void {
+  const loading = createLoadingScreen(document.getElementById('loading-root'));
+  void loading.hide();
+  createChangelogScreen(menuRoot!, () => {
+    setTimeout(() => location.assign(urlWith()), 180);
   });
 }
 
@@ -524,4 +544,5 @@ if (new URLSearchParams(location.search).has('mp')) {
 } else if (mode === 'city') void openWorld();
 else if (mode) void boot(mode);
 else if (new URLSearchParams(location.search).has('race')) raceMenu();
+else if (new URLSearchParams(location.search).has('log')) changelog();
 else menu();

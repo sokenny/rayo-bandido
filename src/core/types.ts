@@ -293,6 +293,73 @@ export interface NearMissState {
   best: number;
 }
 
+/**
+ * The eleven things the game is allowed to shout (`src/sim/flair.ts`). Ordered low priority to
+ * high: the index IS the priority, so arbitration is a comparison and nothing else. `finito`
+ * and `conPermiso` are the same rung — only ever one of them is a candidate at a time.
+ */
+export type FlairMessageId =
+  | 'finito'
+  | 'conPermiso'
+  | 'deCostado'
+  | 'conEstilo'
+  | 'puraSeda'
+  | 'auraPlus'
+  | 'laCalleEsTuya'
+  | 'faltandoElRespeto'
+  | 'aPuroBandidaje'
+  | 'auraInfinita'
+  | 'auraMenos';
+
+/** How loudly a phrase is drawn. `peak` is AURA INFINITA alone; `crash` is the punchline. */
+export type FlairTier = 'common' | 'special' | 'peak' | 'crash';
+
+/**
+ * The flair streak and the arbitration that decides which phrase gets the screen
+ * (`src/sim/flair.ts`). Plain data like everything else here.
+ *
+ * `units` and the counters beside it are INTERNAL. Nothing draws them, nothing pays them, and
+ * they buy nothing: they exist so that two different manoeuvres can add up to one compliment.
+ */
+export interface FlairState {
+  /** True while a streak is alive. */
+  streak: boolean;
+  /** Internal units in the current streak. Never shown. */
+  units: number;
+  /** Near misses inside the current streak. */
+  nearMisses: number;
+  /** Seconds of held drift accumulated inside the current streak. */
+  driftSeconds: number;
+  /** Seconds since the last valid manoeuvre. Reset by a near miss, held at 0 by a live drift. */
+  idle: number;
+  /** Which messages this streak has already spent, as a bitmask of `FlairMessageId` indices. */
+  said: number;
+  /** True once AURA INFINITA has been reached: nothing smaller follows it in this streak. */
+  peaked: boolean;
+  /** Serial of the current streak, so a held candidate can tell whether its streak still exists. */
+  serial: number;
+  /** Whether the existing drift was active last tick, so its start and end are the drift's own. */
+  driftWasActive: boolean;
+  /** Which milestones of the CURRENT drift are spent. Re-armed when that drift ends. */
+  driftMilestones: number;
+  /** Simulation time the last celebration started (`-Infinity` before the first). */
+  shownAt: number;
+  /** Simulation time the crash line was last said. */
+  crashAt: number;
+  /** Simulation time each message was last said, indexed like `FlairMessageId`. */
+  lastSaid: Float64Array;
+  /** The one held candidate, as a message index; -1 for none. Never a queue. */
+  pending: number;
+  /** Simulation time the held candidate qualified. */
+  pendingAt: number;
+  /** Which streak the held candidate belongs to. */
+  pendingSerial: number;
+  /** True while the held candidate is a drift milestone, which stops making sense off the drift. */
+  pendingDrift: boolean;
+  /** Which opener was used last, so the next streak picks the other one. -1 before the first. */
+  lastOpener: number;
+}
+
 export interface EconomyState {
   money: number;
   destroyed: number;
@@ -794,7 +861,14 @@ export type GameEvent =
   /** A quiet note for the strip, not dialogue: the tutorial's own assistance. */
   | { type: 'introNote'; text: string }
   /** The intro is over. Raised exactly once, whichever way it ended. */
-  | { type: 'introDone'; reason: 'completed' | 'skipped' };
+  | { type: 'introDone'; reason: 'completed' | 'skipped' }
+  /* ---------------------------------------------------------------- flair */
+  /**
+   * A phrase to put on the glass (`src/sim/flair.ts`). Raised at most once per tick and only
+   * when it has already won the arbitration, so a listener has nothing to decide: show `text`
+   * for `seconds`, at the weight `tier` asks for.
+   */
+  | { type: 'flair'; id: FlairMessageId; text: string; tier: FlairTier; seconds: number };
 
 export type PoliceOffenseCategory = 'close' | 'medium' | 'far';
 
@@ -1200,6 +1274,11 @@ export interface GameState {
    * sites (`ArenaLayout.streetSites`) — the open-world city, and nothing else.
    */
   streetGate: StreetGateState | null;
+  /**
+   * The reactive phrases (`src/sim/flair.ts`). Present wherever RAYO RUSH is, because that is
+   * the only place they are said; it watches the drift and near-miss rules and changes nothing.
+   */
+  flair: FlairState | null;
   /** The police (`src/sim/police.ts`). Only the open world has any. */
   police: PoliceState | null;
   /**

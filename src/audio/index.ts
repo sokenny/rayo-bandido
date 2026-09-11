@@ -131,6 +131,13 @@ export function createAudio(targetCount: number): AudioSystem {
           // Only on the way in; rolling off a marker is not an event worth a sound.
           if (ev.on) oneShots.pickup();
           break;
+        case 'flair':
+          // The phrases (`src/sim/flair.ts`). The big ones borrow the marker chime — a short
+          // rising figure the kit already has, and already means "that was the good one" — and
+          // the small ones say nothing at all: a sound on every DE COSTADO would be a rattle.
+          // The crash line is silent too; the crash itself was loud enough.
+          if (ev.tier === 'special' || ev.tier === 'peak') oneShots.pickup();
+          break;
         case 'rushLevelUp':
           // A mission cleared gets the GO beat, which is the one sound in the kit that already
           // means "this is the good one" — and it lands on the flag, a beat before the results

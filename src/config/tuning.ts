@@ -2151,3 +2151,82 @@ export const STREET_RACE = {
   /** The rings in the street. Same shape and reasons as `TIME_ATTACK.marker`. */
   marker: { promptRadius: 7.5, exitRadius: 8.4, rearmRadius: 18 },
 };
+
+/**
+ * FLAIR: the phrases the game shouts when the driving deserves one (`src/sim/flair.ts`).
+ *
+ * Every number the feature has is here, because all of them are "play it and see" numbers.
+ * Nothing in this block feeds the near-miss or drift rules — those are `NEAR_MISS` and
+ * `DRIFT` above and they are not to be touched from here: flair only WATCHES what they
+ * already decided.
+ *
+ * Units are internal bookkeeping and never reach the screen. They are not a score, they are
+ * not a multiplier, and no line said here moves money, points or progress by a single yen —
+ * "AURA +1000" is a compliment, not a transaction.
+ */
+export const FLAIR = {
+  /**
+   * Only while a RAYO RUSH run is actually being driven, and only for the local car. Free roam
+   * is quiet. Flip this to say the lines everywhere.
+   */
+  duringRushOnly: true,
+  /** Console trace of every qualification and every arbitration. Off, and stays off. */
+  debug: false,
+  /** The streak that links the two manoeuvres together. */
+  streak: {
+    /** Units a near miss is worth. */
+    nearMissUnits: 2,
+    /** Units a second of held drift is worth, accumulated with delta time. */
+    driftUnitsPerSecond: 1,
+    /** Seconds without a valid manoeuvre after which the streak is over. A drift holds it open. */
+    idleSeconds: 5,
+  },
+  /**
+   * Milestones of ONE sustained drift, in seconds of the drift `src/sim/drift.ts` is already
+   * reporting. Ascending, one shot each per drift, re-armed when that drift ends.
+   */
+  driftMilestones: [
+    { seconds: 1.5, message: 'deCostado' },
+    { seconds: 3.5, message: 'conEstilo' },
+    { seconds: 6, message: 'puraSeda' },
+    { seconds: 10, message: 'laCalleEsTuya' },
+  ],
+  /** The streak's own lines. Each fires at most once per streak. */
+  combo: {
+    /** Near misses in one streak that earn AURA +1000. */
+    auraNearMisses: 3,
+    /** Seconds the drift must already have run for a near miss inside it to be a FALTANDO EL RESPETO. */
+    disrespectDriftSeconds: 2,
+    /** A PURO BANDIDAJE wants all three at once: it is the line for having done both things. */
+    bandidaje: { units: 12, nearMisses: 2, driftSeconds: 4 },
+    /** AURA INFINITA. Reachable by mixing, or by an exceptional run of one manoeuvre alone. */
+    infinite: { units: 22 },
+  },
+  /** The crash line. Reads the impact severity the collision pass already measured. */
+  crash: {
+    /**
+     * Speed into the contact normal (m/s) at or above which contact is a crash rather than a
+     * graze. 15 km/h — a starting point, exactly as briefed.
+     */
+    impactSpeed: 15 / 3.6,
+    /** Units the streak must have reached for losing it to be worth a line. */
+    minUnits: 4,
+    /** Seconds before the crash line may be said again, so a bouncing car says it once. */
+    cooldownSeconds: 4,
+  },
+  /** Timing of the one phrase on screen. All of it on simulation time. */
+  show: {
+    /** Seconds a common line stays up. */
+    commonSeconds: 1.3,
+    /** Seconds a special or peak line stays up. */
+    specialSeconds: 1.8,
+    /** Seconds the crash line stays up: a short punchline, not an announcement. */
+    crashSeconds: 1.3,
+    /** Minimum seconds between two celebrations STARTING. The crash line ignores it. */
+    gapSeconds: 2.2,
+    /** A candidate held through the gap is stale after this and is dropped, never queued. */
+    candidateSeconds: 1.5,
+    /** Minimum seconds before the same phrase may be said again. The crash line has its own. */
+    repeatSeconds: 10,
+  },
+};

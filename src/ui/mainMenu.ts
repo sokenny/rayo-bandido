@@ -1,11 +1,18 @@
 import { MAX_PLAYERS, MAX_WORLD_PLAYERS, worldListing } from '../net/protocol';
 import { fetchRooms } from '../net/connection';
+import { CHANGELOG } from '../content/changelog';
 import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuScreen';
 
 /**
  * Main menu: pick a world. Two of them — the city you drive for its own sake, and the circuit
- * you race on. Built on `menuScreen.ts`; this file is the copy, the live readout and the
- * choice, nothing else.
+ * you race on — and a third tab that is not a world at all, the CHANGELOG. Built on
+ * `menuScreen.ts`; this file is the copy, the live readout and the choice, nothing else.
+ *
+ * The changelog is a tab rather than a key or a corner link because it is the one place the
+ * game says out loud that it is still being worked on, and that is worth as much floor space
+ * as a mode. Its dossier rows come from the log itself (`src/content/changelog.ts`), so the
+ * card advertises the real date of the last change rather than a number somebody has to
+ * remember to bump.
  *
  * RACE IS ONE TAB, TWO WAYS IN. It used to be two — RACE for a solo circuit and VERSUS for a
  * room — which asked the player to decide how they wanted to play before they had decided what
@@ -25,8 +32,8 @@ export interface MainMenu {
   dispose(): void;
 }
 
-/** What the main menu can hand back: a world to drive, the race screen one step deeper, or the intro again. */
-export type MenuChoice = 'city' | 'race' | 'intro';
+/** What the main menu can hand back: a world to drive, a screen one step deeper, or the intro again. */
+export type MenuChoice = 'city' | 'race' | 'changelog' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -56,6 +63,17 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
       ['LENGTH', '1.5 KM'],
       ['LAPS', '02'],
       ['ENTRY', 'OFFLINE OR VERSUS'],
+    ],
+  },
+  {
+    id: 'changelog',
+    kicker: 'BUILD LOG',
+    name: 'CHANGELOG',
+    desc: 'What has changed in the city lately, by the day it went live. Every deploy writes a line here.',
+    spec: [
+      ['LATEST', CHANGELOG[0] ? CHANGELOG[0].date : '--'],
+      ['ENTRIES', String(CHANGELOG.length).padStart(2, '0')],
+      ['NEW', CHANGELOG[0] ? `${String(CHANGELOG[0].items.length).padStart(2, '0')} CHANGES` : 'NONE'],
     ],
   },
 ];

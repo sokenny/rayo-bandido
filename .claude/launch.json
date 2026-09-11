@@ -126,6 +126,19 @@
         "--strictPort"
       ],
       "port": 5182
+    },
+    {
+      "name": "rayo-bandido-flair",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5186",
+        "--strictPort"
+      ],
+      "port": 5186
     }
   ]
 }

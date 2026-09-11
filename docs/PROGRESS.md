@@ -2060,3 +2060,31 @@ player: only this client's collision pass looks away during the intro).
 the parked cars' exact spots and colours, BadKala's look, the strip and panel positions on small
 screens, the placeholder titles. Whether the meet should live in the city permanently (today it
 exists only in the session that runs the intro) is Juan's call.
+
+## The changelog tab, and a deploy that cannot skip it (2026-09-11)
+
+**A third tab on the main menu.** CHANGELOG, next to OPEN WORLD and RACE, reading
+`src/content/changelog.ts`: entries by date, newest first, one terse player-facing line per
+change. It is a screen rather than a card's dossier (`src/ui/changelog.ts`, `?log=1`, ESC back)
+because it is a thing to read rather than a place to drive into, and it keeps the default yellow
+instead of claiming a signature colour — yellow is the system talking in this game, and a build
+log is nothing else. The card's own dossier rows are read from the log (latest date, entry
+count, how many lines that day carries), so the menu advertises the real state of it rather than
+a number somebody has to remember to bump.
+
+**The point is the enforcement, not the tab.** A changelog kept "when we remember to" is worse
+than none: it is a page that quietly stops being true. So the deploy script checks, BEFORE the
+build, that the log's newest entry is dated today, and refuses the deploy otherwise with the
+shape of the entry to write. Checked before the build deliberately — this is the one failure a
+human fixes by writing prose, and making them sit through a build and 776 tests first is the
+surest way to get a careless line. Adding to today's existing entry counts, so a second deploy
+in one day is still one day's news to whoever reads the tab; `tests/changelog.test.ts` holds the
+ISO dates, the newest-first order, the one-entry-per-day rule and the line length.
+
+**What it does not do.** It is not generated from commit subjects or branch names: those say how
+the work was done, and the reader only wants to know what is different when they get in the car.
+A change nobody can see from the driver's seat earns no line at all.
+
+**Verified** in the browser on the dev server: the third card on the menu, the tab at 800x600
+and at 375x812, the entries and the LATEST mark, ↑/↓ scrolling the list, and ESC back to the
+menu at `/`. The gate was exercised both ways before shipping.

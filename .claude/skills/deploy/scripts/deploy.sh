@@ -107,6 +107,37 @@ if [[ -n "$DIRTY" && -z "$COMMIT_MSG" ]]; then
   first argument). Refusing to invent one for a commit that ships to production."
 fi
 
+# --- The changelog is part of shipping, not an afterthought ---------------
+# The game has a CHANGELOG tab reading `src/content/changelog.ts`, and a
+# changelog only stays true if it is impossible to skip. So: a deploy that
+# carries code must leave the log's newest entry dated TODAY. Adding lines to
+# today's existing entry counts — a second deploy in one day is still the same
+# day's news to whoever reads the tab — but yesterday's date at the top means
+# today's changes were never written down, and that is refused here rather
+# than discovered weeks later with no way left to reconstruct what shipped.
+#
+# It is deliberately checked BEFORE the build: this is the one failure a human
+# has to fix by writing prose, and making them wait through a build and a test
+# suite to be told so is the surest way to get the line written carelessly.
+CHANGELOG_FILE="src/content/changelog.ts"
+if [[ -n "$DIRTY" ]]; then
+  [[ -f "$CHANGELOG_FILE" ]] || fail "$CHANGELOG_FILE is missing — the game's CHANGELOG tab reads it."
+  TODAY="$(date +%F)"
+  TOP_DATE="$(node -e "const m=require('fs').readFileSync('$CHANGELOG_FILE','utf8').match(/date:\s*'(\d{4}-\d{2}-\d{2})'/); process.stdout.write(m ? m[1] : '')")"
+  if [[ "$TOP_DATE" != "$TODAY" ]]; then
+    fail "The changelog has nothing for today (${TODAY}); its newest entry is dated '${TOP_DATE:-none}'.
+  Every deploy that ships code writes a line the player can read, in ${CHANGELOG_FILE}:
+
+      { date: '${TODAY}', items: ['What is different when you get in the car.'] },
+
+  Newest first, one entry per day — a second deploy today adds its lines to
+  today's entry rather than opening another one. Keep each line terse and in
+  the player's terms; if this deploy really changes nothing they can see, say
+  so in those terms ('Stability and speed fixes under the hood.')."
+  fi
+  log "Changelog: newest entry is today (${TODAY})."
+fi
+
 tree_fingerprint() {
   # Names plus mtime/size of everything git would consider — cheap, and any
   # editor save moves it.

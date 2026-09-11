@@ -13,8 +13,9 @@ import { canAffordShot } from './lightning';
  *
  * EVENT-DRIVEN, NOT A TIMELINE. A stage ends when the player has done the thing — driven a
  * little way, held a slide, put the bolt in a car, reached the meet — never because a clock
- * ran out. There is no marker to follow until the meet: the drift is anywhere, the electric
- * car is any one on the street. Dialogue is a queue said one line at a time with silence
+ * ran out. There is no marker to follow until she has finished teaching: the drift is anywhere,
+ * the electric car is any one on the street, and the meet is only pinned once the last line
+ * about the shot has been said. Dialogue is a queue said one line at a time with silence
  * between lines; a line marked `instructional` for an objective is dropped unsaid if that
  * objective is already done by the time it would start, so nobody is told how to do what they
  * just did. Skipping a line ends the line and nothing else.
@@ -343,6 +344,7 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
         break;
       }
       intro.assistAccepted = false;
+      say(intro, 'c3');
       say(intro, 'd1');
       say(intro, 'd2');
       setObjective(intro, cfg, 'disable', events);
@@ -363,7 +365,9 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
         say(intro, 'd3');
         say(intro, 'd4');
         say(intro, 'e1');
-        setObjective(intro, cfg, 'arrival', events);
+        // The strip clears while she finishes: the point she marks is the last thing she
+        // gives you, and the `arrival` stage puts it on the map once she has stopped talking.
+        setObjective(intro, cfg, null, events);
         setStage(intro, 'arrival', events);
         break;
       }
@@ -385,6 +389,12 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
     }
 
     case 'arrival': {
+      // THE ONE MARKER OF THE WHOLE INTRODUCTION, and it waits for the lesson to be over: no
+      // pin while she is still explaining the shot. Driving in before it is up still counts —
+      // the meet is the payoff, not a gate.
+      if (intro.objective !== 'arrival' && intro.queue.length === 0 && !intro.lineId && intro.gapLeft <= 0) {
+        setObjective(intro, cfg, 'arrival', events);
+      }
       const r = cfg.route.meetup;
       if (within(state, r.x, r.z, r.radius)) {
         intro.arrivalDone = true;

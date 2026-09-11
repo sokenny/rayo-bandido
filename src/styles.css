@@ -1493,6 +1493,94 @@ body {
     0 0 22px rgba(79, 243, 255, 0.7);
 }
 
+/* ------------------------------------------ centre: the flair phrases */
+
+/* The one line of attitude the game says while a RAYO RUSH run is being driven — see
+   src/ui/flairOverlay.ts for the component and src/sim/flair.ts for what earns one.
+
+   It sits ABOVE the centre, between the aim meter (26%) and the near-miss pop that lands over
+   the car's roof (52%), so nothing is ever written across the car or across the stretch of
+   road the player is steering into. Everything about it is transform and opacity, driven by
+   one Web Animation: there is no per-frame work and nothing here can force a layout. */
+.rb-flair {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: center;
+  will-change: transform, opacity;
+}
+
+.rb-flair__text {
+  font-family: var(--rb-display);
+  font-size: 27px;
+  font-weight: 700;
+  font-stretch: condensed;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  /* The house slant, on the text rather than on the box: the box's transform belongs to the
+     animation, and two owners of one property is how a phrase ends up sideways. */
+  transform: skewX(-7deg);
+  color: var(--rb-cyan-hot);
+  /* Dark casing first, glow second: this is read over headlights and neon, not over a panel. */
+  text-shadow:
+    0 2px 5px rgba(4, 8, 16, 0.95),
+    0 0 20px rgba(79, 243, 255, 0.6);
+}
+
+/* A milestone worth more than a nod: bigger, and the system's yellow behind it. */
+.rb-flair--special .rb-flair__text {
+  font-size: 38px;
+  letter-spacing: 0.1em;
+  color: var(--rb-yellow);
+  text-shadow:
+    0 2px 6px rgba(4, 8, 16, 0.95),
+    0 0 26px rgba(252, 238, 10, 0.55);
+}
+
+/* The accent: one short rule under a special phrase. Nothing boxed, nothing panelled. */
+.rb-flair--special .rb-flair__text::after,
+.rb-flair--peak .rb-flair__text::after {
+  content: '';
+  display: block;
+  width: 46%;
+  height: 2px;
+  margin: 7px auto 0;
+  background: currentColor;
+  box-shadow: 0 0 12px currentColor;
+  opacity: 0.85;
+}
+
+/* AURA INFINITA: the top of the ladder, and the only phrase allowed to take the middle of the
+   screen seriously. Still one line of text — no panel, no flash, no full screen. */
+.rb-flair--peak .rb-flair__text {
+  font-size: 52px;
+  letter-spacing: 0.08em;
+  color: var(--rb-magenta);
+  text-shadow:
+    0 3px 8px rgba(4, 8, 16, 0.95),
+    0 0 18px rgba(255, 61, 240, 0.8),
+    0 0 44px rgba(155, 92, 255, 0.55);
+}
+
+/* The punchline. Small, dry, in the machine's face rather than the shouted one: it is the
+   game being sarcastic about a crash, not announcing a penalty — and there is no penalty. */
+.rb-flair--crash .rb-flair__text {
+  font-family: var(--rb-mono);
+  font-size: 19px;
+  font-weight: 700;
+  font-stretch: normal;
+  letter-spacing: 0.26em;
+  transform: none;
+  color: var(--rb-red);
+  text-shadow:
+    0 2px 5px rgba(4, 8, 16, 0.95),
+    0 0 16px rgba(255, 43, 61, 0.5);
+}
+
 /* ------------------------------------------------ centre: the aim/charge meter */
 
 /* Holding E charges the bolt; this is the meter for that hold, and the only aim aid there
@@ -5118,5 +5206,144 @@ body.rb-touch-pad .rb-minimap {
   .rb-gauge--charge.is-intro-hilite,
   .rb-intro__channel i {
     animation: none;
+  }
+}
+
+/* ------------------------------------------------------------- changelog */
+/* The CHANGELOG tab (`src/ui/changelog.ts`): one panel of dated entries, scrolled. It keeps the
+   default yellow rather than claiming a signature colour of its own, because yellow is the
+   system talking in this game and a build log is nothing else. */
+
+.rb-log {
+  justify-content: center;
+  justify-content: safe center;
+  overflow-y: auto;
+  padding: 26px 16px;
+  box-sizing: border-box;
+}
+
+.rb-log__panel {
+  width: min(660px, 92vw);
+  margin-top: 20px;
+  padding-bottom: 4px;
+}
+
+.rb-log__scroll {
+  max-height: min(46vh, 360px);
+  overflow-y: auto;
+  padding: 8px 14px 10px;
+}
+
+.rb-log__scroll:focus-visible {
+  outline: 1px solid var(--rb-yellow);
+  outline-offset: -2px;
+}
+
+.rb-log__entry + .rb-log__entry {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rb-hairline-cold);
+}
+
+.rb-log__when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rb-log__date {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--rb-yellow);
+}
+
+.rb-log__tag {
+  padding: 2px 6px;
+  background: rgba(252, 238, 10, 0.14);
+  font-family: var(--rb-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--rb-yellow);
+}
+
+.rb-log__items {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rb-log__items li {
+  position: relative;
+  padding-left: 16px;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--rb-text);
+}
+
+.rb-log__items li + li {
+  margin-top: 3px;
+}
+
+.rb-log__items li::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  background: var(--rb-cyan);
+}
+
+.rb-log__empty {
+  padding: 20px 10px;
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--rb-dim);
+  text-align: center;
+}
+
+.rb-log__back {
+  margin-top: 16px;
+  min-width: 140px;
+}
+
+@media (max-width: 900px) {
+  .rb-log__scroll {
+    max-height: 52vh;
+    padding: 8px 10px 10px;
+  }
+
+  .rb-log__items li {
+    font-size: 10px;
+  }
+}
+
+/* The phrases, on a phone: smaller, and a little higher, because the landscape viewport is
+   short and the car sits proportionally further up it. */
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-flair {
+    top: 30%;
+  }
+
+  .rb-flair__text {
+    font-size: 20px;
+  }
+
+  .rb-flair--special .rb-flair__text {
+    font-size: 27px;
+  }
+
+  .rb-flair--peak .rb-flair__text {
+    font-size: 35px;
+  }
+
+  .rb-flair--crash .rb-flair__text {
+    font-size: 15px;
+    letter-spacing: 0.2em;
   }
 }

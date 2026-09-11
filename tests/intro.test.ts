@@ -175,7 +175,7 @@ describe('the places', () => {
   });
 
   it('names every line a trigger refers to, with a sane subtitle timing', () => {
-    for (const id of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2', 'c-hint', 'd1', 'd2', 'd3', 'd4', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7']) {
+    for (const id of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2', 'c3', 'c-hint', 'd1', 'd2', 'd3', 'd4', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7']) {
       const l = introLine(INTRO, id);
       const s = introLineSeconds(INTRO, l);
       expect(s).toBeGreaterThanOrEqual(INTRO.timing.minSeconds);
@@ -275,6 +275,8 @@ describe('the stages', () => {
     expect(r.intro.objective).toBe('disable');
     expect(types(events)).toContain('introStage');
     expect(r.intro.said.has('c2')).toBe(true);
+    // The nitro is mentioned once the slide is behind us, on the way to the shot.
+    expect(r.intro.said.has('c3')).toBe(true);
   });
 
   it('skipping the drift instruction does not complete the drift', () => {
@@ -309,6 +311,8 @@ describe('the stages', () => {
     expect(r.intro.assistOffered).toBe(false);
     expect(r.state.lightning.charge).toBeGreaterThanOrEqual(INTRO.drift.chargeBonus);
     expect(r.intro.said.has('c2')).toBe(false);
+    // ...but the nitro is still mentioned: the assist skips the praise, not the lesson.
+    expect(r.intro.said.has('c3')).toBe(true);
     expect(r.intro.stage).toBe('disableEV');
   });
 
@@ -322,15 +326,23 @@ describe('the stages', () => {
     expect(r.state.lightning.charge).toBeGreaterThanOrEqual(INTRO.drift.chargeBonus);
     expect(r.intro.rechargeAssists).toBe(1);
 
-    // Any street car shot: the objective, and the meet marked.
+    // Any street car shot: the shutdown lines, and no point to drive to while she talks.
     kill(r, 3);
     expect(r.intro.evDone).toBe(true);
     expect(r.intro.stage).toBe('arrival');
+    expect(r.intro.objective).toBe(null);
+    expect(r.intro.objectiveRadius).toBe(0);
+    expect(r.intro.said.has('d3')).toBe(true);
+    expect(r.intro.said.has('d4')).toBe(true);
+    // The pin goes up only once the last of them has been said and the silence after it is over.
+    for (let i = 0; i < 60 * 150 && r.intro.objective === null; i++) {
+      r.tick();
+      if (r.intro.lineId) expect(r.intro.objective).toBe(null);
+    }
+    expect(r.intro.said.has('e1')).toBe(true);
     expect(r.intro.objective).toBe('arrival');
     expect(r.intro.objectiveX).toBe(INTRO.route.meetup.x);
     expect(r.intro.objectiveRadius).toBe(INTRO.route.meetup.radius);
-    expect(r.intro.said.has('d3')).toBe(true);
-    expect(r.intro.said.has('d4')).toBe(true);
     // A second kill changes nothing.
     const stage = r.intro.stage;
     kill(r, 4);

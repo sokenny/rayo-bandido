@@ -10,7 +10,7 @@ import type {
   RivalCar,
   VehicleState,
 } from '../core/types';
-import { NITRO } from '../config/tuning';
+import { FLAIR, NITRO } from '../config/tuning';
 import { stepVehicle } from './vehicle';
 import { resolveCollisions, resolveTargetCollisions } from './collision';
 import { resolveRivalCollisions } from './rivalCollision';
@@ -24,6 +24,7 @@ import { applyPassengerFare, applyPoliceFine, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
 import { createTimeAttackState, resetTimeAttackState, stepTimeAttack } from './timeAttack';
 import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
+import { createFlairState, resetFlairState, stepFlair } from './flair';
 import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
@@ -145,6 +146,7 @@ export function createInitialGameState(
     race: layout.race ? createRaceState(layout.race) : null,
     timeAttack: layout.race && options.timeAttack ? createTimeAttackState(options.timeAttackCleared ?? 0) : null,
     rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
+    flair: layout.rushSites && layout.rushSites.length > 0 ? createFlairState() : null,
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
@@ -174,6 +176,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   // back on the grid, it does not un-finish missions that were finished.
   if (state.timeAttack) resetTimeAttackState(state.timeAttack);
   if (state.rush) resetRushState(state.rush);
+  if (state.flair) resetFlairState(state.flair);
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
@@ -184,10 +187,14 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   state.events.length = 0;
 }
 
+/** Speed (m/s) under which the intro's hold lets go of the brake: see the hold in `stepGame`. */
+const INTRO_HOLD_BRAKE_SPEED = 1;
+
 /**
  * The command applied while a race countdown holds the car on the grid: handbrake on, no
  * throttle. Steering and fire are copied from the player's command so the wheels turn and
- * the lightning still works. One long-lived object, never allocated per tick.
+ * the lightning still works. Each holder sets the brake it wants. One long-lived object,
+ * never allocated per tick.
  */
 const HOLD: PlayerCommand = {
   throttle: 0,
@@ -284,6 +291,7 @@ export function stepGame(
   let input = cmd;
   if (race && race.phase === 'countdown') {
     HOLD.steer = cmd.steer;
+    HOLD.brake = 0;
     HOLD.fire = cmd.fire;
     HOLD.activate = cmd.activate;
     input = HOLD;
@@ -292,13 +300,18 @@ export function stepGame(
   // weapon is holstered too — a BUSTED card is not a moment to be firing.
   if (policeHoldsPlayer(state.police)) {
     HOLD.steer = 0;
+    HOLD.brake = 0;
     HOLD.fire = false;
     HOLD.activate = false;
     input = HOLD;
   }
   // The opening cinematic (`src/sim/intro.ts`): the car waits under the deck until it is over.
+  // Unlike the grid and the arrest, this one brakes as well as pulling the handbrake — pulling
+  // into the meet has to END at the meet, not twenty metres past it in a handbrake slide. The
+  // brake comes off again at walking pace, because holding it at a standstill arms reverse.
   if (introHoldsPlayer(state.intro)) {
     HOLD.steer = 0;
+    HOLD.brake = state.vehicle.speed > INTRO_HOLD_BRAKE_SPEED || state.vehicle.speed < -INTRO_HOLD_BRAKE_SPEED ? 1 : 0;
     HOLD.fire = false;
     HOLD.activate = false;
     input = HOLD;
@@ -354,6 +367,14 @@ export function stepGame(
       dt,
       state.events,
     );
+  }
+  // The phrases (`src/sim/flair.ts`), right behind the activity that owns them. Last of the
+  // things that watch the driving, and the most thoroughly a watcher of them all: it reads the
+  // drift, the near misses and the collisions this tick already raised, and writes nothing but
+  // its own line. `RUSH` is the only place it talks, so the run's phase is what switches it on.
+  if (state.flair) {
+    const talking = !FLAIR.duringRushOnly || (!!state.rush && state.rush.phase === 'running');
+    stepFlair(state.flair, state.drift, talking, state.time, dt, state.events, state.events.length);
   }
   lockOtherActivities(state);
   if (passenger && layout.passengerStops && layout.passengerStops.length > 0) {
