@@ -271,7 +271,20 @@ export interface TrackLineDef {
   halfWidth: number;
 }
 
+/** Exact occupied boxes, after reserving road and chase-camera corridors. */
+export interface CityVolume extends Rect {
+  y0: number;
+  y1: number;
+  role: 'podium' | 'body' | 'wing' | 'top';
+}
+export interface MegastructureDef {
+  tag: string;
+  footprint: Rect;
+  volumes: CityVolume[];
+}
+
 export interface CityPlan {
+  megastructures?: MegastructureDef[];
   bounds: Rect;
   /** Which colour script the world is drawn in. Missing = the arena's. */
   palette?: 'arena' | 'bay';

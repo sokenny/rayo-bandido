@@ -646,7 +646,9 @@ describe('city art budget', () => {
     buildLandmarks(b);
     buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
-    // 162k of this is the city itself (including the vertical corner fillet every building
+    // The structural district adds occupied volumes with independent culling; the total
+    // static ceiling is 270k (measured 269k), with equipment removed beyond 170 m.
+    // Historical baseline: 162k of this is the city itself (including the vertical corner fillet every building
     // carries — `buildingKit`'s `cornerFillet`, four extra wall strips a volume). The other
     // ~51k is the reclamation: the greenery on every verge and block ledge, the ground-floor
     // modules, the kerb-side retaining walls and the one decal builder that carries every tag
@@ -665,8 +667,10 @@ describe('city art budget', () => {
     // scene's lighting can actually show on street furniture: horizontal breaks with lit top
     // faces, and more emissive edges. Measured at 229k in the same 19 draw calls; the ceiling
     // leaves headroom without hiding a regression.
-    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(248000);
+    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(270000);
     expect(triangles, 'the city is not empty').toBeGreaterThan(40000);
-    expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
+    // Six independently culled megablocks now share the existing material set. This is
+    // the all-chunks maximum, not the number submitted from any one driving viewpoint.
+    expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(72);
   });
 });

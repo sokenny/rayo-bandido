@@ -1,8 +1,9 @@
 import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { createBuilders, groundGlow, halo, type EnvBuilders } from './builders';
 import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec, type Volume } from './buildingKit';
+import { buildMegastructures } from './megastructureBuilder';
 import { FLOOR } from './facadeAtlas';
 import { dressBuilding } from './buildingReclaim';
 import { signCell } from './textures';
@@ -47,6 +48,12 @@ export function buildCity(b: EnvBuilders): void {
   buildRoads(b);
   buildRoadPaint(b, rng);
   buildBlocks(b);
+  b.districtChunks = (b.plan.megastructures ?? []).map((m) => {
+    const chunk = createBuilders({ ...b.plan, megastructures: [m] });
+    buildMegastructures(chunk);
+    for (const v of m.volumes) b.walls.add(v);
+    return chunk;
+  });
   buildPerimeter(b, rng);
   buildSkyline(b, rng);
 }

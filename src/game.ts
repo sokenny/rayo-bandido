@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { cityRecovery } from './world/cityRecovery';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { addCircuitGate } from './world/cityCircuitGate';
@@ -1328,9 +1329,14 @@ export function createGame(
       z = (gate.az + gate.bz) / 2 + gate.fz * RESPAWN_AHEAD;
       heading = Math.atan2(gate.fx, -gate.fz);
     }
+    let y = layout.playerSpawn.y ?? 0;
+    if (mode === 'city') {
+      const recovered = cityRecovery(world.plan, v.x, v.z, v.y, v.heading);
+      x = recovered.x; z = recovered.z; y = recovered.y ?? 0; heading = recovered.heading;
+    }
     v.x = v.prevX = x;
     v.z = v.prevZ = z;
-    v.y = v.prevY = 0;
+    v.y = v.prevY = y;
     v.pitch = 0;
     v.heading = v.prevHeading = heading;
     v.vx = 0;
@@ -1541,6 +1547,10 @@ export function createGame(
   function simulate(dt: number): void {
     input.poll(command);
 
+    if (mode === 'city' && command.restart) {
+      command.restart = false;
+      rescue();
+    }
     if (net && trafficSync) {
       // Rivals first: everything after this — collision, the camera, the standings — should
       // see the same instant of them.

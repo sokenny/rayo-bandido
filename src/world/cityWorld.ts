@@ -44,6 +44,7 @@ import {
   VIADUCT_SPEC,
   VIADUCT_Y,
 } from './citySpec';
+import { planMegastructures, reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
 import { createSurfaceField } from './surface';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
@@ -177,12 +178,16 @@ export function createCityWorld(): World {
     return zone;
   };
 
-  const blocks = generateBlocks(inner, ribbons, zoneAt, CITY_BLOCK_OPTIONS);
+  const megastructures = planMegastructures(ribbons);
+  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, CITY_BLOCK_OPTIONS), megastructures);
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
-  const solids: Rect[] = [...blocks, ...perimeter];
+  const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
+    ...v, tag: m.tag, zone: 'urban' as const, massing: 4 as const,
+  })));
+  const solids: Rect[] = [...blocks, ...groundMasses, ...perimeter];
   const shoulders = { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder };
   // The pavement beside the streets: flush with them, so this is art and nothing the car feels.
-  const kerbs = createKerbField(ribbons, shoulders, blocks);
+  const kerbs = createKerbField(ribbons, shoulders, [...blocks, ...groundMasses]);
 
   const onGroundRoad = (x: number, z: number, pad: number): boolean => {
     for (const rb of ground) if (isOnPath(rb.path, x, z, pad)) return true;
@@ -355,6 +360,9 @@ export function createCityWorld(): World {
   /* ---------------------------------------------------------- layout */
 
   const colliders: ObstacleBox[] = [];
+  for (const m of megastructures) for (const v of m.volumes) {
+    colliders.push({ ...v, minY: v.y0, maxY: v.y1, tag: m.tag });
+  }
   for (const w of perimeter) colliders.push({ minX: w.minX, maxX: w.maxX, minZ: w.minZ, maxZ: w.maxZ, tag: w.tag });
   for (const b of blocks) {
     colliders.push({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, tag: b.tag, ...(b.maxHeight !== undefined ? { maxY: b.maxHeight } : {}) });
@@ -448,6 +456,7 @@ export function createCityWorld(): World {
     ribbons,
     rails,
     blocks,
+    megastructures,
     walls: perimeter,
     barriers: [],
     gates: routeGates(ground),

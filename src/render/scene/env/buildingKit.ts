@@ -30,6 +30,7 @@ export type Detail = 'near' | 'mid' | 'far';
 export const ARCHETYPES: readonly Archetype[] = ['tower', 'slab', 'podium', 'stepped', 'offset', 'cantilever', 'recessed', 'twin', 'low', 'shabby', 'landmark'];
 
 export interface BuildingSpec {
+  volumes?: import('../../../world/cityPlan').CityVolume[];
   zone: ZoneId;
   /** The block's height band; picks the archetype table. */
   massing: 1 | 2 | 3 | 4;
@@ -520,6 +521,20 @@ function assignBands(v: Volume, f: Frame, primary: FacadeStyle, tint: number, br
   const pools = STYLE_POOLS[f.spec.zone];
   const rng = f.rng;
   const h = v.y1 - v.y0;
+  if (f.spec.volumes) {
+    // The carved district uses broad quiet service surfaces and grouped occupied floors.
+    // Absolute floor bands remain aligned across pieces of the same carved mass.
+    const first = Math.floor(v.y0 / 12) * 12;
+    for (let floor = first; floor < v.y1; floor += 12) {
+      const lo = Math.max(v.y0, floor), hi = Math.min(v.y1, floor + 12);
+      const split = Math.max(lo, Math.min(hi, floor + 6));
+      if (split > lo) v.bands.push(band(lo, split, 'service', 0x93a6ad, 0.45, 0.95));
+      if (hi > split) v.bands.push(band(split, hi, v.role === 'wing' ? 'cluster' : 'sparse',
+        v.role === 'body' ? 0xffd59a : 0xc0d8d8, 0.8, 0.95));
+    }
+    v.backStyle = 'service';
+    return;
+  }
   if (dark) {
     v.bands.push(band(v.y0, v.y1, 'dark', tint, bright * 0.7, wall));
     return;
@@ -897,7 +912,7 @@ export function buildBuilding(b: EnvBuilders, plot: Rect2, spec: BuildingSpec, r
   const hasStreet = street.some(Boolean);
 
   const archetype = pickArchetype(f);
-  const volumes = archetype === 'landmark' ? landmarkMassing(f, spec.landmark ?? 0) : MASSINGS[archetype](f);
+  const volumes: Volume[] = spec.volumes ? spec.volumes.map((v) => ({ ...v, chamfer: 0, bands: [] })) : archetype === 'landmark' ? landmarkMassing(f, spec.landmark ?? 0) : MASSINGS[archetype](f);
   // Register the walls the moment the massing is decided. Everything hung on a facade later —
   // by this file or by any builder that runs after the city — asks the index where the walls
   // are, because most archetypes stand well inside the plot they were given.
@@ -919,7 +934,7 @@ export function buildBuilding(b: EnvBuilders, plot: Rect2, spec: BuildingSpec, r
     // Wings and second towers may take their own pattern, so a pair never reads as one box.
     const style = v.role === 'wing' || (archetype === 'twin' && v.role === 'body' && rng() < 0.5) ? pick(pools.body, rng, 1.25) : primary;
     assignBands(v, f, style, tint, bright, wallBright, dark, hasStreet);
-    if (backStyle) v.backStyle = backStyle;
+    if (backStyle && !spec.volumes) v.backStyle = backStyle;
   }
 
   // Emit, each volume against the one under it so overhangs get an underside.

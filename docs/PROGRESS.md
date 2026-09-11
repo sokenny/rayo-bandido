@@ -2088,3 +2088,64 @@ A change nobody can see from the driver's seat earns no line at all.
 **Verified** in the browser on the dev server: the third card on the menu, the tab at 800x600
 and at 375x812, the entries and the LATEST mark, ↑/↓ scrolling the list, and ESC back to the
 menu at `/`. The gate was exercised both ways before shipping.
+
+## 2026-09-11 — structural downtown district
+
+Implemented six occupied megablocks across the northern district. `cityMegastructures.ts`
+reserves every ground/elevated road corridor before carving stepped, paired and cantilevered
+masses. The same resulting boxes drive rendering and height-bounded collision; no solid box
+spans a passage. Ground bases also participate in sidewalk generation and prop exclusion.
+The existing 15 m viaduct loop, four ramps and 24 m skyway are preserved. Three substantial
+buildings enclose the northern viaduct, separated by exposed bridge spans. No new road or
+connection between the two elevated layers was necessary; the ramps remain the loop's branches
+and the skyway connects through the ground network.
+
+Window/service bands follow absolute floor levels across carved pieces. Shared atlas windows,
+blank concrete, existing transparent graffiti, shutters, utility grilles, warm soffit fixtures,
+maintenance ledges and sparse static silhouettes dress real surfaces. The district has six
+independently culled material batches; equipment disappears beyond 170 m. Existing city-wide
+batches remain unchanged. City R recovery now selects a nearby road with an elevation preference,
+in solo and online play, instead of resetting to the ground spawn.
+
+Where to drive: from the west end of Centre Boulevard, enter the northbound ramp at
+**(-196, 64)**. Follow it to the viaduct, continue north and then east through downtown. The
+three passage footprints span x **-175..-88**, **-49..8**, and **38..98** along z **-205**.
+Complete the loop and use the north exit beginning at **(-60, -201)** to descend to
+**(190, -166)**. The separate skyway begins at **(-130, 56)** and reaches 24 m.
+
+Controls: `MEGACITY` in `src/world/cityMegastructures.ts` contains district count (up to six),
+height list, road margin, camera clearance, equipment density and detail distance. Road elevations
+and ramp nodes remain in `src/world/citySpec.ts`. Heights/clearances should be verified with the
+focused tests after tuning.
+
+Verification:
+- `npm run build` and `npm run typecheck` passed.
+- 63 focused tests passed across city, megacity, circuit and camera. After final facade/massing
+  changes, all 31 city/megacity tests passed again. Earlier building-kit tests also passed.
+- `node scripts/megacity-check.mjs` ran in Chrome against local Vite: actual vehicle simulation
+  drove ~208 m of entry ramp, ~1,934 m on the loop (including a complete lap), and ~252 m of exit
+  ramp without collision or teleporting between stages. Traffic was removed for this static
+  traversal check. Exit height was 0.035 m. Browser R recovery stayed at y=15. No page errors.
+- Normal chase-camera ground, passage and bridge captures were inspected at 1440x900, DPR 1.
+  Final captures: ~60 FPS, GPU 2.1–2.5 ms; 103/249/192 draw calls and
+  276,810/305,440/295,888 submitted triangles respectively, including traffic/effects.
+  Screenshots and machine-readable traversal results: `/tmp/rb-megacity/` (temporary).
+- Static environment ceiling is now 270k triangles / 72 material batches, including all district
+  chunks. Actual static count is ~269k. This exceeds the preferred ~200k guideline; no equivalent
+  baseline comparison or modest-hardware certification was performed. Chunk culling and detail
+  LOD are in place, but further performance/visual tuning remains possible.
+
+Changed modules: city plan/world plus new megastructure and recovery planners; building kit,
+city/environment builders plus new megastructure dressing; city recovery integration in game;
+focused tests and reproducible browser-check script. No deployment performed.
+
+## 2026-09-11 — restore pre-expansion checkpoint
+
+At Juan’s request, restored the recorded file state immediately before the request to expand
+the treatment across 70% of the city. Retains the original six-block northern district and
+removes the subsequent broader expansion and visual revisions. Reconstructed from the original
+edit history against unchanged HEAD; all restored paths matched that reconstruction byte-for-byte
+before this log entry. The replaced work is backed up at `/tmp/rayo-before-rollback-20260911/`.
+Typecheck and all 63 city/megacity/circuit/camera tests passed. The original Chrome runtime check
+completed entry, full viaduct loop and exit with zero collisions or browser errors; R stayed at
+y=15. No deployment performed.

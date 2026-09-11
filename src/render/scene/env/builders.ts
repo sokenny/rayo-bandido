@@ -13,6 +13,7 @@ import type { CityPlan } from '../../../world/cityPlan';
  */
 export interface EnvBuilders {
   plan: CityPlan;
+  districtChunks?: EnvBuilders[];
   /**
    * Where the city has been let go (`reclaim.ts`). Rides along beside the plan so every
    * builder asks the same field the same question and a vine, the weeds under it and the
@@ -289,6 +290,10 @@ export function builderStats(b: EnvBuilders): { triangles: number; drawCalls: nu
   let triangles = 0;
   let drawCalls = 0;
   for (const [key, value] of Object.entries(b)) {
+    if (key === 'districtChunks') {
+      for (const chunk of b.districtChunks ?? []) { const n = builderStats(chunk); triangles += n.triangles; drawCalls += n.drawCalls; }
+      continue;
+    }
     if (key === 'plan' || key === 'reclaim' || key === 'walls') continue;
     const mb = value as MeshBuilder;
     triangles += mb.triangles;
