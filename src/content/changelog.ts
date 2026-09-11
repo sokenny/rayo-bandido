@@ -32,6 +32,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'The introduction: a first drive through the city with BadKala on the phone, ending in Free Roam.',
       'Replay the introduction any time with I on the main menu.',
       'The city talks back: PURA SEDA, AURA +1000 and the rest, when the driving earns it.',
+      'Downtown is built up: six megablocks in the north, with passages you drive straight through.',
+      'R now puts you back on a nearby road at the height you were at, not down at the spawn.',
       'This tab: every change, by the day it went live.',
     ],
   },

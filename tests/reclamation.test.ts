@@ -163,8 +163,11 @@ describe('the city it produces', () => {
 
   it('adds one draw call and no new light', () => {
     const { drawCalls } = builderStats(b);
-    // Thirteen materials before the reclamation, plus the one decal material it introduces.
-    expect(drawCalls, `draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
+    // The whole city plus the one decal material the reclamation introduces, so this number
+    // moves whenever the city does: the structural district raised the city's own ceiling to
+    // 72 (`tests/cityWorld.test.ts`, all chunks, not one viewpoint) and this budget follows it.
+    // What is being held here is the +1, which is why the two must stay one apart.
+    expect(drawCalls, `draw calls: ${drawCalls}`).toBeLessThanOrEqual(73);
   });
 
   it('never puts a plant, a tag or a plinth on a road', () => {
