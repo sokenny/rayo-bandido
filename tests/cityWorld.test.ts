@@ -669,8 +669,9 @@ describe('city art budget', () => {
     // leaves headroom without hiding a regression.
     expect(triangles, `city triangles: ${triangles}`).toBeLessThan(270000);
     expect(triangles, 'the city is not empty').toBeGreaterThan(40000);
-    // Six independently culled megablocks now share the existing material set. This is
-    // the all-chunks maximum, not the number submitted from any one driving viewpoint.
-    expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(72);
+    // One batch per material for the whole city, the structural district included: it draws
+    // into the same builders every other building does, so a new district adds triangles and
+    // no submissions. This number going up means something started batching on its own.
+    expect(drawCalls, `city draw calls: ${drawCalls}`).toBeLessThanOrEqual(20);
   });
 });

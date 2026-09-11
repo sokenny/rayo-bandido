@@ -1,4 +1,3 @@
-import { MEGACITY } from '../../world/cityMegastructures';
 import * as THREE from 'three';
 import { RENDER } from '../../config/tuning';
 import type { CityPlan } from '../../world/cityPlan';
@@ -331,7 +330,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   buildReclamation(b);
 
   const geometries: THREE.BufferGeometry[] = [];
-  const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0, parent: THREE.Object3D = root): void => {
+  const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
     if (builder.empty) return;
     const geo = builder.build();
     geometries.push(geo);
@@ -339,31 +338,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     mesh.name = name;
     mesh.renderOrder = order;
     // Each mesh spans the whole arena, so a frustum test can never reject one.
-    mesh.frustumCulled = parent !== root;
-    parent.add(mesh);
+    mesh.frustumCulled = false;
+    root.add(mesh);
   };
-
-  for (const chunk of b.districtChunks ?? []) {
-    const mass = new THREE.Group();
-    root.add(mass);
-    add(chunk.facade, facadeMat, 'mega-facade', 0, mass);
-    add(chunk.roof, roofMat, 'mega-roof', 0, mass);
-    add(chunk.wall, wallMat, 'mega-wall', 0, mass);
-    add(chunk.neon, neonMat, 'mega-lights', 0, mass);
-    add(chunk.neonPulse, neonPulseMat, 'mega-pulse', 0, mass);
-    add(chunk.neonFlicker, neonFlickerMat, 'mega-beacons', 0, mass);
-    const site = chunk.plan.megastructures![0].footprint;
-    const cx = (site.minX + site.maxX) / 2, cz = (site.minZ + site.maxZ) / 2;
-    const lod = new THREE.LOD();
-    lod.position.set(cx, 24, cz);
-    const detail = new THREE.Group();
-    detail.position.set(-cx, -24, -cz);
-    add(chunk.props, propsMat, 'mega-equipment', 0, detail);
-    add(chunk.decal, decalMat, 'mega-graffiti', 0, detail);
-    lod.addLevel(detail, 0);
-    lod.addLevel(new THREE.Group(), MEGACITY.detailDistance);
-    root.add(lod);
-  }
 
   add(b.concrete, concreteMat, 'env-concrete');
   add(b.wall, wallMat, 'env-walls');

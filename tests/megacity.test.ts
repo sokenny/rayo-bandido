@@ -44,11 +44,16 @@ describe('occupied city district', () => {
     const skyway = plan.ribbons.find(r => r.tag === 'skyway')!.path.samples.find(s => s.y === 24)!;
     expect(cityRecovery(plan, skyway.x, skyway.z, 24, 0).y).toBeCloseTo(24);
   });
-  it('batches the district separately and reports the full geometry cost', () => {
+  it('draws into the city\'s own batches and costs no draw call of its own', () => {
     const b = createBuilders(plan); buildCity(b);
-    expect(b.districtChunks).toHaveLength(6);
     const stats = builderStats(b);
     console.log('district-inclusive building budget', stats, 'volumes', plan.megastructures!.map(m => m.volumes.length));
     expect(stats.triangles).toBeLessThan(82000);
+    // The district used to carry a set of builders per block — 45 draw calls for 41k triangles,
+    // one block spending six of them on 794. Its geometry now lands in the same batches as
+    // every other building, so it adds volume without adding submissions.
+    const bare = createBuilders({ ...plan, megastructures: [] }); buildCity(bare);
+    expect(stats.drawCalls).toBe(builderStats(bare).drawCalls);
+    expect(stats.triangles).toBeGreaterThan(builderStats(bare).triangles + 30000);
   });
 });

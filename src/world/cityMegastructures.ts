@@ -3,7 +3,6 @@ import type { BlockRect, CityVolume, MegastructureDef, Rect, RibbonDef } from '.
 /** Metres. Roads remain authored in citySpec; this district is cut around those roads. */
 export const MEGACITY = {
   districtCount: 6,
-  detailDistance: 170,
   cameraClearance: 9,
   roadMargin: 3,
   heights: [104, 128, 88, 112, 76, 96],

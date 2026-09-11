@@ -2149,3 +2149,33 @@ before this log entry. The replaced work is backed up at `/tmp/rayo-before-rollb
 Typecheck and all 63 city/megacity/circuit/camera tests passed. The original Chrome runtime check
 completed entry, full viaduct loop and exit with zero collisions or browser errors; R stayed at
 y=15. No deployment performed.
+
+## The district draws with the city, not beside it (2026-09-11)
+
+The structural downtown district shipped with a set of builders per block, so each of the six
+could be frustum-culled and its equipment dropped by an LOD past 170 m. Measured, that cost **45
+draw calls to carry 41k triangles** — one block spent six of them on 794 triangles, and the
+whole city went from 14 batches to 60. It also left the same city-wide budget asserted in two
+tests, one of which was raised to 72 and the other left at 20, which is how `main` went red.
+
+**The trade was the wrong way round.** Six blocks in one corner of a 540 m city are visible
+together or not at all, so the culling almost never paid while the submissions always did, and
+an LOD on 21k triangles of equipment saves nothing next to the 111k of props the city already
+draws at every distance. So `buildMegastructures(b)` now writes into the city's own builders
+like every other building, `districtChunks` is gone from `EnvBuilders`, `builderStats` and
+`environment.ts`, and `MEGACITY.detailDistance` went with the LOD rather than staying as a knob
+that turns nothing. `add()` is back to one shape: every environment mesh is a whole-city batch
+and none of them is frustum-culled.
+
+**Result: 60 draw calls to 15, with the geometry untouched** (76,536 triangles either way; the
+district's own volumes, collision and dressing are exactly as they were). `tests/cityWorld.test.ts`
+is back to a ceiling of 20, `tests/reclamation.test.ts` never moved, and the megacity test now
+holds the thing that matters — the district adds more than 30k triangles and **zero** draw
+calls, measured against the same city built without it, so a future district that batches on its
+own fails here instead of on a number somebody has to remember to raise.
+
+**Verified** in the browser on the dev server: no `mega-*` mesh and no LOD node left under the
+environment root, the district's geometry present inside `env-facade`/`env-props`/`env-walls`,
+and downtown rendering from the viaduct and from the south approach. One small side effect,
+kept: the chunks' `glow` builder was never added to the scene, so the district's ground glow was
+silently dropped before and now draws with the city's.

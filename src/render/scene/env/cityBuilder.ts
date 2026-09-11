@@ -1,7 +1,7 @@
 import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
-import { createBuilders, groundGlow, halo, type EnvBuilders } from './builders';
+import { groundGlow, halo, type EnvBuilders } from './builders';
 import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec, type Volume } from './buildingKit';
 import { buildMegastructures } from './megastructureBuilder';
 import { FLOOR } from './facadeAtlas';
@@ -48,12 +48,13 @@ export function buildCity(b: EnvBuilders): void {
   buildRoads(b);
   buildRoadPaint(b, rng);
   buildBlocks(b);
-  b.districtChunks = (b.plan.megastructures ?? []).map((m) => {
-    const chunk = createBuilders({ ...b.plan, megastructures: [m] });
-    buildMegastructures(chunk);
-    for (const v of m.volumes) b.walls.add(v);
-    return chunk;
-  });
+  // The district draws into the city's own batches, like every other building here. It used to
+  // get a set of builders per block so each could be frustum-culled on its own, which cost 45
+  // draw calls to carry 41k triangles — one block spent six of them on 794 triangles. Six
+  // localised blocks in one corner of a 540 m city are visible together or not at all, so the
+  // culling almost never paid, and the submissions always did.
+  buildMegastructures(b);
+  for (const m of b.plan.megastructures ?? []) for (const v of m.volumes) b.walls.add(v);
   buildPerimeter(b, rng);
   buildSkyline(b, rng);
 }
