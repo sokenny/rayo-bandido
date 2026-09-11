@@ -6,7 +6,6 @@ import type { World } from './arenaWorld';
 import {
   BUS_STOP,
   inRect,
-  SIDEWALK_Y,
   type BlockRect,
   type BusStopDef,
   type CityPlan,
@@ -47,7 +46,7 @@ import {
 } from './citySpec';
 import { createKerbField } from './kerbs';
 import { createSurfaceField } from './surface';
-import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, projectOntoPath, type TrackPath } from './track';
+import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
 /**
  * The big city ("City" in the main menu), generated from `citySpec.ts`:
@@ -182,9 +181,8 @@ export function createCityWorld(): World {
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const solids: Rect[] = [...blocks, ...perimeter];
   const shoulders = { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder };
-  // The pavement beside the streets stands a step proud of them, for the art and the car alike.
+  // The pavement beside the streets: flush with them, so this is art and nothing the car feels.
   const kerbs = createKerbField(ribbons, shoulders, blocks);
-  const kerbGrade = { gx: 0, gz: 0 };
 
   const onGroundRoad = (x: number, z: number, pad: number): boolean => {
     for (const rb of ground) if (isOnPath(rb.path, x, z, pad)) return true;
@@ -296,7 +294,7 @@ export function createCityWorld(): World {
 
   // Built here rather than at the layout: a ground spawn at the foot of a ramp sits a few
   // centimetres above zero, and the car has to start on the road, not under it.
-  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, kerbs);
+  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5);
   const GROUND_SAMPLE = { y: 0, gx: 0, gz: 0 };
 
   const targetSpawns: SpawnPoint[] = [];
@@ -491,9 +489,8 @@ export function createCityWorld(): World {
       for (const b of solids) if (inRect(b, x, z, -pad)) return true;
       return false;
     },
-    padY(x, z) {
-      for (const b of solids) if (inRect(b, x, z)) return SIDEWALK_Y;
-      return kerbs.heightAt(x, z, kerbGrade);
+    padY() {
+      return 0;
     },
   };
 
@@ -557,7 +554,7 @@ function placeBusStops(
   lanes: Array<Array<{ x: number; z: number }>>,
 ): BusStopDef[] {
   const stops: BusStopDef[] = [];
-  const grade = { gx: 0, gz: 0 };
+  const station = createProjection();
   /** Half the bus's length: the reach of every clearance test below. */
   const reach = BUSES.length / 2;
   let route = 0;
@@ -600,8 +597,10 @@ function placeBusStops(
           // A crossing road reaches out over the pavement: no shelter in a junction.
           for (const other of ground) if (isOnPath(other.path, a.x, a.z, 1)) ok = false;
           if (isSolid(a.x, a.z, 0.4)) ok = false;
-          // No pavement here means a junction mouth, whatever the roads say.
-          if (kerbs.heightAt(a.x, a.z, grade) <= 0) ok = false;
+          // No pavement wide enough to hold the shelter means a junction mouth, whatever
+          // the roads say.
+          const at = pointAtStation(path, s + d, station);
+          if (!kerbs.paved(rb, at.index, trySide) || kerbs.widthAt(rb, at.index, trySide, at.t) < shelterOut - at.halfWidth) ok = false;
           // A deck overhead swallows the shelter's roof, and its pillars stand under it.
           for (const e of elevated) if (isOnPath(e.path, a.x, a.z, 10)) ok = false;
           if (!ok) break;
@@ -611,7 +610,7 @@ function placeBusStops(
         stops.push({
           x: p.x,
           z: p.z,
-          y: SIDEWALK_Y,
+          y: 0,
           tx: c.tx,
           tz: c.tz,
           // The normal points back at the road the bus pulls in from.

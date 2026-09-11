@@ -3,8 +3,6 @@ import { LAMP_SPARKS, lampSparkSeed } from './lampFaults';
 import { createReclaimField, type ReclaimField } from './reclaim';
 import type { CityPlan } from '../../../world/cityPlan';
 
-export { SIDEWALK_Y } from '../../../world/cityPlan';
-
 /**
  * One MeshBuilder per material. Every piece of the city lands in one of these, so the whole
  * environment renders in about a dozen draw calls no matter how much clutter we add.

@@ -481,6 +481,38 @@ describe('electric cars off the patrol', () => {
     expect(targets[0].status).toBe('active');
   });
 
+  it('coast to a stop when the power is cut, instead of parking in the frame they were hit', () => {
+    const layout = trafficLayout();
+    const targets = createTargets(layout);
+    const t = targets[0];
+    const startX = t.x;
+    const startZ = t.z;
+    // Cruising when the bolt lands. Nothing about the hit touches its speed: losing the motor
+    // is not the same as hitting a wall, and the roll-out is the whole point.
+    t.status = 'destroyed';
+    t.hitTime = 0;
+    t.speed = TARGETS.patrolSpeed;
+
+    stepTargets(targets, layout, 0, SIM_STEP);
+    expect(Math.hypot(t.x - startX, t.z - startZ)).toBeGreaterThan(0);
+
+    const steps = Math.round(TARGETS.dying.coast / SIM_STEP) + 2;
+    for (let i = 1; i < steps; i++) stepTargets(targets, layout, i * SIM_STEP, SIM_STEP);
+    const restX = t.x;
+    const restZ = t.z;
+    // Far enough to read as a roll-out, not far enough to be a car still being driven.
+    const rolled = Math.hypot(restX - startX, restZ - startZ);
+    expect(rolled).toBeGreaterThan(0.5);
+    expect(rolled).toBeLessThan(TARGETS.patrolSpeed * TARGETS.dying.coast);
+
+    // And then it is parked: a wreck does not creep down the street for the twelve seconds it
+    // is waiting to respawn.
+    stepTargets(targets, layout, steps * SIM_STEP, SIM_STEP);
+    expect(t.x).toBe(restX);
+    expect(t.z).toBe(restZ);
+    expect(t.status).toBe('destroyed');
+  });
+
   it('are stopped by a guardrail when shoved, instead of leaving the circuit', () => {
     const layout = trafficLayout();
     // A wall across the car's path, two metres ahead.

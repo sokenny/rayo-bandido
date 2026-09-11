@@ -30,7 +30,9 @@ import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from '
 import { createStreetGateState, resetStreetGateState, stepStreetGate } from './streetGate';
 import { lockOtherActivities } from './activities';
 import { createPoliceState, isPoliceEnabledForCurrentGameState, policeHoldsPlayer, resetPoliceState, stepPolice, type StepPoliceOptions } from './police';
+import { createIntroState, introHoldsPlayer, resetIntroState, stepIntro } from './intro';
 import { PASSENGERS } from '../content/passengers';
+import { INTRO } from '../content/intro';
 import { settleVehicle } from './surface';
 
 /**
@@ -115,6 +117,11 @@ export interface GameStateOptions {
   police?: boolean;
   /** How many STREET RACE events are won, for the rings in the street (`src/sim/streetGate.ts`). */
   streetRaceCleared?: number;
+  /**
+   * Run the first-time introduction (`src/sim/intro.ts`), with the meet's furniture already
+   * appended to the layout (`installIntroMeetup`). Defaults to off.
+   */
+  intro?: boolean;
 }
 
 export function createInitialGameState(
@@ -123,7 +130,7 @@ export function createInitialGameState(
   options: GameStateOptions = {},
 ): GameState {
   const s = layout.playerSpawn;
-  return {
+  const state: GameState = {
     transmission,
     time: 0,
     tick: 0,
@@ -143,8 +150,10 @@ export function createInitialGameState(
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
     streetGate: layout.streetSites && layout.streetSites.length > 0 ? createStreetGateState(options.streetRaceCleared ?? 0) : null,
     police: options.police ? createPoliceState(layout) : null,
+    intro: options.intro ? createIntroState() : null,
     events: [],
   };
+  return state;
 }
 
 /** Restore the initial playable state in place (instant restart). */
@@ -170,6 +179,8 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
   if (state.streetGate) resetStreetGateState(state.streetGate);
   if (state.police) resetPoliceState(state.police);
+  // The intro goes back to its safe beginning (`resetIntroState` leaves a finished one alone).
+  if (state.intro) resetIntroState(state.intro);
   state.events.length = 0;
 }
 
@@ -285,6 +296,13 @@ export function stepGame(
     HOLD.activate = false;
     input = HOLD;
   }
+  // The opening cinematic (`src/sim/intro.ts`): the car waits under the deck until it is over.
+  if (introHoldsPlayer(state.intro)) {
+    HOLD.steer = 0;
+    HOLD.fire = false;
+    HOLD.activate = false;
+    input = HOLD;
+  }
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
@@ -301,6 +319,9 @@ export function stepGame(
   resolveTargetCollisions(state.vehicle, state.targets, state.events);
   stepNearMiss(state.nearMiss, state.vehicle, state.targets, state.events);
   stepLightning(state.lightning, state.vehicle, state.targets, state.drift, input, state.time, dt, state.events);
+  // The introduction (`src/sim/intro.ts`), right behind the shot: it sees the kill the beam
+  // just made on this very tick.
+  if (state.intro) stepIntro(state.intro, INTRO, state, dt, state.events);
   applyRewards(state.economy, state.targets, state.events);
   if (race && layout.race) stepRace(race, layout.race, state.vehicle, state.time, dt, state.events);
   // Right behind the race, and only ever watching it: the circuit mission chain judges the

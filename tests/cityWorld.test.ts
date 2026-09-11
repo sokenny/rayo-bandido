@@ -8,14 +8,13 @@ import { builderStats, createBuilders } from '../src/render/scene/env/builders';
 import { buildCity } from '../src/render/scene/env/cityBuilder';
 import { buildLandmarks } from '../src/render/scene/env/landmarksBuilder';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
-import { buildTrack } from '../src/render/scene/env/trackBuilder';
+import { buildTrack, KERB_LIP } from '../src/render/scene/env/trackBuilder';
 import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
-import { BUS_STOP, SIDEWALK_Y } from '../src/world/cityPlan';
+import { BUS_STOP } from '../src/world/cityPlan';
 import { BUSES } from '../src/config/tuning';
 import { busWallIndex, createBuses, routeLength, stepBuses } from '../src/sim/buses';
-import { KERB_HEIGHT, KERB_RAMP } from '../src/world/kerbs';
 import { CITY_QUAY_Z, VIADUCT_CARS, VIADUCT_Y } from '../src/world/citySpec';
 import { createProjection, maxGrade, offsetAtStation, projectOntoPath } from '../src/world/track';
 
@@ -150,6 +149,24 @@ describe('city layout contract', () => {
 
 const PROJ = createProjection();
 const SAMPLE: SurfaceSample = { y: 0, gx: 0, gz: 0 };
+
+/**
+ * True when the drawn pavement covers (x, z). The kerb field answers the renderer by
+ * (ribbon, segment, side); this is the same question asked by point, which is how the tests
+ * below check what is under a car standing there. The asphalt always wins.
+ */
+function pavedAt(x: number, z: number): boolean {
+  const kerbs = plan.kerbs!;
+  let paved = false;
+  for (const rb of ground) {
+    projectOntoPath(rb.path, x, z, PROJ);
+    const over = PROJ.dist - PROJ.halfWidth;
+    if (over <= 0) return false;
+    const side = PROJ.lateral >= 0 ? 1 : -1;
+    if (kerbs.paved(rb, PROJ.index, side) && over <= kerbs.widthAt(rb, PROJ.index, side, PROJ.t) + KERB_LIP) paved = true;
+  }
+  return paved;
+}
 
 describe('city surface', () => {
   const viaduct = elevated.find((rb) => rb.tag === 'viaduct')!;
@@ -304,30 +321,20 @@ describe('city kerbs', () => {
   };
   const width = kerbs.widthAt(spot.rb, spot.i, 1);
 
-  it('leaves the asphalt flat and raises the pavement beside it by a full step', () => {
+  it('lays the pavement flush with the asphalt, with nothing to climb or tip on', () => {
+    // The kerb used to stand a step above the road, which made every brush with it a jolt.
+    // The whole street is one level now, from the centreline out past the blocks.
     expect(width).toBeGreaterThan(0.8);
-    expect(at(0)).toBe(0);
-    expect(at(spot.halfWidth - 0.5)).toBe(0);
-    // The kerb face climbs over its own short run, then the pavement runs flat to the blocks.
-    expect(at(spot.halfWidth + KERB_RAMP / 2)).toBeCloseTo(KERB_HEIGHT / 2, 3);
-    expect(at(spot.halfWidth + KERB_RAMP + 0.1)).toBeCloseTo(KERB_HEIGHT, 3);
-    expect(at(spot.halfWidth + width - 0.1)).toBeCloseTo(KERB_HEIGHT, 3);
-    expect(KERB_HEIGHT).toBe(SIDEWALK_Y);
+    for (let off = 0; off <= spot.halfWidth + width + 2; off += 0.1) {
+      expect(at(off), `step at ${off} m from the centreline`).toBe(0);
+      expect(Math.hypot(SAMPLE.gx, SAMPLE.gz), `grade at ${off} m from the centreline`).toBe(0);
+    }
   });
 
-  it('tips a car climbing the face and levels it once it is up', () => {
-    at(spot.halfWidth + KERB_RAMP / 2);
-    // The grade points away from the road, and is the face's own rise per metre.
-    expect(Math.hypot(SAMPLE.gx, SAMPLE.gz)).toBeCloseTo(KERB_HEIGHT / KERB_RAMP, 3);
-    expect(SAMPLE.gx * -spot.tz + SAMPLE.gz * spot.tx).toBeGreaterThan(0);
-    at(spot.halfWidth + KERB_RAMP + 0.5);
-    expect(Math.hypot(SAMPLE.gx, SAMPLE.gz)).toBe(0);
-  });
-
-  it('holds a car up all the way to the block behind the pavement', () => {
+  it('runs the pavement all the way to the block behind it', () => {
     // The bug this covers: the band was as wide as the zone's shoulder, but the blocks only
-    // clear that shoulder — they often stand a metre or three further back, and the pavement
-    // between the two dropped a car back to road level while it was still standing on it.
+    // clear that shoulder — they often stand a metre or three further back, leaving a strip
+    // of bare ground between the pavement and the wall it is meant to meet.
     let clean = 0;
     let trench = 0;
     for (const rb of ground) {
@@ -344,12 +351,12 @@ describe('city kerbs', () => {
           const nz = a.tx * side;
           const width = kerbs.widthAt(rb, i, side, 0.5);
           const at = (d: number): [number, number] => [mx + nx * (a.halfWidth + d), mz + nz * (a.halfWidth + d)];
-          // Every step of the band, from the top of the kerb face to its outer edge, is up.
-          for (let off = KERB_RAMP + 0.01; off <= width; off += 0.5) {
+          // Every step of the band, from the road edge out, is paved.
+          for (let off = 0.1; off <= width; off += 0.5) {
             const [x, z] = at(off);
             // Except where another street runs through: there the asphalt wins, as it should.
             if (plan.isRoad(x, z)) continue;
-            expect(kerbs.heightAt(x, z, SAMPLE), `pavement dips at ${x}, ${z}`).toBeCloseTo(KERB_HEIGHT, 3);
+            expect(pavedAt(x, z), `bare ground at ${x}, ${z}`).toBe(true);
           }
           // And where a block stands behind it, the band runs out to its face rather than
           // stopping at the shoulder: no strip of bare ground between the two to fall into.
@@ -358,9 +365,6 @@ describe('city kerbs', () => {
             if (!plan.isSolid(x, z)) continue;
             if (d - width <= 0.3) clean++;
             else trench++;
-            // The block's own slab carries on at the same step, so a car nosing over its
-            // collider stays up instead of sinking through the kerb.
-            expect(kerbs.heightAt(x, z, SAMPLE)).toBeCloseTo(KERB_HEIGHT, 3);
             break;
           }
         }
@@ -373,15 +377,15 @@ describe('city kerbs', () => {
     expect(trench / (clean + trench)).toBeLessThan(0.2);
   });
 
-  it('never lifts a car that is still on the asphalt', () => {
-    // The pavement stops at every junction mouth, so no point on a street is ever raised.
+  it('never paves over the asphalt', () => {
+    // The pavement stops at every junction mouth, so no point on a street is ever covered.
     let checked = 0;
     for (const rb of ground) {
       for (const sm of rb.path.samples) {
         for (const off of [0, 0.5, 0.9]) {
           for (const side of [-1, 1]) {
             const d = sm.halfWidth * off * side;
-            expect(kerbs.heightAt(sm.x + -sm.tz * d, sm.z + sm.tx * d, SAMPLE)).toBe(0);
+            expect(pavedAt(sm.x + -sm.tz * d, sm.z + sm.tx * d)).toBe(false);
             checked++;
           }
         }
@@ -390,7 +394,7 @@ describe('city kerbs', () => {
     expect(checked).toBeGreaterThan(1000);
   });
 
-  it('paves the back alleys flush: no kerb to trip a car in a lane that narrow', () => {
+  it('paves the back alleys too, out to the walls that line them', () => {
     /** True when only the alley's own pavement reaches this point (no street's beside it). */
     const alleyOnly = (x: number, z: number): boolean =>
       ground.every((rb) => {
@@ -409,7 +413,7 @@ describe('city kerbs', () => {
           const x = sm.x + -sm.tz * d;
           const z = sm.z + sm.tx * d;
           if (!alleyOnly(x, z)) continue;
-          expect(kerbs.heightAt(x, z, SAMPLE)).toBe(0);
+          expect(pavedAt(x, z), `bare ground beside an alley at ${x}, ${z}`).toBe(true);
           checked++;
         }
       }
@@ -424,11 +428,11 @@ describe('city kerbs', () => {
     projectOntoPath(av.path, 0, -60, PROJ);
     const mouth = { x: PROJ.x, z: PROJ.z, halfWidth: PROJ.halfWidth };
     expect(cross.path.samples[0].halfWidth).toBeGreaterThan(4);
-    expect(kerbs.heightAt(mouth.x + mouth.halfWidth + 1, mouth.z, SAMPLE)).toBe(0);
-    expect(kerbs.heightAt(mouth.x - mouth.halfWidth - 1, mouth.z, SAMPLE)).toBe(0);
-    // A car on the viaduct is on the viaduct: the kerbs below are not in its way.
+    expect(pavedAt(mouth.x + mouth.halfWidth + 1, mouth.z)).toBe(false);
+    expect(pavedAt(mouth.x - mouth.halfWidth - 1, mouth.z)).toBe(false);
+    // A car on the viaduct is on the viaduct, and the street below is flat ground.
     layout.surface!.sample(spot.x, spot.z, VIADUCT_Y, SAMPLE);
-    expect(SAMPLE.y).toBeLessThan(KERB_HEIGHT);
+    expect(SAMPLE.y).toBe(0);
   });
 });
 
@@ -444,7 +448,7 @@ describe('city bus network', () => {
       // Axis-aligned, so the collider round it is the shape of the thing and not a guess.
       expect(Math.abs(s.tx) + Math.abs(s.tz)).toBeCloseTo(1, 3);
       expect(s.tx * s.nx + s.tz * s.nz).toBeCloseTo(0, 6);
-      expect(s.y).toBe(SIDEWALK_Y);
+      expect(s.y).toBe(0);
     }
   });
 
@@ -463,13 +467,12 @@ describe('city bus network', () => {
   });
 
   it('keeps the shelter on the pavement and clear of every road and building', () => {
-    const kerbs = plan.kerbs!;
     for (const s of stops) {
       for (const d of [-BUS_STOP.length / 2 + 0.2, 0, BUS_STOP.length / 2 - 0.2]) {
         const x = s.x + s.tx * d;
         const z = s.z + s.tz * d;
         expect(plan.isRoad(x, z), `shelter on the road at ${x}, ${z}`).toBe(false);
-        expect(kerbs.heightAt(x, z, SAMPLE), `shelter off the pavement at ${x}, ${z}`).toBeGreaterThan(0);
+        expect(pavedAt(x, z), `shelter off the pavement at ${x}, ${z}`).toBe(true);
         for (const blk of plan.blocks) {
           const inside = x > blk.minX && x < blk.maxX && z > blk.minZ && z < blk.maxZ;
           expect(inside, `shelter inside block ${blk.tag}`).toBe(false);

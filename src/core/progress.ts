@@ -1,4 +1,5 @@
 import { RUSH, STREET_RACE, TIME_ATTACK } from '../config/tuning';
+import { INTRO } from '../content/intro';
 
 /**
  * What this browser remembers about a player between sessions: how far they have got through
@@ -312,4 +313,49 @@ export function recordStreetRace(progress: StreetRaceProgress, event: number, pl
   if (event >= 0 && event < best.length && placement >= 1 && (best[event] < 0 || placement < best[event])) best[event] = Math.floor(placement);
   const cleared = advanced ? Math.max(progress.cleared, clampStreetClearedCount(event + 1)) : progress.cleared;
   return { cleared, best };
+}
+
+/* ============================================================== the introduction */
+
+/**
+ * Whether this browser has been through the first-time introduction (`src/sim/intro.ts`), and
+ * how it ended. Same contract as everything above: no server, never throws, garbage reads as
+ * a player who has not seen it. VERSIONED: a record written by an older intro reads as unseen,
+ * which is what lets `INTRO.persistence.version` replay a reworked intro for everyone.
+ *
+ * An interrupted intro is deliberately not recorded at all — the next normal entry starts it
+ * from the beginning, and there is no mid-step resume to get wrong.
+ */
+export type IntroStatus = 'completed' | 'skipped';
+
+export interface IntroProgress {
+  status: IntroStatus | null;
+}
+
+export function readIntroProgress(): IntroProgress {
+  const raw = readRaw(INTRO.persistence.key);
+  if (!raw) return { status: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { status: null };
+  }
+  if (!parsed || typeof parsed !== 'object') return { status: null };
+  const record = parsed as { version?: unknown; status?: unknown };
+  if (Number(record.version) !== INTRO.persistence.version) return { status: null };
+  return { status: record.status === 'completed' || record.status === 'skipped' ? record.status : null };
+}
+
+export function writeIntroProgress(status: IntroStatus): void {
+  writeRaw(INTRO.persistence.key, JSON.stringify({ version: INTRO.persistence.version, status, at: Date.now() }));
+}
+
+/** Forget it, so the next normal entry runs the intro again. What the menu's replay uses. */
+export function clearIntroProgress(): void {
+  try {
+    localStorage.removeItem(INTRO.persistence.key);
+  } catch {
+    /* storage unavailable: nothing to forget */
+  }
 }

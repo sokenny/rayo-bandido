@@ -1,6 +1,5 @@
 import { inBusStop, type RailDef, type RibbonDef, type TrackLineDef } from '../../../world/cityPlan';
 import { onRibbonAtLevel } from '../../../world/cityGen';
-import { KERB_HEIGHT, KERB_LIP, KERB_RAMP } from '../../../world/kerbs';
 import { createProjection, offsetAtStation, projectOntoPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
@@ -79,11 +78,16 @@ function buildRibbon(b: EnvBuilders, rb: RibbonDef): void {
   }
 }
 
+/** Width of the kerb-coloured stripe along the road edge (m): the pavement's bright margin. */
+const KERB_EDGE = 0.6;
+/** Overhang past the band's outer edge (m): the lip that closes the seam at a block's face. */
+export const KERB_LIP = 0.3;
+
 /**
- * Pavement from the road's edge out to where the blocks start, raised a step above the
- * asphalt on a short kerb face. `b.plan.kerbs` decides both the height and which stretches
- * are paved at all (nothing across a junction) — the simulation reads the same object, so
- * the ledge the car climbs is exactly the one drawn here. Alleys get bare pavement, no kerb.
+ * Pavement from the road's edge out to where the blocks start, laid flush with the asphalt:
+ * a step here was worth nothing and cost the car a jolt every time it touched one, so the
+ * kerb is colour, not height. `b.plan.kerbs` decides which stretches are paved at all
+ * (nothing across a junction) and how far out each one runs.
  */
 function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
   const kerbs = b.plan.kerbs;
@@ -91,7 +95,6 @@ function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
   const samples = rb.path.samples;
   const segs = segmentCount(rb.path);
   const lift = liftOf(rb) + 0.012;
-  const top = KERB_HEIGHT;
   for (let i = 0; i < segs; i++) {
     const a = samples[i];
     const c = samples[(i + 1) % samples.length];
@@ -101,17 +104,16 @@ function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
       const wa = kerbs.widthAt(rb, i, side, 0);
       const wc = kerbs.widthAt(rb, i, side, 1);
       if (Math.min(wa, wc) < 0.8) continue;
-      const ramp = Math.min(KERB_RAMP, wa, wc);
       const ay = a.y + lift;
       const cy = c.y + lift;
       /** A point `off` metres outside the road edge on this side, at the near/far sample. */
       const px = (s: typeof a, off: number): number => s.x + -s.tz * (s.halfWidth + off) * side;
       const pz = (s: typeof a, off: number): number => s.z + s.tx * (s.halfWidth + off) * side;
       /**
-       * One strip of pavement, rising from y0 to y1 across it. The inner and outer offsets are
-       * given per end of the segment, so the strip can widen along its run.
+       * One strip of pavement. The inner and outer offsets are given per end of the segment,
+       * so the strip can widen along its run.
        */
-      const strip = (o0: number, oa1: number, oc1: number, y0: number, y1: number): void => {
+      const strip = (o0: number, oa1: number, oc1: number): void => {
         const ax0 = px(a, o0);
         const az0 = pz(a, o0);
         const ax1 = px(a, oa1);
@@ -120,23 +122,23 @@ function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
         const cz0 = pz(c, o0);
         const cx1 = px(c, oc1);
         const cz1 = pz(c, oc1);
-        // Winding depends on the side so the face always looks up.
-        if (side > 0) b.concrete.quad(ax0, ay + y0, az0, ax1, ay + y1, az1, cx1, cy + y1, cz1, cx0, cy + y0, cz0);
-        else b.concrete.quad(ax1, ay + y1, az1, ax0, ay + y0, az0, cx0, cy + y0, cz0, cx1, cy + y1, cz1);
+        // Winding depends on the side so the pavement always looks up.
+        if (side > 0) b.concrete.quad(ax0, ay, az0, ax1, ay, az1, cx1, cy, cz1, cx0, cy, cz0);
+        else b.concrete.quad(ax1, ay, az1, ax0, ay, az0, cx0, cy, cz0, cx1, cy, cz1);
       };
       if (rb.kind === 'alley') {
-        // The old town's back lanes are flush: no kerb to trip a car in a gap this narrow.
         b.concrete.color(PAL.sidewalk, 0.75);
-        strip(0, wa, wc, 0, 0);
+        strip(0, wa, wc);
         continue;
       }
-      // The kerb face, then the pavement it carries. The face is the bright edge at night.
+      // The kerb line, then the pavement behind it: the same band it always was, now all at
+      // road level. The bright edge is what reads as a kerb at night.
       b.concrete.color(PAL.curb, 1.05);
-      strip(0, ramp, ramp, 0, top);
+      strip(0, KERB_EDGE, KERB_EDGE);
       b.concrete.color(PAL.sidewalk, 0.92);
       // Run a little past the band's edge: the blocks stand exactly there and draw their own
-      // kerb 0.3 m inside their collider, so the overhang closes that seam instead of a trench.
-      if (Math.max(wa, wc) > ramp) strip(ramp, wa + KERB_LIP, wc + KERB_LIP, top, top);
+      // pavement 0.3 m inside their collider, so the overhang closes that seam.
+      if (Math.max(wa, wc) > KERB_EDGE) strip(KERB_EDGE, wa + KERB_LIP, wc + KERB_LIP);
     }
   }
 }

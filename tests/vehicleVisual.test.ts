@@ -362,6 +362,73 @@ describe('electric car visual', () => {
       disposeElectricCarResources();
     }
   });
+
+  it('surges before it dies: the car is lit from inside, stutters, and only then goes dark', () => {
+    const target = createElectricCarVisual(0);
+    try {
+      const chassis = target.root.children[0] as THREE.Group;
+      const body = chassis.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+      const bars = chassis.children[1] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+
+      // Alive, nothing lights the body from inside: any glow at all is the bolt.
+      target.setStatus('active', 0);
+      expect(body.material.emissiveIntensity * body.material.emissive.getHex()).toBe(0);
+      const serviceBars = bars.material.emissiveIntensity;
+
+      // The surge: the body floods and the bars run brighter than they are ever allowed to in
+      // service. This is the beat the whole effect is built around.
+      target.setStatus('destroyed', 0.15);
+      expect(body.material.emissiveIntensity).toBeGreaterThan(0.8);
+      expect(bars.material.emissiveIntensity).toBeGreaterThan(serviceBars * 1.5);
+
+      // The stutter: sampled across the flicker the bars are neither pinned on nor pinned off.
+      const levels = new Set<number>();
+      for (let age = 0.2; age < 0.55; age += 0.01) {
+        target.setStatus('destroyed', age);
+        levels.add(Math.round(bars.material.emissiveIntensity * 100));
+      }
+      expect(levels.size).toBeGreaterThan(2);
+
+      // Dark, in order: the cabin first, then the bars, then the beacon.
+      target.setStatus('destroyed', 0.8);
+      expect(body.material.emissiveIntensity).toBe(0);
+      expect(bars.material.emissiveIntensity).toBeGreaterThan(0);
+      target.setStatus('destroyed', 1.5);
+      expect(bars.material.emissiveIntensity).toBe(0);
+      expect((chassis.children[2] as THREE.Mesh).visible).toBe(false);
+    } finally {
+      target.dispose();
+      disposeElectricCarResources();
+    }
+  });
+
+  it('leaves a wreck wearing its own paint, dimmed, rather than a black silhouette', () => {
+    // One car of each shutdown variant, so a wreck that flickers a beat longer than the rest
+    // is still a wreck by the time anybody looks at it.
+    const cars = [0, 1, 2, 3].map((i) => createElectricCarVisual(i));
+    try {
+      for (const car of cars) {
+        const body = ((car.root.children[0] as THREE.Group).children[0] as THREE.Mesh<
+          THREE.BufferGeometry,
+          THREE.MeshStandardMaterial
+        >).material;
+        const clean = body.color.clone();
+        car.setStatus('destroyed', 3);
+        const dead = body.color;
+        // Darker than it was...
+        const value = (c: THREE.Color) => Math.max(c.r, c.g, c.b);
+        expect(value(dead)).toBeLessThan(value(clean) * 0.8);
+        // ...but not black, and still the same paint: the channels keep their ratios, so the
+        // player can tell at a glance which of the three liveries they just took out.
+        expect(value(dead)).toBeGreaterThan(0.1);
+        expect(dead.r / value(dead)).toBeCloseTo(clean.r / value(clean), 1);
+        expect(dead.b / value(dead)).toBeCloseTo(clean.b / value(clean), 1);
+      }
+    } finally {
+      for (const car of cars) car.dispose();
+      disposeElectricCarResources();
+    }
+  });
   it('paints the traffic in three colours, and a car keeps its own through a hit and back', () => {
     const cars = [0, 1, 2, 3].map((i) => createElectricCarVisual(i));
     try {

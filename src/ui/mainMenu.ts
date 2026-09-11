@@ -25,8 +25,8 @@ export interface MainMenu {
   dispose(): void;
 }
 
-/** What the main menu can hand back: a world to drive, or the race screen one step deeper. */
-export type MenuChoice = 'city' | 'race';
+/** What the main menu can hand back: a world to drive, the race screen one step deeper, or the intro again. */
+export type MenuChoice = 'city' | 'race' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -89,7 +89,7 @@ export function showMainMenu(root: HTMLElement, onSelect: (choice: MenuChoice) =
   screen = createMenuScreen<MenuChoice>(root, {
     screen: 'MAIN',
     sub: 'DRIFT AND ROAM THE CYBERPUNK UNDERGROUND',
-    hint: '<b>←</b> <b>→</b> select · <b>ENTER</b> execute · in game <b>ESC</b> returns here',
+    hint: '<b>←</b> <b>→</b> select · <b>ENTER</b> execute · <b>I</b> replay the intro · in game <b>ESC</b> returns here',
     entries,
     onSelect(choice) {
       done = true;
@@ -100,10 +100,20 @@ export function showMainMenu(root: HTMLElement, onSelect: (choice: MenuChoice) =
   void pollWorld();
   const poll = window.setInterval(() => void pollWorld(), POLL_MS);
 
+  // The introduction again (`src/sim/intro.ts`): one key rather than a third card, because it
+  // is a thing to revisit, not a place to go.
+  const onKey = (e: KeyboardEvent): void => {
+    if (done || e.code !== 'KeyI' || e.repeat) return;
+    done = true;
+    onSelect('intro');
+  };
+  window.addEventListener('keydown', onKey);
+
   return {
     dispose() {
       done = true;
       window.clearInterval(poll);
+      window.removeEventListener('keydown', onKey);
       screen?.dispose();
     },
   };

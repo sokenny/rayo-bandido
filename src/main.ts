@@ -80,6 +80,12 @@ interface Destination {
   from?: GameMode;
   /** Which STREET RACE event `mode=street` is asked for, 0-based. Cleared unless asked for. */
   event?: number;
+  /**
+   * `?intro=1`: run the first-time introduction in the city whatever the browser remembers
+   * (the menu's replay). Cleared unless asked for, so a replay never sticks to later visits.
+   * `?intro=0` — typed, never written here — suppresses it, which is what the QA scripts want.
+   */
+  intro?: boolean;
 }
 
 /**
@@ -87,10 +93,12 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null, event } = to;
+  const { mode = null, race = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
+  if (intro) params.set('intro', '1');
+  else params.delete('intro');
   if (event !== undefined) params.set('event', String(event));
   else params.delete('event');
   if (from) params.set('from', from);
@@ -459,7 +467,8 @@ function menu(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
-    const url = choice === 'race' ? urlWith({ race: true }) : urlWith({ mode: choice });
+    const url =
+      choice === 'race' ? urlWith({ race: true }) : choice === 'intro' ? urlWith({ mode: 'city', intro: true }) : urlWith({ mode: choice });
     // A short beat for the card to light up, then reload into the chosen world.
     setTimeout(() => location.assign(url), 180);
   });

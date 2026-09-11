@@ -39,6 +39,14 @@ export interface FinishAmounts {
   chroma: number;
   /** The periphery drifting on slow waves. */
   swim: number;
+  /**
+   * Radius the swim starts at, the way `SPEED_BLUR.centerClear` is the radius the smear starts
+   * at — but its own, and much smaller, so the skyline leans as well as the corners. 0 would
+   * swim the car itself, which is the one thing that must stay where the player put it.
+   */
+  swimCentre: number;
+  /** How much of the swim bends along the radius (the street leaning in and out) rather than across it. */
+  swimBend: number;
   /** Seconds, for the waves. */
   time: number;
   /**
@@ -116,6 +124,8 @@ uniform float uMaxShift;
 uniform float uCenterClear;
 uniform float uChroma;
 uniform float uSwim;
+uniform float uSwimCentre;
+uniform float uSwimBend;
 uniform float uTime;
 uniform sampler2D tBleed;
 uniform float uBleed;
@@ -133,10 +143,25 @@ void main() {
   float edge = smoothstep(uCenterClear, 1.0, radius);
   float amount = uStrength * edge;
 
-  // The swim: the periphery drifts on two slow, detuned waves. Exactly nothing in the middle.
-  vec2 base = vUv + uSwim * edge * vec2(
+  // THE SWIM. The frame drifts on slow, detuned waves, from uSwimCentre outwards — its own
+  // radius, well inside the blur's sharp circle, so a building halfway up the frame leans as
+  // well as the corners do. Two short waves across the frame, one long pair under them that
+  // carries a whole wall at once rather than rippling it, and a bend ALONG the radius: the
+  // street pushed away from the car and drawn back in. Still exactly nothing at the very
+  // middle, where the car and the road under it are.
+  float swimEdge = smoothstep(uSwimCentre, 1.0, radius);
+  vec2 wave = vec2(
     sin(vUv.y * 7.3 + uTime * 0.71) + 0.5 * sin(vUv.x * 4.1 - uTime * 0.37),
     cos(vUv.x * 6.1 + uTime * 0.53) + 0.5 * cos(vUv.y * 3.7 + uTime * 0.29));
+  wave += 0.7 * vec2(
+    sin(vUv.x * 2.3 - uTime * 0.23 + 1.7),
+    sin(vUv.y * 2.9 + uTime * 0.19 + 0.6));
+  if (uSwimBend > 0.0) {
+    vec2 dir = fromCenter / max(length(fromCenter), 1e-4);
+    float bend = sin(radius * 3.4 - uTime * 0.37) + 0.5 * sin(radius * 1.7 + uTime * 0.23);
+    wave += dir * (uSwimBend * bend);
+  }
+  vec2 base = vUv + uSwim * swimEdge * wave;
 
   // Smear along the radial direction, growing with the distance from the center: the classic
   // zoom blur. The kernel is centered on the pixel so the image never slides while it ramps.
@@ -205,6 +230,8 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     uCenterClear: { value: SPEED_BLUR.centerClear },
     uChroma: { value: 0 },
     uSwim: { value: 0 },
+    uSwimCentre: { value: SPEED_BLUR.centerClear },
+    uSwimBend: { value: 0 },
     uTime: { value: 0 },
     tBleed: { value: null as THREE.Texture | null },
     uBleed: { value: 0 },
@@ -257,7 +284,7 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     return texture;
   }
 
-  function blurPass(strength: number, chroma = 0, swim = 0, time = 0, bleed: BleedAmounts | null = null): void {
+  function blurPass(strength: number, finish: FinishAmounts | null, chroma: number, swim: number, bleed: BleedAmounts | null): void {
     renderer.getDrawingBufferSize(size);
     const texture = ensureFrame(size.x, size.y);
     renderer.copyFramebufferToTexture(texture);
@@ -266,7 +293,9 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
     uniforms.uAspect.value = size.y > 0 ? size.x / size.y : 1;
     uniforms.uChroma.value = chroma;
     uniforms.uSwim.value = swim;
-    uniforms.uTime.value = time;
+    uniforms.uSwimCentre.value = finish ? finish.swimCentre : SPEED_BLUR.centerClear;
+    uniforms.uSwimBend.value = finish ? finish.swimBend : 0;
+    uniforms.uTime.value = finish ? finish.time : 0;
     // Keep the scene's own draw calls and triangles in `renderer.info` for the debug overlay:
     // the blur pass adds to them instead of resetting them. The halo's four small draws are
     // inside the same guard, so they show up there too.
@@ -291,13 +320,13 @@ export function createSpeedBlur(renderer: THREE.WebGLRenderer): SpeedBlur {
       const swim = finish && finish.swim > MIN_FINISH ? finish.swim : 0;
       const bleed = finish && finish.bleed.amount > MIN_BLEED ? finish.bleed : null;
       if (!(strength > MIN_STRENGTH) && chroma === 0 && swim === 0 && !bleed) return;
-      blurPass(strength > MIN_STRENGTH ? strength : 0, chroma, swim, finish ? finish.time : 0, bleed);
+      blurPass(strength > MIN_STRENGTH ? strength : 0, finish, chroma, swim, bleed);
     },
 
     warm() {
       // With the halo in it, so the trip's first haloed frame neither compiles a shader nor
       // allocates a render target. It is drawn at an amount of zero and changes nothing.
-      blurPass(0, 0, 0, 0, WARM_BLEED);
+      blurPass(0, null, 0, 0, WARM_BLEED);
     },
 
     dispose() {

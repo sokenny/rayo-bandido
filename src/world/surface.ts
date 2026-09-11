@@ -1,5 +1,4 @@
 import type { SurfaceField, SurfaceSample } from '../core/types';
-import type { KerbField } from './cityPlan';
 import { createProjection, projectOntoPath, segmentCount, type TrackPath } from './track';
 
 /**
@@ -15,18 +14,16 @@ import { createProjection, projectOntoPath, segmentCount, type TrackPath } from 
  * `pad` widens each ribbon a little past its guardrails, so a car pressed into a rail still
  * stands on the deck rather than dropping to the ground beside it.
  *
- * At ground level the world is not quite flat either: `kerbs` raises the pavement beside the
- * streets by a step, so a car that strays off the asphalt climbs the kerb and tips on its
- * face. It is asked only when no elevated road won — the pavement is a ground-level thing.
+ * Ground level itself is flat: the pavement beside the streets is laid flush with the asphalt,
+ * so there is no kerb to climb and nothing to read under a car that strays off the road.
  *
  * Allocation-free: one scratch projection, one bounding box per ribbon computed up front.
  */
 /** Largest rise a body takes in its stride (m). A ramp climbs a few centimetres per tick. */
 export const STEP_UP = 0.6;
 
-export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, kerbs: KerbField | null = null): SurfaceField {
+export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5): SurfaceField {
   const proj = createProjection();
-  const kerbGrade = { gx: 0, gz: 0 };
   const layers = paths.map((path) => {
     let minX = Infinity;
     let maxX = -Infinity;
@@ -68,11 +65,6 @@ export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, kerbs
         const grade = run > 1e-6 && proj.index < segmentCount(path) ? (b.y - a.y) / run : 0;
         bestGx = proj.tx * grade;
         bestGz = proj.tz * grade;
-      }
-      if (kerbs && bestY === 0) {
-        bestY = kerbs.heightAt(x, z, kerbGrade);
-        bestGx = kerbGrade.gx;
-        bestGz = kerbGrade.gz;
       }
       out.y = bestY;
       out.gx = bestGx;

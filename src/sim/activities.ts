@@ -1,4 +1,4 @@
-import type { BuhoState, CircuitGateState, GameState, PassengerState, RushState, StreetGateState } from '../core/types';
+import type { BuhoState, CircuitGateState, GameState, IntroState, PassengerState, RushState, StreetGateState } from '../core/types';
 
 /**
  * ONE ACTIVITY AT A TIME: the one place that decides which of them has the car.
@@ -41,7 +41,7 @@ import type { BuhoState, CircuitGateState, GameState, PassengerState, RushState,
  * The four activities, named. Three of them can hold the car; `'moogul'` is here because it can
  * be suppressed, not because it can ever be the one doing the suppressing.
  */
-export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit' | 'street';
+export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit' | 'street' | 'intro';
 
 /** A RAYO RUSH run, from the count-in to the results card being put away. */
 export function rushEngaged(rush: RushState | null | undefined): boolean {
@@ -79,6 +79,15 @@ export function streetEngaged(gate: StreetGateState | null | undefined): boolean
 }
 
 /**
+ * The first-time introduction (`src/sim/intro.ts`), from its first tick until it completes or
+ * is skipped. It has the car for its whole length: nothing else may start, offer, or send the
+ * police, and its own furniture is the only furniture on the street.
+ */
+export function introEngaged(intro: IntroState | null | undefined): boolean {
+  return !!intro && intro.active;
+}
+
+/**
  * Which activity has the car, or null when the player is simply driving. Never `'moogul'`: a
  * trip is not something that has the car.
  *
@@ -91,7 +100,10 @@ export function engagedActivity(state: {
   passenger?: PassengerState | null;
   circuitGate?: CircuitGateState | null;
   streetGate?: StreetGateState | null;
+  intro?: IntroState | null;
 }): ActivityKind | null {
+  // The introduction first: it starts before anything else can, and holds the car until it ends.
+  if (introEngaged(state.intro)) return 'intro';
   if (rushEngaged(state.rush)) return 'rush';
   if (passengerEngaged(state.passenger)) return 'passenger';
   if (circuitEngaged(state.circuitGate)) return 'circuit';

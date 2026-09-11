@@ -30,6 +30,8 @@ export interface OneShots {
   escaped(): void;
   /** The Rayo meeting a shielded car: a hard metallic clink, no sizzle. */
   shield(): void;
+  /** The phone: two short buzzes of a clipped square wave, an encrypted-channel ringtone. */
+  ring(): void;
 }
 
 /**
@@ -170,6 +172,19 @@ export function createOneShots(core: AudioCore): OneShots {
       }
     },
 
+    ring() {
+      const t = ctx.currentTime;
+      const v = AUDIO.pickupVolume * 0.7;
+      // Two buzzes, each a fifth over a low root, gated hard: a device on a table, not a chime.
+      for (let b = 0; b < 2; b++) {
+        const at = t + b * 0.42;
+        playOsc('square', at, at + 0.16, 660, 660, 0.22 * v, 0.004, 2400);
+        playOsc('square', at, at + 0.16, 990, 990, 0.12 * v, 0.004, 2400);
+        playOsc('square', at + 0.19, at + 0.34, 660, 660, 0.22 * v, 0.004, 2400);
+        playOsc('square', at + 0.19, at + 0.34, 990, 990, 0.12 * v, 0.004, 2400);
+      }
+    },
+
     pickup() {
       const t = ctx.currentTime;
       const v = AUDIO.pickupVolume;
@@ -232,13 +247,22 @@ export function createOneShots(core: AudioCore): OneShots {
     shutdown() {
       const t = ctx.currentTime;
       const v = AUDIO.shutdownVolume;
+      // LAID OUT ON THE SAME BEATS THE CAR GOES DARK ON (`scene/electricCarVisual.ts`), because
+      // the two are one event and the ear is the half of it that notices when they are not.
+      // The overload arriving: a hard crack, over before the eye has finished the flash.
+      playNoise(t, t + 0.06, 'highpass', 3200, 2600, 0.8, 0.4 * v, 0.002);
       // Spin-down: the hover pitch gliding down as the motor loses power.
       playOsc('sawtooth', t, t + 0.72, 320, 46, 0.4 * v, 0.01, 1400);
       playOsc('sine', t, t + 0.7, 240, 38, 0.32 * v, 0.01);
-      // Electrical short: a bright fizzle sweeping down.
+      // Electrical short: a bright fizzle sweeping down...
       playNoise(t, t + 0.4, 'bandpass', 2600, 700, 4, 0.28 * v, 0.006);
-      // Final thunk as it settles dead.
-      playOsc('sine', t + 0.6, t + 0.9, 110, 48, 0.35 * v, 0.006);
+      // ...and two shorter ones under the stutter, so the flickering has something arcing
+      // behind it rather than playing over a smooth fade.
+      playNoise(t + 0.19, t + 0.27, 'bandpass', 4200, 2000, 9, 0.2 * v, 0.004);
+      playNoise(t + 0.36, t + 0.46, 'bandpass', 3000, 1400, 9, 0.16 * v, 0.004);
+      // Final thunk as it settles dead: on the beat the light bars are cut, and lower than the
+      // rest of the kit goes, which is what makes it land in the chest rather than the ear.
+      playOsc('sine', t + 0.62, t + 0.98, 104, 38, 0.42 * v, 0.006);
     },
   };
 }

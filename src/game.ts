@@ -22,6 +22,7 @@ import type {
   StreetGateHudSnapshot,
   StreetRaceHudSnapshot,
   RaceHudSnapshot,
+  RivalCar,
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
@@ -79,7 +80,12 @@ import {
   type StreetRaceState,
 } from './sim/streetRace';
 import { readStreetRaceProgress, recordStreetRace, writeStreetRaceProgress } from './core/progress';
-import { activitySuppressed, engagedActivity, type ActivityKind } from './sim/activities';
+import { readIntroProgress, writeIntroProgress } from './core/progress';
+import { activitySuppressed, engagedActivity, introEngaged, type ActivityKind } from './sim/activities';
+import { INTRO } from './content/intro';
+import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installIntroMeetup, skipIntro, skipIntroLine } from './sim/intro';
+import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanFigure';
+import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
 import { canAffordShot } from './sim/lightning';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
 import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
@@ -258,10 +264,28 @@ export function createGame(
    */
   const hasStreetRace = mode === 'street' && !net;
   let streetProgress = hasStreetRace || mode === 'city' ? readStreetRaceProgress() : null;
+  /**
+   * THE INTRODUCTION (`src/sim/intro.ts`): the first normal entry into the open world, on a
+   * browser that has not been through it. Never on a circuit and never in a room — a race
+   * invitation is `?mp=`, which never builds the city — so it can only ever stand in front of
+   * Free Roam. `?intro=1` replays it (the menu's I key), `?intro=0` keeps it away (QA).
+   *
+   * It moves the spawn to its own start and makes the meet's parked cars solid BEFORE the
+   * state is built, because both are facts the state is created from. The city's own arrival
+   * point is kept to be put back when the intro ends, so a later restart is an ordinary one.
+   */
+  const introParam = params.get('intro');
+  const introWanted = mode === 'city' && introParam !== '0' && (introParam === '1' || readIntroProgress().status === null);
+  const cityArrival = { ...layout.playerSpawn };
+  if (introWanted) {
+    installIntroMeetup(layout, INTRO);
+    layout.playerSpawn = { x: INTRO.route.start.x, z: INTRO.route.start.z, heading: INTRO.route.start.heading };
+  }
   const state = createInitialGameState(layout, readTransmission(), {
     timeAttack: hasTimeAttack,
     timeAttackCleared: timeAttackProgress?.cleared ?? 0,
     streetRaceCleared: streetProgress?.cleared ?? 0,
+    intro: introWanted,
     // THE POLICE (`src/sim/police.ts`): Free Roam only, which is the open world and nothing
     // else. Whether they may act on any given tick is the sim's question; whether they exist
     // at all is this one.
@@ -458,7 +482,7 @@ export function createGame(
    * world with stops but no network still runs — it simply has no arrow.
    */
   const roadGraph: RoadGraph | null =
-    hasPassengers && layout.roadNetwork && layout.roadNetwork.length > 0 ? buildRoadGraph(layout.roadNetwork) : null;
+    (hasPassengers || !!state.intro) && layout.roadNetwork && layout.roadNetwork.length > 0 ? buildRoadGraph(layout.roadNetwork) : null;
   const destinationArrow = roadGraph ? createDestinationArrow() : null;
   if (destinationArrow) scene.add(destinationArrow.group);
   let routeField: RouteField | null = null;
@@ -543,6 +567,127 @@ export function createGame(
   const onlinePanel: OnlinePanel | null = roaming ? createOnlinePanel(hudRoot) : null;
   end();
 
+  /* ------------------------------------------------------------ the introduction */
+
+  /**
+   * Everything the intro puts on screen and on the street, in the session that runs it and
+   * nowhere else: the overlay (opening, call, subtitles, objective, the clip at the meet), the
+   * ring at the meet — the passenger's destination ring, reused, because it already is "drive
+   * here" — a route for the arrow, and the meet itself: the cars parked under the deck and
+   * BadKala standing by them. The screen furniture comes down on `introDone`; the meet stays
+   * for the session, because the player is standing in it.
+   */
+  const introOverlay: IntroOverlay | null = state.intro
+    ? createIntroOverlay({
+        cfg: INTRO,
+        hudRoot,
+        onOpeningDone: () => {
+          if (state.intro) finishIntroOpening(state.intro);
+        },
+        onCinematicDone: () => {
+          if (state.intro) finishIntroCinematic(state.intro);
+        },
+        onSkipLine: () => {
+          if (state.intro) skipIntroLine(state.intro);
+        },
+        onSkipIntro: () => {
+          if (state.intro) skipIntro(state.intro);
+        },
+        onAssist: () => {
+          if (state.intro) acceptIntroAssist(state.intro);
+        },
+        duckMusic: (level) => theme.duck(level),
+      })
+    : null;
+  if (introOverlay) hudRoot.appendChild(introOverlay.root);
+  const introMarker = state.intro ? createPassengerMarker() : null;
+  if (introMarker) scene.add(introMarker.group);
+  /**
+   * THE MEET. The parked cars are the rival car's own visual — a Bandido's car in a slot colour,
+   * standing still — fed a static record each, so they cost what three quiet rivals cost. Their
+   * colliders were laid with the layout (`installIntroMeetup`). BadKala is the shared body every
+   * side-mission figure is built from, in her own look.
+   */
+  const introParked: Array<{ car: RivalCar; vis: RivalCarVisual }> = [];
+  let badkalaFigure: HumanFigureVisual | null = null;
+  if (state.intro) {
+    for (let i = 0; i < INTRO.meetup.cars.length; i++) {
+      const c = INTRO.meetup.cars[i];
+      const car: RivalCar = {
+        id: `intro-parked-${i}`,
+        name: '',
+        slot: c.slot,
+        present: true,
+        x: c.x,
+        z: c.z,
+        heading: c.heading,
+        vx: 0,
+        vz: 0,
+        speed: 0,
+        steerAngle: 0,
+        wheelSpin: 0,
+        latAccel: 0,
+        longAccel: 0,
+        drifting: false,
+        nitro: false,
+        braking: false,
+        reversing: false,
+        charge: 0.4,
+        lap: 0,
+        progress: 0,
+        lapTime: 0,
+        bestLap: -1,
+        finishTime: -1,
+        money: 0,
+      };
+      const vis = createRivalCarVisual(c.slot);
+      vis.sync(car);
+      scene.add(vis.root);
+      introParked.push({ car, vis });
+    }
+    const bk = INTRO.meetup.badkala;
+    badkalaFigure = createHumanFigure(INTRO.meetup.badkalaLook, { name: 'badkala', phase: 2.3 });
+    badkalaFigure.group.position.set(bk.x, 0.03, bk.z);
+    badkalaFigure.group.rotation.y = -bk.heading;
+    scene.add(badkalaFigure.group);
+  }
+  const introSnapshot: IntroOverlaySnapshot = { stage: 'opening', objective: null, assistOffered: false, talking: false };
+  /** The road route to the intro's current objective, for the arrow. Rebuilt per objective. */
+  let introRoute: RouteField | null = null;
+  let introRewarded = false;
+
+  /** Stand the ring at the current objective, and route the arrow to it; nothing while there is no place. */
+  function placeIntroMarker(): void {
+    const intro = state.intro;
+    if (!intro || !introMarker) return;
+    if (intro.active && intro.objective && intro.objectiveRadius > 0) {
+      const site = { x: intro.objectiveX, z: intro.objectiveZ, y: 0, heading: 0 };
+      introMarker.place(site, 'destination');
+      introRoute = roadGraph ? routeTo(roadGraph, site) : null;
+      if (introRoute && destinationArrow) destinationArrow.snap();
+    } else {
+      introMarker.hide();
+      introRoute = null;
+      destinationArrow?.hide();
+    }
+  }
+
+  /**
+   * The intro is over, one way or the other: write it down and put the city back the way a
+   * plain visit finds it. The meet stays: it is where the player is standing.
+   */
+  function endIntro(reason: 'completed' | 'skipped'): void {
+    writeIntroProgress(reason);
+    if (reason === 'completed' && INTRO.completionReward > 0 && !introRewarded) {
+      introRewarded = true;
+      state.economy.money += INTRO.completionReward;
+    }
+    layout.playerSpawn = { ...cityArrival };
+    theme.duck(1);
+    placeIntroMarker();
+    refreshMapMarks();
+  }
+
   /**
    * Stand the marker, and put the map's mark under it, at the site of the mission on offer.
    *
@@ -575,6 +720,11 @@ export function createGame(
   function refreshMapMarks(): void {
     mapMarks.length = 0;
     const engaged = engagedActivity(state);
+    // The intro's objective, while it is a place. Everything else is suppressed underneath.
+    const intro = state.intro;
+    if (intro && intro.active && intro.objective && intro.objectiveRadius > 0) {
+      mapMarks.push({ x: intro.objectiveX, z: intro.objectiveZ, kind: 'destination' });
+    }
     if (!activitySuppressed(engaged, 'rush')) {
       const site = rushSite();
       if (site) mapMarks.push({ x: site.x, z: site.z, kind: 'rush' });
@@ -643,6 +793,32 @@ export function createGame(
    * they are back on the pavement at the destination for as long as the fare card is up — which
    * is the only moment in a ride when the player can look at the person they just drove.
    */
+  /**
+   * Aim the arrow along a route. The arrow rides the car and only turns: `follow` is the car's
+   * own pose, and the heading is the bearing FROM the car TO a point a fixed distance up the
+   * route. So it lies down the street while the street is the way and swings across as the
+   * junction comes up, while never leaving the screen. It goes away rather than point at
+   * nothing when the walk finds no way — off the network, or nowhere left to go. One arrow for
+   * the fare's destination and for the intro's objectives, which never coexist.
+   */
+  function steerArrow(field: RouteField, frameDt: number): void {
+    if (!destinationArrow || !roadGraph) return;
+    if (aimAlong(roadGraph, field, pose.x, pose.z, PASSENGER.arrow.lookahead, routeAim)) {
+      const toAimX = routeAim.x - pose.x;
+      const toAimZ = routeAim.z - pose.z;
+      destinationArrow.follow(pose.x, pose.y, pose.z, pose.heading);
+      // Standing on the aim point itself there is no bearing to take, so the road's own
+      // direction there stands in — which is what the player would do anyway.
+      if (toAimX * toAimX + toAimZ * toAimZ > 1) destinationArrow.face(toAimX, toAimZ);
+      else destinationArrow.face(routeAim.dirX, routeAim.dirZ);
+      destinationArrow.setDive(1 - Math.min(1, routeAim.remaining / PASSENGER.arrow.diveDistance));
+      destinationArrow.show();
+    } else {
+      destinationArrow.hide();
+    }
+    destinationArrow.update(frameDt, simTime);
+  }
+
   function placePassengerMarkers(): void {
     const p = state.passenger;
     if (!p || !pickupMarker || !destinationMarker || !passengerStops) return;
@@ -1179,13 +1355,14 @@ export function createGame(
     if (ev.type === 'transmission') saveTransmission(ev.mode);
     hud.onEvent(ev);
     audio.onEvent(ev);
+    introOverlay?.onEvent(ev);
     switch (ev.type) {
       case 'lightningFired':
         effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
         chase.shake(CAMERA.shakeLightning);
         break;
       case 'targetDestroyed':
-        effects.explosion(ev.x, ev.y, ev.z);
+        effects.powerDown(ev.x, ev.y, ev.z);
         if (ev.reward > 0) effects.scorePopup(ev.x, ev.y, ev.z, ev.reward);
         // The kill happened here, but the host is the one everybody believes about traffic:
         // tell the host, and do not let its next few reports bring the car back meanwhile.
@@ -1308,7 +1485,15 @@ export function createGame(
           writeRideProgress(rideProgress);
         }
         break;
+      case 'introObjective':
+        placeIntroMarker();
+        refreshMapMarks();
+        break;
+      case 'introDone':
+        endIntro(ev.reason);
+        break;
       case 'restart':
+        placeIntroMarker();
         rushPreviousBest = -1;
         rushNewBest = false;
         timeAttackPreviousBest = -1;
@@ -1370,14 +1555,14 @@ export function createGame(
         pendingTraffic = null;
         for (let i = 0; i < newlyDestroyed.length; i++) {
           const t = state.targets[newlyDestroyed[i]];
-          effects.explosion(t.x, t.y, t.z);
+          effects.powerDown(t.x, t.y, t.z);
         }
       }
       while (ownsTraffic() && pendingHits.length > 0) {
         const id = pendingHits.shift() as number;
         if (trafficSync.destroy(state.targets, id, state.time)) {
           const t = state.targets[id];
-          effects.explosion(t.x, t.y, t.z);
+          effects.powerDown(t.x, t.y, t.z);
         }
       }
       while (ownsTraffic() && pendingBumps.length > 0) {
@@ -1407,6 +1592,9 @@ export function createGame(
     // The rivals' public records back on their tick poses, so the player's collision pass sees
     // where they are and not where the last frame drew them.
     if (streetRace) snapStreetRivals(streetRace);
+    // The intro's protection from the room: nobody can shove the tutorial player. Their car
+    // is still drawn and still published; only this client's collision pass looks away.
+    stepOptions.rivals = introEngaged(state.intro) ? null : net ? net.rivals : streetRace ? streetRace.cars : null;
     stepGame(state, command, layout, dt, stepOptions);
     // One tick's worth: the rescue that set it has been seen.
     stepOptions.respawned = false;
@@ -1732,22 +1920,7 @@ export function createGame(
       // the street while the street is the way and swings across as the junction comes up,
       // while never leaving the screen. It goes away rather than point at nothing when the walk
       // finds no way — off the network, or nowhere left to go.
-      if (destinationArrow && roadGraph && routeField) {
-        if (aimAlong(roadGraph, routeField, pose.x, pose.z, PASSENGER.arrow.lookahead, routeAim)) {
-          const toAimX = routeAim.x - pose.x;
-          const toAimZ = routeAim.z - pose.z;
-          destinationArrow.follow(pose.x, pose.y, pose.z, pose.heading);
-          // Standing on the aim point itself there is no bearing to take, so the road's own
-          // direction there stands in — which is what the player would do anyway.
-          if (toAimX * toAimX + toAimZ * toAimZ > 1) destinationArrow.face(toAimX, toAimZ);
-          else destinationArrow.face(routeAim.dirX, routeAim.dirZ);
-          destinationArrow.setDive(1 - Math.min(1, routeAim.remaining / PASSENGER.arrow.diveDistance));
-          destinationArrow.show();
-        } else {
-          destinationArrow.hide();
-        }
-        destinationArrow.update(frameDt, simTime);
-      }
+      if (routeField) steerArrow(routeField, frameDt);
       pickupMarker.update(simTime);
       destinationMarker.update(simTime);
       passengerFigure?.update(simTime);
@@ -1815,6 +1988,26 @@ export function createGame(
       policeSnapshot.bustedCharged = police.bustedCharged;
       if (policeAudio) policeAudio.siren = chasing;
     }
+    const intro = state.intro;
+    if (intro && introOverlay) {
+      if (intro.active) {
+        if (introMarker && intro.objective && intro.objectiveRadius > 0) {
+          const dx = pose.x - intro.objectiveX;
+          const dz = pose.z - intro.objectiveZ;
+          const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / (intro.objectiveRadius * 3));
+          introMarker.setProximity(near * near);
+        }
+        if (introRoute) steerArrow(introRoute, frameDt);
+        introSnapshot.stage = intro.stage;
+        introSnapshot.objective = intro.objective;
+        introSnapshot.assistOffered = intro.assistOffered;
+        introSnapshot.talking = intro.lineId !== '';
+        introOverlay.update(introSnapshot);
+      }
+      introMarker?.update(simTime);
+    }
+    for (let i = 0; i < introParked.length; i++) introParked[i].vis.update(frameDt, simTime);
+    badkalaFigure?.update(simTime);
     hud.update(snapshot);
     minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
     if (standings) {
@@ -1824,7 +2017,11 @@ export function createGame(
     if (nameTags) nameTags.update(chase.camera, rivals);
 
     gpuTimer.begin();
-    speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed), moogul ? moogul.finish : null);
+    // Not behind the opening clip: an opaque video over a city nobody can see is GPU time spent
+    // on nothing. The simulation above ran regardless — a networked city is never paused.
+    if (!introOverlay || !introOverlay.opaque) {
+      speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed), moogul ? moogul.finish : null);
+    }
     gpuTimer.end();
 
     readout.carX = pose.x;
@@ -1969,6 +2166,8 @@ export function createGame(
         if (remaining >= 0) state.race.countdown = remaining;
       }
       loop.start();
+      // The opening plays over the first frames; the rules hold the car until it is over.
+      introOverlay?.startOpening();
     },
     stop() {
       loop.stop();
@@ -1991,6 +2190,21 @@ export function createGame(
       standings?.dispose();
       nameTags?.dispose();
       onlinePanel?.dispose();
+      introOverlay?.dispose();
+      for (const p of introParked) {
+        scene.remove(p.vis.root);
+        p.vis.dispose();
+      }
+      introParked.length = 0;
+      if (badkalaFigure) {
+        scene.remove(badkalaFigure.group);
+        badkalaFigure.dispose();
+      }
+      if (introMarker) {
+        scene.remove(introMarker.group);
+        introMarker.dispose();
+      }
+      theme.duck(1);
       debug.dispose();
       audio.dispose();
       effects.dispose();
@@ -2345,6 +2559,63 @@ export function createGame(
           site: () => (circuitSite ? { ...circuitSite } : null),
           offering: () => (state.circuitGate ? canEnterCircuit(state.circuitGate) : false),
           mission: () => ({ ...circuitGateSnapshot }),
+        }
+      : null,
+
+    /**
+     * THE INTRODUCTION, for automation. Null in every session that is not running it.
+     *
+     *   __rb.intro.state            // the live `IntroState`
+     *   __rb.intro.status()         // { stage, objective, line, done, ... }
+     *   __rb.intro.finishOpening()  // end the opening now
+     *   __rb.intro.finishClip()     // end the clip at the meet now
+     *   __rb.intro.skipLine()       // end the line on screen
+     *   __rb.intro.assist()         // take CONTINUAR, when offered
+     *   __rb.intro.skip()           // skip the whole introduction
+     */
+    intro: state.intro
+      ? {
+          config: INTRO,
+          get state() {
+            return state.intro;
+          },
+          status() {
+            const i = state.intro!;
+            return {
+              stage: i.stage,
+              active: i.active,
+              objective: i.objective,
+              objectiveText: i.objectiveText,
+              line: i.lineId,
+              lineText: i.lineText,
+              queue: i.queue.slice(),
+              said: Array.from(i.said),
+              ringing: i.ringing,
+              connected: i.callConnected,
+              assistOffered: i.assistOffered,
+              driftDone: i.driftDone,
+              evDone: i.evDone,
+              done: i.done,
+              charge: state.lightning.charge,
+              money: state.economy.money,
+              cinematicDone: i.cinematicDone,
+            };
+          },
+          finishOpening: () => {
+            if (state.intro) finishIntroOpening(state.intro);
+          },
+          finishClip: () => {
+            if (state.intro) finishIntroCinematic(state.intro);
+          },
+          skipLine: () => {
+            if (state.intro) skipIntroLine(state.intro);
+          },
+          assist: () => {
+            if (state.intro) acceptIntroAssist(state.intro);
+          },
+          skip: () => {
+            if (state.intro) skipIntro(state.intro);
+          },
         }
       : null,
 

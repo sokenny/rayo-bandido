@@ -1,39 +1,22 @@
 import { onRibbonAtLevel } from './cityGen';
-import { inRect, SIDEWALK_Y, type CityPlan, type KerbField, type Rect, type RibbonDef } from './cityPlan';
-import { createProjection, projectOntoPath, segmentCount } from './track';
+import { inRect, type CityPlan, type KerbField, type Rect, type RibbonDef } from './cityPlan';
+import { segmentCount } from './track';
 
 /**
- * The kerb: the pavement beside every ground-level street, standing a step above the asphalt.
- *
- * It exists twice over — as the quads `trackBuilder.ts` lays beside a ribbon, and as the
- * height `src/sim/surface.ts` reads under a car — so both read the same object here:
+ * The pavement beside every ground-level street: which stretches carry it, and how wide each
+ * one runs. It is flush with the asphalt — a car crosses onto it without a bump — so this is
+ * art only; nothing here answers the simulation, which reads flat ground under the whole city.
  *
  *  - which segments are paved is decided once, at build time, by the same junction test the
- *    renderer used to do inline: no pavement across the mouth of a crossing road. The
- *    renderer asks by (ribbon, segment, side); the simulation asks by point and lands on the
- *    same flag, so a car is never lifted where nothing is drawn,
+ *    renderer used to do inline: no pavement across the mouth of a crossing road,
  *  - how wide each stretch is is measured, not assumed: the zone's shoulder is only a
  *    starting point, and the band is then run out to the face of the block behind it. The
  *    blocks are placed on a grid and only guaranteed to clear the shoulder, so the gap
  *    between the two is often a metre or three wide — pavement you can see and stand on,
- *    which used to drop a car back to road level the moment it left the band,
- *  - the blocks themselves are pavement too: their slab is the same step high, so a car that
- *    noses into one over its collider stays up rather than sinking through the kerb,
- *  - the asphalt always wins: a point on any street is at road level whatever pavement runs
- *    beside it, and the alleys are paved flush: a kerb in a lane that narrow is a trap, not
- *    a landmark,
- *  - the kerb face is a short ramp rather than a wall, so a car crossing it climbs (and noses
- *    up on the grade) in a few frames instead of teleporting upward.
- *
- * Allocation-free on the query path: one scratch projection, one bounding box per ribbon.
+ *    which would otherwise be left as bare ground,
+ *  - the alleys are paved too: the old town's back lanes are the same flush concrete.
  */
 
-/** Height of the pavement above the road (m). The same slab the city blocks stand on. */
-export const KERB_HEIGHT = SIDEWALK_Y;
-/** Lateral run over which the kerb face rises (m): a chamfer a car can mount, not a wall. */
-export const KERB_RAMP = 0.6;
-/** Overhang past the band's outer edge (m): the lip that closes the seam at a block's face. */
-export const KERB_LIP = 0.3;
 /** Shoulders narrower than this are not worth paving. */
 const MIN_SHOULDER = 0.8;
 /** How far past the zone's shoulder a band may run to reach the block behind it (m). */
@@ -59,8 +42,6 @@ interface Layer {
 }
 
 export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Shoulders, blocks: readonly Rect[] = []): KerbField {
-  const proj = createProjection();
-
   const shoulderOf = (rb: RibbonDef, i: number): number => {
     const s = rb.path.samples[i];
     const w = rb.kind === 'alley' ? shoulders.alley : shoulders[s.zone];
@@ -160,8 +141,6 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
     layers.set(rb, { rb, minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach, paved, widthA, widthC });
   }
 
-  const list = [...layers.values()];
-
   return {
     widthAt(rb, i, side, t = 0) {
       const layer = layers.get(rb);
@@ -172,50 +151,6 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
     paved(rb, i, side) {
       const layer = layers.get(rb);
       return !!layer && layer.paved[i * 2 + (side < 0 ? 0 : 1)] === 1;
-    },
-    heightAt(x, z, out) {
-      out.gx = 0;
-      out.gz = 0;
-      let best = 0;
-      for (let n = 0; n < list.length; n++) {
-        const layer = list[n];
-        if (x < layer.minX || x > layer.maxX || z < layer.minZ || z > layer.maxZ) continue;
-        projectOntoPath(layer.rb.path, x, z, proj);
-        const over = proj.dist - proj.halfWidth;
-        // On the asphalt of any street: road level, whatever else runs nearby.
-        if (over <= 0) {
-          out.gx = 0;
-          out.gz = 0;
-          return 0;
-        }
-        const side = proj.lateral >= 0 ? 1 : -1;
-        const slot = proj.index * 2 + (side < 0 ? 0 : 1);
-        if (layer.paved[slot] !== 1) continue;
-        const width = layer.widthA[slot] + (layer.widthC[slot] - layer.widthA[slot]) * proj.t;
-        if (over > width + KERB_LIP) continue;
-        if (layer.rb.kind === 'alley') continue;
-        const t = over < KERB_RAMP ? over / KERB_RAMP : 1;
-        const y = KERB_HEIGHT * t;
-        if (y <= best) continue;
-        best = y;
-        if (t < 1) {
-          // Uphill is the outward normal on this side; the face rises at this rate.
-          const g = (KERB_HEIGHT / KERB_RAMP) * side;
-          out.gx = -proj.tz * g;
-          out.gz = proj.tx * g;
-        } else {
-          out.gx = 0;
-          out.gz = 0;
-        }
-      }
-      // The block slabs stand at the same step as the pavement that runs up to them, so a car
-      // that noses over a block's collider is carried on, not dropped through the kerb.
-      if (best < KERB_HEIGHT && solidAt(x, z)) {
-        best = KERB_HEIGHT;
-        out.gx = 0;
-        out.gz = 0;
-      }
-      return best;
     },
   };
 }

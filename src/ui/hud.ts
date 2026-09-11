@@ -83,7 +83,7 @@ const NEAR_MISS_HOLD = 2;
  * Same card, pad labels, shown instead of the keys once a controller is plugged in. The order
  * follows NFS Underground 2's default layout, which is the mapping the pad uses.
  */
-const PAD_CONTROLS = [
+export const PAD_CONTROLS = [
   ['RT/LT', 'drive'],
   ['STICK', 'steer'],
   ['A', 'handbrake'],
@@ -96,7 +96,7 @@ const PAD_CONTROLS = [
   ['R3', 'activity'],
 ];
 
-const CONTROLS = [
+export const CONTROLS = [
   ['WASD', 'drive'],
   ['SPACE or /', 'handbrake'],
   ['SHIFT', 'nitro'],

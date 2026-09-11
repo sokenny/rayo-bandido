@@ -10,7 +10,9 @@ import { attachTexture, type TextureHandle } from '../textures/load';
  * CONTRACT
  * - `root` origin on the ground, nose toward local -Z. Sync sets position/rotation.
  * - `setStatus` is called every frame with the sim status and seconds since the hit
- *   (0 when never hit). 'destroyed' should read clearly: dark, sparking, tilted or sunk.
+ *   (0 when never hit). 'destroyed' plays the POWER-DOWN CASCADE below: the car is lit from
+ *   inside, stutters, and goes out one system at a time. It must end up reading as a car with
+ *   the power off — its own paint, unlit — and never as a black silhouette.
  * - `setRushTarget(true)` marks this car as worth points during a RAYO RUSH run
  *   (`src/sim/rush.ts`), with a slow amber ring on the ground. That is the only thing the
  *   ring ever means: aiming is the player's job and nothing locks on, so a car the beam
@@ -44,14 +46,80 @@ const BODY_COLORS = [
   new THREE.Color(0x6f8296), // slate blue
   new THREE.Color(0xc9a172), // warm sand
 ];
-const CHARRED_BODY = new THREE.Color(0x1d1b1a);
 const CLEAN_BAR = new THREE.Color(0x00e5ff);
 /** The amber a Rayo Rush target wears on the ground. */
 const RUSH_RING = new THREE.Color(0xfcee0a);
+/** A dead light bar: not quite black, so the strip still reads as a strip. */
 const DEAD_BAR = new THREE.Color(0x0c0f12);
+/** What everything the surge is running through turns: arc white with cyan left in it. */
+const SURGE = new THREE.Color(0xcdf6ff);
+/** Hazard amber, for the wrecks whose bars come back for two blinks after the lights go. */
+const HAZARD = new THREE.Color(0xffa326);
+/** The cold the paint is left in once nothing is lighting it. */
+const DEAD_TINT = new THREE.Color(0x14171c);
 
-/** Fall-over animation length after a hit, in seconds. */
-const SAG_TIME = 0.5;
+/**
+ * THE POWER-DOWN CASCADE, in seconds since the hit. The bolt does not paint the car black; it
+ * puts far too much through it and then the car loses its systems in order, which is the only
+ * version of this that says ELECTRIC rather than BURNT.
+ *
+ *   0    -> T_SURGE    the whole car floods with light from inside, brighter than it is ever
+ *                      allowed to be in service, and the roof beacon swells with it.
+ *   ..   -> T_FLICKER   everything stutters: three detuned waves quantised to three levels,
+ *                      which reads as a contact arcing rather than as a sine.
+ *   ..   -> T_CABIN     the interior glow drains away first.
+ *   ..   -> T_BARS      the light bars are cut.
+ *   ..   -> T_BEACON    the beacon takes its last blink, and the car is dark.
+ *
+ * The whole thing is a pure function of the age of the hit, so a wreck looks the same at 30 fps
+ * as at 240, a paused frame is a real frame of it, and `setStatus` can be called with any age
+ * in any order — which is what lets the tests read the middle of it.
+ */
+const T_SURGE = 0.16;
+const T_FLICKER = 0.58;
+const T_CABIN = 0.74;
+const T_BARS = 0.9;
+const T_BEACON = 1.05;
+
+/** Long enough after the hit that every phase above has finished. */
+const SETTLED = 99;
+
+/** How long the chassis takes to settle onto its dead springs, in seconds. */
+const SAG_TIME = 0.95;
+/** The torque jerk as the motor cuts: how long it rings for (s) and its peak yaw (rad). */
+const JERK_TIME = 0.35;
+const JERK_YAW = 0.085;
+
+const TAU = Math.PI * 2;
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Smoothstep, for a heavy settle rather than a linear slide. */
+function smooth(x: number): number {
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * The electrical stutter. Three detuned waves summed and then quantised to full / a guttering
+ * fraction / off, so the light JUMPS between states instead of breathing.
+ *
+ * The low states are deliberately very low. A flicker that only dips to half reads as a grey
+ * wash over the paint — the car looks badly lit rather than electrically stricken — and what
+ * sells this is the contrast between a body flooded with light and a body with none.
+ *
+ * `phase` is the car's own, which keeps six wrecks in the same street out of lockstep.
+ */
+function stutter(age: number, phase: number): number {
+  const n =
+    0.45 * Math.sin((age * 61 + phase) * TAU) +
+    0.33 * Math.sin((age * 37.3 + phase * 2.1) * TAU) +
+    0.22 * Math.sin((age * 23.7 + phase * 3.7) * TAU);
+  if (n > 0.05) return 1;
+  if (n > -0.3) return 0.18;
+  return 0;
+}
 
 interface SharedResources {
   body: THREE.BufferGeometry;
@@ -282,6 +350,22 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   const tiltAmount = 0.16 + (index % 3) * 0.04;
   const blinkPhase = (index * 0.37) % 1;
 
+  /**
+   * How this car's power-down goes wrong, by index rather than at random: the mix on a street
+   * is the same every run, and the player learns the fleet rather than waiting on a dice roll.
+   *
+   *   0  clean: every system out on the beat.
+   *   1  the beacon's contact does not let go, and it stutters on for another beat.
+   *   2  the hazards come up after everything else is dead: two slow amber blinks.
+   *   3  a short circuit — the stutter is over early and the car is dark sooner.
+   */
+  const variant = index % 4;
+  const flickerEnd = variant === 3 ? 0.42 : T_FLICKER;
+  const beaconEnd = variant === 1 ? T_BEACON + 0.9 : T_BEACON;
+
+  /** The paint with nothing lighting it: its own hue, half the value, a little colder. */
+  const deadBody = cleanBody.clone().multiplyScalar(0.5).lerp(DEAD_TINT, 0.2);
+
   let alive = true;
   let rushTarget = false;
 
@@ -292,10 +376,14 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       if (nowAlive) {
         if (!alive) {
           bodyMat.color.copy(cleanBody);
+          bodyMat.emissive.setRGB(0, 0, 0);
+          bodyMat.emissiveIntensity = 1;
           bodyMat.roughness = 0.35;
           bodyMat.metalness = 0.2;
           barMat.emissive.copy(CLEAN_BAR);
           barMat.emissiveIntensity = 2.2;
+          beaconMat.opacity = 1;
+          beacon.scale.setScalar(1);
           alive = true;
         }
         chassis.rotation.set(0, 0, 0);
@@ -303,18 +391,70 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
         return;
       }
       alive = false;
-      const raw = timeSinceHit <= 0 ? 1 : Math.min(1, timeSinceHit / SAG_TIME);
-      // Smoothstep for a heavy settle rather than a linear slide.
-      const t = raw * raw * (3 - 2 * raw);
-      bodyMat.color.lerpColors(cleanBody, CHARRED_BODY, t);
-      bodyMat.roughness = 0.35 + t * 0.6;
-      bodyMat.metalness = 0.2 - t * 0.15;
-      barMat.emissive.lerpColors(CLEAN_BAR, DEAD_BAR, t);
-      barMat.emissiveIntensity = 2.2 * (1 - t);
-      chassis.rotation.z = tiltSign * tiltAmount * t;
-      chassis.rotation.x = 0.05 * t;
-      chassis.position.y = -0.12 * t;
-      beacon.visible = false;
+      // A car that was already a wreck when this client first heard about it (no `hitTime`:
+      // the host reporting traffic that died before we arrived) has no cascade to play. It
+      // starts at the end of one.
+      const age = timeSinceHit > 0 ? timeSinceHit : SETTLED;
+
+      // THE PAINT keeps its own colour and only loses the light in it. A wreck is a car with
+      // the power off, not a shape burnt into the street — which is also what lets the player
+      // still read, at a glance, which of the three liveries they just took out.
+      const sag = smooth(clamp01(age / SAG_TIME));
+      bodyMat.color.lerpColors(cleanBody, deadBody, sag);
+      bodyMat.roughness = 0.35 + sag * 0.4;
+      bodyMat.metalness = 0.2 - sag * 0.1;
+
+      // 1. THE SURGE. Nothing lights the body from inside while the car is in service, so any
+      // glow here is unmistakably the bolt going through it: it floods, stutters, and drains.
+      let glow: number;
+      if (age < T_SURGE) glow = 1.4 * (age / T_SURGE);
+      else if (age < flickerEnd) glow = 0.1 + 1.3 * stutter(age, blinkPhase);
+      else if (age < T_CABIN) glow = 0.55 * (1 - clamp01((age - flickerEnd) / (T_CABIN - flickerEnd)));
+      else glow = 0;
+      bodyMat.emissive.copy(SURGE);
+      bodyMat.emissiveIntensity = glow;
+
+      // 2. THE LIGHT BARS ride the same surge well past the brightness they are allowed in
+      // service, stutter with it, and are cut after the cabin has gone dark.
+      let hazard = 0;
+      if (variant === 2 && age > T_BEACON && age < T_BEACON + 1.4) {
+        const since = age - T_BEACON;
+        hazard = since % 0.7 < 0.28 ? 1 - since / 1.4 : 0;
+      }
+      let barLevel: number;
+      if (age < T_SURGE) barLevel = 1 + 1.6 * (age / T_SURGE);
+      else if (age < flickerEnd) barLevel = 0.05 + 2.4 * stutter(age, blinkPhase + 0.31);
+      else if (age < T_BARS) barLevel = 0.8 * (1 - clamp01((age - flickerEnd) / (T_BARS - flickerEnd)));
+      else barLevel = 0;
+      if (hazard > 0) {
+        barMat.emissive.copy(HAZARD);
+        barMat.emissiveIntensity = 2.6 * hazard;
+      } else if (age < flickerEnd) {
+        barMat.emissive.lerpColors(CLEAN_BAR, SURGE, clamp01(age / T_SURGE));
+        barMat.emissiveIntensity = 2.2 * barLevel;
+      } else {
+        barMat.emissive.lerpColors(SURGE, DEAD_BAR, clamp01((age - flickerEnd) / (T_BARS - flickerEnd)));
+        barMat.emissiveIntensity = 2.2 * barLevel;
+      }
+
+      // 3. THE BEACON is last out, and on one car in four its contact never quite lets go.
+      if (age < beaconEnd) {
+        beacon.visible = true;
+        const s = stutter(age, blinkPhase + 0.63);
+        const fade = 1 - clamp01(age / beaconEnd);
+        beaconMat.opacity = age < T_SURGE ? 1 : s * (0.35 + 0.65 * fade);
+        beacon.scale.setScalar(age < T_SURGE ? 1 + 0.6 * (age / T_SURGE) : 1 + 0.3 * s);
+      } else {
+        beacon.visible = false;
+      }
+
+      // 4. THE JERK. One twitch of torque as the motor cuts, rung out inside a third of a
+      // second, and under it the car settling onto its springs and leaning off the lane.
+      const jerk = age < JERK_TIME ? Math.sin((age / JERK_TIME) * Math.PI * 1.5) * (1 - age / JERK_TIME) : 0;
+      chassis.rotation.y = tiltSign * JERK_YAW * jerk;
+      chassis.rotation.z = tiltSign * tiltAmount * sag - tiltSign * 0.06 * jerk;
+      chassis.rotation.x = 0.05 * sag + 0.03 * jerk;
+      chassis.position.y = -0.12 * sag;
     },
     setRushTarget(value) {
       if (value === rushTarget) return;

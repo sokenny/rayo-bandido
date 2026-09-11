@@ -2003,3 +2003,60 @@ the rival driving, the HUD position, the finish card with the unlock, ring II op
 **Left for tuning** (deliberately not iterated here): every AI number, the barrier spans and
 lead, the shortcut mouth speed, the marker glyph proportions, rivals exiting alley-c a few
 metres wide onto st-south's pavement, and nobody has yet raced the tiers by hand.
+
+## The introduction — "Return Signal" (MVP, 2026-09-11)
+
+**What.** The first-time playable introduction: a short opening fade, then three or four
+minutes of real driving with BadKala on the phone — into the city, a drift anywhere, any
+electric car on the street, then the one point of the whole drive: the underground meet under
+the viaduct's east leg — ending seamlessly in ordinary Free Roam. Not a campaign, not a
+dialogue system: one scripted call, data in `src/content/intro.ts` (start, the meet and its
+parked cars, timings, the lines with stable ids, the clip's asset entry and production brief,
+persistence version), rules in `src/sim/intro.ts` (an explicit state machine, `opening →
+incomingCall → approach → drift → disableEV → arrival → meetup → complete`, event-driven, never
+a timeline), screen furniture in `src/ui/introOverlay.ts`, and the wiring in `src/game.ts`.
+
+**The shape.** The start is the service stretch at the top of Avenida Main, north of the
+viaduct's north leg. From the call on there is no marker: the lore is paced by metres driven,
+the drift is asked for after ~110 m and counts wherever it happens, and the shutdown counts on
+any electric car (paid as any kill is). Only then is a point marked — the corridor under the
+viaduct's east leg north of Boulevard Centre, El Búho's own corner, where three Bandido cars
+stand parked (rival-car visuals in slot colours, solid through layout colliders) and BadKala
+waits (the shared human body, her own look). Pulling in holds the car and plays the clip; she
+talks the player into Free Roam afterwards. The meet stays for the session.
+
+**The clip.** `INTRO.cinematic.src` is null: the placeholder is a five-second in-engine hold at
+the meet with two title lines, skippable. Drop the MP4 at `public/intro/the-meet.mp4` and set
+`src`; playback is inline, tried with sound then muted, and any failure or timeout is the
+placeholder. The world is not drawn behind an opaque clip; the simulation is never paused. The
+opening is a placeholder only (`INTRO.opening`): no clip slot there any more.
+
+**Reused.** ONE ACTIVITY AT A TIME (`'intro'` is an engaged activity: police, RUSH, fares, El
+Búho and both doors are off for its whole length), the real drift detection and charge, the
+real beam and shutdown, the passenger's destination ring and the route arrow for the meet, the
+minimap's `destination` mark, the rival car visual and the human figure kit for the meet, the
+system message for INTRO COMPLETADA, the progress module's storage contract (`rb.intro`,
+versioned), the one-shots (a ringtone) and the theme (a `duck` under a voice clip). Hints name
+the keyboard's real keys from the HUD's own binding table (never a pad, whatever is plugged in),
+or the thumb pad's labels on a phone.
+
+**Persistence.** Completed or skipped is written once; a later visit does not replay. `?intro=1`
+(the main menu's I key) replays it, `?intro=0` suppresses it. An interrupted intro restarts from
+the beginning; R during it goes back to the incoming call without the opening.
+
+**Verified** with `tests/intro.test.ts` (start and meet on drivable ground under the deck, the
+parked cars and BadKala clear of every column and the cars solid, the hold during the opening,
+the ring and the connection, lines one at a time, lore paced by distance, an early slide
+counted and the instruction dropped, a real brief drift, the hint once then CONTINUAR, any car
+counts once, the dry-meter top-up, the hold for the clip at the meet then the closing lines and
+one completion, isolation and police off, skip cleanup including during the clip, restart,
+storage round trip) and one browser pass in the dev server (see the session notes).
+
+**Not exercised.** The MP4 branch (no clip exists), voice clips (none exist), touch hints on a
+phone, the shared city with other players present (other cars still drive through the tutorial
+player: only this client's collision pass looks away during the intro).
+
+**Left for tuning.** Line timings (`INTRO.timing`), the struggle clocks, the meet's radius and
+the parked cars' exact spots and colours, BadKala's look, the strip and panel positions on small
+screens, the placeholder titles. Whether the meet should live in the city permanently (today it
+exists only in the session that runs the intro) is Juan's call.

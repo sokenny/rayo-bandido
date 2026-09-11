@@ -287,10 +287,11 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
   const cz = (blk.minZ + blk.maxZ) / 2;
 
   // Curb + sidewalk, kept 0.3 m inside the collider so the car stops before it touches art.
+  // Flat, like the pavement that runs up to it: the street is one level all the way across.
   b.concrete.color(PAL.curb);
-  b.concrete.box(cx, 0.11, cz, w - 0.6, 0.22, d - 0.6, { top: true, bottom: false });
+  b.concrete.planeY(cx, 0, cz, w - 0.6, d - 0.6);
   b.concrete.color(PAL.sidewalk, blk.zone === 'jdm' ? 0.8 : 1);
-  b.concrete.planeY(cx, 0.226, cz, w - 1.7, d - 1.7);
+  b.concrete.planeY(cx, 0.006, cz, w - 1.7, d - 1.7);
 
   const setback = blockSetback(w, d);
   const inner: Rect2 = {
@@ -673,15 +674,15 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
     const along = (t: number, off: number): [number, number] =>
       horizontal ? [t, innerEdge - inward * off] : [innerEdge - inward * off, t];
 
-    // Raised pavement across the whole band so props sit at sidewalk height.
+    // Pavement across the whole band, flush with the road like every other stretch of it.
     {
       const [px, pz] = along((min + max) / 2, (bandMax - bandMin) / 2);
       const w = horizontal ? max - min - 0.6 : bandMax - bandMin - 0.6;
       const d = horizontal ? bandMax - bandMin - 0.6 : max - min - 0.6;
       b.concrete.color(PAL.curb);
-      b.concrete.box(px, 0.11, pz, w, 0.22, d, { top: true, bottom: false });
+      b.concrete.planeY(px, 0, pz, w, d);
       b.concrete.color(PAL.sidewalk);
-      b.concrete.planeY(px, 0.226, pz, w - 1.2, d - 1.2);
+      b.concrete.planeY(px, 0.006, pz, w - 1.2, d - 1.2);
     }
 
     // Low retaining wall hugging the road edge; it closes the gaps between buildings.

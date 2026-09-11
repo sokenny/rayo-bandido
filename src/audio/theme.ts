@@ -38,6 +38,11 @@ export interface ThemeAudio {
   status(): 'unavailable' | 'idle' | AudioContextState;
   setMuted(muted: boolean): void;
   isMuted(): boolean;
+  /**
+   * Lower the song under a voice: `level` is a fraction of the theme's own volume, 1 to
+   * restore it. Independent of the mute — a muted song ducked is still muted.
+   */
+  duck(level: number): void;
   dispose(): void;
 }
 
@@ -73,6 +78,7 @@ function silentTheme(): ThemeAudio {
     status: () => 'unavailable',
     setMuted() {},
     isMuted: () => false,
+    duck() {},
     dispose() {},
   };
 }
@@ -159,6 +165,9 @@ export function createThemeAudio(): ThemeAudio {
   let armed = false;
   let armWindow: Window | null = null;
   let muted = false;
+  /** Fraction of `THEME.volume` the song is allowed right now: 1, or less under a voice. */
+  let duckLevel = 1;
+  const target = (): number => (muted ? 0 : THEME.volume * duckLevel);
 
   function start(): void {
     if (started) return;
@@ -173,7 +182,7 @@ export function createThemeAudio(): ThemeAudio {
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(muted ? 0 : THEME.volume, now + THEME.fadeInSeconds);
+    gain.gain.linearRampToValueAtTime(target(), now + THEME.fadeInSeconds);
   }
 
   function onGesture(): void {
@@ -187,7 +196,18 @@ export function createThemeAudio(): ThemeAudio {
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(muted ? 0 : THEME.volume, now + 0.05);
+    gain.gain.linearRampToValueAtTime(target(), now + 0.05);
+  }
+
+  function duck(level: number): void {
+    const next = Math.min(1, Math.max(0, level));
+    if (next === duckLevel) return;
+    duckLevel = next;
+    if (!started) return;
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(target(), now + 0.25);
   }
 
   function onMuteKey(e: KeyboardEvent): void {
@@ -284,6 +304,7 @@ export function createThemeAudio(): ThemeAudio {
     isMuted() {
       return muted;
     },
+    duck,
     dispose() {
       if (armWindow) {
         armWindow.removeEventListener('keydown', onGesture);

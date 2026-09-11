@@ -14,6 +14,7 @@ import {
 import { createLightningArc, BOLT_FROM_Y, BOLT_TO_Y } from './lightningArc';
 import { createSparkFx } from './sparks';
 import { createShockRings } from './explosion';
+import { createPowerDown } from './powerDown';
 import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
 
 /**
@@ -27,7 +28,9 @@ import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
  *   that clearly connects the car to the target for ~0.4 s.
  * - `backfire(strength)` when the exhaust pops: a flame spit at the tailpipes, in step with
  *   the bang from the audio layer (both are driven by the same trigger in `game.ts`).
- * - `explosion(x, z)` on `targetDestroyed`: stylized burst (sparks, flash, short-lived debris).
+ * - `powerDown(x, y, z)` on `targetDestroyed`: the ground ring, and then the cascade of
+ *   arcs, sparks and haze in `powerDown.ts`, which plays out over the next second and a bit
+ *   in step with the car going dark in `scene/electricCarVisual.ts`.
  * - `scorePopup(x, z, amount)` on `targetDestroyed`: a floating "+X" over the wreck.
  *   A near miss has no world pop: it is paid on the HUD, because the car it was scored on is
  *   already behind the camera by the time a number over it could be read.
@@ -54,7 +57,11 @@ export interface CarPose {
 export interface EffectsSystem {
   setCarPose(pose: CarPose, vehicle: VehicleState, drifting: boolean, nitro: number, frameDt: number): void;
   lightning(fromX: number, fromY: number, fromZ: number, toX: number, toY: number, toZ: number): void;
-  explosion(x: number, y: number, z: number): void;
+  /**
+   * An electric car losing its power. NOT an explosion: the particles arrive in beats over
+   * about a second, because the car does.
+   */
+  powerDown(x: number, y: number, z: number): void;
   /**
    * Flame out of the tailpipes for one exhaust pop (`strength` 0..1). Call after
    * `setCarPose` in the same frame — it fires from the tip positions that set.
@@ -111,6 +118,7 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
   const bolt = createLightningArc(root, textures);
   const sparkFx = createSparkFx(root, textures);
   const rings = createShockRings(root);
+  const powerDownFx = createPowerDown(sparkFx, smoke);
   const popups = createScorePopups(root);
 
   const halfBase = VEHICLE.wheelbase / 2;
@@ -189,21 +197,12 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       sparkFx.burst(toX, toY + BOLT_TO_Y, toZ, 8, 5.5, 0.35, 0.16, 0.55, 0.95, 1);
     },
 
-    explosion(x, y, z) {
+    powerDown(x, y, z) {
+      // The ring is the only part that still lands all at once: it is the moment of the hit,
+      // and it is what carries the kill across a street the wreck itself may be too far down
+      // to be read on. Everything after it arrives on the beat — see `powerDown.ts`.
       rings.spawn(x, y, z);
-      sparkFx.flash(x, y + 1.0, z, 3.4, 0.22, 0.9, 1, 1);
-      sparkFx.burst(x, y + 0.7, z, 40, 9, 0.8, 0.22, 0.45, 0.92, 1);
-      // A little non-glowing smoke gives the burst some weight against the neon.
-      for (let i = 0; i < 7; i++) {
-        smoke.puff(
-          x + (Math.random() - 0.5) * 1.6,
-          y + 0.4 + Math.random() * 0.8,
-          z + (Math.random() - 0.5) * 1.6,
-          0.7 + Math.random() * 0.5,
-          1.0 + Math.random() * 0.5,
-          0.45,
-        );
-      }
+      powerDownFx.spawn(x, y, z);
     },
 
     backfire(strength) {
@@ -247,6 +246,7 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       bolt.update(frameDt);
       sparkFx.update(frameDt);
       rings.update(frameDt);
+      powerDownFx.update(frameDt);
       popups.update(frameDt);
     },
 
@@ -257,6 +257,7 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       bolt.reset();
       sparkFx.reset();
       rings.reset();
+      powerDownFx.reset();
       popups.reset();
     },
 

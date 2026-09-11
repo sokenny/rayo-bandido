@@ -34,8 +34,12 @@ import type { FinishAmounts } from '../post/speedBlur';
  *    the trip deepens. The windows themselves burn a little harder to feed it. This is the one
  *    layer that touches the whole frame rather than its edge, and the reason the city reads as
  *    SOFT rather than merely coloured.
- *  - THE FINISH. A restrained colour separation and a slow swim in the periphery, on the pass
- *    the nitro blur already owns; the middle of the frame — the car, the road — stays exact.
+ *  - THE FINISH. A colour separation at the edge and a slow swim, on the pass the nitro blur
+ *    already owns. The swim has its own, much smaller inner radius than the blur's: the whole
+ *    skyline leans, bends towards the car and settles back, so the deep end of the trip is
+ *    something the player drives THROUGH rather than only looks at. Only the very middle of
+ *    the frame — the car and the road under it — stays exact, which is what keeps this the
+ *    difficult side of readable rather than the other one.
  *
  * SLOW EVERYWHERE. Every modulation inside the envelope is a sine with a period in the tens of
  * seconds; nothing here strobes, flickers or steps. Under `prefers-reduced-motion` the swim is
@@ -406,6 +410,8 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
   const finish: FinishAmounts = {
     chroma: 0,
     swim: 0,
+    swimCentre: MOOGUL.post.swimCentre,
+    swimBend: 0,
     time: 0,
     bleed: {
       amount: 0,
@@ -434,6 +440,7 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
     surface.set(0, 0, 0, 0, 0, 0);
     finish.chroma = 0;
     finish.swim = 0;
+    finish.swimBend = 0;
     finish.bleed.amount = 0;
     finish.bleed.fringe = 0;
     for (const face of faces) if (face.active) retireFace(face);
@@ -520,7 +527,14 @@ export function createMoogulTrip(hooks: MoogulTripHooks): MoogulTrip {
 
       const chromaAmount = layerAmount(shown, L.chroma) * (0.8 + 0.2 * Math.sin((twoPi * tripTime) / 11));
       finish.chroma = chromaAmount * MOOGUL.post.chroma * (reduced ? 0.5 : 1);
-      finish.swim = reduced ? 0 : layerAmount(shown, L.swim) * MOOGUL.post.swim;
+      // The swim reaches in from its own radius rather than the blur's, so the buildings the
+      // player is actually steering between lean as well as the corners of the screen do, and
+      // part of it bends along the radius so the street comes towards the car and goes away
+      // again. Read every frame, like the halo's numbers, so `__rb.buho.config.post` is live.
+      const swimAmount = reduced ? 0 : layerAmount(shown, L.swim);
+      finish.swim = swimAmount * MOOGUL.post.swim;
+      finish.swimCentre = MOOGUL.post.swimCentre;
+      finish.swimBend = swimAmount * MOOGUL.post.swimBend;
       finish.time = (twoPi * tripTime) / MOOGUL.post.swimPeriod;
 
       // The halo. It comes on with the sky, before anything else is obviously wrong, and it

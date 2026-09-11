@@ -2,7 +2,7 @@ import type { ArenaLayout, ObstacleBox, ObstacleWall, RaceCourse, RaceGate, Race
 import { RACE } from '../config/tuning';
 import { PAL } from '../render/scene/env/palette';
 import type { World } from './arenaWorld';
-import { inRect, SIDEWALK_Y, type CityPlan, type Rect, type RibbonDef, type WallRect, type ZoneId } from './cityPlan';
+import { inRect, type CityPlan, type Rect, type RibbonDef, type WallRect, type ZoneId } from './cityPlan';
 import { buildRails, createRandom, generateBlocks, railBounds } from './cityGen';
 import { RACE_BOUNDS, RACE_GATES, RACE_SHORTCUTS, RACE_SPEC } from './raceSpec';
 import {
@@ -250,8 +250,7 @@ export function createRaceWorld(seed: number = (Math.random() * 0xffffffff) >>> 
       for (const b of solids) if (inRect(b, x, z, -pad)) return true;
       return false;
     },
-    padY(x, z) {
-      for (const b of solids) if (inRect(b, x, z)) return SIDEWALK_Y;
+    padY() {
       return 0;
     },
   };

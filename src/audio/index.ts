@@ -155,6 +155,10 @@ export function createAudio(targetCount: number): AudioSystem {
         case 'policeShielded':
           oneShots.shield();
           break;
+        case 'introCall':
+          // The phone on the dash, ringing. Connecting and hanging up are silent on purpose.
+          if (ev.phase === 'ringing') oneShots.ring();
+          break;
         case 'policeCleared':
           police.setChase(false);
           police.reset();

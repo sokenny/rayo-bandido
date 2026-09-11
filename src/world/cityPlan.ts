@@ -358,18 +358,18 @@ export interface CityPlan {
   isRoad(x: number, z: number, pad?: number): boolean;
   /** True inside a block, wall band or barrier footprint, shrunk by `pad`. Props live only here. */
   isSolid(x: number, z: number, pad?: number): boolean;
-  /** Height of the walkable surface: sidewalks and the perimeter band are raised. */
+  /**
+   * Height of the walkable surface (m). The pavement is flush with the road, so this is 0
+   * everywhere at ground level today; it stays the seam a prop asks for its footing, for
+   * whatever stands on something raised later.
+   */
   padY(x: number, z: number): number;
 }
 
-/** Height of a sidewalk / perimeter slab above the road. */
-export const SIDEWALK_Y = 0.22;
-
 /**
- * The raised pavement beside the ground-level roads: where it is, and how high the ground
- * stands there. One object answers both the renderer (which segments to pave, how wide) and
- * the simulation (the height under a point), so a car that mounts the kerb rises by exactly
- * as much as the kerb you can see. Built by `src/world/kerbs.ts`.
+ * The pavement beside the ground-level roads: which stretches are paved, and how wide. Only
+ * the renderer asks — the pavement is flush with the asphalt, so there is no height under it
+ * for the simulation to read. Built by `src/world/kerbs.ts`.
  */
 export interface KerbField {
   /**
@@ -379,12 +379,6 @@ export interface KerbField {
   widthAt(rb: RibbonDef, i: number, side: number, t?: number): number;
   /** True when segment `i` of `rb` carries pavement on `side` (-1 left, +1 right of travel). */
   paved(rb: RibbonDef, i: number, side: number): boolean;
-  /**
-   * Height of the pavement at (x, z) above the road (m): 0 on the asphalt and past the
-   * pavement's outer edge, `KERB_HEIGHT` on it, ramped across the kerb face between. Writes
-   * the grade of that face into `out`, which is what tilts a car climbing it.
-   */
-  heightAt(x: number, z: number, out: { gx: number; gz: number }): number;
 }
 
 export function inRect(r: Rect, x: number, z: number, pad = 0): boolean {
@@ -402,8 +396,7 @@ export function rectPredicates(roads: readonly Rect[], solids: readonly Rect[]):
       for (const b of solids) if (inRect(b, x, z, -pad)) return true;
       return false;
     },
-    padY(x, z) {
-      for (const b of solids) if (inRect(b, x, z)) return SIDEWALK_Y;
+    padY() {
       return 0;
     },
   };

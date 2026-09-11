@@ -503,6 +503,24 @@ export const TARGETS = {
   /** Seconds a destroyed target stays in the world before respawning at its spawn. -1 = never respawn. */
   respawnDelay: 12,
   /**
+   * What a car does in the second after its power is cut (`src/sim/targets.ts`). It used to
+   * stop dead in the frame it was hit, which is the one thing a two-tonne car cannot do: the
+   * lights going out over a car already at rest reads as a sprite being swapped rather than as
+   * a car losing its motor. So it coasts. Nothing here is a collision — a wreck is not solid
+   * (`src/sim/collision.ts`) — it is only the roll-out, so it stays cheap and cannot trap
+   * anybody.
+   */
+  dying: {
+    /** How long the roll-out lasts (s). It is tapered to reach a standstill exactly here. */
+    coast: 1.2,
+    /** How fast the roll-out bleeds off (1/s). High enough that it is a stop, not a drift. */
+    drag: 1.8,
+    /** Peak of the torque jerk as the motor cuts (rad/s), damped out over `jerkTime`. */
+    jerk: 0.85,
+    /** How long that jerk rings for (s). */
+    jerkTime: 0.3,
+  },
+  /**
    * Physical bump when the player drives into an electric car. Arcade, not realistic: the car
    * is light, gets shoved a bit harder than momentum alone would (`transfer` > 1), and the
    * player barely loses speed so it never feels like hitting a wall.
@@ -1743,11 +1761,11 @@ export const MOOGUL = {
     sky: [0.04, 0.85],
     fog: [0.08, 0.9],
     lights: [0.25, 1],
-    surface: [0.15, 0.95],
-    graffiti: [0.1, 0.8],
-    faces: [0.4, 0.9],
-    chroma: [0.5, 1],
-    swim: [0.6, 1],
+    surface: [0.12, 0.85],
+    graffiti: [0.08, 0.7],
+    faces: [0.34, 0.8],
+    chroma: [0.38, 0.9],
+    swim: [0.42, 0.9],
     bleed: [0.06, 0.9],
     glow: [0.2, 1],
   } as Record<
@@ -1761,9 +1779,9 @@ export const MOOGUL = {
    * all the way, so the storm's own structure and the flash stay in it.
    */
   sky: {
-    cyclePeriod: 52,
-    blend: 0.88,
-    fogBlend: 0.55,
+    cyclePeriod: 44,
+    blend: 0.95,
+    fogBlend: 0.74,
     moodA: {
       zenith: 0x1a0838,
       middle: 0x0e4a52,
@@ -1788,27 +1806,31 @@ export const MOOGUL = {
     hemiSky: 0x7a48c8,
     hemiGround: 0x1c5a58,
     key: 0xd07ad8,
-    blend: 0.55,
+    blend: 0.74,
   },
   /** Facades and paint (`env/moogulSurface.ts`). */
   surface: {
-    /** How far the window grid drifts at full, in panes. Half a pane is unmistakable, one is mush. */
-    warpPanes: 0.55,
+    /**
+     * How far the window grid drifts at full, in panes. Half a pane is unmistakable; a whole
+     * one is mush. Three quarters is where a facade stops being a wall with moving windows
+     * and starts being a wall that is itself moving — which is the point of the deep end.
+     */
+    warpPanes: 0.78,
     /** Wavelength of the drift across a wall (m) and how fast it moves (rad/s). */
-    warpWavelength: 21,
-    warpRate: 0.42,
+    warpWavelength: 18,
+    warpRate: 0.52,
     /** How far the window tints and the graffiti rotate round the hue wheel at full (rad). */
-    hue: 1.1,
+    hue: 1.55,
     /** How much the paint pulses in brightness at full (fraction). */
-    pulse: 0.4,
+    pulse: 0.56,
     /**
      * How much brighter the lit windows burn at full (fraction). Small on its own — a window
      * cannot be made to glare without looking like a bug — but it is what pushes the panes
      * over `bleed.threshold`, so what it really buys is the halo round them.
      */
-    glow: 0.85,
+    glow: 1.2,
     /** Slow variation inside the envelope (s), so the peak breathes rather than holds. */
-    breathPeriod: 17,
+    breathPeriod: 15,
   },
   /** The faces in the windows (`moogulTrip.ts`). */
   faces: {
@@ -1843,8 +1865,28 @@ export const MOOGUL = {
   },
   /** The finishing pass, in `render/post/speedBlur.ts`. Fractions of the frame, at the edge. */
   post: {
-    chroma: 0.0055,
-    swim: 0.0042,
+    chroma: 0.0077,
+    /**
+     * THE SWIM: how far the frame drifts on its slow waves at full, as a fraction of it. This
+     * is the one number the city is NAVIGATED through rather than merely looked at — a facade
+     * that leans and comes back is a facade whose corner is somewhere slightly other than
+     * where it is drawn — so it is deliberately the largest lift of the lot. Past ~0.02 a
+     * junction stops being readable at all rather than being hard to read.
+     */
+    swim: 0.0105,
+    /**
+     * Radius (0 = the middle of the frame, 1 = the top and bottom edges) the swim starts at.
+     * Well inside the blur's own sharp circle: the whole skyline is meant to lean, not just
+     * the corners of the screen. The car and the road immediately under it still sit in the
+     * quiet middle, which is what keeps this "hard to navigate" and not "impossible to steer".
+     */
+    swimCentre: 0.1,
+    /**
+     * How much of the swim is spent bending along the radius rather than sideways — the street
+     * pushed out and drawn back in, so the buildings lean towards the car and away again
+     * instead of only sliding across it. A fraction of `swim`.
+     */
+    swimBend: 0.85,
     swimPeriod: 8.5,
   },
   /**
@@ -1855,28 +1897,28 @@ export const MOOGUL = {
    */
   bleed: {
     /** How much of the halo goes back into the frame at full. Past ~2 it stops being a city. */
-    amount: 1.15,
+    amount: 1.5,
     /**
      * Brightness a pixel must reach before it bleeds: `[at the layer's start, at full]`. It
      * FALLS as the trip deepens — first only the actual lights halo, and by the peak so does
      * anything merely bright, which is what turns a haze round the lamps into a soft city.
      */
-    threshold: [0.68, 0.34] as readonly [number, number],
+    threshold: [0.6, 0.26] as readonly [number, number],
     /** How much brighter than the threshold a pixel must be to bleed fully. Wide: no pane pops. */
     knee: 0.34,
     /** How far the halo's colour turns off its light's, and how far off white it is pushed. */
-    hue: 1.5,
-    huePeriod: 23,
-    saturation: 1.45,
+    hue: 1.9,
+    huePeriod: 19,
+    saturation: 1.7,
     /** Halo width as a fraction of the frame's height, `[start, full]`, and its sideways stretch. */
-    radius: [0.03, 0.075] as readonly [number, number],
-    stretch: 1.35,
+    radius: [0.035, 0.1] as readonly [number, number],
+    stretch: 1.45,
     /** Slow variation inside the envelope (s), so the glow breathes with the walls. */
     breathPeriod: 13,
     /** How far the halo's channels split along the radius at full (fraction of the frame). */
-    fringe: 0.006,
+    fringe: 0.0085,
     /** How much halo survives in the middle of the frame, where the car and the road are. */
-    centre: 0.55,
+    centre: 0.62,
   },
   /** Seconds the overrides take to let go when the trip is cut short. */
   stopFadeSeconds: 0.9,

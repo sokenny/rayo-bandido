@@ -22,6 +22,9 @@ import { createNitroExhaust } from '../src/render/fx/nitroExhaust';
 import { speedBlurStrength } from '../src/render/post/speedBlur';
 import { SPEED_BLUR } from '../src/config/tuning';
 import type { FxTextures } from '../src/render/fx/sprites';
+import { createPowerDown, SLOTS } from '../src/render/fx/powerDown';
+import type { SparkFx } from '../src/render/fx/sparks';
+import type { TireSmoke } from '../src/render/fx/tireSmoke';
 
 describe('ring buffers', () => {
   it('wraps back to zero at capacity', () => {
@@ -314,5 +317,83 @@ describe('nitro speed blur strength', () => {
       expect(s).toBeGreaterThanOrEqual(previous);
       previous = s;
     }
+  });
+});
+
+describe('the electric car power-down', () => {
+  /** Counts what a cascade spends, and when. */
+  function recorder() {
+    const log: { at: number; particles: number }[] = [];
+    let clock = 0;
+    const sparks = {
+      burst: (_x: number, _y: number, _z: number, count: number) => log.push({ at: clock, particles: count }),
+      flash: () => log.push({ at: clock, particles: 1 }),
+    } as unknown as SparkFx;
+    const smoke = {
+      puff: () => log.push({ at: clock, particles: 1 }),
+    } as unknown as TireSmoke;
+    return {
+      log,
+      fx: createPowerDown(sparks, smoke),
+      particles: () => log.reduce((n, e) => n + e.particles, 0),
+      tick(dt: number) {
+        clock += dt;
+        this.fx.update(dt);
+      },
+    };
+  }
+
+  it('spends nothing at all until a car is actually hit', () => {
+    const r = recorder();
+    for (let i = 0; i < 120; i++) r.tick(1 / 60);
+    expect(r.log).toHaveLength(0);
+  });
+
+  it('lands the impact in the frame of the hit and the rest of it on later frames', () => {
+    const r = recorder();
+    r.fx.spawn(0, 0, 0);
+    // The hit itself is not deferred: the flash has to be simultaneous with the bolt.
+    expect(r.log.length).toBeGreaterThan(0);
+    const atImpact = r.log.length;
+
+    for (let i = 0; i < 30; i++) r.tick(1 / 60);
+    const atHalfSecond = r.log.length;
+    expect(atHalfSecond).toBeGreaterThan(atImpact);
+
+    for (let i = 0; i < 90; i++) r.tick(1 / 60);
+    expect(r.log.length).toBeGreaterThan(atHalfSecond);
+    // Spread over about a second and a bit, in order, and each beat exactly once.
+    expect(r.log[r.log.length - 1].at).toBeGreaterThan(1);
+    for (let i = 1; i < r.log.length; i++) expect(r.log[i].at).toBeGreaterThanOrEqual(r.log[i - 1].at);
+
+    // ...and then it is over: a wreck does not keep smoking for the twelve seconds it waits
+    // to respawn.
+    const finished = r.log.length;
+    for (let i = 0; i < 300; i++) r.tick(1 / 60);
+    expect(r.log).toHaveLength(finished);
+  });
+
+  it('is lighter than the burst it replaced, and scales flat with the cars going down', () => {
+    const one = recorder();
+    one.fx.spawn(0, 0, 0);
+    for (let i = 0; i < 120; i++) one.tick(1 / 60);
+    // The old kill threw 40 sparks, a flash and 7 puffs in a single frame. A cascade is a
+    // cheaper effect as well as a slower one — spreading it out was never the excuse to spend
+    // more, and against 126 cars on a street it could not have been.
+    expect(one.particles()).toBeLessThan(48);
+
+    const many = recorder();
+    for (let i = 0; i < SLOTS; i++) many.fx.spawn(i, 0, 0);
+    for (let i = 0; i < 120; i++) many.tick(1 / 60);
+    expect(many.particles()).toBe(one.particles() * SLOTS);
+  });
+
+  it('drops what is still owed on a reset', () => {
+    const r = recorder();
+    r.fx.spawn(0, 0, 0);
+    const atImpact = r.log.length;
+    r.fx.reset();
+    for (let i = 0; i < 120; i++) r.tick(1 / 60);
+    expect(r.log).toHaveLength(atImpact);
   });
 });

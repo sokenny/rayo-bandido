@@ -12,7 +12,6 @@ import { GRAFFITI_ART_COUNT, GRAFFITI_CELLS, graffitiArtIndex, graffitiCell, pic
 import { canopyTree, crookedTree, palm, PLANT_COST, PLANTS, weeds, OVERHANG_CLEAR } from '../src/render/scene/env/plants';
 import { makeRng } from '../src/render/scene/env/meshBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
-import { SIDEWALK_Y } from '../src/world/cityPlan';
 
 /**
  * The reclamation: the deterministic field that says where the city has been let go
@@ -199,13 +198,13 @@ describe('the city it produces', () => {
     check('decal', b.decal.positions);
   });
 
-  it('leaves the pavement walkable: nothing stands taller than a kerb on the driving line', () => {
+  it('leaves the pavement walkable: the ground under the driving line stays flat', () => {
     // The colliders are the contract. Nothing the reclamation adds may sit where the layout
     // says a car drives, so the surface height under every road sample is untouched.
     for (const rb of plan.ribbons) {
       for (let i = 0; i < rb.path.samples.length; i += 7) {
         const s = rb.path.samples[i];
-        expect(plan.padY(s.x, s.z), `pad height on ${rb.tag ?? 'ribbon'}`).toBeLessThanOrEqual(SIDEWALK_Y + 1e-6);
+        expect(plan.padY(s.x, s.z), `pad height on ${rb.tag ?? 'ribbon'}`).toBe(0);
       }
     }
     // And no collider was added: the reclamation is art only.

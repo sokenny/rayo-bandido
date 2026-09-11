@@ -175,6 +175,59 @@ function separateTraffic(targets: TargetState[], dt: number): void {
 }
 
 /**
+ * The roll-out of a car whose power has just been cut: it keeps whatever speed it had, bleeds
+ * it off over `TARGETS.dying.coast`, and gives one twitch of yaw as the motor lets go.
+ *
+ * A wreck is not solid (`src/sim/collision.ts` and `separateTraffic` both skip it), so this
+ * cannot shunt anyone or wedge the traffic — it is presentation that happens to live in the
+ * sim, where the visual can read it off `hitTime` and every other system already ignores it.
+ * Pure in the car's own state, so every client rolls it out the same way from the same hit;
+ * `src/sim/traffic.ts` leaves destroyed cars alone rather than correcting them, so the host
+ * has no opinion to disagree with.
+ */
+function coastToAStop(t: TargetState, layout: ArenaLayout, time: number, dt: number): void {
+  if (t.hitTime < 0) return;
+  const age = time - t.hitTime;
+  const { coast, drag, jerk, jerkTime } = TARGETS.dying;
+  if (age > coast) return;
+  // The twitch: half a sine, damped, and in the direction the car's id says. Arbitrary, but
+  // arbitrary the same way on every machine, which is all the traffic sync asks of it.
+  if (age < jerkTime) {
+    const ring = Math.sin((age / jerkTime) * Math.PI) * (1 - age / jerkTime);
+    t.heading = wrapAngle(t.heading + (t.id % 2 === 0 ? 1 : -1) * jerk * ring * dt);
+  }
+  // Drag alone would still be carrying a little speed when the window closes, and the wreck
+  // would stop because the clock said so rather than because it had run out. So the roll-out
+  // also sits under a ceiling that reaches zero at the end of it — a CEILING and not a second
+  // decay, because anything multiplied in every tick compounds with the frame rate and would
+  // have the car stopped inside half a second.
+  const ceiling = t.patrolSpeed * (1 - age / coast);
+  t.speed = Math.min(Math.max(0, t.speed - t.speed * drag * dt), ceiling);
+  if (t.speed > 0.05) {
+    const step = t.speed * dt;
+    t.x += Math.sin(t.heading) * step;
+    t.z += -Math.cos(t.heading) * step;
+  } else {
+    t.speed = 0;
+  }
+  // Whatever the player's bump was still doing to it carries on too, so a car shot mid-shove
+  // keeps sliding instead of stopping on the frame the lights went out.
+  if (t.vx !== 0 || t.vz !== 0) {
+    t.x += t.vx * dt;
+    t.z += t.vz * dt;
+    const decay = Math.max(0, 1 - TARGETS.knock.damping * dt);
+    t.vx *= decay;
+    t.vz *= decay;
+    if (Math.abs(t.vx) < 0.05 && Math.abs(t.vz) < 0.05) {
+      t.vx = 0;
+      t.vz = 0;
+    }
+    pushOutOfWorld(t, TARGETS.knock.radius, layout, WALL, dt);
+  }
+  settleTarget(t, layout);
+}
+
+/**
  * Advance every target by `dt`. `respawn` false leaves destroyed cars destroyed: a
  * multiplayer client that does not own the traffic lets the host's reports bring them back.
  */
@@ -189,6 +242,8 @@ export function stepTargets(targets: TargetState[], layout: ArenaLayout, time: n
     if (t.status !== 'active') {
       if (respawn && TARGETS.respawnDelay >= 0 && t.hitTime >= 0 && time - t.hitTime >= TARGETS.respawnDelay) {
         respawnTarget(t, layout);
+      } else {
+        coastToAStop(t, layout, time, dt);
       }
       continue;
     }

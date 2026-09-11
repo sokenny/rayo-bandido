@@ -779,7 +779,22 @@ export type GameEvent =
   /** The bolt met a police car: shielded, nothing happens to it. For the feedback flash only. */
   | { type: 'policeShielded'; unit: number; x: number; y: number; z: number }
   /** The police were switched off because the player left Free Roam for an activity. */
-  | { type: 'policeCleared' };
+  | { type: 'policeCleared' }
+  /* ---------------------------------------------------------------- the introduction */
+  /** BadKala's call: the phone starts ringing, the line opens, the line closes. */
+  | { type: 'introCall'; phase: 'ringing' | 'connected' | 'ended' }
+  /** A subtitle line started. `voice` is the optional clip; `seconds` is the subtitle-only timing. */
+  | { type: 'introLine'; id: string; speaker: string; text: string; voice: string | null; seconds: number }
+  /** The line on screen ended (its time ran out, or it was skipped). */
+  | { type: 'introLineEnd'; id: string }
+  /** The intro moved to a new stage. */
+  | { type: 'introStage'; stage: IntroStage }
+  /** The current objective changed (`id` null: nothing to do right now). */
+  | { type: 'introObjective'; id: IntroObjectiveId | null; text: string }
+  /** A quiet note for the strip, not dialogue: the tutorial's own assistance. */
+  | { type: 'introNote'; text: string }
+  /** The intro is over. Raised exactly once, whichever way it ended. */
+  | { type: 'introDone'; reason: 'completed' | 'skipped' };
 
 export type PoliceOffenseCategory = 'close' | 'medium' | 'far';
 
@@ -1080,6 +1095,73 @@ export interface PassengerState {
   results: PassengerResults | null;
 }
 
+/* ---------------------------------------------------------------- the introduction */
+
+/** The stages of the first-time introduction, in order. `complete` is also where a skip lands. */
+export type IntroStage = 'opening' | 'incomingCall' | 'approach' | 'drift' | 'disableEV' | 'arrival' | 'meetup' | 'complete';
+
+export type IntroObjectiveId = 'approach' | 'drift' | 'disable' | 'arrival';
+
+/**
+ * The first-time introduction (`src/sim/intro.ts`): a short scripted drive with BadKala on the
+ * phone. Plain data, stepped by the simulation like every other activity; the presentation
+ * reads it and raises the handful of flags the rules cannot decide for themselves (the
+ * cinematic ending, a skipped line, a skipped intro, an accepted assist).
+ */
+export interface IntroState {
+  /** Engaged: from the first tick until `done` is set. What locks the other activities out. */
+  active: boolean;
+  stage: IntroStage;
+  /** Seconds in the current stage. */
+  stageTime: number;
+  /** Written by the presentation when the opening is over. */
+  openingDone: boolean;
+  /** Written by the presentation when the clip at the meet is over (or was skipped). */
+  cinematicDone: boolean;
+  ringing: boolean;
+  callConnected: boolean;
+  /** Line ids waiting to be said, in order. */
+  queue: string[];
+  /** Ids already queued or said, so a line is never queued twice. */
+  said: Set<string>;
+  /** The line on screen: '' between lines. `lineSeq` increments per line for change detection. */
+  lineId: string;
+  lineText: string;
+  lineTimeLeft: number;
+  lineSeq: number;
+  /** Silence still owed after the last line before the next may start. */
+  gapLeft: number;
+  /** The current objective, or null. Only the meet has a point: `objectiveRadius` is 0 otherwise. */
+  objective: IntroObjectiveId | null;
+  objectiveText: string;
+  objectiveX: number;
+  objectiveZ: number;
+  objectiveRadius: number;
+  approachDone: boolean;
+  driftDone: boolean;
+  /** The drift objective was cleared by the CONTINUAR assist rather than by a drift. */
+  driftAssisted: boolean;
+  /** Seconds since the drift was asked for (the instruction said, or dropped) without one. */
+  struggleTime: number;
+  hintGiven: boolean;
+  /** The CONTINUAR assist is on offer (drift stage). */
+  assistOffered: boolean;
+  /** Written by the presentation when the player takes the assist. */
+  assistAccepted: boolean;
+  evDone: boolean;
+  /** Seconds the meter has been unable to pay for a shot, in the shutdown stage. */
+  noChargeFor: number;
+  rechargeAssists: number;
+  arrivalDone: boolean;
+  /** Metres driven since the call connected; what paces the lore lines on the approach. */
+  odometer: number;
+  /** Written by the presentation: end the line on screen now. */
+  skipLineRequested: boolean;
+  /** Written by the presentation: end the whole introduction now. */
+  skipRequested: boolean;
+  done: 'completed' | 'skipped' | null;
+}
+
 export interface GameState {
   /** Simulation time in seconds since the session started. */
   time: number;
@@ -1120,6 +1202,11 @@ export interface GameState {
   streetGate: StreetGateState | null;
   /** The police (`src/sim/police.ts`). Only the open world has any. */
   police: PoliceState | null;
+  /**
+   * The first-time introduction (`src/sim/intro.ts`). Present only in the session that runs
+   * it — the open world, on a browser that has not seen it — and null everywhere else.
+   */
+  intro: IntroState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
