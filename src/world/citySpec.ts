@@ -1,5 +1,11 @@
-import type { Rect, ZoneId } from './cityPlan';
+import { PAL } from '../render/scene/env/palette';
+import type { CityRoadSpec, CitySpec } from './cityDef';
+import { hash01, type BlockOptions } from './cityGen';
+import { inRect, type Rect, type ZoneId } from './cityPlan';
+import { planMegastructures } from './cityMegastructures';
 import type { TrackNode, TrackSpec, TrackZone } from './track';
+
+export type { CityRoadSpec } from './cityDef';
 
 /**
  * THE CITY — "Bandido Bay". Data only; `src/world/cityWorld.ts` turns it into colliders,
@@ -38,12 +44,6 @@ export function zoneOf(x: number, z: number): ZoneId {
   if (z < -100 && x < 60) return 'corporate';
   if (z > 90 || (x > 150 && z > -20)) return 'jdm';
   return 'urban';
-}
-
-export interface CityRoadSpec {
-  tag: string;
-  kind: 'track' | 'alley';
-  spec: TrackSpec;
 }
 
 /** A node in its district's zone. `y` given only on height anchors. */
@@ -306,3 +306,88 @@ export const PASSENGER_STOPS = [
   { id: 'blvd-water-quay', x: -25, z: 186, y: 0, heading: Math.PI / 2, label: 'THE QUAY', tags: ['waterfront'] },
   { id: 'st-far-east', x: 210, z: 90, y: 0, heading: 0, label: 'ST FAR EAST · THE EDGE', tags: ['outskirts', 'industrial'] },
 ];
+
+/* ------------------------------------------------------------------ the spec */
+
+export const BAY_BLOCK_OPTIONS: BlockOptions = {
+  cell: 110,
+  minCell: 11,
+  axisSplit: true,
+  mergeUpTo: 80,
+  shoulder: { corporate: 5, urban: 3.2, jdm: 2.6 },
+  alleyShoulder: 1.2,
+  elevatedShoulder: 1.6,
+  elevatedAbove: 2.5,
+  massingFor(rect, zone) {
+    const w = rect.maxX - rect.minX;
+    const d = rect.maxZ - rect.minZ;
+    const cx = (rect.minX + rect.maxX) / 2;
+    const cz = (rect.minZ + rect.maxZ) / 2;
+    const h = hash01(cx, cz);
+    // Downtown: skyscrapers on every plot that can carry one, pencil towers on the slivers.
+    if (inRect(DOWNTOWN, cx, cz)) {
+      if (Math.min(w, d) < 7) return 1;
+      return Math.min(w, d) >= 12 && h < 0.8 ? 4 : 3;
+    }
+    // Only a sliver stays low; a narrow plot in the core still carries a tower.
+    if (Math.min(w, d) < 11 || w * d < 220) return 1;
+    if (zone === 'corporate') return h < 0.15 ? 2 : 3;
+    if (zone === 'urban') return h < 0.3 ? 3 : h < 0.85 ? 2 : 1;
+    return h < 0.25 ? 2 : 1;
+  },
+};
+
+/**
+ * Bandido Bay as one `CitySpec`: everything above, gathered for `createCityWorld`. The
+ * constants stay exported on their own because the circuit, the street race, the missions and
+ * their tests pin coordinates against them by name.
+ */
+export const BAY_SPEC: CitySpec = {
+  name: 'Bandido Bay',
+  bounds: CITY_BOUNDS,
+  wallBand: CITY_WALL_BAND,
+  water: { quayZ: CITY_QUAY_Z },
+  zoneOf,
+  roads: CITY_ROADS,
+  elevated: [
+    { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },
+    ...RAMP_SPECS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 })),
+    { tag: 'skyway', spec: SKYWAY_SPEC.spec, lift: 0.07 },
+  ],
+  blockOptions: BAY_BLOCK_OPTIONS,
+  planMegastructures,
+  downtown: DOWNTOWN,
+  neonDistricts: NEON_DISTRICTS,
+  ringBillboards: RING_BILLBOARDS,
+  radioTowers: RADIO_TOWERS,
+  powerLine: POWER_LINE,
+  billboards: (bounds) => [
+    { variant: 0, x: -150, y: 30, z: bounds.minZ + 0.6, w: 30, h: 17, rotY: 0, color: PAL.neonCyan },
+    { variant: 1, x: 150, y: 26, z: bounds.minZ + 0.6, w: 26, h: 15, rotY: 0, color: PAL.neonMagenta },
+    { variant: 0, x: bounds.minX + 0.6, y: 28, z: -20, w: 30, h: 17, rotY: Math.PI / 2, color: PAL.neonCyan },
+    { variant: 1, x: bounds.maxX - 0.6, y: 26, z: 100, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonMagenta },
+    // The BADKALA WANTED campaign: portrait boards, so they read as an ad column between
+    // the landscape holograms rather than as a fourth data wall.
+    { variant: 2, x: 40, y: 30, z: bounds.minZ + 0.6, w: 14, h: 28, rotY: 0, color: PAL.neonMagenta },
+    { variant: 2, x: bounds.minX + 0.6, y: 30, z: 150, w: 14, h: 28, rotY: Math.PI / 2, color: PAL.neonMagenta },
+    { variant: 2, x: bounds.maxX - 0.6, y: 28, z: -110, w: 13, h: 26, rotY: -Math.PI / 2, color: PAL.neonMagenta },
+  ],
+  gates: () => [
+    ['blvd-north', 140, PAL.neonCyan, PAL.neonBlue],
+    ['blvd-north', 290, PAL.neonMagenta, PAL.neonCyan],
+    ['blvd-center', 110, PAL.neonCyan, PAL.neonMagenta],
+    ['blvd-center', 420, PAL.neonPink, PAL.neonMagenta],
+    ['blvd-water', 260, PAL.neonMagenta, PAL.neonPink],
+    ['av-main', 150, PAL.neonCyan, PAL.neonBlue],
+  ],
+  skybridgeStreets: ['av-main', 'av-east', 'st-mid', 'blvd-north', 'st-n2', 'blvd-center', 'st-west'],
+  trafficLoops: TRAFFIC_LOOPS,
+  deckTraffic: [{ tag: 'viaduct', cars: VIADUCT_CARS, lanes: VIADUCT_LANES }],
+  cruiseLoop: TRAFFIC_LOOPS[0].rect,
+  busRoutes: ['av-main', 'blvd-north', 'av-east', 'blvd-center', 'blvd-water'],
+  busRouteLoops: BUS_ROUTE_LOOPS,
+  spawn: CITY_SPAWN,
+  rushSites: RUSH_SITES,
+  passengerStops: PASSENGER_STOPS,
+  buhoSite: BUHO_SITE,
+};

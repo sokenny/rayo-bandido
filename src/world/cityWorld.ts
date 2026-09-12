@@ -1,6 +1,5 @@
 import type { ArenaLayout, BusRoute, ObstacleBox, ObstacleWall, SpawnPoint } from '../core/types';
 import { BUSES } from '../config/tuning';
-import { PAL } from '../render/scene/env/palette';
 import { HAZE } from '../render/scene/env/haze';
 import type { World } from './arenaWorld';
 import {
@@ -20,54 +19,36 @@ import {
   type WallRect,
   type ZoneId,
 } from './cityPlan';
-import { buildRails, generateBlocks, onRibbonAtLevel, railBounds, type BlockOptions } from './cityGen';
-import {
-  CITY_BOUNDS,
-  CITY_QUAY_Z,
-  DOWNTOWN,
-  BUHO_SITE,
-  BUS_ROUTE_LOOPS,
-  CITY_ROADS,
-  CITY_SPAWN,
-  CITY_WALL_BAND,
-  NEON_DISTRICTS,
-  POWER_LINE,
-  RADIO_TOWERS,
-  RAMP_SPECS,
-  RING_BILLBOARDS,
-  PASSENGER_STOPS,
-  RUSH_SITES,
-  SKYWAY_SPEC,
-  TRAFFIC_LOOPS,
-  VIADUCT_CARS,
-  VIADUCT_LANES,
-  VIADUCT_SPEC,
-  VIADUCT_Y,
-} from './citySpec';
-import { planMegastructures, reserveMegastructurePlots } from './cityMegastructures';
+import { buildRails, generateBlocks, hash01, onRibbonAtLevel, railBounds, type BlockOptions } from './cityGen';
+import type { CitySpec } from './cityDef';
+import { BAY_SPEC } from './citySpec';
+import { reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
 import { createSurfaceField } from './surface';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
 /**
- * The big city ("City" in the main menu), generated from `citySpec.ts`:
+ * The big city, generated from a `CitySpec` (`cityDef.ts`): Bandido Bay (`citySpec.ts`,
+ * "OPEN WORLD" in the main menu) by default, The Stack (`stackSpec.ts`) when handed that one.
+ * The assembler knows neither city by name; everything below reads the spec.
  *
- *  - every road is a ribbon: the ground grid, the diagonal, the alleys, the viaduct, its
- *    ramps and the skyway. The elevated ones carry heights in their samples; the surface
- *    field built from them is what the simulation reads the car's height from,
+ *  - every road is a ribbon: the ground network, the alleys, the viaducts, their ramps and
+ *    the skyways. The elevated ones carry heights in their samples; the surface field built
+ *    from them is what the simulation reads the car's height from,
  *  - blocks grow in the grid between the roads (`cityGen.ts`); a viaduct only clears the
  *    narrow corridor under itself, so the towers stand right up against the deck,
  *  - the elevated roads get guardrails as wall colliders bounded in height, and pillars as
  *    ground colliders wherever the deck is not over a street or another deck,
- *  - the south edge is water behind a quay wall; the viaduct's south leg is a bridge over it,
- *  - traffic: rectangles of streets driven clockwise, plus cars lapping the viaduct.
+ *  - a city with a shore ends in water behind a quay wall, and a viaduct out over it is a
+ *    bridge; one without ends in the perimeter band on all four sides,
+ *  - traffic: rectangles of streets driven clockwise, plus cars lapping every elevated loop.
  *
  * Collision and art come from the same segments, rectangles and points, as everywhere else.
  */
 
 /** Deck heights below this are an embankment, not a bridge: no pillars, nothing drives under. */
 const PILLAR_MIN_Y = 4.5;
-/** Column spacing (m). Close, so the underside reads as a structure, not a table on stilts. */
+/** Column spacing (m), unless the spec says otherwise. Close, so the underside reads as a structure, not a table on stilts. */
 const PILLAR_STEP = 12;
 /** Half size of a column's ground collider (m): the column plus the barrier ring at its foot. */
 const PILLAR_HALF = 1.3;
@@ -76,18 +57,12 @@ const LANE = 3.5;
 /** Quay wall segment length (m). */
 const QUAY_STEP = 8;
 
-/**
- * Bus routes: the wide, straight, axis-aligned boulevards, which are the only streets with
- * both a deep enough pavement for a shelter and enough asphalt to park a 13.6 m bus at the
- * kerb without standing in the traffic's lane (which runs `LANE` m off the centreline).
- */
-const BUS_ROUTES = ['av-main', 'blvd-north', 'av-east', 'blvd-center', 'blvd-water'];
 /** Least distance between stops on one route (m), and where the first one may stand. */
 const BUS_STOP_SPACING = 130;
 const BUS_STOP_FIRST = 60;
 /** How finely the route is searched for somewhere a stop fits (m). */
 const BUS_STOP_PROBE = 6;
-/** A stop needs this much road either side of the centreline (m): see `BUS_ROUTES`. */
+/** A stop needs this much road either side of the centreline (m): see `placeBusStops`. */
 const BUS_STOP_MIN_HALF_WIDTH = 8;
 /** And this much pavement behind the kerb (m), or the shelter would stand in a facade. */
 const BUS_STOP_MIN_PAVEMENT = 2.6;
@@ -96,72 +71,46 @@ const BUS_STOP_KERB_GAP = 0.35;
 /** Nothing parked within this of the player's spawn (m). */
 const BUS_STOP_SPAWN_CLEAR = 34;
 
-const CITY_BLOCK_OPTIONS: BlockOptions = {
-  cell: 110,
-  minCell: 11,
-  axisSplit: true,
-  mergeUpTo: 80,
-  shoulder: { corporate: 5, urban: 3.2, jdm: 2.6 },
-  alleyShoulder: 1.2,
-  elevatedShoulder: 1.6,
-  elevatedAbove: 2.5,
-  massingFor(rect, zone) {
-    const w = rect.maxX - rect.minX;
-    const d = rect.maxZ - rect.minZ;
-    const cx = (rect.minX + rect.maxX) / 2;
-    const cz = (rect.minZ + rect.maxZ) / 2;
-    const h = hash01(cx, cz);
-    // Downtown: skyscrapers on every plot that can carry one, pencil towers on the slivers.
-    if (inRect(DOWNTOWN, cx, cz)) {
-      if (Math.min(w, d) < 7) return 1;
-      return Math.min(w, d) >= 12 && h < 0.8 ? 4 : 3;
-    }
-    // Only a sliver stays low; a narrow plot in the core still carries a tower.
-    if (Math.min(w, d) < 11 || w * d < 220) return 1;
-    if (zone === 'corporate') return h < 0.15 ? 2 : 3;
-    if (zone === 'urban') return h < 0.3 ? 3 : h < 0.85 ? 2 : 1;
-    return h < 0.25 ? 2 : 1;
-  },
-};
-
-/** Deterministic 0..1 from a position, so the city is the same on every machine. */
-function hash01(x: number, z: number): number {
-  return Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
-}
-
-export function createCityWorld(): World {
-  const bounds: Rect = { ...CITY_BOUNDS };
+/**
+ * Assemble a city. Called with no argument this is Bandido Bay, exactly as it was before the
+ * spec existed: the circuit, the street race and every mission instance it that way.
+ */
+export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
+  const bounds: Rect = { ...spec.bounds };
+  const wallBand = spec.wallBand;
+  const quayZ = spec.water ? spec.water.quayZ : null;
   const inner: Rect = {
-    minX: bounds.minX + CITY_WALL_BAND,
-    maxX: bounds.maxX - CITY_WALL_BAND,
-    minZ: bounds.minZ + CITY_WALL_BAND,
-    maxZ: CITY_QUAY_Z,
+    minX: bounds.minX + wallBand,
+    maxX: bounds.maxX - wallBand,
+    minZ: bounds.minZ + wallBand,
+    maxZ: quayZ ?? bounds.maxZ - wallBand,
   };
+  const blockOptions = spec.blockOptions;
+  const pillarStep = spec.pillarStep ?? PILLAR_STEP;
 
   /* ---------------------------------------------------------- roads */
 
-  const ground: RibbonDef[] = CITY_ROADS.map((r, i) => ({
+  const ground: RibbonDef[] = spec.roads.map((r, i) => ({
     path: buildTrackPath(r.spec),
     kind: r.kind,
     tag: r.tag,
     // Roads crossing at grade get their own lift each, so their slabs never z-fight.
     lift: i * 0.004 + (r.kind === 'alley' ? 0.002 : 0),
   }));
-  const viaduct: RibbonDef = { path: buildTrackPath(VIADUCT_SPEC), kind: 'track', tag: 'viaduct', elevated: true, lift: 0 };
-  const ramps: RibbonDef[] = RAMP_SPECS.map((r) => ({ path: buildTrackPath(r.spec), kind: 'track', tag: r.tag, elevated: true, lift: 0.08 }));
-  const skyway: RibbonDef = { path: buildTrackPath(SKYWAY_SPEC.spec), kind: 'track', tag: 'skyway', elevated: true, lift: 0.07 };
-  const elevated: RibbonDef[] = [viaduct, ...ramps, skyway];
-  for (const rb of elevated) if (!isElevated(rb.path)) throw new Error(`city: ${rb.tag} is meant to be elevated`);
+  const elevated: RibbonDef[] = spec.elevated.map((r) => ({ path: buildTrackPath(r.spec), kind: 'track', tag: r.tag, elevated: true, lift: r.lift }));
+  for (const rb of elevated) if (!isElevated(rb.path)) throw new Error(`${spec.name}: ${rb.tag} is meant to be elevated`);
   const ribbons: RibbonDef[] = [...ground, ...elevated];
 
   /* ---------------------------------------------------------- land, water, walls */
 
+  // The perimeter band: three sides when the fourth is water, otherwise all four.
   const perimeter: WallRect[] = [
     { tag: 'wall-n', minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: inner.minZ },
-    { tag: 'wall-w', minX: bounds.minX, maxX: inner.minX, minZ: inner.minZ, maxZ: CITY_QUAY_Z },
-    { tag: 'wall-e', minX: inner.maxX, maxX: bounds.maxX, minZ: inner.minZ, maxZ: CITY_QUAY_Z },
+    { tag: 'wall-w', minX: bounds.minX, maxX: inner.minX, minZ: inner.minZ, maxZ: inner.maxZ },
+    { tag: 'wall-e', minX: inner.maxX, maxX: bounds.maxX, minZ: inner.minZ, maxZ: inner.maxZ },
   ];
-  const water = { rect: { minX: bounds.minX - 400, maxX: bounds.maxX + 400, minZ: CITY_QUAY_Z, maxZ: bounds.maxZ + 500 }, quayZ: CITY_QUAY_Z };
+  if (quayZ === null) perimeter.push({ tag: 'wall-s', minX: bounds.minX, maxX: bounds.maxX, minZ: inner.maxZ, maxZ: bounds.maxZ });
+  const water = quayZ !== null ? { rect: { minX: bounds.minX - 400, maxX: bounds.maxX + 400, minZ: quayZ, maxZ: bounds.maxZ + 500 }, quayZ } : null;
 
   /** Zone of the nearest street: the city follows the road it stands on. */
   const proj = createProjection();
@@ -178,14 +127,14 @@ export function createCityWorld(): World {
     return zone;
   };
 
-  const megastructures = planMegastructures(ribbons);
-  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, CITY_BLOCK_OPTIONS), megastructures);
+  const megastructures = spec.planMegastructures ? spec.planMegastructures(ribbons) : [];
+  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures);
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
     ...v, tag: m.tag, zone: 'urban' as const, massing: 4 as const,
   })));
   const solids: Rect[] = [...blocks, ...groundMasses, ...perimeter];
-  const shoulders = { ...CITY_BLOCK_OPTIONS.shoulder, alley: CITY_BLOCK_OPTIONS.alleyShoulder };
+  const shoulders = { ...blockOptions.shoulder, alley: blockOptions.alleyShoulder };
   // The pavement beside the streets: flush with them, so this is art and nothing the car feels.
   const kerbs = createKerbField(ribbons, shoulders, [...blocks, ...groundMasses]);
 
@@ -199,7 +148,7 @@ export function createCityWorld(): World {
   const pillars: PillarDef[] = [];
   for (const rb of elevated) {
     const path = rb.path;
-    for (let s = PILLAR_STEP / 2; s < path.length; s += PILLAR_STEP) {
+    for (let s = pillarStep / 2; s < path.length; s += pillarStep) {
       const c = offsetAtStation(path, s, 0);
       if (c.y < PILLAR_MIN_Y) continue;
       // Never on a street: the deck spans it. Never on a lower deck either. Both columns are
@@ -218,21 +167,23 @@ export function createCityWorld(): World {
         if (onLowerDeck) break;
       }
       if (onLowerDeck) continue;
-      pillars.push({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, y: c.y, halfWidth: c.halfWidth, wet: c.z > CITY_QUAY_Z, zone: c.zone });
+      pillars.push({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, y: c.y, halfWidth: c.halfWidth, wet: quayZ !== null && c.z > quayZ, zone: c.zone });
     }
   }
 
   /* ---------------------------------------------------------- fences */
 
-  // Between consecutive columns of one ribbon, on both sides, two bays out of three: the
-  // space under the deck is fenced off the street, and entered through the open bays.
+  // Between consecutive columns of one ribbon, on both sides, two bays out of three (or one,
+  // when the spec is saving triangles): the space under the deck is fenced off the street,
+  // and entered through the open bays.
   const fences: FenceDef[] = [];
   {
     let last: PillarDef | null = null;
     let bay = 0;
+    const fenced = spec.fenceBays === 'few' ? (k: number): boolean => k % 3 === 0 : (k: number): boolean => k % 3 !== 2;
     for (const p of pillars) {
-      if (last && !last.wet && !p.wet && Math.hypot(p.x - last.x, p.z - last.z) < PILLAR_STEP * 1.5) {
-        if (bay % 3 !== 2) {
+      if (last && !last.wet && !p.wet && Math.hypot(p.x - last.x, p.z - last.z) < pillarStep * 1.5) {
+        if (fenced(bay)) {
           for (const side of [-1, 1]) {
             const oa = last.halfWidth - 1.6;
             const ob = p.halfWidth - 1.6;
@@ -257,30 +208,32 @@ export function createCityWorld(): World {
   /* ---------------------------------------------------------- quay */
 
   const quay: ObstacleWall[] = [];
-  for (let x = inner.minX; x < inner.maxX; x += QUAY_STEP) {
-    const bx = Math.min(inner.maxX, x + QUAY_STEP);
-    const mx = (x + bx) / 2;
-    // A ramp that comes ashore here opens the wall; its own rails keep the car on it.
-    let open = false;
-    for (const rb of ribbons) {
-      if (onRibbonAtLevel(rb, mx, CITY_QUAY_Z, 0, 2.5)) {
-        open = true;
-        break;
+  if (quayZ !== null) {
+    for (let x = inner.minX; x < inner.maxX; x += QUAY_STEP) {
+      const bx = Math.min(inner.maxX, x + QUAY_STEP);
+      const mx = (x + bx) / 2;
+      // A ramp that comes ashore here opens the wall; its own rails keep the car on it.
+      let open = false;
+      for (const rb of ribbons) {
+        if (onRibbonAtLevel(rb, mx, quayZ, 0, 2.5)) {
+          open = true;
+          break;
+        }
       }
+      if (open) continue;
+      quay.push({ ax: x, az: quayZ, bx, bz: quayZ, maxY: 4, tag: 'quay' });
     }
-    if (open) continue;
-    quay.push({ ax: x, az: CITY_QUAY_Z, bx, bz: CITY_QUAY_Z, maxY: 4, tag: 'quay' });
   }
 
   /* ---------------------------------------------------------- skybridges */
 
-  const skybridges = findSkybridges(ground, elevated, blocks, zoneAt);
+  const skybridges = findSkybridges(ground, elevated, blocks, zoneAt, spec.skybridgeStreets, spec.downtown);
 
   /* ---------------------------------------------------------- bus stops */
 
   // The routes are laid out first: a shelter is put on the kerb a bus drives along wherever
   // both kerbs would do, so the network is a network and not two unrelated things.
-  const lanes = busLanes(ground);
+  const lanes = busLanes(ground, spec.busRouteLoops);
   const busStops = placeBusStops(
     ground,
     elevated,
@@ -291,6 +244,8 @@ export function createCityWorld(): World {
       return false;
     },
     lanes,
+    spec.busRoutes,
+    spec.spawn,
   );
   const busRoutes: BusRoute[] = lanes.map((points) => ({ points, stops: callingPoints(points, busStops) }));
 
@@ -307,7 +262,7 @@ export function createCityWorld(): World {
   // Every road carries traffic both ways: half the cars of a loop drive it clockwise in the
   // inner lane, half anticlockwise in the outer one, so each file keeps to its own side of
   // the centreline and the player meets oncoming headlights.
-  for (const loop of TRAFFIC_LOOPS) {
+  for (const loop of spec.trafficLoops) {
     for (const dir of [1, -1]) {
       const corners = dir > 0 ? loopWaypoints(loop.rect, LANE) : loopWaypoints(loop.rect, -LANE).reverse();
       const cars = dir > 0 ? Math.ceil(loop.cars / 2) : Math.floor(loop.cars / 2);
@@ -321,23 +276,26 @@ export function createCityWorld(): World {
       }
     }
   }
-  {
-    // The viaduct the same way: two lanes each side of its centreline, the oncoming pair
+  for (const deck of spec.deckTraffic) {
+    // The elevated loops the same way: lanes each side of the centreline, the oncoming files
     // driven round the loop backwards. Lanes are offset half a gap from each other so the
-    // files interleave rather than driving in pairs.
-    const samples = viaduct.path.samples;
-    const lanes: Array<Array<{ x: number; z: number }>> = [];
+    // files interleave rather than driving in pairs. Each waypoint carries the deck's height
+    // there, so a car on a loop that climbs (or on one merged from a ramp) spawns on it.
+    const rb = elevated.find((e) => e.tag === deck.tag);
+    if (!rb || !rb.path.closed) throw new Error(`${spec.name}: deck traffic wants a closed elevated loop tagged ${deck.tag}`);
+    const samples = rb.path.samples;
+    const lanes: Array<Array<{ x: number; z: number; y: number }>> = [];
     for (const dir of [1, -1]) {
-      for (const offset of VIADUCT_LANES) {
-        const lane: Array<{ x: number; z: number }> = [];
+      for (const offset of deck.lanes) {
+        const lane: Array<{ x: number; z: number; y: number }> = [];
         for (let i = 0; i < samples.length; i += 3) {
           const s = samples[i];
-          lane.push({ x: s.x + -s.tz * offset * dir, z: s.z + s.tx * offset * dir });
+          lane.push({ x: s.x + -s.tz * offset * dir, z: s.z + s.tx * offset * dir, y: s.y });
         }
         lanes.push(dir > 0 ? lane : lane.reverse());
       }
     }
-    const perLane = Math.floor(VIADUCT_CARS / lanes.length);
+    const perLane = Math.floor(deck.cars / lanes.length);
     for (let l = 0; l < lanes.length; l++) {
       const lane = lanes[l];
       for (let k = 0; k < perLane; k++) {
@@ -347,15 +305,15 @@ export function createCityWorld(): World {
         targetSpawns.push({
           x: rotated[0].x,
           z: rotated[0].z,
-          y: VIADUCT_Y,
+          y: rotated[0].y,
           heading: Math.atan2(ahead.x - rotated[0].x, -(ahead.z - rotated[0].z)),
         });
-        targetPatrols.push(rotated);
+        targetPatrols.push(rotated.map((w) => ({ x: w.x, z: w.z })));
       }
     }
   }
 
-  const cruiseRoute = loopWaypoints(TRAFFIC_LOOPS[0].rect, LANE);
+  const cruiseRoute = loopWaypoints(spec.cruiseLoop, LANE);
 
   /* ---------------------------------------------------------- layout */
 
@@ -390,14 +348,14 @@ export function createCityWorld(): World {
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
-  const PARKED = CITY_BOUNDS.minZ - 1000;
+  const PARKED = bounds.minZ - 1000;
   for (let i = 0; i < busRoutes.length * BUSES.perRoute * 4; i++) {
     walls.push({ ax: 0, az: PARKED, bx: 0, bz: PARKED, maxY: BUSES.height, tag: 'bus' });
   }
 
   const layout: ArenaLayout = {
     bounds,
-    playerSpawn: { ...CITY_SPAWN },
+    playerSpawn: { ...spec.spawn },
     targetSpawns,
     targetPatrols,
     cruiseRoute,
@@ -408,18 +366,18 @@ export function createCityWorld(): World {
     // The free-world activity markers, one per mission and in mission order. Points and
     // headings; the rules read them (`src/sim/rush.ts`) and the art stands on whichever is
     // current (`env/rushMarker.ts`). No colliders — the streets under them are still streets.
-    rushSites: RUSH_SITES.map((site) => ({ ...site })),
+    rushSites: spec.rushSites.map((site) => ({ ...site })),
     // Where passengers wait. Points on roads; the rules and the art both read this list.
-    passengerStops: PASSENGER_STOPS.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
+    passengerStops: spec.passengerStops.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
     // The streets, as centrelines, for `src/world/roadGraph.ts` to route a passenger home over.
     // Ground only: the viaduct and its ramps are left out because every stop is a kerb, and a
     // deck crossing over a street is not a turning off it.
     roadNetwork: ground.map((rb) => ({ points: rb.path.samples.map((sm) => ({ x: sm.x, z: sm.z })) })),
     // Where El Búho stands. A point under the deck; the rules and the figure both read it.
-    buhoSite: { ...BUHO_SITE },
+    buhoSite: spec.buhoSite ? { ...spec.buhoSite } : null,
     busRoutes,
     minimap: {
-      bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: 270 },
+      bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: quayZ !== null ? bounds.maxZ - 20 : inner.maxZ },
       rects: [],
       ribbons: ribbons.map((rb) => ({
         points: rb.path.samples.filter((_, i) => i % 2 === 0 || !rb.path.closed).map((s) => ({ x: s.x, z: s.z })),
@@ -428,21 +386,24 @@ export function createCityWorld(): World {
         hidden: false,
         elevated: !!rb.elevated,
       })),
-      water: { minX: inner.minX, maxX: inner.maxX, minZ: CITY_QUAY_Z, maxZ: 270 },
+      ...(quayZ !== null ? { water: { minX: inner.minX, maxX: inner.maxX, minZ: quayZ, maxZ: bounds.maxZ - 20 } } : {}),
       // The FIRST site only: the map marks where the marker actually is, and the marker is
       // only ever at one of these at a time. `Minimap.setActivities` moves the mark when a
       // cleared mission moves the marker, so the map cannot send the player somewhere it is not.
-      activities: [{ x: RUSH_SITES[0].x, z: RUSH_SITES[0].z }],
+      activities: spec.rushSites.length > 0 ? [{ x: spec.rushSites[0].x, z: spec.rushSites[0].z }] : [],
     },
   };
 
   /* ---------------------------------------------------------- plan */
 
-  const towers: TowerDef[] = RADIO_TOWERS.map((t) => ({ ...t, kind: 'radio' as const }));
+  const towers: TowerDef[] = spec.radioTowers.map((t) => ({ ...t, kind: 'radio' as const }));
   const powerLines: Array<[number, number]> = [];
-  for (let i = 0; i < POWER_LINE.xs.length; i++) {
-    towers.push({ x: POWER_LINE.xs[i], z: POWER_LINE.z, height: POWER_LINE.height, base: POWER_LINE.base, kind: 'pylon', tx: 1, tz: 0 });
-    if (i > 0) powerLines.push([towers.length - 2, towers.length - 1]);
+  const line = spec.powerLine;
+  if (line) {
+    for (let i = 0; i < line.xs.length; i++) {
+      towers.push({ x: line.xs[i], z: line.z, height: line.height, base: line.base, kind: 'pylon', tx: 1, tz: 0 });
+      if (i > 0) powerLines.push([towers.length - 2, towers.length - 1]);
+    }
   }
 
   const plan: CityPlan = {
@@ -450,8 +411,8 @@ export function createCityWorld(): World {
     palette: 'bay',
     // Exponential haze rather than a linear curtain: the far towers stay towers, read
     // through blue air, and their windows keep burning (see `env/haze.ts`).
-    fog: { density: HAZE.cityDensity },
-    downtown: { ...DOWNTOWN },
+    fog: { density: spec.fogDensity ?? HAZE.cityDensity },
+    downtown: spec.downtown ? { ...spec.downtown } : null,
     roads: [],
     ribbons,
     rails,
@@ -459,36 +420,27 @@ export function createCityWorld(): World {
     megastructures,
     walls: perimeter,
     barriers: [],
-    gates: routeGates(ground),
-    billboards: [
-      { variant: 0, x: -150, y: 30, z: bounds.minZ + 0.6, w: 30, h: 17, rotY: 0, color: PAL.neonCyan },
-      { variant: 1, x: 150, y: 26, z: bounds.minZ + 0.6, w: 26, h: 15, rotY: 0, color: PAL.neonMagenta },
-      { variant: 0, x: bounds.minX + 0.6, y: 28, z: -20, w: 30, h: 17, rotY: Math.PI / 2, color: PAL.neonCyan },
-      { variant: 1, x: bounds.maxX - 0.6, y: 26, z: 100, w: 26, h: 15, rotY: -Math.PI / 2, color: PAL.neonMagenta },
-      // The BADKALA WANTED campaign: portrait boards, so they read as an ad column between
-      // the landscape holograms rather than as a fourth data wall.
-      { variant: 2, x: 40, y: 30, z: bounds.minZ + 0.6, w: 14, h: 28, rotY: 0, color: PAL.neonMagenta },
-      { variant: 2, x: bounds.minX + 0.6, y: 30, z: 150, w: 14, h: 28, rotY: Math.PI / 2, color: PAL.neonMagenta },
-      { variant: 2, x: bounds.maxX - 0.6, y: 28, z: -110, w: 13, h: 26, rotY: -Math.PI / 2, color: PAL.neonMagenta },
-    ],
-    cableRuns: cableRuns(ground, CITY_BLOCK_OPTIONS),
+    gates: routeGates(ground, spec.gates()),
+    billboards: spec.billboards(bounds),
+    cableRuns: cableRuns(ground, blockOptions),
     pylons: [],
     pillars,
     fences,
     towers,
     powerLines,
-    ringBillboards: RING_BILLBOARDS.map((r) => ({ ...r })),
+    ringBillboards: spec.ringBillboards.map((r) => ({ ...r })),
     skybridges,
     busStops,
-    neonDistricts: NEON_DISTRICTS.map((r) => ({ ...r })),
+    neonDistricts: spec.neonDistricts.map((r) => ({ ...r })),
     shoulders,
     kerbs,
     water,
     plaza: null,
     wantedBoard: null,
-    rushMarkers: RUSH_SITES.map((site) => ({ ...site })),
+    rushMarkers: spec.rushSites.map((site) => ({ ...site })),
     startLine: null,
     checkpoints: [],
+    ...(spec.art ?? {}),
     zoneAt,
     isRoad(x, z, pad = 0) {
       for (const rb of ribbons) if (isOnPath(rb.path, x, z, pad)) return true;
@@ -561,13 +513,20 @@ function placeBusStops(
   shoulders: NonNullable<CityPlan['shoulders']>,
   isSolid: (x: number, z: number, pad: number) => boolean,
   lanes: Array<Array<{ x: number; z: number }>>,
+  /**
+   * The streets with shelters: the wide, straight, axis-aligned boulevards, which are the only
+   * streets with both a deep enough pavement for a shelter and enough asphalt to park a
+   * 13.6 m bus at the kerb without standing in the traffic's lane (`LANE` m off the centreline).
+   */
+  routes: readonly string[],
+  spawn: { x: number; z: number },
 ): BusStopDef[] {
   const stops: BusStopDef[] = [];
   const station = createProjection();
   /** Half the bus's length: the reach of every clearance test below. */
   const reach = BUSES.length / 2;
   let route = 0;
-  for (const tag of BUS_ROUTES) {
+  for (const tag of routes) {
     const rb = ground.find((g) => g.tag === tag);
     if (!rb) continue;
     const path = rb.path;
@@ -602,7 +561,7 @@ function placeBusStops(
         let ok = true;
         for (const d of [-reach, 0, reach]) {
           const a = offsetAtStation(path, s + d, trySide * shelterOut);
-          if (Math.hypot(a.x - CITY_SPAWN.x, a.z - CITY_SPAWN.z) < BUS_STOP_SPAWN_CLEAR) ok = false;
+          if (Math.hypot(a.x - spawn.x, a.z - spawn.z) < BUS_STOP_SPAWN_CLEAR) ok = false;
           // A crossing road reaches out over the pavement: no shelter in a junction.
           for (const other of ground) if (isOnPath(other.path, a.x, a.z, 1)) ok = false;
           if (isSolid(a.x, a.z, 0.4)) ok = false;
@@ -641,7 +600,7 @@ function placeBusStops(
 }
 
 /**
- * The bus routes: each rectangle in `BUS_ROUTE_LOOPS` turned into a closed loop of waypoints
+ * The bus routes: each rectangle in `spec.busRouteLoops` turned into a closed loop of waypoints
  * in the kerb lane, plus the stations along it where a shelter stands on that kerb.
  *
  * The lane is worked out per leg from the street's own width rather than set once for the
@@ -649,7 +608,7 @@ function placeBusStops(
  * whichever street it is on, which is both what a bus does and what keeps it outboard of the
  * electric cars' lane (they run `LANE` m off the centreline and steer round nothing).
  */
-function busLanes(ground: RibbonDef[]): Array<Array<{ x: number; z: number }>> {
+function busLanes(ground: RibbonDef[], loops: readonly Rect[]): Array<Array<{ x: number; z: number }>> {
   const proj = createProjection();
   /** How far off the centreline the kerb lane is on the street under (x, z). */
   const laneAt = (x: number, z: number): number => {
@@ -667,7 +626,7 @@ function busLanes(ground: RibbonDef[]): Array<Array<{ x: number; z: number }>> {
   };
 
   const lanes: Array<Array<{ x: number; z: number }>> = [];
-  for (const rect of BUS_ROUTE_LOOPS) {
+  for (const rect of loops) {
     // Clockwise: north leg first, and the inset toward the middle of the rectangle is the
     // right-hand side of travel on every leg (see `loopWaypoints`).
     const dN = laneAt((rect.minX + rect.maxX) / 2, rect.minZ);
@@ -732,17 +691,9 @@ function callingPoints(lane: Array<{ x: number; z: number }>, stops: readonly Bu
   return found;
 }
 
-/** Neon route gates over the boulevards, at fixed stations. */
-function routeGates(ground: RibbonDef[]): GateDef[] {
+/** Neon route gates over the boulevards, at fixed stations: [street, station, left colour, right colour]. */
+function routeGates(ground: RibbonDef[], wanted: ReadonlyArray<[string, number, number, number]>): GateDef[] {
   const out: GateDef[] = [];
-  const wanted: Array<[string, number, number, number]> = [
-    ['blvd-north', 140, PAL.neonCyan, PAL.neonBlue],
-    ['blvd-north', 290, PAL.neonMagenta, PAL.neonCyan],
-    ['blvd-center', 110, PAL.neonCyan, PAL.neonMagenta],
-    ['blvd-center', 420, PAL.neonPink, PAL.neonMagenta],
-    ['blvd-water', 260, PAL.neonMagenta, PAL.neonPink],
-    ['av-main', 150, PAL.neonCyan, PAL.neonBlue],
-  ];
   for (const [tag, s, left, right] of wanted) {
     const rb = ground.find((g) => g.tag === tag);
     if (!rb) continue;
@@ -780,11 +731,18 @@ function cableRuns(ground: RibbonDef[], opts: BlockOptions): Array<[number, numb
 /**
  * Enclosed bridges between buildings across a street: wherever a mid-rise or a tower stands
  * on both sides of one of the big streets, a few metres into each block so the ends vanish
- * inside the facades. Nothing under a viaduct or the skyway.
+ * inside the facades. Nothing under a viaduct or the skyway. Higher and more often inside
+ * `downtown`.
  */
-function findSkybridges(ground: RibbonDef[], elevated: RibbonDef[], blocks: BlockRect[], zoneAt: (x: number, z: number) => ZoneId): SkybridgeDef[] {
+function findSkybridges(
+  ground: RibbonDef[],
+  elevated: RibbonDef[],
+  blocks: BlockRect[],
+  zoneAt: (x: number, z: number) => ZoneId,
+  wanted: readonly string[],
+  downtownRect: Rect | null,
+): SkybridgeDef[] {
   const out: SkybridgeDef[] = [];
-  const wanted = ['av-main', 'av-east', 'st-mid', 'blvd-north', 'st-n2', 'blvd-center', 'st-west'];
   const blockAt = (x: number, z: number): BlockRect | null => {
     for (const b of blocks) if (inRect(b, x, z)) return b;
     return null;
@@ -795,7 +753,7 @@ function findSkybridges(ground: RibbonDef[], elevated: RibbonDef[], blocks: Bloc
     const path = rb.path;
     for (let s = 50; s < path.length - 50; s += 55) {
       const c = offsetAtStation(path, s, 0);
-      const downtown = inRect(DOWNTOWN, c.x, c.z);
+      const downtown = downtownRect !== null && inRect(downtownRect, c.x, c.z);
       if (hash01(s, path.length) > (downtown ? 0.75 : 0.5)) continue;
       const zone = zoneAt(c.x, c.z);
       if (zone === 'jdm') continue;
@@ -840,7 +798,7 @@ function findSkybridges(ground: RibbonDef[], elevated: RibbonDef[], blocks: Bloc
   return out;
 }
 
-/** Test/tool helper: the elevated paths, for tests that walk them. */
-export function cityElevatedPaths(): TrackPath[] {
-  return [buildTrackPath(VIADUCT_SPEC), ...RAMP_SPECS.map((r) => buildTrackPath(r.spec)), buildTrackPath(SKYWAY_SPEC.spec)];
+/** Test/tool helper: the elevated paths of a spec, for tests that walk them. */
+export function cityElevatedPaths(spec: CitySpec = BAY_SPEC): TrackPath[] {
+  return spec.elevated.map((r) => buildTrackPath(r.spec));
 }

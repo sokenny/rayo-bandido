@@ -182,6 +182,9 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
   const samples = rb.path.samples;
   const segs = segmentCount(rb.path);
   const wet = b.plan.water;
+  // The plan's economy: rib spacing and how much hangs under the slab (`CityPlan`).
+  const ribSpacing = b.plan.ribSpacing ?? RIB_SPACING;
+  const lean = b.plan.deckServices === 'lean';
   // Which side of this ribbon the services run down, and how far in. Fixed per ribbon: a
   // drainage pipe that swapped sides at a module boundary would read as a mistake, not as
   // variety, so what varies module to module is the wear and the lamps, never the routing.
@@ -250,7 +253,7 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     // near the floor of what is visible. Roughly one module in six is a dead section — the
     // channel is still cut, the light in it is not on — which is what stops a 1.7 km run of
     // unbroken cyan from reading as a racetrack rail again.
-    const mod = Math.floor(a.s / RIB_SPACING);
+    const mod = Math.floor(a.s / ribSpacing);
     const lx = a.tz * 0.05;
     const lz = -a.tx * 0.05;
     for (const side of [1, -1]) {
@@ -295,27 +298,36 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     b.wall.orientedBox(mx - nx * (hw - 0.7), mz - nz * (hw - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.95, bottom, { bottom: true });
     // Two steel longitudinal girders inboard of them, dark against the lit concrete. Real
     // boxes rather than tubes: they have to break the ceiling into three bands from below.
-    b.props.color(PAL.metalDark, 2.2);
-    for (const side of [-1, 1]) {
-      b.props.orientedBox(mx + nx * hw * 0.34 * side, mz + nz * hw * 0.34 * side, dx, dz, len + 0.05, 0.5, bottom - 0.8, bottom - 0.02, { bottom: true });
+    // The lean profile leaves them out: forty triangles a segment, on decks the driver is
+    // mostly above.
+    if (!lean) {
+      b.props.color(PAL.metalDark, 2.2);
+      for (const side of [-1, 1]) {
+        b.props.orientedBox(mx + nx * hw * 0.34 * side, mz + nz * hw * 0.34 * side, dx, dz, len + 0.05, 0.5, bottom - 0.8, bottom - 0.02, { bottom: true });
+      }
     }
 
     /* -------------------------------------------------------------- the services */
 
     // A drainage pipe and a conduit run down one side, and a flat cable tray down the other,
     // both following the curve because they are drawn per segment off the same samples the
-    // deck is. Routing is fixed per ribbon (`svc`); only the grime on it varies.
-    b.props.color(PAL.metalDark, 2.4);
-    const drainOff = hw * 0.58 * svc;
-    b.props.tube(a.x + nx * drainOff, bottomA - 0.55, a.z + nz * drainOff, c.x + nx * drainOff, bottomC - 0.55, c.z + nz * drainOff, 0.42);
+    // deck is. Routing is fixed per ribbon (`svc`); only the grime on it varies. The lean
+    // profile keeps the conduit alone: the one warm line under the slab.
+    if (!lean) {
+      b.props.color(PAL.metalDark, 2.4);
+      const drainOff = hw * 0.58 * svc;
+      b.props.tube(a.x + nx * drainOff, bottomA - 0.55, a.z + nz * drainOff, c.x + nx * drainOff, bottomC - 0.55, c.z + nz * drainOff, 0.42);
+    }
     // Rust, and well up off the palette floor: a warm brown line is the one thing under here
     // that is not teal concrete or black steel, and it is what makes the run read as pipework.
     b.props.color(PAL.rust, 2.6);
     const condOff = hw * 0.72 * svc;
     b.props.tube(a.x + nx * condOff, bottomA - 0.36, a.z + nz * condOff, c.x + nx * condOff, bottomC - 0.36, c.z + nz * condOff, 0.21);
-    // The tray is a plate seen from below and nothing else, so it is two triangles.
-    b.props.color(PAL.metalDark, 3.0);
-    downQuad(b.props, mx - nx * hw * 0.68 * svc, bottom - 0.42, mz - nz * hw * 0.68 * svc, dx, dz, len + 0.05, 0.62);
+    if (!lean) {
+      // The tray is a plate seen from below and nothing else, so it is two triangles.
+      b.props.color(PAL.metalDark, 3.0);
+      downQuad(b.props, mx - nx * hw * 0.68 * svc, bottom - 0.42, mz - nz * hw * 0.68 * svc, dx, dz, len + 0.05, 0.62);
+    }
 
     /* ------------------------------------------- ribs, lamps and wear, by station */
 
@@ -326,8 +338,8 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     const s0 = a.s;
     const s1 = s0 + len;
 
-    for (let k = Math.ceil(s0 / RIB_SPACING); k * RIB_SPACING < s1; k++) {
-      const st = k * RIB_SPACING;
+    for (let k = Math.ceil(s0 / ribSpacing); k * ribSpacing < s1; k++) {
+      const st = k * ribSpacing;
       const t = (st - s0) / (len || 1);
       const px = a.x + (c.x - a.x) * t;
       const pz = a.z + (c.z - a.z) * t;

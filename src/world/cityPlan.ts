@@ -366,6 +366,20 @@ export interface CityPlan {
   /** Race dressing: the line and the checkpoint arches. */
   startLine: TrackLineDef | null;
   checkpoints: TrackLineDef[];
+  /*
+   * The economy knobs. Every one is optional and every builder falls back to the value it
+   * was written with, which is Bandido Bay's, so a plan that says nothing is drawn exactly
+   * as before. The Stack (`stackSpec.ts`) sets them: it carries half as much elevated road
+   * again as the Bay under a tighter ceiling.
+   */
+  /** Transverse rib spacing under the decks (m). Missing: `elevatedBuilder`'s 10.5. */
+  ribSpacing?: number;
+  /** 'lean': the concrete edge girders and one conduit under a deck; missing or 'full': two steel girders, a drain and a cable tray as well. */
+  deckServices?: 'full' | 'lean';
+  /** Street lamp spacing along the ribbons (m), on the ground and on the decks. Missing: 38 and 38. */
+  lampSpacing?: { street: number; deck: number };
+  /** The reclamation floor (`RECLAIM.baseNeglect`) for this world. Missing: the tuning's. */
+  neglect?: number;
   zoneAt(x: number, z: number): ZoneId;
   /** True on any drivable surface, grown by `pad`. */
   isRoad(x: number, z: number, pad?: number): boolean;

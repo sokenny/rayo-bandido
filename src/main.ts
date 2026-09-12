@@ -20,11 +20,12 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 }
 
 /**
- * What to load comes from the URL: `?mode=city` (the open world), `?mode=circuit` (the city
- * circuit on your own), `?mp=1` (the same circuit in a room), `?race=1` (the screen that
- * chooses between those two), `?mode=race` (the Bandido Loop, the original circuit — still
- * built and still what the perf gate measures, just no longer on a menu) or `?mode=test` (the
- * original test block). Without any of them the main menu is shown and the choice is written
+ * What to load comes from the URL: `?mode=city` (the open world), `?mode=stack` (The Stack,
+ * the second city, driven alone while it is built — `docs/CITY_V2_BRIEF.md`), `?mode=circuit`
+ * (the city circuit on your own), `?mp=1` (the same circuit in a room), `?race=1` (the screen
+ * that chooses between those two), `?mode=race` (the Bandido Loop, the original circuit —
+ * still built and still what the perf gate measures, just no longer on a menu) or
+ * `?mode=test` (the original test block). Without any of them the main menu is shown and the choice is written
  * into the URL, so a world is always one reload away.
  *
  * RACE IS ONE TAB. The menu used to offer RACE and VERSUS as two cards on two different
@@ -53,7 +54,7 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  */
 function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
-  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' ? mode : null;
+  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' || mode === 'stack' ? mode : null;
 }
 
 /**

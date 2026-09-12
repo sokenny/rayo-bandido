@@ -33,7 +33,7 @@ export interface MainMenu {
 }
 
 /** What the main menu can hand back: a world to drive, a screen one step deeper, or the intro again. */
-export type MenuChoice = 'city' | 'race' | 'changelog' | 'intro';
+export type MenuChoice = 'city' | 'stack' | 'race' | 'changelog' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -51,6 +51,20 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
       ['SIZE', '540 x 550 M'],
       ['ROADS', 'VIADUCT · SKYWAY · ALLEYS'],
       [ONLINE_LABEL, 'CHECKING'],
+    ],
+  },
+  {
+    // City v2 (`docs/CITY_V2_BRIEF.md`), built in phases beside the Bay. Solo until Phase 4
+    // moves the missions and the shared room over; the card says which phase is in.
+    id: 'stack',
+    kicker: 'FREE ROAM · SOLO · IN PROGRESS',
+    name: 'THE STACK',
+    desc: 'The second city: a highway cut through the middle of it, a deck under that, a skyway over it, and ramps between all four. Roads and levels only for now. Nobody else is here yet.',
+    spec: [
+      ['ZONE', 'THE STACK'],
+      ['SIZE', '600 x 600 M'],
+      ['LEVELS', 'STREET · DECK · SPINE · RING'],
+      ['PHASE', '1 · ROADS AND LEVELS'],
     ],
   },
   {

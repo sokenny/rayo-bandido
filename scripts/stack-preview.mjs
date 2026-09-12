@@ -1,8 +1,8 @@
 /**
  * City v2 ("The Stack") road-network preview — Phase 0 of `docs/CITY_V2_BRIEF.md`.
  *
- * The draft ribbons for the four road levels live HERE, in this script, until Phase 1 lifts
- * them verbatim into `src/world/stackSpec.ts`. Builds every ribbon with the real `track.ts`,
+ * The ribbons come from `src/world/stackSpec.ts` (they lived here in Phase 0, and were lifted
+ * into the spec in Phase 1). Builds every ribbon with the real `track.ts`,
  * runs the same geometric checks `tests/cityWorld.test.ts` will run against the new spec
  * (grades, drive-under clearance at every crossing, the merge rule for ramps, reachability
  * between levels), prints the numbers the plan quotes, and writes a plan view to
@@ -13,106 +13,27 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { buildTrackPath, createProjection, maxGrade, projectOntoPath, pointAtStation, segmentCount } from '../src/world/track.ts';
 
-/* ------------------------------------------------------------------ the draft spec */
+/* ------------------------------------------------------------------ the spec */
 
-export const STACK_BOUNDS = { minX: -300, maxX: 300, minZ: -300, maxZ: 300 };
-export const WALL_BAND = 12;
-export const L1_Y = 12;
-export const L2_Y = 24;
-export const L3_Y = 36;
+import {
+  STACK_BOUNDS,
+  STACK_ELEVATED,
+  STACK_L1_Y as L1_Y,
+  STACK_L2_Y as L2_Y,
+  STACK_L3_Y as L3_Y,
+  STACK_ROADS,
+  STACK_WALL_BAND as WALL_BAND,
+} from '../src/world/stackSpec.ts';
+
 const EDGE = WALL_BAND + 2.5;
 const XMIN = STACK_BOUNDS.minX + EDGE, XMAX = STACK_BOUNDS.maxX - EDGE;
 const ZMIN = STACK_BOUNDS.minZ + EDGE, ZMAX = STACK_BOUNDS.maxZ - EDGE;
 
-/** Districts (`zoneOf`): the core is corporate, the old-town pocket is jdm, the rest urban. */
-export function zoneOf(x, z) {
-  if (x > 150 && z > 130) return 'jdm';
-  if (Math.abs(x) < 175 && z > -150 && z < 200) return 'corporate';
-  return 'urban';
-}
-const n = (x, z, r, width, y, tag) => ({ x, z, r, width, zone: zoneOf(x, z), ...(y !== undefined ? { y } : {}), ...(tag ? { tag } : {}) });
-const road = (tag, level, width, nodes, kind = 'track', closed = false) => ({ tag, level, kind, spec: { closed, nodes: nodes.map((nd) => ({ ...nd, width })) } });
-
-/*
- * L0 — streets. Not a grid: two avenues, one long sweeper, two edge streets that double as
- * the interchange corridors' ground level, three cross streets, curved connectors, and
- * narrow one-way cuts. Spacing 70-140 m. Nothing crosses the two interchange corridors
- * (x -252..-180 and 178..250) except av-gran-via and st-south, which the ramps clear.
- */
-export const L0 = [
-  road('av-central', 0, 22, [n(-60, ZMIN, 0, 22), n(-60, ZMAX, 0, 22)]),
-  road('av-gran-via', 0, 20, [n(XMIN, -60, 0, 20), n(XMAX, -60, 0, 20)]),
-  // The sweeper: the southern boulevard, one long curve north-east, then straight up the map.
-  road('av-sweeper', 0, 18, [n(XMIN, 252, 0, 18), n(20, 252, 170, 18), n(115, 130, 170, 18), n(115, ZMIN, 0, 18)]),
-  road('st-west', 0, 13, [n(-252, ZMIN, 0, 13), n(-252, ZMAX, 0, 13)]),
-  road('st-east', 0, 13, [n(250, ZMIN, 0, 13), n(250, ZMAX, 0, 13)]),
-  road('st-centre', 0, 13, [n(30, ZMIN, 0, 13), n(30, ZMAX, 0, 13)]),
-  road('st-north', 0, 13, [n(XMIN, -200, 0, 13), n(XMAX, -200, 0, 13)]),
-  road('st-mid', 0, 13, [n(-130, 40, 0, 13), n(60, 40, 0, 13)]),
-  road('st-south', 0, 13, [n(XMIN, 130, 0, 13), n(XMAX, 130, 0, 13)]),
-  road('st-oldtown', 0, 12, [n(160, 130, 0, 12), n(160, ZMAX, 0, 12)]),
-  road('st-market', 0, 12, [n(160, 200, 0, 12), n(250, 200, 0, 12)]),
-  // Curved connectors.
-  road('cn-northwest', 0, 13, [n(-130, -200, 0, 13), n(-200, -235, 50, 13), n(-252, -235, 0, 13)]),
-  road('cn-centre', 0, 13, [n(60, 40, 0, 13), n(60, -10, 40, 13), n(20, -60, 0, 13)]),
-  road('cn-southeast', 0, 13, [n(160, 200, 0, 13), n(195, 250, 45, 13), n(250, 250, 0, 13)]),
-  // Cuts: narrow one-way alleys between buildings.
-  road('cut-a', 0, 7.5, [n(-130, -200, 0, 7.5), n(-130, 130, 0, 7.5)], 'alley'),
-  road('cut-b', 0, 7.5, [n(-60, -130, 0, 7.5), n(30, -130, 0, 7.5)], 'alley'),
-  road('cut-c', 0, 7.5, [n(-130, 100, 0, 7.5), n(-60, 100, 0, 7.5)], 'alley'),
-  road('cut-d', 0, 7.5, [n(0, 130, 0, 7.5), n(0, ZMAX, 0, 7.5)], 'alley'),
-  road('cut-e', 0, 7.5, [n(190, 130, 0, 7.5), n(190, ZMAX, 0, 7.5)], 'alley'),
-  road('cut-g', 0, 7.5, [n(30, -10, 0, 7.5), n(115, -10, 0, 7.5)], 'alley'),
+/** Every ribbon with the level it belongs to: streets 0, the loops and ramps as the spec says. */
+export const ALL = [
+  ...STACK_ROADS.map((r) => ({ tag: r.tag, level: 0, kind: r.kind, spec: r.spec })),
+  ...STACK_ELEVATED.map((r) => ({ tag: r.tag, level: r.level, kind: 'track', spec: r.spec })),
 ];
-
-/* L2 — the spine: a closed highway loop through the middle, mid-block on every leg. */
-export const L2 = road('spine', 2, 18, [
-  n(-180, -130, 40, 18, L2_Y, 'nw'),
-  n(178, -130, 40, 18, L2_Y, 'ne'),
-  n(178, 110, 40, 18, L2_Y, 'se'),
-  n(60, 190, 40, 18, L2_Y, 's'),
-  n(-180, 150, 40, 18, L2_Y, 'w'),
-], 'track', true);
-
-/* L1 — the deck: a closed loop with a hairpin pinch through the centre; crosses the spine four times. */
-export const L1 = road('deck', 1, 14, [
-  n(-215, -160, 40, 14, L1_Y, 'w'),
-  n(-60, -250, 50, 14, L1_Y, 'nw'),
-  n(0, -20, 45, 14, L1_Y, 'pinch'),
-  n(215, -180, 50, 14, L1_Y, 'ne'),
-  n(215, 170, 50, 14, L1_Y, 'se'),
-  n(-40, 215, 50, 14, L1_Y, 's'),
-  n(-215, 150, 40, 14, L1_Y, 'sw'),
-], 'track', true);
-
-/* L3 — the ring: a small closed loop above the core, fed from the spine. */
-export const L3 = road('ring', 3, 13, [
-  n(-105, -85, 45, 13, L3_Y),
-  n(95, -85, 45, 13, L3_Y),
-  n(95, 110, 45, 13, L3_Y),
-  n(-105, 110, 45, 13, L3_Y),
-], 'track', true);
-
-/*
- * Ramps. Each starts inside one road, runs beside the next one in the gap between them and
- * slides in parallel, like `RAMP_SPECS` in Bandido Bay. Every ramp is drivable both ways;
- * the direction named is the one whose merge is tangential.
- *   west corridor  x: st-west -252 | gap -232 | deck -215 | gap -198 | spine -180
- *   east corridor  x: spine 178 | gap 198 | deck 215 | gap 232 | st-east 250
- */
-export const RAMPS = [
-  road('w-up-01', 1, 11, [n(-249, 155, 0, 11, 0), n(-232, 115, 30, 11), n(-232, -5, 30, 11, L1_Y), n(-218, -40, 30, 11), n(-217, -75, 0, 11, L1_Y)]),
-  road('w-up-12', 2, 11, [n(-214, -118, 0, 11, L1_Y), n(-198, -80, 30, 11), n(-198, 30, 30, 11, L2_Y), n(-183, 62, 30, 11), n(-182, 82, 0, 11, L2_Y)]),
-  road('e-up-01', 1, 11, [n(247, -170, 0, 11, 0), n(232, -130, 30, 11), n(232, -10, 30, 11, L1_Y), n(218, 25, 30, 11), n(217, 60, 0, 11, L1_Y)]),
-  road('e-up-12', 2, 11, [n(214, 110, 0, 11, L1_Y), n(198, 70, 30, 11), n(198, -40, 30, 11, L2_Y), n(183, -72, 30, 11), n(182, -95, 0, 11, L2_Y)]),
-  road('ring-up', 3, 11, [n(-135, -131, 0, 11, L2_Y), n(-95, -131, 30, 11, L2_Y), n(-20, -105, 40, 11), n(0, -86, 30, 11, L3_Y), n(50, -86, 0, 11, L3_Y)]),
-  road('ring-down', 2, 11, [n(30, 111, 0, 11, L3_Y), n(-20, 111, 30, 11, L3_Y), n(-90, 145, 40, 11), n(-125, 159, 30, 11, L2_Y), n(-160, 153, 0, 11, L2_Y)]),
-  road('ring-up-e', 3, 11, [n(177, -70, 0, 11, L2_Y), n(177, -30, 30, 11, L2_Y), n(118, 22, 40, 11), n(97, 45, 20, 11, L3_Y), n(96, 66, 0, 11, L3_Y)]),
-  // The south: up from the sweeper onto the deck's south leg, eastbound.
-  road('s-up-01', 1, 11, [n(-150, 256, 0, 11, 0), n(-128, 244, 30, 11), n(-10, 220, 30, 11, L1_Y), n(40, 204, 30, 11, L1_Y), n(80, 194, 0, 11, L1_Y)]),
-];
-
-export const ALL = [...L0, L1, L2, L3, ...RAMPS];
 
 /* ------------------------------------------------------------------ build + checks */
 

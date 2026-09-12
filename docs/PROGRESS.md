@@ -2214,3 +2214,119 @@ flagged because the fleet is not instanced.
 **Not verified.** Nothing has been rendered in the game yet; the picture is the ribbons
 only. The per-metre budget numbers are derived from the Bay's totals, not measured per
 builder on the new network.
+
+## City v2 "The Stack" — Phase 1, roads and levels (2026-09-12)
+
+Phase 1 of `docs/CITY_V2_BRIEF.md`, at gate. 827 tests and the typecheck green, `vite build`
+clean. The Bay's own suites (`cityWorld`, `megacity`, `reclamation`, `buildingKit`, `circuitWorld`,
+`streetRace`, `circuitGate`) pass unchanged, and `circuitWorld`'s "same world for the same seed"
+test still holds: mode `'city'` draws and collides exactly as before.
+
+**Delivered.**
+
+- `src/world/cityDef.ts` — `CitySpec`: what a free-roam city is made of, as data. Bounds, wall
+  band, water or none, zones, ground roads, elevated roads with their lifts, block options, an
+  optional megastructure planner, the dressing lists, traffic (street rectangles and cars per
+  elevated loop), bus routes, spawn, the activity sites, and the art economy knobs.
+- `src/world/cityWorld.ts` — `createCityWorld(spec = BAY_SPEC)`. Every Bay constant it read is
+  now a spec field; the Bay's spec is `BAY_SPEC` in `citySpec.ts` (the constants stay exported,
+  because the circuit, the street race and the missions pin coordinates against them). A city
+  without water gets a fourth perimeter wall and no quay; the elevated-loop traffic is a list, and
+  a waypoint carries the loop's height there.
+- `src/world/stackSpec.ts` — The Stack: the Phase 0 lists lifted verbatim, then corrected (below).
+  `scripts/stack-preview.mjs` now imports them from here, so the checker and the game cannot drift.
+- `GameMode` `'stack'`, `?mode=stack`, `createCityWorld(STACK_SPEC)` in `game.ts` (solo, no
+  police, no intro, R recovery on), and a THE STACK card on the main menu after OPEN WORLD.
+- `tests/stackWorld.test.ts` — the `cityWorld` contract against the new spec, plus the brief's
+  rules: no dead ends, every ramp tangential at its top (within 18°) and a slip road at its foot
+  (within 32°), both directions of every loop with a way up and a way down, six stacked crossings
+  (20 found), every elevated slab clear of every street EDGE TO EDGE (the Bay's test walks
+  centrelines only), all eight ramps driven under the car's own power in the real simulation, R
+  recovery keeping its level, and the budget with its per-system split printed.
+- `scripts/city-drive.mjs --mode stack` — a route through every level, stage by stage, run with
+  the real `stepGame` in the page as `megacity-check.mjs` did; `scripts/city-shots.mjs --mode stack`
+  — a shot from every level and the plan's six frame-test vantage points at 1440x900, a view
+  standing the car on a named ribbon at that ribbon's height.
+- Optional `CityPlan` economy knobs, read by the builders with the Bay's values as defaults:
+  `ribSpacing`, `deckServices`, `lampSpacing`, `neglect`; `CitySpec.pillarStep` and `fenceBays`.
+
+**What Phase 1 found wrong in the approved plan, and fixed** (`docs/CITY_V2_PLAN.md` §15).
+
+1. The loops' directions were not a system. The checker is undirected; driven, both deck→spine
+   ramps left the deck anticlockwise while both corridor on-ramps merged clockwise, so a car up
+   either on-ramp had no way onto the spine without a U-turn, and the plan's own gate route
+   needed one. `w-up-12` is turned round (now climbs north). Every direction of every loop has an
+   up and a down exit, as the Bay's viaduct has; the test holds it.
+2. Three ramps climbed while their slab was still over a street's lane or inside the deck they
+   were leaving: `s-up-01`'s rail stood in the sweeper's north lane at 1-4 m for 50 m; `e-up-01`'s
+   edge over st-east at 0.7 m; `ring-up` 3 m up with the spine's rail across its lane. All three
+   now leave sideways first, at grade, then climb. `w-up-01`'s foot crossed st-south as a 1 m hump;
+   it starts north of it now. Peak grades 9.1-14.5 %, all under the 17 % rule.
+
+**Measured against the brief, honestly.**
+
+| | |
+|---|---|
+| Static environment | **217,376 triangles, 17 draw calls** (ceiling 220k / 20) |
+| of which track | 131k: decks 58k, rails 26k, columns and fences 22k, streets and lamps 26k |
+| blocks / reclamation / props+landmarks | 52k / 31k / 2k |
+| Elevated road | 5.22 km at 20.3 triangles per metre all in (plan: 16; the Bay: 34) |
+| First measurement, Bay builders unchanged | 322k (track 208k) — the lean profile and 5 m arc sampling took 105k out |
+| Traffic | 184 cars: streets 56, deck 60, spine 44, ring 24 |
+| Frame at the 14 views (DPR 1, 1440x900, fleet in) | 53-449 draw calls, 235k-312k triangles, GPU 1.8-4.8 ms; sim 3-4 ms, render 1.3-2.3 ms |
+| Drive | 13 stages, 4,073 m, L0 → L1 (a full deck lap) → L2 → L3 → L2 → L1 → L0, **0 collisions**, no console errors |
+
+The drive, from `scripts/city-drive.mjs --mode stack` against the dev server, with the traffic
+taken out so a contact could only be the road's:
+
+```
+PASS  st-west (reversed)     127 m of   130  ends (-252, 123) y 0
+PASS  w-up-01                198 m of   201  ends (-217, -72) y 12
+PASS  deck                  1401 m of  1404  ends (-216, 118) y 12
+PASS  w-up-12                207 m of   210  ends (-182, -85) y 24
+PASS  spine                   70 m of    73  ends (-138, -131) y 24
+PASS  ring-up                190 m of   193  ends (47, -85) y 36
+PASS  ring                   266 m of   269  ends (33, 110) y 36
+PASS  ring-down              197 m of   200  ends (-157, 153) y 24
+PASS  spine                  648 m of   651  ends (178, -98) y 24
+PASS  e-up-12 (reversed)     208 m of   211  ends (213, 107) y 12.03
+PASS  deck                   183 m of   186  ends (83, 193) y 12
+PASS  s-up-01 (reversed)     277 m of   280  ends (-187, 254) y 0
+PASS  av-sweeper (reversed)   77 m of    80  ends (-264, 252) y 0
+collisions over the whole route: 0
+```
+
+Screenshots: `artifacts/stack-phase1/phase1-<view>.png` (1440x900, DPR 1, `?debug=1` overlay
+on), metrics per view in `phase1.json`. One per level and both corridors: `l0-av-central`,
+`l0-west-corridor`, `l1-deck-west`, `l1-deck-pinch`, `l2-spine-east`, `l3-ring-west`,
+`ramp-w-up-01`, `ramp-e-up-12`; and the six frame-test points of the plan (§11), taken now so
+Phase 2 measures the same frames: `spine-passage-north`, `spine-passage-south`, `gran-via-west`,
+`st-centre-south`, `ramp-w-up-12`, `av-central-ring`. `gran-via-west` — the street under the
+west corridor with the on-ramp, the deck and the spine stacked overhead on their columns — is
+already the closest thing in either city to `city-v2-street.webp`, with no massing yet.
+
+**Frame rate, with its caveat.** Under puppeteer the game reads a flat 30.0 fps at every view,
+in headless and headed Chrome alike, with 7-8 ms of work in the frame — and Bandido Bay reads
+the same 30.0 in the same harness (with 5-5.6 ms of GPU against the Stack's 2-3.5). A
+`requestAnimationFrame` probe on a blank page in the same Chrome runs at 60 headless and 120
+headed, so the cap is the harness driving a WebGL page, not the scene. In the desktop app's own
+visible Chromium the Stack ran at **120 fps (8.3 ms frames)** at 1440x900 — at pixel ratio 1.5,
+which is 2.25x the brief's pixels. The ≥ 55 fps rule holds by every number available; a clean
+visible-window reading at DPR 1 is still owed.
+
+**Not done, and known.**
+
+- The sky-fraction and structure-overhead measurements of the frame test are Phase 2's; the
+  vantage points are recorded and shot, the measurement is not written.
+- The budget leaves 3k under the ceiling for Phase 2's passages, portal frames and skybridges
+  (planned at 32k). The plan's fallbacks are listed in §15; choosing is Juan's.
+- Reachability stays as Phase 0 reported it (a level change starts within 240 m on L2/L3,
+  403 m on L1, 490 m on L0); Phase 1 added no ramps.
+- Where a ramp leaves a deck the deck's rail is gapped for the ramp's width and the ramp's own
+  rails only begin once it is clear of the deck, so a car steering hard sideways at a merge can
+  drive off the edge. The Bay's ramps are built the same way; not new, worth knowing.
+- The old-town streets and the sweeper's south leg are wider apart than the rest (the two
+  4-car traffic rectangles); nothing drives the cuts.
+- Bandido Bay untouched, but two things it shares changed behind defaults: `createReclaimField`
+  takes an optional `neglect` and `buildRibbonLamps` an optional spacing. Both fall back to the
+  numbers they had.

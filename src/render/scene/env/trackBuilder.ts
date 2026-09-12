@@ -335,7 +335,9 @@ function buildRails(b: EnvBuilders, rails: RailDef[], rng: () => number): void {
 function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): void {
   const path = rb.path;
   const alley = rb.kind === 'alley';
-  const step = alley ? 24 : 38;
+  // Spacing from the plan when it sets one (`CityPlan.lampSpacing`), else the Bay's 38 m.
+  const spacing = b.plan.lampSpacing;
+  const step = alley ? 24 : rb.elevated ? (spacing?.deck ?? 38) : (spacing?.street ?? 38);
   let side = 1;
   for (let s = step / 2; s < path.length - (path.closed ? 0 : 4); s += step) {
     side = -side;

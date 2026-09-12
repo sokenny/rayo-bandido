@@ -1,9 +1,10 @@
 # City v2 — "The Stack": Phase 0 plan
 
-Phase 0 of `docs/CITY_V2_BRIEF.md`. No game code changed. The draft road network lives in
-`scripts/stack-preview.mjs` (data plus the checker); Phase 1 lifts those nodes verbatim into
-`src/world/stackSpec.ts`. Everything measured below comes from running that script against the
-real `src/world/track.ts`.
+Phase 0 of `docs/CITY_V2_BRIEF.md`, approved 2026-09-12, then amended by Phase 1 the same day:
+the road network now lives in `src/world/stackSpec.ts` and `scripts/stack-preview.mjs` reads it
+from there, so the checker and the game cannot drift. Phase 1 changed five ramps and measured
+the budget for real; those changes are marked **[Phase 1]** below and gathered in §15. Everything
+measured below comes from running the checker against the real `src/world/track.ts`.
 
     node scripts/stack-preview.mjs        # checks + docs/city-v2-plan-ribbons.svg/.png
 
@@ -52,9 +53,9 @@ width) never touches a deck or a street edge while it is at a different height.
 | L1 | `deck` | 12 | 14 m | 1,591 m | closed; corners w(-215,-160) nw(-60,-250) pinch(0,-20) ne(215,-180) se(215,170) s(-40,215) sw(-215,150) |
 | L2 | `spine` | 24 | 18 m | 1,213 m | closed; corners nw(-180,-130) ne(178,-130) se(178,110) s(60,190) w(-180,150); fillets 40 m |
 | L3 | `ring` | 36 | 13 m | 713 m | closed; (-105,-85) (95,-85) (95,110) (-105,110); fillets 45 m |
-| ramps | 8 | 0→12, 12→24, 24→36 | 11 m | 1,691 m | table in §5 |
+| ramps | 8 | 0→12, 12→24, 24→36 | 11 m | 1,699 m **[Phase 1]** | table in §5 |
 
-Elevated road in total: 5,208 m (Bandido Bay: 3,376 m). That number drives the triangle
+Elevated road in total: 5,216 m (Bandido Bay: 3,376 m). That number drives the triangle
 budget in §9 and is the plan's biggest risk.
 
 ## 4. L0 — the streets
@@ -85,17 +86,28 @@ sides — no water. The map never shows bare ground at its edge.
 
 | Ramp | From → to | Merge heading | Length | Peak grade | Where it lives |
 |---|---|---|---|---|---|
-| `w-up-01` | st-west (0) → deck (12) | north | 236 m | 9.4 % | west gap x -232, z 155 → -75 |
-| `w-up-12` | deck (12) → spine (24) | south | 206 m | 10.3 % | west gap x -198, z -118 → 82 |
-| `e-up-01` | st-east (0) → deck (12) | south | 235 m | 9.5 % | east gap x 232, z -170 → 60 |
+| `w-up-01` | st-west (0) → deck (12) | north | 201 m | 12.0 % | west gap x -232, z 120 → -75 **[Phase 1: foot moved north of st-south]** |
+| `w-up-12` | deck (12) → spine (24) | **north** | 210 m | 9.1 % | west gap x -198, z 115 → -88 **[Phase 1: turned round, see §15]** |
+| `e-up-01` | st-east (0) → deck (12) | south | 235 m | 12.8 % | east gap x 232, z -170 → 60 **[Phase 1: flat until clear of st-east]** |
 | `e-up-12` | deck (12) → spine (24) | north | 211 m | 10.2 % | east gap x 198, z 110 → -95 |
-| `ring-up` | spine north leg (24) → ring north leg (36) | east | 195 m | 14.5 % | diagonal, (-135,-131) → (50,-86) |
+| `ring-up` | spine north leg (24) → ring north leg (36) | east | 193 m | 12.6 % | (-135,-131) → (-88,-114) at 24, then up to (50,-86) **[Phase 1: leaves the spine sideways before climbing]** |
 | `ring-up-e` | spine east leg (24) → ring east leg (36) | south | 169 m | 14.2 % | diagonal, (177,-70) → (96,66) |
 | `ring-down` | ring south leg (36) → spine south leg (24) | west | 200 m | 13.5 % | diagonal, (30,111) → (-160,153) |
-| `s-up-01` | av-sweeper (0) → deck south leg (12) | east | 239 m | 10.6 % | (-150,256) → (80,194) |
+| `s-up-01` | av-sweeper (0) → deck south leg (12) | east | 280 m | 11.8 % | (-190,255), flat to (-150,236.5), up to (-20,228), merge at (80,194) **[Phase 1: foot and approach moved]** |
 
 All eight are drivable both ways (an "up" ramp is the "down" ramp for the other direction of
 travel, as on the viaduct today); the heading named is the one whose merge is tangential.
+
+**The directions are a system [Phase 1].** The checker is undirected and could not see it, but
+in the approved draft both deck→spine ramps left the deck in the same direction, so a car that
+came up either corridor on-ramp (which merge clockwise) could never reach the spine without a
+U-turn, and the spine's ring-facing direction could never come down. With `w-up-12` turned
+round, every direction of every loop has a way up and a way down, as both directions of the
+Bay's viaduct do: deck clockwise climbs by `w-up-12` and comes down by `s-up-01` reversed; deck
+anticlockwise climbs by `e-up-12` and comes down by either corridor on-ramp reversed; spine
+clockwise climbs to the ring by `ring-up` / `ring-up-e` and comes down by `e-up-12` reversed;
+spine anticlockwise climbs by `ring-down` reversed and comes down by `w-up-12` reversed.
+`tests/stackWorld.test.ts` holds this as a rule.
 WEST INTERCHANGE: the corridor x -252..-180 between z -120 and 155, `w-up-01` and `w-up-12`.
 EAST INTERCHANGE: x 178..250 between z -170 and 110, `e-up-01` and `e-up-12`. The ring's
 three ramps and the south ramp are the extra connections that keep the loops from being
@@ -246,7 +258,7 @@ Heading 0 = north (-z), π/2 = east (+x), π = south.
 | 2 | `spine-passage-south` | (-20, 24, 176), heading 256° (WSW) | the south diagonal passage, the deck crossing under ahead |
 | 3 | `gran-via-west` | (-240, 0, -60), east | the street image: ramp, deck, ramp, spine stacked ahead |
 | 4 | `st-centre-south` | (30, 0, 150), south | deck and spine corner overhead, the sweeper's arc |
-| 5 | `ramp-w-up-12` | (-198, ~18, -20), south | mid-climb between deck and spine, towers both sides |
+| 5 | `ramp-w-up-12` | (-198, ~23, -20), north **[Phase 1]** | mid-climb between deck and spine, towers both sides |
 | 6 | `av-central-ring` | (-60, 0, -10), north | avenue with skybridges at three heights, the ring above |
 
 Acceptance at each: sky < 15 % of the frame at 1, 2, 3, 4; structure within 40 m overhead at
@@ -262,9 +274,11 @@ Acceptance at each: sky < 15 % of the frame at 1, 2, 3, 4; structure within 40 m
 - Tests: `tests/stackWorld.test.ts` mirrors `cityWorld.test.ts` (clearance, grades, pillars,
   the drive up every ramp under its own power, the budget) against the new spec; the Bay
   suite runs unchanged.
-- Gate: `scripts/city-drive.mjs --mode stack` drives st-west → w-up-01 → deck → w-up-12 →
-  spine → ring-up → ring → ring-down → spine → e-up-12 (reverse) → deck → e-up-01 (reverse)
-  → st-east without a collision, plus a screenshot from every level.
+- Gate: `scripts/city-drive.mjs --mode stack` drives st-west → w-up-01 → deck (clockwise, a
+  full lap) → w-up-12 → spine → ring-up → ring → ring-down → spine → e-up-12 (reverse) → deck
+  → s-up-01 (reverse) → the sweeper without a collision, plus a screenshot from every level.
+  **[Phase 1: the draft's route ended "e-up-12 (reverse) → deck → e-up-01 (reverse)", which
+  needs a U-turn on the deck; see §5.]**
 
 ## 13. Known compromises in this draft
 
@@ -286,3 +300,38 @@ Acceptance at each: sky < 15 % of the frame at 1, 2, 3, 4; structure within 40 m
 3. Traffic: ship 180 cars and measure, or start at 130?
 4. Menu label: "THE STACK"?
 5. No water: a wall of towers on all four sides. OK, or keep one water edge?
+
+## 15. Phase 1 amendments (2026-09-12)
+
+What Phase 1 changed in this plan, and why. The picture above is regenerated from the spec.
+
+**Ramps.** Five of the eight moved (§5). `w-up-12` turned round so the loops' directions form a
+system. Three feet re-laid because a ramp that climbs while its slab is still over a street's
+lane, or still between the rails of the deck it is leaving, is a wall in that lane: `s-up-01`
+(its right rail stood in the sweeper's north lane at 1-4 m for 50 m), `e-up-01` (its slab edge
+over st-east at 0.7 m), `ring-up` (3 m up while still inside the spine's rails: the spine's rail
+crossed its lane). `w-up-01`'s foot moved north of st-south, which it crossed as a 1 m hump. The
+checker only walks centrelines; `tests/stackWorld.test.ts` walks both slab edges too.
+
+**Sampling.** The elevated roads are sampled at 5 m round their bends instead of 3 m
+(`arcStep`): a 5 m chord sits 7-10 cm off a 40 m arc, and a third of the network's slab and
+rail segments were in its bends. Streets keep 3 m.
+
+**Budget, measured.** With the Bay's builders unchanged the roads alone came to 322k triangles
+(track 208k: decks 105k, columns and fences 41k, rails 33k, streets and lamps 34k; plain blocks
+57k; reclamation 54k). The lean profile of §9, made real as optional `CityPlan` knobs the Bay
+never sets (`ribSpacing` 16, `deckServices: 'lean'` = edge girders and one conduit only,
+`lampSpacing` 56 m on streets / 76 m on decks, `neglect` 0.25) plus columns every 16 m with a
+fence in one bay in three and the 5 m arcs, lands the roads-and-plain-blocks city at
+**217k triangles in 17 draw calls**: track 131k (decks 58k, rails 26k, columns and fences 22k,
+streets and lamps 26k), blocks 52k, reclamation 31k, props and landmarks 2k. The elevated
+structure costs **20 triangles per metre** all in, against the 16 the plan budgeted and the
+34 the Bay pays. Phase 2's passages, portal frames and skybridges (§9: 32k) do not fit under
+220k on top of this without one of the fallbacks: the ring's two ramps and fillets as one open
+skyway (−7k), ribs at 21 m (−3k), columns at 20 m (−4k), reclamation pockets in the old town
+and under the decks only (−10k), or fewer street lamps. Juan's call at the Phase 2 gate.
+
+**Traffic.** 184 cars shipped (streets 56, deck 60, spine 44, ring 24). At the six vantage
+points the frame is 53-449 draw calls with the fleet, 235k-312k triangles; the worst is
+`gran-via-west`, looking down the corridor at both decks' traffic. GPU time 2-3.5 ms at 1440x900
+DPR 1. Not yet a problem on this machine; the fallback (130 cars by level length) stands.

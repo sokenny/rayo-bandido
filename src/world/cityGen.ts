@@ -29,6 +29,11 @@ export function createRandom(seed: number): () => number {
   };
 }
 
+/** Deterministic 0..1 from a position, so a city is the same on every machine. */
+export function hash01(x: number, z: number): number {
+  return Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+}
+
 /* ------------------------------------------------------------------ geometry helpers */
 
 export function segmentRectDistance(ax: number, az: number, bx: number, bz: number, r: Rect): number {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { cityRecovery } from './world/cityRecovery';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
+import { STACK_SPEC } from './world/stackSpec';
 import { addCircuitGate } from './world/cityCircuitGate';
 import { addStreetSites } from './world/cityStreetSites';
 import { createStreetWorld } from './world/streetWorld';
@@ -218,7 +219,11 @@ export function createGame(
             // the city rather than a part of it (`src/world/cityCircuitGate.ts`), for the same
             // reason the circuit itself is one: the city does not know the race exists.
             addStreetSites(addCircuitGate(createCityWorld()))
-          : createArenaWorld();
+          : mode === 'stack'
+            ? // The Stack (`src/world/stackSpec.ts`): the second city, roads and levels first.
+              // Solo, no police, no missions and no intro until Phase 4 moves them in.
+              createCityWorld(STACK_SPEC)
+            : createArenaWorld();
   const layout = world.layout;
 
   /* ------------------------------------------------------------- multiplayer */
@@ -1330,7 +1335,7 @@ export function createGame(
       heading = Math.atan2(gate.fx, -gate.fz);
     }
     let y = layout.playerSpawn.y ?? 0;
-    if (mode === 'city') {
+    if (mode === 'city' || mode === 'stack') {
       const recovered = cityRecovery(world.plan, v.x, v.z, v.y, v.heading);
       x = recovered.x; z = recovered.z; y = recovered.y ?? 0; heading = recovered.heading;
     }
@@ -1547,7 +1552,7 @@ export function createGame(
   function simulate(dt: number): void {
     input.poll(command);
 
-    if (mode === 'city' && command.restart) {
+    if ((mode === 'city' || mode === 'stack') && command.restart) {
       command.restart = false;
       rescue();
     }

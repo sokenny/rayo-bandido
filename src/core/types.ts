@@ -25,7 +25,7 @@ import type { TrackPath } from '../world/track';
 import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 
 /** Which world is loaded: the free-roam test city, the racing circuit or the big city. */
-export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street';
+export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street' | 'stack';
 
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {
