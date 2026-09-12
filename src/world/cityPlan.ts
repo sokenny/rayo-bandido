@@ -149,6 +149,8 @@ export interface SkybridgeDef {
   width: number;
   height: number;
   zone: ZoneId;
+  /** 'lit' (missing): a ribbon of windows, the Bay's. 'concrete': a bare occupied slab, one dim strip under it. */
+  kind?: 'lit' | 'concrete';
 }
 
 /**
@@ -281,6 +283,29 @@ export interface MegastructureDef {
   tag: string;
   footprint: Rect;
   volumes: CityVolume[];
+  /** The stretches of road that run through this building (`PassageDef`), when it planned them. */
+  passages?: PassageDef[];
+}
+
+/**
+ * A stretch of one road that runs INSIDE a building: from station `s0` to `s1` along the
+ * ribbon tagged `tag`, under a ceiling `clearance` metres over the road surface (over a
+ * climbing ramp the building's underside is stepped and the ceiling follows the road up at
+ * this clearance, never lower). `left` / `right` say whether a wall
+ * stands at the kerb on that side of the direction of travel. The megastructure planner
+ * derives these from the carved volumes, and the passage builder (`env/passageBuilder.ts`)
+ * dresses them: soffit, ribs, ducts, strip lamps and their pools. "Enclosed on two sides" in
+ * `docs/CITY_V2_BRIEF.md` is a passage with its ceiling and at least one wall.
+ */
+export interface PassageDef {
+  tag: string;
+  s0: number;
+  s1: number;
+  clearance: number;
+  left: boolean;
+  right: boolean;
+  /** How far past the asphalt edge the building's reservation ends (m): where a wall can stand. */
+  margin: number;
 }
 
 export interface CityPlan {
@@ -380,6 +405,28 @@ export interface CityPlan {
   lampSpacing?: { street: number; deck: number };
   /** The reclamation floor (`RECLAIM.baseNeglect`) for this world. Missing: the tuning's. */
   neglect?: number;
+  /**
+   * Most pavement a block keeps between its collider edge and its buildings (m). Missing:
+   * `cityBuilder`'s 3.4, the Bay's. The Stack stands its buildings at the kerb.
+   */
+  setback?: number;
+  /** Multiplier on the rooftop clutter (mechanical blocks, antennas). Missing: 1. */
+  roofClutter?: number;
+  /** Roads inside buildings, gathered from the megastructures (`PassageDef`). */
+  passages?: PassageDef[];
+  /**
+   * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
+   * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.
+   */
+  megaDetail?: 'full' | 'lean';
+  /** Tags of the elevated ribbons that carry portal frames over their open stretches. */
+  portalFrames?: string[];
+  /**
+   * Where the kit's landmark silhouettes stand, by hand: the plot nearest each point takes
+   * `kind` (an index into `buildingKit`'s `LANDMARKS`). Missing: `cityBuilder` picks the
+   * biggest plots itself.
+   */
+  landmarkAnchors?: Array<{ x: number; z: number; kind: number }>;
   zoneAt(x: number, z: number): ZoneId;
   /** True on any drivable surface, grown by `pad`. */
   isRoad(x: number, z: number, pad?: number): boolean;

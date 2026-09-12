@@ -103,6 +103,17 @@ export interface CitySpec {
   pillarStep?: number;
   /** Fences between the columns: 'most' is two bays in three (the Bay), 'few' one in three. */
   fenceBays?: 'most' | 'few';
-  /** The art builders' economy knobs (`CityPlan`): rib spacing, girders, lamp spacing, greenery. Missing: the Bay's. */
-  art?: Pick<CityPlan, 'ribSpacing' | 'deckServices' | 'lampSpacing' | 'neglect'>;
+  /** The art builders' economy knobs (`CityPlan`): rib spacing, girders, lamp spacing, greenery, setback, roof clutter. Missing: the Bay's. */
+  art?: Pick<CityPlan, 'ribSpacing' | 'deckServices' | 'lampSpacing' | 'neglect' | 'setback' | 'roofClutter' | 'megaDetail'>;
+  /** Elevated ribbons whose open stretches carry portal frames. Missing: none. */
+  portalFrames?: string[];
+  /** Hand-placed landmark silhouettes (`CityPlan.landmarkAnchors`). Missing: the builder picks its own. */
+  landmarks?: Array<{ x: number; z: number; kind: number }>;
+  /**
+   * How the skybridges over `skybridgeStreets` are chosen. `heights`: the tiers a bridge may
+   * sit at (m); `concreteShare`: the fraction that are bare concrete rather than lit;
+   * `max`: how many at most; `step`: stations between attempts (m). Missing: the Bay's rule
+   * (two heights by district, all lit, 22 at most, every 55 m).
+   */
+  skybridges?: { heights: number[]; concreteShare: number; max: number; step: number };
 }

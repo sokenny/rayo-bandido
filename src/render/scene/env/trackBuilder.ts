@@ -5,6 +5,7 @@ import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
 import { groundGlow, halo, type EnvBuilders } from './builders';
 import { buildViaducts } from './elevatedBuilder';
+import { buildPassages, buildPortalFrames } from './passageBuilder';
 import { lampColor, lampPost } from './propsBuilder';
 import { rollLampFault } from './lampFaults';
 import { PAINT_Y, ROAD_TILE, roadTint } from './cityBuilder';
@@ -37,6 +38,9 @@ export function buildTrack(b: EnvBuilders): void {
   for (const rb of b.plan.ribbons) if (rb.kind === 'track') buildLanePaint(b, rb);
   buildRails(b, b.plan.rails, rng);
   buildViaducts(b, rng);
+  // The roads inside the buildings, and the frames over the open highway (the Stack).
+  buildPassages(b);
+  buildPortalFrames(b);
   for (const rb of b.plan.ribbons) buildRibbonLamps(b, rb, rng);
   for (const rb of b.plan.ribbons) if (rb.kind === 'alley') buildAlleyDressing(b, rb, rng);
   if (b.plan.startLine) buildStartLine(b, b.plan.startLine);

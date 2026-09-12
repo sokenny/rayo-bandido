@@ -84,9 +84,11 @@ const STACK_VIEWS = [
   { name: 'ramp-e-up-12', along: 'e-up-12', dir: 1, x: 198, z: 20 },
   // Frame test (plan §11).
   { name: 'spine-passage-north', along: 'spine', dir: 1, x: -30, z: -130 },
-  { name: 'spine-passage-south', along: 'spine', dir: 1, x: -20, z: 176 },
-  { name: 'gran-via-west', x: -240, z: -56, heading: Math.PI / 2, y: 0 },
-  { name: 'st-centre-south', x: 34, z: 150, heading: Math.PI, y: 0 },
+  { name: 'spine-passage-south', along: 'spine', dir: 1, x: -48, z: 172 },
+  // Under the on-ramp's edge, the deck and the spine stacked ahead: the street image.
+  { name: 'gran-via-west', x: -234, z: -56, heading: Math.PI / 2, y: 0 },
+  // Under the spine's south corner, the deck's bridge building ahead.
+  { name: 'st-centre-south', x: 32, z: 183, heading: Math.PI, y: 0 },
   { name: 'ramp-w-up-12', along: 'w-up-12', dir: 1, x: -198, z: -20 },
   { name: 'av-central-ring', x: -56, z: -10, heading: 0, y: 0 },
 ];
@@ -110,6 +112,90 @@ function resolveStackViews(views) {
 }
 
 const VIEWS = mode === 'stack' ? resolveStackViews(STACK_VIEWS) : CITY_VIEWS;
+
+/**
+ * The frame test of `docs/CITY_V2_BRIEF.md`, measured in the page:
+ *
+ *  - SKY: the share of the frame where nothing but the sky dome is drawn. The atmosphere
+ *    (dome, rain, storm) is hidden, the scene is rendered once more with every material
+ *    replaced by unfogged white on a black clear, and the black pixels are counted. Fog is
+ *    not sky: a fogged tower is still a tower and comes out white.
+ *  - OVERHEAD: what structure stands over the car within 40 m: a building's ceiling (a
+ *    megastructure volume over the point), a deck (the surface field's answer from 45 m up),
+ *    a skybridge within 12 m along, or a portal frame (the ribbon carries frames every 30 m
+ *    outside its passages, so one is always within 15 m unless a merge or a crossing skipped
+ *    it — reported as 'frame', the weakest claim of the four).
+ */
+async function measureFrame(page) {
+  return page.evaluate(async () => {
+    const rb = window.__rb;
+    // A white, unfogged, unlit material: the lane paint's, cloned, with its colour and its
+    // vertex colours taken off. Borrowed from the scene so nothing here imports three.
+    const white = rb.scene.getObjectByName('env-lanes').material.clone();
+    white.vertexColors = false;
+    white.fog = false;
+    white.map = null;
+    white.color.setHex(0xffffff);
+    white.needsUpdate = true;
+    const atmosphere = rb.scene.getObjectByName('atmosphere');
+    const r = rb.renderer;
+    const gl = r.getContext();
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const wasVisible = atmosphere ? atmosphere.visible : true;
+    const prevOverride = rb.scene.overrideMaterial;
+    let sky = 0;
+    try {
+      if (atmosphere) atmosphere.visible = false;
+      rb.scene.overrideMaterial = white;
+      const c = r.getClearColor(new (Object.getPrototypeOf(white.color).constructor)());
+      const alpha = r.getClearAlpha();
+      r.setClearColor(0x000000, 1);
+      r.render(rb.scene, rb.camera);
+      const px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let black = 0;
+      for (let i = 0; i < px.length; i += 4) if (px[i] < 16 && px[i + 1] < 16 && px[i + 2] < 16) black++;
+      sky = black / (w * h);
+      r.setClearColor(c, alpha);
+    } finally {
+      rb.scene.overrideMaterial = prevOverride;
+      if (atmosphere) atmosphere.visible = wasVisible;
+      white.dispose();
+    }
+    // Overhead structure within 40 m.
+    const { createCityWorld } = await import('/src/world/cityWorld.ts');
+    const { STACK_SPEC } = await import('/src/world/stackSpec.ts');
+    const { createProjection, projectOntoPath } = await import('/src/world/track.ts');
+    window.__stackPlan ??= createCityWorld(STACK_SPEC).plan;
+    const plan = window.__stackPlan;
+    const v = rb.state.vehicle;
+    const x = v.x, z = v.z, y = v.y ?? 0;
+    const overhead = [];
+    for (const m of plan.megastructures ?? []) for (const vol of m.volumes) {
+      if (x >= vol.minX && x <= vol.maxX && z >= vol.minZ && z <= vol.maxZ && vol.y0 > y + 1 && vol.y0 <= y + 40) { overhead.push(`ceiling@${(vol.y0 - y).toFixed(0)}m`); break; }
+    }
+    const sample = { y: 0, gx: 0, gz: 0 };
+    rb.layout.surface.sample(x, z, y + 45, sample);
+    if (sample.y > y + 1) overhead.push(`deck@${(sample.y - y).toFixed(0)}m`);
+    for (const sb of plan.skybridges ?? []) {
+      const dx = sb.bx - sb.ax, dz = sb.bz - sb.az, len = Math.hypot(dx, dz);
+      const t = ((x - sb.ax) * dx + (z - sb.az) * dz) / (len * len);
+      const px2 = sb.ax + dx * t, pz2 = sb.az + dz * t;
+      if (t > 0 && t < 1 && Math.hypot(px2 - x, pz2 - z) < 12 && sb.y > y + 1 && sb.y < y + 40) { overhead.push(`skybridge@${(sb.y - y).toFixed(0)}m`); break; }
+    }
+    const P = createProjection();
+    for (const tag of plan.portalFrames ?? []) {
+      const rbn = plan.ribbons.find((q) => q.tag === tag);
+      if (!rbn) continue;
+      projectOntoPath(rbn.path, x, z, P);
+      if (P.dist > P.halfWidth || Math.abs(P.y - y) > 1) continue;
+      const inPassage = (plan.passages ?? []).some((pd) => pd.tag === tag && P.s > pd.s0 - 12 && P.s < pd.s1 + 12);
+      if (!inPassage) overhead.push('frame');
+    }
+    return { sky, overhead, width: w, height: h };
+  });
+}
 
 const candidates = [
   process.env.RB_BROWSER,
@@ -183,8 +269,10 @@ try {
       const s = window.__rb.state.vehicle;
       return { x: +s.x.toFixed(1), y: +(s.y ?? 0).toFixed(2), z: +s.z.toFixed(1) };
     });
-    out.views.push({ ...v, at, file, metrics: m });
-    console.log(`${v.name}: at (${at.x}, ${at.y}, ${at.z})  ${m.drawCalls} draws, ${m.triangles} tris, ${m.fps.toFixed(1)} fps, gpu ${m.gpuMs.toFixed(2)} ms`);
+    const frame = mode === 'stack' ? await measureFrame(page) : null;
+    out.views.push({ ...v, at, file, metrics: m, ...(frame ? { frame } : {}) });
+    const extra = frame ? `  sky ${(frame.sky * 100).toFixed(1)}%  overhead ${frame.overhead.join('+') || 'none'}` : '';
+    console.log(`${v.name}: at (${at.x}, ${at.y}, ${at.z})  ${m.drawCalls} draws, ${m.triangles} tris, ${m.fps.toFixed(1)} fps, gpu ${m.gpuMs.toFixed(2)} ms${extra}`);
   }
   // Free-camera close-ups: the chase camera is pinned to the car, so for inspecting a wall
   // or a plant we drive the scene camera ourselves. A requestAnimationFrame callback

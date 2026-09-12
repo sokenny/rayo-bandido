@@ -4,8 +4,15 @@ import { makeRng } from './meshBuilder';
 import type { EnvBuilders } from './builders';
 import { paintSurface } from './graffiti';
 
-/** Shared facade atlas and merged static equipment: no lights, textures or physics per prop. */
+/**
+ * Shared facade atlas and merged static equipment: no lights, textures or physics per prop.
+ *
+ * `plan.megaDetail === 'lean'` (the Stack) stops after the kit's facades: its buildings are
+ * many and the roads inside them carry the detail (`passageBuilder.ts`), where the Bay's six
+ * blocks wear ribs, equipment and ledges on every face.
+ */
 export function buildMegastructures(b: EnvBuilders): void {
+  const lean = b.plan.megaDetail === 'lean';
   for (const m of b.plan.megastructures ?? []) {
     const rng = makeRng(plotSeed(m.footprint.minX, m.footprint.minZ));
     buildBuilding(b, m.footprint, {
@@ -13,6 +20,7 @@ export function buildMegastructures(b: EnvBuilders): void {
       height: Math.max(...m.volumes.map((v) => v.y1)), detail: 'mid', archetype: 'twin',
       street: [true, false, true, false],
     }, rng);
+    if (lean) continue;
     for (const v of m.volumes) {
       const w = v.maxX - v.minX, d = v.maxZ - v.minZ;
       if (w < 4 || d < 4 || v.y1 - v.y0 < 4) continue;

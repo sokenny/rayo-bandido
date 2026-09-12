@@ -778,8 +778,10 @@ function roofFurniture(b: EnvBuilders, bld: Building, spec: BuildingSpec, rng: (
     return;
   }
 
-  // Mechanical blocks, off to one side so the crown keeps the centre.
-  if (rng() < KIT.mechChance && w > 4 && d > 4) {
+  // Mechanical blocks, off to one side so the crown keeps the centre. A world that would
+  // rather spend its triangles on the structure the driver is inside turns these down.
+  const clutter = b.plan.roofClutter ?? 1;
+  if (rng() < KIT.mechChance * clutter && w > 4 && d > 4) {
     const n = 1 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
       const bw = 1.6 + rng() * Math.min(5, w * 0.35);
@@ -790,7 +792,7 @@ function roofFurniture(b: EnvBuilders, bld: Building, spec: BuildingSpec, rng: (
     }
   }
   // Antennas: a cluster of thin masts, one of them lit once in a while.
-  if (h > 18 && rng() < KIT.antennaChance) {
+  if (h > 18 && rng() < KIT.antennaChance * clutter) {
     const n = crownKind === 'spire' ? 1 : 1 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
       const mh = 3 + rng() * (h > 60 ? 14 : 8);

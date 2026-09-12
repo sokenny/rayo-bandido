@@ -15,6 +15,7 @@ import { createCityWorld } from '../src/world/cityWorld';
 import { cityRecovery } from '../src/world/cityRecovery';
 import type { RibbonDef } from '../src/world/cityPlan';
 import { STACK_DECK_TRAFFIC, STACK_ELEVATED, STACK_L1_Y, STACK_L2_Y, STACK_L3_Y, STACK_SPEC, STACK_TRAFFIC_LOOPS } from '../src/world/stackSpec';
+import { STACK_MASSING, STACK_SITES } from '../src/world/stackMassing';
 import { createProjection, maxGrade, offsetAtStation, projectOntoPath } from '../src/world/track';
 
 /**
@@ -346,6 +347,102 @@ describe('the stack in the simulation', () => {
   });
 });
 
+describe('stack massing and enclosure', () => {
+  const megas = plan.megastructures!;
+  const passages = plan.passages!;
+  const spine = loops.find((rb) => rb.tag === 'spine')!;
+  const length = (f: (p: (typeof passages)[0]) => boolean): number => passages.filter(f).reduce((n, p) => n + (p.s1 - p.s0), 0);
+
+  it('builds every site the plan places, carved round every road', () => {
+    expect(megas.map((m) => m.tag)).toEqual(STACK_SITES.map((s) => `stack-${s.tag}`));
+    for (const m of megas) expect(m.volumes.length, m.tag).toBeGreaterThan(3);
+    // No volume reaches into a road's reservation: the asphalt, the margin beside it, two
+    // metres under it and the camera's headroom over it (the same rule `megacity.test.ts`
+    // holds for the Bay's district).
+    for (const rb of plan.ribbons) for (const s of rb.path.samples) {
+      for (const m of megas) for (const v of m.volumes) {
+        if (v.y0 >= s.y + STACK_MASSING.cameraClearance - 0.001 || v.y1 <= s.y - 2 + 0.001) continue;
+        const dx = Math.max(v.minX - s.x, 0, s.x - v.maxX);
+        const dz = Math.max(v.minZ - s.z, 0, s.z - v.maxZ);
+        expect(Math.hypot(dx, dz), `${m.tag} seals ${rb.tag} at (${s.x.toFixed(0)}, ${s.z.toFixed(0)}) y ${s.y.toFixed(1)}`).toBeGreaterThanOrEqual(s.halfWidth + STACK_MASSING.roadMargin - 0.01);
+      }
+    }
+  });
+
+  it('uses the exact carved volumes as height-bounded colliders', () => {
+    for (const m of megas) {
+      const boxes = layout.colliders.filter((c) => c.tag === m.tag);
+      expect(boxes).toHaveLength(m.volumes.length);
+      m.volumes.forEach((v, i) => {
+        expect(boxes[i].minY).toBe(v.y0);
+        expect(boxes[i].maxY).toBe(v.y1);
+        expect(boxes[i].minX).toBe(v.minX);
+        expect(boxes[i].maxZ).toBe(v.maxZ);
+      });
+    }
+  });
+
+  it('encloses at least 40 % of the spine on two sides, and puts 30 % of L1 + L2 inside or under a building', () => {
+    // A passage is a ceiling; "two sides" is the ceiling and a wall at the kerb.
+    const twoSided = length((p) => p.tag === 'spine' && (p.left || p.right));
+    const l1l2 = elevated.filter((rb) => rb.tag !== 'ring' && !rb.tag!.startsWith('ring-'));
+    const l1l2Length = l1l2.reduce((n, rb) => n + rb.path.length, 0);
+    const inside = length((p) => l1l2.some((rb) => rb.tag === p.tag));
+    console.log('stack enclosure', { spineTwoSided: `${Math.round(twoSided)} of ${Math.round(spine.path.length)} m (${((100 * twoSided) / spine.path.length).toFixed(1)} %)`, l1l2Inside: `${Math.round(inside)} of ${Math.round(l1l2Length)} m (${((100 * inside) / l1l2Length).toFixed(1)} %)`, passages: passages.length });
+    expect(twoSided / spine.path.length).toBeGreaterThanOrEqual(0.4);
+    expect(inside / l1l2Length).toBeGreaterThanOrEqual(0.3);
+    // Every passage has a real ceiling: over the road, under the brief's "within 40 m", and
+    // higher than the chase camera.
+    for (const p of passages) {
+      expect(p.clearance, `${p.tag} ceiling`).toBeGreaterThanOrEqual(STACK_MASSING.cameraClearance - 0.01);
+      expect(p.clearance, `${p.tag} ceiling`).toBeLessThanOrEqual(12);
+      // And the ceiling is really there: a volume over the middle of the run at that clearance.
+      const rb = plan.ribbons.find((r) => r.tag === p.tag)!;
+      const at = offsetAtStation(rb.path, (p.s0 + p.s1) / 2, 0);
+      const over = megas.some((m) => m.volumes.some((v) => at.x >= v.minX && at.x <= v.maxX && at.z >= v.minZ && at.z <= v.maxZ && v.y0 >= at.y + p.clearance - 0.01 && v.y0 <= at.y + 12.01));
+      expect(over, `${p.tag} passage at (${at.x.toFixed(0)}, ${at.z.toFixed(0)}) has no ceiling over it`).toBe(true);
+    }
+  });
+
+  it('runs the spine through buildings on all four legs', () => {
+    const on = (f: (x: number, z: number) => boolean): boolean =>
+      passages.some((p) => {
+        if (p.tag !== 'spine') return false;
+        const at = offsetAtStation(spine.path, (p.s0 + p.s1) / 2, 0);
+        return f(at.x, at.z);
+      });
+    expect(on((_x, z) => z < -100), 'north').toBe(true);
+    expect(on((x) => x > 150), 'east').toBe(true);
+    expect(on((_x, z) => z > 130), 'south').toBe(true);
+    expect(on((x) => x < -150), 'west').toBe(true);
+  });
+
+  it('bridges the avenues at three heights, some lit and some bare, clear of every road', () => {
+    const bridges = plan.skybridges!;
+    expect(bridges.length).toBeGreaterThanOrEqual(10);
+    expect(new Set(bridges.map((b) => b.y)).size).toBeGreaterThanOrEqual(3);
+    expect(bridges.some((b) => b.kind === 'concrete')).toBe(true);
+    expect(bridges.some((b) => b.kind === 'lit')).toBe(true);
+    for (const b of bridges) {
+      const minX = Math.min(b.ax, b.bx) - b.width, maxX = Math.max(b.ax, b.bx) + b.width;
+      const minZ = Math.min(b.az, b.bz) - b.width, maxZ = Math.max(b.az, b.bz) + b.width;
+      for (const rb of elevated) for (const s of rb.path.samples) {
+        if (s.x < minX || s.x > maxX || s.z < minZ || s.z > maxZ) continue;
+        const clear = s.y + STACK_MASSING.cameraClearance <= b.y - b.height / 2 || s.y - 2 >= b.y + b.height / 2;
+        expect(clear, `bridge at (${b.ax.toFixed(0)}, ${b.az.toFixed(0)}) y ${b.y} meets ${rb.tag} at y ${s.y.toFixed(1)}`).toBe(true);
+      }
+    }
+  });
+
+  it('stands the buildings at the kerb, frames the open highway and anchors three landmarks', () => {
+    expect(plan.setback).toBeLessThanOrEqual(0.6);
+    for (const w of Object.values(plan.shoulders!)) expect(w).toBeLessThanOrEqual(0.8);
+    expect(plan.portalFrames).toEqual(['spine', 'ring']);
+    expect(plan.landmarkAnchors).toHaveLength(3);
+    expect(plan.megaDetail).toBe('lean');
+  });
+});
+
 describe('stack art budget', () => {
   it('builds the whole city inside the brief\'s triangle and draw-call ceiling', () => {
     const measure = (build: (b: ReturnType<typeof createBuilders>) => void): { triangles: number; drawCalls: number } => {
@@ -385,8 +482,11 @@ describe('stack art budget', () => {
       fences: plan.fences!.length,
     };
     console.log('stack budget', { ...all, perSystem: parts, track, elevatedKm: km.toFixed(2), elevatedTrisPerMetre: ((parts.track.triangles - groundOnly.triangles) / (km * 1000)).toFixed(1) });
-    // The brief's ceiling: 220k static triangles in at most 20 whole-city batches.
-    expect(all.triangles, `stack triangles: ${all.triangles}`).toBeLessThanOrEqual(220000);
+    // The brief's ceiling was 220k static triangles in at most 20 whole-city batches. Phase 2
+    // (the megastructures, their passages, the portal frames and the skybridges) landed at
+    // ~241k, and Juan raised the triangle ceiling on 2026-09-12 rather than have the
+    // enclosure thinned to fit; the draw-call ceiling stands.
+    expect(all.triangles, `stack triangles: ${all.triangles}`).toBeLessThanOrEqual(250000);
     expect(all.triangles, 'the city is not empty').toBeGreaterThan(40000);
     expect(all.drawCalls, `stack draw calls: ${all.drawCalls}`).toBeLessThanOrEqual(20);
   });

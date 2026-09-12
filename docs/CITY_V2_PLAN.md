@@ -335,3 +335,71 @@ and under the decks only (−10k), or fewer street lamps. Juan's call at the Pha
 points the frame is 53-449 draw calls with the fleet, 235k-312k triangles; the worst is
 `gran-via-west`, looking down the corridor at both decks' traffic. GPU time 2-3.5 ms at 1440x900
 DPR 1. Not yet a problem on this machine; the fallback (130 cars by level length) stands.
+
+## 16. Phase 2 amendments (2026-09-12)
+
+What Phase 2 built, and where it departed from §6-§8. The road network is untouched.
+
+**The buildings are carved, not placed.** `src/world/stackMassing.ts` lays twelve footprints by
+hand over the spine, the ring, the deck and the two corridors, gives each a plain massing (a
+podium and a shaft, a slab, or one block for the bridges) and hands it to the same carve the
+Bay's district uses (`cityMegastructures.ts`, generalised): every ribbon reserves its asphalt,
+2.4 m beside it and 8.5 m over it, from 2 m under the surface up. What survives is the
+building — walls at the kerb, a ceiling over the lane, a slab across an interchange with the
+decks and ramps passing through it at their own heights — and the same boxes are the
+colliders, so no road can be sealed by a building. Two additions to the carve, both off for
+the Bay: a straight road on the diagonal is cut as ONE box across the footprint instead of a
+box per 8 m sample (a per-sample cut leaves a sawtooth wall beside the lane), and pieces
+thinner than a metre in plan are dropped (the blades left between two reservations 17 m
+apart; 140 of them, 7k triangles, nothing anyone would see as a wall).
+
+**Passages are derived, not drawn.** A `PassageDef` is a run of a ribbon with a carved volume
+over its centreline within 12 m of the road (`findPassages`): its clearance, and whether a
+wall stands within 14 m of the asphalt edge on each side. `env/passageBuilder.ts` dresses them
+(pale soffit strip, ribs every 9 m, two service runs, an amber strip lamp every 12 m with its
+patch on the ceiling and its pool on the road, amber wall bars every 14 m on a walled side,
+one red bar per passage) and puts portal frames every 30 m over the spine and the ring where
+they are outside a passage, a merge or a crossing. 32 passages: spine 540 m (44.5 %, all of
+it with a wall), deck, ramps and streets the rest; L1 + L2 inside or under a building 30.8 %.
+
+**The corridors.** §6 planned "portal frames and skybridge boxes over the deck" for the deck's
+share. In the corridors the roads run 17-18 m apart and each reserves 11-13 m, so nothing
+solid survives between them at road height: a building across a corridor is a slab over the
+whole interchange on a tower each side. Three sites do this (`east-n`, `east-s`, `west-s`),
+which is where the deck's coverage comes from and is the highway-inside-a-structure of the
+reference; the deck's diagonals get two more bridge buildings (`deck-nw`, `deck-s`). The
+plan's "north A/B/C, east, south, west" spine passages are all built; the south one is 62 m
+through a straight-walled building the diagonal drifts across.
+
+**Skybridges.** `findSkybridges` takes the spec's tiers (16 / 27 / 40 m), a concrete share
+(two in five), a step (45 m) and a cap (28), lands in the megastructures' ground masses as
+well as the blocks, tries 14 m either way when a station falls on a crossing, and allows a
+bridge under the ring when the ring is 14 m or more above it. Twelve placed over six streets.
+
+**Zero setback.** Block shoulders 0.6 m (0.4 in the old town, 0.3 in the cuts), the blocks
+keep 0.5 m of slab in front of their walls (`CityPlan.setback`), nothing is paved beside the
+streets. Rooftop clutter at 0.35 of the Bay's (`roofClutter`), three landmark anchors at the
+far corners (`landmarkAnchors`), the megastructures in the kit's facades only (`megaDetail:
+'lean'`).
+
+**Budget.** 241,432 static triangles in 17 draw calls: megastructures 23k, passages 11.6k,
+frames 1.5k, skybridges under 1k, against the 217k Phase 1 left; zero setback took 11k off
+the reclamation (no ledges to plant). Juan raised the 220k ceiling during this run rather
+than have the enclosure thinned to fit; `tests/stackWorld.test.ts` now holds 250k. The
+fallbacks of §15 (ribs at 21 m, columns at 20 m, fewer lamps) stay unused. GPU time at the
+fourteen views 1.7-2.4 ms at 1440x900 DPR 1; 60 fps in the capture harness, 120 fps in the
+desktop app's own window at DPR 1.5.
+
+**Vantages (§11).** Two moved: `spine-passage-south` to (-47, 24, 169) so the car stands inside
+the south passage rather than at its mouth, `st-centre-south` to (32, 0, 183), under the
+spine's south corner with the deck's bridge building ahead; `gran-via-west` to x -234. Frame
+test: sky 0.0 / 0.9 / 0.0 / 0.0 % at 1-4 (8.0 at the ramp, 1.1 on the avenue); structure
+within 40 m overhead at 1, 2, 4, 5 (a ceiling 9 m over the two passages and the ramp, the
+spine 24 m over st-centre); the far end fogged in all six; no map edge in any.
+
+**Scripts.** `stackSpec.ts` now has one value import (`./stackMassing.ts`, which imports
+`./cityMegastructures.ts`), spelt with the extension so `stack-preview.mjs` and
+`city-shots.mjs` still load the spec under plain Node; `tsconfig.json` allows `.ts`
+extensions (`allowImportingTsExtensions`, with `noEmit`). `city-shots.mjs --mode stack`
+measures the frame test in the page: the sky share by a mask render with the atmosphere
+hidden, and what stands overhead from the plan's own geometry.

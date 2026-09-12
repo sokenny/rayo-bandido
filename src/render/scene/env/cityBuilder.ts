@@ -25,10 +25,13 @@ const SIDEWALK = 3.4;
  * gives way, the pencil tower stays. The greenery reads the same numbers, so nothing is ever
  * planted inside a facade.
  */
-export function blockSetback(w: number, d: number): { x: number; z: number } {
+export function blockSetback(w: number, d: number, max = SIDEWALK): { x: number; z: number } {
+  // A world that stands its buildings at the kerb (`CityPlan.setback`) keeps less than the
+  // 0.8 m floor: the floor is there so the Bay's thin plots keep a ledge, not to stop it.
+  const floor = Math.min(0.8, max);
   return {
-    x: Math.min(SIDEWALK, Math.max(0.8, (w - 6) / 2)),
-    z: Math.min(SIDEWALK, Math.max(0.8, (d - 6) / 2)),
+    x: Math.min(max, Math.max(floor, (w - 6) / 2)),
+    z: Math.min(max, Math.max(floor, (d - 6) / 2)),
   };
 }
 
@@ -301,7 +304,7 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
   b.concrete.color(PAL.sidewalk, blk.zone === 'jdm' ? 0.8 : 1);
   b.concrete.planeY(cx, 0.006, cz, w - 1.7, d - 1.7);
 
-  const setback = blockSetback(w, d);
+  const setback = blockSetback(w, d, b.plan.setback ?? SIDEWALK);
   const inner: Rect2 = {
     minX: blk.minX + setback.x,
     maxX: blk.maxX - setback.x,
@@ -356,8 +359,29 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
  * each given one of the kit's silhouettes in turn and a head above the field. Deterministic:
  * the same plots every time, unless the block grid changes.
  */
-function assignLandmarks(plots: Plot[]): void {
+function assignLandmarks(plots: Plot[], anchors?: ReadonlyArray<{ x: number; z: number; kind: number }>): void {
   const L = BLOCKS.landmarks;
+  if (anchors) {
+    // Placed by hand: the nearest plot big enough to each anchor takes that silhouette, and
+    // stands at least three quarters of the landmark ceiling so it reads on the horizon.
+    for (const a of anchors) {
+      let best: Plot | null = null;
+      let bestD = 90;
+      for (const p of plots) {
+        if (p.blk.maxHeight !== undefined || p.spec.landmark !== undefined || Math.min(p.maxX - p.minX, p.maxZ - p.minZ) < 10) continue;
+        const d = Math.hypot((p.minX + p.maxX) / 2 - a.x, (p.minZ + p.maxZ) / 2 - a.z);
+        if (d < bestD) {
+          bestD = d;
+          best = p;
+        }
+      }
+      if (!best) continue;
+      best.spec.landmark = a.kind;
+      best.spec.height = Math.min(L.maxHeight, Math.max(best.height * L.scale, L.maxHeight * 0.75));
+      best.height = best.spec.height;
+    }
+    return;
+  }
   const candidates = plots
     .filter((p) => p.blk.massing >= 3 && p.blk.maxHeight === undefined && Math.min(p.maxX - p.minX, p.maxZ - p.minZ) >= L.minSide)
     .map((p) => ({ p, score: (p.maxX - p.minX) * (p.maxZ - p.minZ) * (p.blk.massing === 4 ? 1.3 : 1) }))
@@ -482,7 +506,7 @@ function buildLinks(b: EnvBuilders, plots: Plot[]): void {
 function buildBlocks(b: EnvBuilders): void {
   const plots: Plot[] = [];
   for (const blk of b.plan.blocks) plots.push(...planBlock(b, blk));
-  assignLandmarks(plots);
+  assignLandmarks(plots, b.plan.landmarkAnchors);
   for (const p of plots) buildPlot(b, p);
   buildLinks(b, plots);
 }

@@ -14,7 +14,7 @@ images with the Read tool before anything else, and again before every phase rep
 |---|---|---|
 | 0 — Plan | approved | `docs/CITY_V2_PLAN.md` + `docs/city-v2-plan-ribbons.png` (from `scripts/stack-preview.mjs`); PROGRESS.md 2026-09-12 |
 | 1 — Roads and levels | approved | `src/world/stackSpec.ts` + `createCityWorld(spec)`; `tests/stackWorld.test.ts` (24); `scripts/city-drive.mjs --mode stack` 13 stages, 0 collisions; `artifacts/stack-phase1/phase1-*.png` (14 shots, metrics in `phase1.json`); PROGRESS.md 2026-09-12 |
-| 2 — Massing and enclosure | not started | six vantage shots + metrics vs references |
+| 2 — Massing and enclosure | approved | `src/world/stackMassing.ts` (12 carved sites, 32 passages) + `env/passageBuilder.ts`; `tests/stackWorld.test.ts` (30); `artifacts/stack-phase2/frame-test.html` / `.png` (six vantages beside the references, 1:1 crops, sky % and overhead per view), `phase2-*.png` (14), `phase2.json`; `city-drive.mjs --mode stack` 13 stages, 0 collisions; PROGRESS.md 2026-09-12 |
 | 3 — Surfaces and light | not started | six vantage shots, before/after |
 | 4 — Missions move in | not started | separate brief |
 

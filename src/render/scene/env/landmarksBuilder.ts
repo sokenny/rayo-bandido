@@ -284,6 +284,21 @@ function buildSkybridge(b: EnvBuilders, s: SkybridgeDef, rng: () => number): voi
   const cz = (s.az + s.bz) / 2;
   const y0 = s.y - s.height / 2;
   const y1 = s.y + s.height / 2;
+  if (s.kind === 'concrete') {
+    // Bare concrete: an occupied slab between two towers, board-marked, a pale parapet along
+    // its top edge and one dim amber line under it. No windows: the lit ones are the other kind.
+    b.wall.color(PAL.concrete, 1.15);
+    b.wall.orientedBox(cx, cz, dx, dz, len, s.width, y0, y1 - 0.5, { bottom: true });
+    b.concrete.color(PAL.curb, 1.6);
+    b.concrete.orientedBox(cx, cz, dx, dz, len, s.width + 0.2, y1 - 0.5, y1);
+    const nx = -dz;
+    const nz = dx;
+    const hw = s.width / 2 - 0.4;
+    b.neon.color(PAL.neonAmber, 0.45);
+    b.neon.tube(s.ax + nx * hw, y0 - 0.06, s.az + nz * hw, s.bx + nx * hw, y0 - 0.06, s.bz + nz * hw, 0.12);
+    groundGlow(b, cx, cz, Math.abs(dx) > 0.5 ? len : s.width * 3, Math.abs(dx) > 0.5 ? s.width * 3 : len, PAL.neonAmber, 0.05);
+    return;
+  }
   // Body as one ribbon of windows in the district's light, floor and roof slabs in dark metal.
   const cell = facadeCell('ribbon');
   const lights = s.zone === 'corporate' ? PAL.windowsCorp : s.zone === 'jdm' ? PAL.windowsJdm : PAL.windowsUrban;

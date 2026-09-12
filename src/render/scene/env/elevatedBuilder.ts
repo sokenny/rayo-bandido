@@ -95,7 +95,7 @@ function vary(m: number, salt: number): number {
  *
  * `(dx, dz)` is the unit direction along the deck; `len` runs along it and `wid` across.
  */
-function downQuad(
+export function downQuad(
   mb: MeshBuilder,
   cx: number,
   cy: number,

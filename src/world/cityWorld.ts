@@ -227,7 +227,8 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   /* ---------------------------------------------------------- skybridges */
 
-  const skybridges = findSkybridges(ground, elevated, blocks, zoneAt, spec.skybridgeStreets, spec.downtown);
+  // The megastructures' ground masses count as buildings to land a bridge in.
+  const skybridges = findSkybridges(ground, elevated, [...blocks, ...groundMasses], zoneAt, spec.skybridgeStreets, spec.downtown, spec.skybridges);
 
   /* ---------------------------------------------------------- bus stops */
 
@@ -440,6 +441,10 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     rushMarkers: spec.rushSites.map((site) => ({ ...site })),
     startLine: null,
     checkpoints: [],
+    // Roads inside the buildings, and the frames over the open ones (Phase 2 of the Stack).
+    passages: megastructures.flatMap((m) => m.passages ?? []),
+    ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
+    ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),
     zoneAt,
     isRoad(x, z, pad = 0) {
@@ -734,6 +739,8 @@ function cableRuns(ground: RibbonDef[], opts: BlockOptions): Array<[number, numb
  * inside the facades. Nothing under a viaduct or the skyway. Higher and more often inside
  * `downtown`.
  */
+const SKY_PROJ = createProjection();
+
 function findSkybridges(
   ground: RibbonDef[],
   elevated: RibbonDef[],
@@ -741,8 +748,11 @@ function findSkybridges(
   zoneAt: (x: number, z: number) => ZoneId,
   wanted: readonly string[],
   downtownRect: Rect | null,
+  style?: CitySpec['skybridges'],
 ): SkybridgeDef[] {
   const out: SkybridgeDef[] = [];
+  const max = style?.max ?? 22;
+  const step = style?.step ?? 55;
   const blockAt = (x: number, z: number): BlockRect | null => {
     for (const b of blocks) if (inRect(b, x, z)) return b;
     return null;
@@ -751,17 +761,36 @@ function findSkybridges(
     const rb = ground.find((g) => g.tag === tag);
     if (!rb) continue;
     const path = rb.path;
-    for (let s = 50; s < path.length - 50; s += 55) {
+    for (let s0 = 50; s0 < path.length - 50; s0 += step) {
+      // The Bay thins its bridges by chance; a spec with its own tiers wants them over every
+      // avenue and is bounded by `max` instead.
+      if (!style && hash01(s0, path.length) > (downtownRect !== null && inRect(downtownRect, offsetAtStation(path, s0, 0).x, offsetAtStation(path, s0, 0).z) ? 0.75 : 0.5)) continue;
+      // A station that lands on a crossing has no building either side of it; a spec with
+      // tiers tries a little way along before giving the station up.
+      const tries = style ? [0, 14, -14] : [0];
+      let placed = false;
+      for (const shift of tries) {
+      if (placed) break;
+      const s = s0 + shift;
+      if (s < 50 || s > path.length - 50) continue;
       const c = offsetAtStation(path, s, 0);
       const downtown = downtownRect !== null && inRect(downtownRect, c.x, c.z);
-      if (hash01(s, path.length) > (downtown ? 0.75 : 0.5)) continue;
       const zone = zoneAt(c.x, c.z);
       if (zone === 'jdm') continue;
       const nx = -c.tz;
       const nz = c.tx;
-      // Nothing overhead: a bridge under a deck reads as a mistake.
+      // The Bay's rule: higher inside downtown. A spec with tiers takes one of them, and its
+      // share of the bridges are bare concrete rather than lit.
+      const roll = hash01(s * 3, path.length);
+      const y = style ? style.heights[Math.floor(roll * style.heights.length) % style.heights.length] : downtown ? 22 + roll * 30 : 12 + roll * 8;
+      // Nothing overhead: a bridge under a deck reads as a mistake — unless the deck is a
+      // whole building's height above it, which is the Stack's ring over an avenue bridge.
       let overhead = false;
-      for (const e of elevated) if (isOnPath(e.path, c.x, c.z, 8)) overhead = true;
+      for (const e of elevated) {
+        if (!isOnPath(e.path, c.x, c.z, 8)) continue;
+        projectOntoPath(e.path, c.x, c.z, SKY_PROJ);
+        if (!style || SKY_PROJ.y < y + 14) overhead = true;
+      }
       if (overhead) continue;
       // The first block met walking out from the road edge on each side.
       const probe = (side: number): { blk: BlockRect; reach: number } | null => {
@@ -781,18 +810,21 @@ function findSkybridges(
       // Both blocks must be long enough along the street for the bridge to land in a building.
       const along = (blk: BlockRect): number => (Math.abs(c.tx) > 0.5 ? blk.maxX - blk.minX : blk.maxZ - blk.minZ);
       if (along(a) < 16 || along(b) < 16) continue;
-      const y = downtown ? 22 + hash01(s * 3, path.length) * 30 : 12 + hash01(s * 3, path.length) * 8;
+      const concrete = !!style && hash01(s * 7, path.length) < style.concreteShare;
       out.push({
         ax: c.x - nx * left.reach,
         az: c.z - nz * left.reach,
         bx: c.x + nx * right.reach,
         bz: c.z + nz * right.reach,
         y,
-        width: 3.6,
-        height: 3.2,
+        width: concrete ? 5.2 : 3.6,
+        height: concrete ? 4.4 : 3.2,
         zone,
+        ...(style ? { kind: concrete ? ('concrete' as const) : ('lit' as const) } : {}),
       });
-      if (out.length >= 22) return out;
+      placed = true;
+      if (out.length >= max) return out;
+      }
     }
   }
   return out;

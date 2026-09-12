@@ -2330,3 +2330,85 @@ visible-window reading at DPR 1 is still owed.
 - Bandido Bay untouched, but two things it shares changed behind defaults: `createReclaimField`
   takes an optional `neglect` and `buildRibbonLamps` an optional spacing. Both fall back to the
   numbers they had.
+
+## City v2 "The Stack" — Phase 2, massing and enclosure (2026-09-12)
+
+Phase 2 of `docs/CITY_V2_BRIEF.md`, at gate. 833 tests and the typecheck green, `vite build`
+clean. Bandido Bay's suites (`cityWorld`, `megacity`, `reclamation`, `buildingKit`) pass with
+the same numbers as before: its district still carves to the same 175/108/97/30/3/99 volumes
+and 76,536 triangles, mode `'city'` draws and collides exactly as it did.
+
+**Delivered.**
+
+- `src/world/stackMassing.ts` — twelve footprints placed by hand over the spine, the ring, the
+  deck and the two corridors, each given a plain massing and CARVED by every ribbon that crosses
+  it, using the Bay district's carve generalised in `cityMegastructures.ts` (`roadCuts`,
+  `carveVolumes`, `findPassages`; the Bay's `planMegastructures` calls the same code and is
+  byte-identical in its output). Every road reserves its asphalt, 2.4 m beside it and 8.5 m over
+  it; what survives is the building and the collider both. Two carve options, off for the Bay:
+  a straight diagonal road is cut as one box across the footprint (no sawtooth walls), and
+  pieces under a metre thick are dropped.
+- `PassageDef`: the 32 stretches of road that run under a carved ceiling, derived from the
+  volumes (clearance, and whether a wall stands within 14 m on each side).
+  `env/passageBuilder.ts` dresses them — soffit strip, ribs, two service runs, an amber strip
+  lamp every 12 m with its patch on the ceiling and its pool on the road, amber wall bars, one
+  red bar per passage — and puts a portal frame every 30 m over the open spine and ring.
+- Skybridges with tiers, a concrete kind and a cap (`CitySpec.skybridges`, `SkybridgeDef.kind`);
+  zero setback (`CityPlan.setback`, block shoulders 0.3-0.6 m); rooftop clutter at 0.35
+  (`roofClutter`); three landmark anchors at the far corners (`landmarkAnchors`); the
+  megastructures in the kit's facades only (`megaDetail: 'lean'`).
+- `tests/stackWorld.test.ts` +6: every site built and carved clear of every road's reservation,
+  the volumes as height-bounded colliders, the brief's two enclosure percentages, a spine
+  passage on all four legs, the skybridges' tiers and kinds and clearance, setback / frames /
+  landmarks, and the budget.
+- `scripts/city-shots.mjs --mode stack` now measures the frame test in the page: sky share by a
+  mask render (atmosphere hidden, every material unfogged white on black, black pixels counted)
+  and what stands overhead from the plan's own geometry. Two vantages moved (plan §16).
+
+**Measured against the brief.**
+
+| | |
+|---|---|
+| Spine enclosed on two sides (ceiling + a wall) | **540 of 1,213 m, 44.5 %** (brief: ≥ 40 %) |
+| L1 + L2 inside or under a building | **1,214 of 3,940 m, 30.8 %** (brief: ≥ 30 %) |
+| Skybridges | 12 over six streets, at 16 / 27 / 40 m, 5 bare concrete |
+| Static environment | **241,432 triangles, 17 draw calls** — megastructures 23k, passages 11.6k, frames 1.5k; reclamation −11k (nothing to plant at a zero setback) |
+| Sky, vantages 1-4 (must be < 15 %) | **0.0 / 0.9 / 0.0 / 0.0 %**; 8.0 % on the ramp, 1.1 % on the avenue |
+| Structure within 40 m overhead (four of six required) | **1, 2, 4, 5**: a ceiling 9 m over both spine passages and the ramp, the spine 24 m over st-centre |
+| Far end fogged, no map edge | all six |
+| Frame at the 14 views (1440x900 DPR 1, 184 cars in) | 44-439 draw calls, 259k-337k triangles, GPU 1.7-2.4 ms |
+| Frame rate | 60.0 fps at every view in the capture harness; **120 fps in the desktop app's own window** at pixel ratio 1.5 on a 1024x768 pane (more pixels than the brief's) |
+| Drive (`city-drive.mjs --mode stack`, traffic out) | 13 stages, L0 → L1 → L2 → L3 → L2 → L1 → L0, **0 collisions**, no console errors |
+
+Evidence: `artifacts/stack-phase2/frame-test.html` (and `.png`, 1500x5330) — each of the six
+vantages beside its reference image with three 1:1 crops; `phase2-<view>.png` for all 14 views
+with `?debug=1` on; sky, overhead and renderer metrics per view in `phase2.json`.
+
+**The budget.** Phase 1 left 3k under 220k; the enclosure needed ~36k. During this run Juan
+said the triangle ceiling can rise rather than have the enclosure thinned, so the Stack test
+now holds 250k and the plan's fallbacks (ribs at 21 m, columns at 20 m, fewer lamps) are unused.
+The draw-call ceiling of 20 stands at 17.
+
+**Honest notes for the gate.**
+
+- It is dark. Measured in `phase2-spine-passage-north.png`, the passage ceiling reads (16, 29,
+  29) and the walls (33, 27, 16) against the reference's mid-grey concrete with strong lamp
+  pools. The structure the reference shows is there; the light on it is Phase 3's job, and the
+  frame test's numbers pass without it.
+- The corridors (`east-n`, `east-s`, `west-s`) came out as slabs over the whole interchange on a
+  tower each side, not the plan's "portal frames and skybridge boxes over the deck": the roads
+  there run 17 m apart and each reserves 11-13 m, so nothing solid survives between them. It is
+  the reference's highway-inside-a-structure, but from `gran-via-west` the deck overhead hides
+  the spine, so the "three levels at once" street picture reads as one deck and a building.
+- The spine's rails still wear the Bay's per-zone strips (red/cyan alternating where the spine
+  runs outside the core), against the brief's "one red accent per view". Rail art is Phase 3.
+- Zero setback puts the kit's lit lobby bands at the driver's shoulder; at a grazing angle they
+  read as white streaks (`st-centre-south` before it was moved). Ground floors are Phase 3.
+- The 30.8 % for L1 + L2 is tight: the deck's share comes from the corridor slabs and two bridge
+  buildings; the deck's other diagonals run through the loops' 40-50 m fillets, where a footprint
+  would carve a sawtooth. Reachability is unchanged from Phase 1.
+- `tsconfig.json` now allows `.ts` extensions in imports (`allowImportingTsExtensions`, with
+  `noEmit`): `stackSpec.ts` imports the planner with its extension so `stack-preview.mjs` and
+  `city-shots.mjs` still load the spec under plain Node.
+- The uncommitted change to `src/ui/menuScreen.ts` / `src/styles.css` in the working tree (the
+  main-menu dossier height lock) predates this run and is not part of Phase 2.

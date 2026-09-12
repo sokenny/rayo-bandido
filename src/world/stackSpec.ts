@@ -1,6 +1,9 @@
 import type { CityRoadSpec, CitySpec, ElevatedRoadSpec } from './cityDef';
 import type { BlockOptions } from './cityGen';
 import type { Rect, ZoneId } from './cityPlan';
+// The one value import in this data module, spelt with its extension so the QA scripts can
+// still load the spec under plain Node (see `cityMegastructures.ts`).
+import { planStackMassing } from './stackMassing.ts';
 import type { TrackNode, TrackSpec } from './track';
 
 /**
@@ -217,16 +220,20 @@ function hash01(x: number, z: number): number {
 }
 
 /**
- * Phase 1 massing: plain `cityGen` blocks, the core banded tall, the old town low. Phase 2
- * replaces the core's plots with the megastructures and the zero-setback walls.
+ * The plain blocks between the megastructures (`stackMassing.ts`): the core banded tall, the
+ * old town low. ZERO SETBACK: the brief wants the buildings at the kerb, so the shoulder
+ * between a road's edge and the block is under a metre (the Bay's is 2.6-5) and the blocks
+ * keep half a metre of their own slab in front of their walls (`STACK_ART.setback`). Nothing
+ * is paved beside the streets: the kerb field does not pave a shoulder that narrow, which is
+ * the brief's "pavement only where a bus stop or a stall needs it".
  */
 export const STACK_BLOCK_OPTIONS: BlockOptions = {
   cell: 110,
   minCell: 11,
   axisSplit: true,
   mergeUpTo: 80,
-  shoulder: { corporate: 5, urban: 3.2, jdm: 2.6 },
-  alleyShoulder: 1.2,
+  shoulder: { corporate: 0.6, urban: 0.6, jdm: 0.4 },
+  alleyShoulder: 0.3,
   elevatedShoulder: 1.6,
   elevatedAbove: 2.5,
   massingFor(rect, zone) {
@@ -292,7 +299,29 @@ export const STACK_ART = {
   deckServices: 'lean' as const,
   lampSpacing: { street: 56, deck: 76 },
   neglect: 0.25,
+  /** Buildings at the kerb: half a metre of slab in front of a wall, not the Bay's 3.4. */
+  setback: 0.5,
+  /** Rooftop clutter is where the Bay spends triangles nobody drives past (brief, rule 6). */
+  roofClutter: 0.35,
+  /** The megastructures wear the kit's facades; the passages inside them carry the detail. */
+  megaDetail: 'lean' as const,
 };
+
+/**
+ * The three hand-drawn silhouettes on the horizon (`buildingKit`'s `LANDMARKS`: 0 spire,
+ * 2 blade, 3 twins), one in each far corner the core does not reach.
+ */
+export const STACK_LANDMARKS = [
+  { x: -240, z: -240, kind: 0 },
+  { x: 250, z: -250, kind: 2 },
+  { x: -250, z: 250, kind: 3 },
+];
+
+/**
+ * Skybridges between the towers over the avenues: three tiers, two in five bare concrete,
+ * the rest lit and occupied.
+ */
+export const STACK_SKYBRIDGES = { heights: [16, 27, 40], concreteShare: 0.4, max: 28, step: 45 };
 
 export const STACK_SPEC: CitySpec = {
   name: 'The Stack',
@@ -306,6 +335,12 @@ export const STACK_SPEC: CitySpec = {
   roads: STACK_ROADS,
   elevated: STACK_ELEVATED.map(({ tag, spec, lift }) => ({ tag, spec, lift })),
   blockOptions: STACK_BLOCK_OPTIONS,
+  // The city is one structure: the towers the spine, the ring and the deck run through.
+  planMegastructures: planStackMassing,
+  // Portal frames over every open stretch of the two highway levels.
+  portalFrames: ['spine', 'ring'],
+  landmarks: STACK_LANDMARKS,
+  skybridges: STACK_SKYBRIDGES,
   downtown: STACK_CORE,
   // Neon is rare in the references: no screen districts, no holograms, no drum of screens.
   neonDistricts: [],
@@ -317,7 +352,7 @@ export const STACK_SPEC: CitySpec = {
   powerLine: null,
   billboards: () => [],
   gates: () => [],
-  skybridgeStreets: ['av-central', 'av-gran-via', 'st-centre', 'st-north'],
+  skybridgeStreets: ['av-central', 'av-gran-via', 'st-centre', 'st-north', 'st-south', 'st-mid'],
   trafficLoops: STACK_TRAFFIC_LOOPS,
   deckTraffic: STACK_DECK_TRAFFIC,
   cruiseLoop: STACK_TRAFFIC_LOOPS[5].rect,
