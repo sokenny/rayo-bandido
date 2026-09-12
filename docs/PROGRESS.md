@@ -2179,3 +2179,38 @@ environment root, the district's geometry present inside `env-facade`/`env-props
 and downtown rendering from the viaduct and from the south approach. One small side effect,
 kept: the chunks' `glow` builder was never added to the scene, so the district's ground glow was
 silently dropped before and now draws with the city's.
+
+## City v2 "The Stack" — Phase 0, the plan (2026-09-12)
+
+Phase 0 of `docs/CITY_V2_BRIEF.md`, at gate. No game code changed; 803 tests and the
+typecheck green as before.
+
+**Delivered.** `docs/CITY_V2_PLAN.md` and `docs/city-v2-plan-ribbons.png` / `.svg`, both
+produced by the new `scripts/stack-preview.mjs`, which holds the draft road network as
+`track.ts` node lists and runs the same geometric checks `tests/cityWorld.test.ts` applies
+to the Bay: grades, drive-under clearance at every crossing, the merge rule for ramps, dead
+ends, plus reachability on a sample graph and a count of stacked crossings.
+
+**The network.** 600 x 600 m, no water, perimeter towers on four sides. L2 is a closed
+1,213 m spine through the middle of the core; L1 a closed 1,591 m deck that pinches through
+the centre in a hairpin and crosses under the spine four times; L3 a closed 713 m ring over
+the core; 21 streets (two avenues, a 170 m-radius sweeper, three cross streets, three curved
+connectors, seven cuts). Eight ramps, 1,691 m in all, in two vertical corridors on the west
+and east edges of the core where street, deck and spine run parallel 35 m apart, plus three
+ring ramps and a south ramp off the sweeper. All checks clear: peak grades 9.4–14.5 %,
+19 stacked crossings (six required), 47 % of the spine and 31 % of L1+L2 marked for
+enclosure in Phase 2.
+
+**Measured against the brief, honestly.** "Every level reachable within 400 m" cannot be
+met in the ramp-included sense (a 12 m rise at ≤ 17 % is ≥ 170 m of ramp by itself); the
+plan meets it as "a level change starts within 240 m anywhere on L2/L3, 384 m on L1" and
+puts the choice to Juan. Triangles: Bandido Bay measured at 268.8k / 19 draw calls, with the
+elevated structure at ~27 triangles per metre; 5.2 km of elevated road at that rate is
+~140k on its own and the naive whole-city extrapolation is ~335k. The plan budgets 210k
+with a leaner deck profile and names the fallbacks; Phase 1 measures the real cost of the
+roads before any massing exists. Traffic scaled by length is ~180 cars against 126 today,
+flagged because the fleet is not instanced.
+
+**Not verified.** Nothing has been rendered in the game yet; the picture is the ribbons
+only. The per-metre budget numbers are derived from the Bay's totals, not measured per
+builder on the new network.
