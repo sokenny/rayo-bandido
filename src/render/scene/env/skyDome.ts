@@ -262,13 +262,21 @@ void main() {
  */
 const RADIUS = 500;
 
-export function createSkyDome(quality: SkyQuality): SkyDome {
+/** The three gradient colours a palette may substitute for `ATMOSPHERE`'s (`Palette.sky`). */
+export interface SkyColors {
+  zenith: number;
+  middle: number;
+  horizon: number;
+}
+
+export function createSkyDome(quality: SkyQuality, colors?: SkyColors): SkyDome {
   const A = ATMOSPHERE;
+  const gradient = (): SkyColors => colors ?? { zenith: A.zenith, middle: A.middle, horizon: A.horizon };
   const uniforms: SkyUniforms = {
     uTime: { value: 0 },
-    uZenith: { value: new THREE.Color(A.zenith) },
-    uMiddle: { value: new THREE.Color(A.middle) },
-    uHorizon: { value: new THREE.Color(A.horizon) },
+    uZenith: { value: new THREE.Color(gradient().zenith) },
+    uMiddle: { value: new THREE.Color(gradient().middle) },
+    uHorizon: { value: new THREE.Color(gradient().horizon) },
     uFog: { value: new THREE.Color(A.fogColor) },
     uCloudDark: { value: new THREE.Color(A.cloudDark) },
     uCloudLight: { value: new THREE.Color(A.cloudLight) },
@@ -313,9 +321,10 @@ export function createSkyDome(quality: SkyQuality): SkyDome {
   mesh.matrixWorldAutoUpdate = false;
 
   function refresh(): void {
-    uniforms.uZenith.value.set(A.zenith);
-    uniforms.uMiddle.value.set(A.middle);
-    uniforms.uHorizon.value.set(A.horizon);
+    const g = gradient();
+    uniforms.uZenith.value.set(g.zenith);
+    uniforms.uMiddle.value.set(g.middle);
+    uniforms.uHorizon.value.set(g.horizon);
     uniforms.uCloudDark.value.set(A.cloudDark);
     uniforms.uCloudLight.value.set(A.cloudLight);
     uniforms.uPollutionColor.value.set(A.pollutionColor);

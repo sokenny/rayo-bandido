@@ -1,6 +1,7 @@
 import { onRibbonAtLevel } from './cityGen';
-import { inRect, type CityPlan, type KerbField, type Rect, type RibbonDef } from './cityPlan';
-import { segmentCount } from './track';
+import { inRect, type CityPlan, type KerbField, type Rect, type RibbonDef, type ZoneId } from './cityPlan';
+import { createRectIndex } from './spatialIndex';
+import { pathBounds, segmentCount } from './track';
 
 /**
  * The pavement beside every ground-level street: which stretches carry it, and how wide each
@@ -41,15 +42,23 @@ interface Layer {
   widthC: Float32Array;
 }
 
-export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Shoulders, blocks: readonly Rect[] = []): KerbField {
+export function createKerbField(
+  ribbons: readonly RibbonDef[],
+  shoulders: Shoulders,
+  blocks: readonly Rect[] = [],
+  /** The shoulder at a point, when the world's districts do not all keep the zone's (`BlockOptions.shoulderAt`). */
+  shoulderAt?: (x: number, z: number, zone: ZoneId) => number,
+): KerbField {
   const shoulderOf = (rb: RibbonDef, i: number): number => {
     const s = rb.path.samples[i];
-    const w = rb.kind === 'alley' ? shoulders.alley : shoulders[s.zone];
+    const w = rb.kind === 'alley' ? shoulders.alley : shoulderAt ? shoulderAt(s.x, s.z, s.zone) : shoulders[s.zone];
     return w < MIN_SHOULDER ? 0 : w;
   };
 
+  const index = createRectIndex(blocks);
   const solidAt = (x: number, z: number): boolean => {
-    for (let i = 0; i < blocks.length; i++) if (inRect(blocks[i], x, z)) return true;
+    const near = index.at(x, z);
+    for (let i = 0; i < near.length; i++) if (inRect(near[i], x, z)) return true;
     return false;
   };
 
@@ -58,15 +67,30 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
    * face of a block — or, past the zone's own shoulder, the asphalt of some other street. -1
    * when it meets neither within reach, which means open ground rather than a kerb to a wall.
    */
-  const reachAt = (rb: RibbonDef, y: number, x: number, z: number, nx: number, nz: number, edge: number, base: number): number => {
+  /** The ribbons a march from this segment could meet: those whose box comes within its reach. Filled per segment. */
+  const nearby: RibbonDef[] = [];
+  const gather = (rb: RibbonDef, x0: number, z0: number, x1: number, z1: number, reach: number): void => {
+    nearby.length = 0;
+    const minX = Math.min(x0, x1) - reach;
+    const maxX = Math.max(x0, x1) + reach;
+    const minZ = Math.min(z0, z1) - reach;
+    const maxZ = Math.max(z0, z1) + reach;
+    for (const other of ribbons) {
+      if (other === rb) continue;
+      const box = pathBounds(other.path);
+      if (box.maxX < minX || box.minX > maxX || box.maxZ < minZ || box.minZ > maxZ) continue;
+      nearby.push(other);
+    }
+  };
+  const reachAt = (y: number, x: number, z: number, nx: number, nz: number, edge: number, base: number): number => {
     const limit = base + REACH_MAX;
     for (let o = REACH_STEP; o <= limit; o += REACH_STEP) {
       const px = x + nx * (edge + o);
       const pz = z + nz * (edge + o);
       if (solidAt(px, pz)) return o - REACH_STEP;
       if (o <= base) continue;
-      for (const other of ribbons) {
-        if (other !== rb && onRibbonAtLevel(other, px, pz, y, 0)) return o - REACH_STEP;
+      for (let k = 0; k < nearby.length; k++) {
+        if (onRibbonAtLevel(nearby[k], px, pz, y, 0)) return o - REACH_STEP;
       }
     }
     return -1;
@@ -99,6 +123,7 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
       const c = samples[(i + 1) % samples.length];
       const base = shoulderOf(rb, i);
       if (base === 0) continue;
+      gather(rb, a.x, a.z, c.x, c.z, Math.max(a.halfWidth, c.halfWidth) + base + REACH_MAX + 1);
       for (let k = 0; k < 2; k++) {
         const side = k === 0 ? -1 : 1;
         const nx = -a.tz * side;
@@ -107,8 +132,8 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
         const mx = (a.x + c.x) / 2 + nx * (a.halfWidth + base / 2);
         const mz = (a.z + c.z) / 2 + nz * (a.halfWidth + base / 2);
         let crossing = false;
-        for (const other of ribbons) {
-          if (other !== rb && onRibbonAtLevel(other, mx, mz, a.y, 0.6)) {
+        for (let k = 0; k < nearby.length; k++) {
+          if (onRibbonAtLevel(nearby[k], mx, mz, a.y, 0.6)) {
             crossing = true;
             break;
           }
@@ -120,9 +145,9 @@ export function createKerbField(ribbons: readonly RibbonDef[], shoulders: Should
         // open end is no reason to leave a trench along a stretch that does back onto a
         // block — but never past a face the rays did find, so pavement never enters one. The
         // middle only pulls the band in: a face that bows toward the street still keeps it out.
-        const rayA = reachAt(rb, a.y, a.x, a.z, nx, nz, a.halfWidth, base);
-        const rayC = reachAt(rb, c.y, c.x, c.z, nx, nz, c.halfWidth, base);
-        const rayM = reachAt(rb, a.y, (a.x + c.x) / 2, (a.z + c.z) / 2, nx, nz, a.halfWidth, base);
+        const rayA = reachAt(a.y, a.x, a.z, nx, nz, a.halfWidth, base);
+        const rayC = reachAt(c.y, c.x, c.z, nx, nz, c.halfWidth, base);
+        const rayM = reachAt(a.y, (a.x + c.x) / 2, (a.z + c.z) / 2, nx, nz, a.halfWidth, base);
         let open = base;
         for (const r of [rayA, rayC, rayM]) if (r >= 0 && r < open) open = r;
         let wa = rayA >= 0 ? rayA : open;

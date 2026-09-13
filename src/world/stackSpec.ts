@@ -8,8 +8,9 @@ import type { TrackNode, TrackSpec } from './track';
 
 /**
  * CITY v2 — "THE STACK". Data only; `createCityWorld(STACK_SPEC)` turns it into a world.
- * The brief is `docs/CITY_V2_BRIEF.md`, the approved plan `docs/CITY_V2_PLAN.md`; this file
- * is Phase 1 of it: the roads and the levels. Massing, enclosure and light are later phases.
+ * The brief is `docs/CITY_V2_BRIEF.md`, the approved plan `docs/CITY_V2_PLAN.md`. Phase 1 laid
+ * the roads and the levels below; Phase 2 the massing (`stackMassing.ts`); Phase 3 the
+ * surfaces and the light (`STACK_ART.finish`, the `stack` palette, the fog).
  *
  * Read with north up (x east, z south). 600 x 600 m, no water, towers on all four sides:
  *
@@ -258,26 +259,27 @@ export const STACK_BLOCK_OPTIONS: BlockOptions = {
  * leg up x 115 and its southern straight both count).
  */
 export const STACK_TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
-  { rect: { minX: -252, maxX: -60, minZ: -200, maxZ: -60 }, cars: 6 },
-  { rect: { minX: -60, maxX: 30, minZ: -200, maxZ: -60 }, cars: 6 },
-  { rect: { minX: 30, maxX: 115, minZ: -200, maxZ: -60 }, cars: 6 },
-  { rect: { minX: 115, maxX: 250, minZ: -200, maxZ: -60 }, cars: 6 },
-  { rect: { minX: -252, maxX: -60, minZ: -60, maxZ: 130 }, cars: 6 },
-  { rect: { minX: -60, maxX: 30, minZ: -60, maxZ: 130 }, cars: 6 },
-  { rect: { minX: 30, maxX: 115, minZ: -60, maxZ: 130 }, cars: 6 },
-  { rect: { minX: 115, maxX: 250, minZ: -60, maxZ: 130 }, cars: 6 },
-  { rect: { minX: 160, maxX: 250, minZ: 130, maxZ: 200 }, cars: 4 },
-  { rect: { minX: -252, maxX: -60, minZ: 130, maxZ: 252 }, cars: 4 },
+  { rect: { minX: -252, maxX: -60, minZ: -200, maxZ: -60 }, cars: 3 },
+  { rect: { minX: -60, maxX: 30, minZ: -200, maxZ: -60 }, cars: 3 },
+  { rect: { minX: 30, maxX: 115, minZ: -200, maxZ: -60 }, cars: 3 },
+  { rect: { minX: 115, maxX: 250, minZ: -200, maxZ: -60 }, cars: 3 },
+  { rect: { minX: -252, maxX: -60, minZ: -60, maxZ: 130 }, cars: 3 },
+  { rect: { minX: -60, maxX: 30, minZ: -60, maxZ: 130 }, cars: 3 },
+  { rect: { minX: 30, maxX: 115, minZ: -60, maxZ: 130 }, cars: 3 },
+  { rect: { minX: 115, maxX: 250, minZ: -60, maxZ: 130 }, cars: 3 },
+  { rect: { minX: 160, maxX: 250, minZ: 130, maxZ: 200 }, cars: 2 },
+  { rect: { minX: -252, maxX: -60, minZ: 130, maxZ: 252 }, cars: 2 },
 ];
 
 /**
  * Cars lapping the three elevated loops: Bandido Bay's density (64 on 1,728 m of viaduct)
- * scaled by length, as the plan asks, to be measured against the frame budget at the gate.
+ * scaled by length, then halved (2026-09-12) along with the street loops. Kept to multiples of
+ * the four lane files so every car the spec asks for spawns.
  */
 export const STACK_DECK_TRAFFIC = [
-  { tag: 'deck', cars: 60, lanes: [4.6, 1.5] },
-  { tag: 'spine', cars: 44, lanes: [5, 1.5] },
-  { tag: 'ring', cars: 24, lanes: [4.2, 1.4] },
+  { tag: 'deck', cars: 32, lanes: [4.6, 1.5] },
+  { tag: 'spine', cars: 20, lanes: [5, 1.5] },
+  { tag: 'ring', cars: 12, lanes: [4.2, 1.4] },
 ];
 
 /** The car starts on the central avenue in the core, pointed north at the spine. */
@@ -295,17 +297,35 @@ export const STACK_SPAWN = { x: -56, z: 70, heading: 0 };
  * The greenery floor is lower too: the reclamation budget is 15k here, not the Bay's 50k.
  */
 export const STACK_ART = {
-  ribSpacing: 16,
-  deckServices: 'lean' as const,
-  lampSpacing: { street: 56, deck: 76 },
-  neglect: 0.25,
+  // Phase 3 feedback (2026-09-12): the budget is not the constraint, the look is. The lean
+  // profile of Phase 1 (ribs at 16 m, edge girders only, lamps every 56 m, a 0.25 greenery
+  // floor, a third of the roof clutter) is gone: the Bay's full underside, its lamp density,
+  // its reclamation floor and its rooftops, on five kilometres of elevated road.
+  ribSpacing: 10.5,
+  deckServices: 'full' as const,
+  lampSpacing: { street: 38, deck: 38 },
+  neglect: 0.45,
   /** Buildings at the kerb: half a metre of slab in front of a wall, not the Bay's 3.4. */
   setback: 0.5,
   /** Rooftop clutter is where the Bay spends triangles nobody drives past (brief, rule 6). */
-  roofClutter: 0.35,
+  roofClutter: 1,
   /** The megastructures wear the kit's facades; the passages inside them carry the detail. */
   megaDetail: 'lean' as const,
+  /**
+   * Concrete, not glass (Phase 3): concrete-first facade styles, a ground floor of shutters
+   * and doors on every street wall, parapets with amber markers for rails, sodium lamps, and
+   * the red accent placed by hand rather than worn by every barrier (`CityPlan.finish`).
+   */
+  finish: 'concrete' as const,
 };
+
+/**
+ * The haze. The brief wants a tower at 250 m to be 70-80 % fog. `FogExp2` reaches
+ * 1 - exp(-(d·k)²) at distance d; with the atmosphere's 1.15× on top (`ATMOSPHERE.fogDensityScale`)
+ * this lands at 75 % at 250 m, 8 % at 60 m and 27 % at 120 m, so the road stays readable
+ * (`AGENTS.md`) and the far end of every street is gone.
+ */
+export const STACK_FOG_DENSITY = 0.0041;
 
 /**
  * The three hand-drawn silhouettes on the horizon (`buildingKit`'s `LANDMARKS`: 0 spire,
@@ -328,9 +348,12 @@ export const STACK_SPEC: CitySpec = {
   bounds: STACK_BOUNDS,
   wallBand: STACK_WALL_BAND,
   water: null,
-  pillarStep: 16,
-  fenceBays: 'few',
+  pillarStep: 12,
+  fenceBays: 'most',
   art: STACK_ART,
+  // The bay's night with every window list and accent re-weighted warm (`palette.ts`).
+  palette: 'stack',
+  fogDensity: STACK_FOG_DENSITY,
   zoneOf,
   roads: STACK_ROADS,
   elevated: STACK_ELEVATED.map(({ tag, spec, lift }) => ({ tag, spec, lift })),

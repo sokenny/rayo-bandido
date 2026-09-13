@@ -204,7 +204,7 @@ function pocketOf(ix: number, iz: number): ReclaimPocket | null {
  * grid of pockets lands differently in a swept corporate core and in the old town, and it is
  * the plan — not a global — that decides where those are.
  */
-export function createReclaimField(plan: Pick<CityPlan, 'zoneAt' | 'downtown' | 'neglect'>): ReclaimField {
+export function createReclaimField(plan: Pick<CityPlan, 'zoneAt' | 'downtown' | 'neglect' | 'densityAt'>): ReclaimField {
   const downtown = plan.downtown ?? null;
   // The floor is the world's when it sets one (`CityPlan.neglect`), else the tuning's.
   const baseNeglect = plan.neglect ?? RECLAIM.baseNeglect;
@@ -238,7 +238,8 @@ export function createReclaimField(plan: Pick<CityPlan, 'zoneAt' | 'downtown' | 
     return m;
   };
 
-  const intensityAt = (x: number, z: number): number => Math.min(1, raw(x, z) * bias(x, z));
+  // A thinned district (`CityPlan.densityAt`) is that much less far gone.
+  const intensityAt = (x: number, z: number): number => Math.min(1, raw(x, z) * bias(x, z) * (plan.densityAt ? plan.densityAt(x, z) : 1));
 
   return {
     intensityAt,

@@ -140,10 +140,17 @@ fi
 
 tree_fingerprint() {
   # Names plus mtime/size of everything git would consider — cheap, and any
-  # editor save moves it.
+  # editor save moves it. GNU stat (-c) and BSD/macOS stat (-f) take
+  # incompatible format flags, so pick the one this machine actually has.
+  local stat_cmd
+  if stat -c '%n' . >/dev/null 2>&1; then
+    stat_cmd=(stat -c '%n %Y %s')
+  else
+    stat_cmd=(stat -f '%N %m %z')
+  fi
   git ls-files -co --exclude-standard -z \
-    | xargs -0 -r stat -c '%n %Y %s' 2>/dev/null \
-    | sort | sha1sum | cut -d' ' -f1
+    | xargs -0 -r "${stat_cmd[@]}" 2>/dev/null \
+    | sort | shasum -a 1 | cut -d' ' -f1
 }
 FINGERPRINT_BEFORE=$(tree_fingerprint)
 

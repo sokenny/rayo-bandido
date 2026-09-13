@@ -10,6 +10,9 @@ import { createCircuitWorld } from '../src/world/circuitWorld';
 import { BUHO_SITE, PASSENGER_STOPS, RUSH_SITES } from '../src/world/citySpec';
 import { addCircuitGate, circuitGateSite } from '../src/world/cityCircuitGate';
 import { CIRCUIT_GATES } from '../src/world/circuitSpec';
+import { METRO_BUHO_SITE, METRO_CIRCUIT_SITE, METRO_PASSENGER_STOPS, METRO_RUSH_SITES } from '../src/world/metroSpec';
+import { createOpenWorld } from '../src/world/openWorld';
+import { INTRO } from '../src/content/intro';
 
 /**
  * THE DOOR INTO THE CIRCUIT MISSIONS (`src/sim/circuitGate.ts`), and ONE ACTIVITY AT A TIME
@@ -160,7 +163,7 @@ function resetEntering(s: { entering: boolean }): void {
 
 /* ================================================================== the city */
 
-describe('where the door stands', () => {
+describe('where the door stands on Bandido Bay', () => {
   const { layout, plan } = addCircuitGate(createCityWorld());
 
   it('is the Bandido Grid’s own start line, not a spot near it', () => {
@@ -228,6 +231,45 @@ describe('where the door stands', () => {
   });
 });
 
+/* ================================================================== the open world */
+
+describe('where the door stands in the open world', () => {
+  // Bandido Metro, where the lap is not drawn: the door is a site of its own, and the circuit
+  // it opens is still run on the Bay.
+  const { layout, plan } = createOpenWorld();
+
+  it('is the metro’s own site, handed to the rules and the art alike', () => {
+    expect(layout.circuitSite).toEqual(METRO_CIRCUIT_SITE);
+    expect(plan.circuitMarker).toEqual(layout.circuitSite);
+  });
+
+  it('is painted on a road, clear of anything solid', () => {
+    const site = layout.circuitSite!;
+    const r = TIME_ATTACK.marker.promptRadius;
+    expect(plan.isRoad(site.x, site.z)).toBe(true);
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+      const x = site.x + Math.cos(a) * r;
+      const z = site.z + Math.sin(a) * r;
+      expect(plan.isRoad(x, z), `ring at ${x.toFixed(0)}, ${z.toFixed(0)}`).toBe(true);
+      expect(plan.isSolid(x, z), `ring at ${x.toFixed(0)}, ${z.toFixed(0)}`).toBe(false);
+    }
+  });
+
+  it('is far enough from every other activity, and from the meet, that two signs can never argue', () => {
+    const site = METRO_CIRCUIT_SITE;
+    const reach = TIME_ATTACK.marker.rearmRadius;
+    for (const rush of METRO_RUSH_SITES) {
+      expect(Math.hypot(rush.x - site.x, rush.z - site.z)).toBeGreaterThan(RUSH.marker.rearmRadius + reach);
+    }
+    for (const stop of METRO_PASSENGER_STOPS) {
+      expect(Math.hypot(stop.x - site.x, stop.z - site.z)).toBeGreaterThan(PASSENGER.marker.exitRadius + reach);
+    }
+    expect(Math.hypot(METRO_BUHO_SITE.x - site.x, METRO_BUHO_SITE.z - site.z)).toBeGreaterThan(MOOGUL.marker.exitRadius + reach);
+    const meet = INTRO.route.meetup;
+    expect(Math.hypot(meet.x - site.x, meet.z - site.z)).toBeGreaterThan(meet.radius + reach);
+  });
+});
+
 /* ================================================================== one at a time */
 
 describe('one activity at a time', () => {
@@ -256,7 +298,7 @@ describe('one activity at a time', () => {
   });
 
   it('shuts the door while a RAYO RUSH run is on, and opens it again afterwards', () => {
-    const { layout } = addCircuitGate(createCityWorld());
+    const { layout } = createOpenWorld();
     const state = createInitialGameState(layout);
     const cmd = createPlayerCommand();
     const v = state.vehicle;
@@ -295,7 +337,7 @@ describe('one activity at a time', () => {
   });
 
   it('locks the other three the moment the door is taken', () => {
-    const { layout } = addCircuitGate(createCityWorld());
+    const { layout } = createOpenWorld();
     const state = createInitialGameState(layout);
     const cmd = createPlayerCommand();
     const site = layout.circuitSite!;
@@ -317,7 +359,7 @@ describe('one activity at a time', () => {
   });
 
   it('keeps a waiting fare from boarding mid-run, without cancelling their ride', () => {
-    const { layout } = addCircuitGate(createCityWorld());
+    const { layout } = createOpenWorld();
     const state = createInitialGameState(layout);
     const cmd = createPlayerCommand();
     const v = state.vehicle;

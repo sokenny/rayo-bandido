@@ -2,8 +2,8 @@ import { inBusStop, inRect, type BlockRect, type GateDef, type SkybridgeDef } fr
 import { isOnPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { type EnvBuilders } from './builders';
-import { blockSetback } from './cityBuilder';
+import { setbackAt, type EnvBuilders } from './builders';
+import { SIDEWALK, blockSetback } from './cityBuilder';
 import { grimeSurface, paintSurface } from './graffiti';
 import { canopyTree, crookedTree, deadTree, fern, palm, sapling, shrub, vine, weedLine, weeds } from './plants';
 import { seedAt, type GraffitiSurface, type ReclaimField, type ReclaimProfile } from './reclaim';
@@ -372,7 +372,7 @@ function buildBlockGreenery(b: EnvBuilders, field: ReclaimField): void {
   const facesRoad = (x: number, z: number, ox: number, oz: number): boolean =>
     b.plan.isRoad(x + ox * 6, z + oz * 6) || b.plan.isRoad(x + ox * 10, z + oz * 10) || b.plan.isRoad(x + ox * 14, z + oz * 14);
   for (const blk of b.plan.blocks) {
-    const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ, b.plan.setback);
+    const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ, setbackAt(b, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2, SIDEWALK));
 
     /** `outX/outZ` points from the block out at the street; `pave` is the pavement there. */
     const place = (edgeX: number, edgeZ: number, outX: number, outZ: number, pave: number, along: 'x' | 'z'): void => {
@@ -462,7 +462,7 @@ function buildBlockGreenery(b: EnvBuilders, field: ReclaimField): void {
  * so it changes nothing about what a car can hit: the collider was always there.
  */
 function dressLedgeWalls(b: EnvBuilders, field: ReclaimField, blk: BlockRect): void {
-  const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ, b.plan.setback);
+  const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ, setbackAt(b, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2, SIDEWALK));
   const facesRoad = (x: number, z: number, ox: number, oz: number): boolean =>
     b.plan.isRoad(x + ox * 6, z + oz * 6) || b.plan.isRoad(x + ox * 10, z + oz * 10) || b.plan.isRoad(x + ox * 14, z + oz * 14);
 

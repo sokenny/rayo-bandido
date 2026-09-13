@@ -17,9 +17,7 @@ import {
   stepIntro,
 } from '../src/sim/intro';
 import { isPoliceEnabledForCurrentGameState } from '../src/sim/police';
-import { addStreetSites } from '../src/world/cityStreetSites';
-import { addCircuitGate } from '../src/world/cityCircuitGate';
-import { createCityWorld } from '../src/world/cityWorld';
+import { createOpenWorld } from '../src/world/openWorld';
 
 /**
  * The first-time introduction (`src/sim/intro.ts`): the start and the meet are on the city's
@@ -31,9 +29,9 @@ import { createCityWorld } from '../src/world/cityWorld';
 
 const DT = 1 / 60;
 
-/** A fresh city with the intro installed, exactly as `src/game.ts` builds it. */
+/** A fresh open world with the intro installed, exactly as `src/game.ts` builds it. */
 function rig() {
-  const world = addStreetSites(addCircuitGate(createCityWorld()));
+  const world = createOpenWorld();
   const layout = world.layout;
   installIntroMeetup(layout, INTRO);
   layout.playerSpawn = { ...INTRO.route.start };

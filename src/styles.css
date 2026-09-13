@@ -819,6 +819,9 @@ body {
   grid-template-columns: 108px 1fr;
   gap: 14px;
   padding: 8px 14px 0;
+  /* `menuScreen.ts` pins a min-height here, measured off the tallest entry so the console
+     stops growing and shrinking under the cursor. It measures the border box. */
+  box-sizing: border-box;
 }
 
 /* The mugshot. Crushed to two channels and screened, so it reads as a printed record rather

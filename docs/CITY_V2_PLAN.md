@@ -403,3 +403,58 @@ spine 24 m over st-centre); the far end fogged in all six; no map edge in any.
 extensions (`allowImportingTsExtensions`, with `noEmit`). `city-shots.mjs --mode stack`
 measures the frame test in the page: the sky share by a mask render with the atmosphere
 hidden, and what stands overhead from the plan's own geometry.
+
+## 17. Phase 3 amendments (2026-09-12)
+
+What Phase 3 built, and where it departed from §8. Roads and massing are untouched.
+
+**One finish, one palette, no new draw call.** The Stack asks for `finish: 'concrete'` on its
+`CityPlan` and draws in a third palette, `stack` (`palette.ts`): the bay's night with every
+window list re-weighted amber first, cold white second, teal third, accents warm-first with
+one cold note, no violet, no pink; a lifted, warmed ground bounce for the hemisphere light,
+because the Stack is a city of ceilings; and a lighter base concrete for the facade atlas.
+Everything below is gated on the finish or the palette, so Bandido Bay is drawn as before.
+
+**Ground floors are texture, not geometry.** §8 planned `groundFloor.ts` modules on every
+street wall. At the Stack's half-metre setback the module kit cannot stand (it needs 0.55 m
+of pavement and stands 0.45 m proud), and a module per 20 m of frontage would have cost
+~26k triangles against the 25k rule. Instead the facade atlas grew from 4x4 to 5x5 cells
+and gained three GROUND styles — `ground` (shutters, a grille, doors, a vent), `shops`
+(two lit shopfronts among the shutters), `plant` (a loading door, a louvred plant room) —
+and one body style, `brut` (heavy concrete, deep-set panes). Every street wall's lowest
+three storeys sample a ground cell (two triangles it was already paying for), drawn 1.45x
+brighter between the fittings, with the concrete photograph over it; the pattern shows a
+door or a shutter at least every 12 m, which is the brief's "no blank wall over 20 m". The
+kit's concrete pools favour `brut`, `panels`, `stack`, `louvre` over glass. Measured over the
+whole city's walls: 5,933 service, 3,989 panels, 3,844 brut, 1,680 ground, 508 shops, 488
+plant cells against 308 grid, 232 ribbon and no curtain wall; concrete-family cells are 87 %
+of the facades. The neon shopfront band survives on one street wall in six (one in three in
+the old town), warm, and the sign on one in ten.
+
+**Rails, lamps, markers.** The per-zone rail strips (red/cyan alternating, the Phase 2 note)
+are replaced in concrete by a parapet with a dark steel rail and an amber marker on every
+third segment, at the bay's 16 triangles a segment. Street and deck lamps are sodium three
+times in four, cold white otherwise; the perimeter route marker is one dim amber line; the
+cuts' tubes and mouth signs are amber; blade signs are a third as frequent. The red accent
+is placed by hand only: one bar per passage and one on every other portal frame.
+
+**Light in the passages.** The soffit is cast in 3 m panels whose vertex colour carries the
+nearest strip lamp's light (brighter and redder under it, falling off over 7.5 m), the ribs
+likewise; the lamp's glow patch covers its whole bay of ceiling, a wash of it stands off each
+wall, and its pool on the road is twice Phase 2's. Found on the way: Phase 2's soffit strip
+was wound facing up and had been back-face culled all along — the "ceiling" measured at that
+gate was the building's raw underside behind it. The deck undersides over the stacked
+crossings are drawn 1.9x brighter in concrete.
+
+**Fog.** `STACK_FOG_DENSITY` 0.0041, 0.00472 in the scene after the atmosphere's 1.15x:
+a tower at 250 m is 75 % fog, the road at 60 m 8 %.
+
+**Clutter.** At zero setback the Bay's block clutter (containers, stalls, kiosks) was being
+placed inside the facades; in a tight-setback plan a ledge point is skipped when a wall
+stands within 3.4 m behind it or the point is inside one, and the old town's pipe runs and
+AC units walk the wall itself instead of a ledge 3.6 m inside the block.
+
+**QA.** `city-shots.mjs --no-traffic` parks the fleet off the map so two runs compare pixel
+for pixel; `stack-frame-test.mjs` builds the before/after page and reads the mean colour of
+six rectangles of every frame out of the PNGs. The Phase 2 build was checked out into a
+scratch worktree and shot with the same script for the "before" column.

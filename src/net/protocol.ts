@@ -16,8 +16,13 @@
  * `src/net/connection.ts` for how a client maps that onto its own `performance.now()`.
  */
 
-/** Bumped whenever a message shape changes. A mismatch is refused at `hello`. */
-export const PROTOCOL_VERSION = 4;
+/**
+ * Bumped whenever a message shape changes. A mismatch is refused at `hello`. Also bumped when
+ * the open world is a different map (5: Bandido Bay became Bandido Metro), because every
+ * position on the wire is a coordinate in it: a page still driving the old city would be a car
+ * inside somebody else's walls.
+ */
+export const PROTOCOL_VERSION = 5;
 
 /** Players per VERSUS match. Also that room's capacity: a fifth connection is refused. */
 export const MAX_PLAYERS = 4;
@@ -61,7 +66,7 @@ export const EMPTY_ROOM_TTL_MS = 120_000;
  */
 export const WORLD_ROOM_CODE = 'WRLD';
 /** The world room's label, which is what `GET /rooms` and the lobby show it as. */
-export const WORLD_ROOM_LABEL = 'BANDIDO BAY';
+export const WORLD_ROOM_LABEL = 'BANDIDO METRO';
 
 /**
  * What a room is FOR, which decides its rules:

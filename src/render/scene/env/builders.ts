@@ -159,6 +159,16 @@ export class WallIndex {
     }
   }
 
+  /** True when (x, z) at height y is inside a registered volume: a prop there would be in a wall. */
+  inside(x: number, y: number, z: number): boolean {
+    const list = this.cells.get(WallIndex.key(x, z));
+    if (!list) return false;
+    for (const v of list) {
+      if (x >= v.minX && x <= v.maxX && z >= v.minZ && z <= v.maxZ && y >= v.y0 - 0.01 && y <= v.y1 + 0.01) return true;
+    }
+    return false;
+  }
+
   /**
    * True when a wall facing (dx, dz) stands within `reach` metres behind (x, z) at height y —
    * that is, when something mounted there would have a building to hang on.
@@ -181,6 +191,37 @@ export class WallIndex {
     }
     return false;
   }
+}
+
+/** The kit's `finish` from the plan, as a spread: nothing when the plan says nothing. */
+export function finishOf(b: EnvBuilders, x?: number, z?: number): { finish?: 'glass' | 'concrete' } {
+  const f = x !== undefined && z !== undefined ? finishAt(b, x, z) : b.plan.finish;
+  return f ? { finish: f } : {};
+}
+
+/**
+ * The finish at a point: what the world says for the spot when it is built of more than one
+ * city (`CityPlan.finishAt`), else the world's one finish. Every builder that asks "is this
+ * concrete?" about a wall, a lamp or a rail asks here with the thing's own position, so the
+ * Stack stays concrete inside a glass city.
+ */
+export function finishAt(b: EnvBuilders, x: number, z: number): 'glass' | 'concrete' | undefined {
+  return b.plan.finishAt ? b.plan.finishAt(x, z) : b.plan.finish;
+}
+
+/** True where the finish at (x, z) is concrete. */
+export function concreteAt(b: EnvBuilders, x: number, z: number): boolean {
+  return finishAt(b, x, z) === 'concrete';
+}
+
+/** How much of the dressing a point gets (`CityPlan.densityAt`), 1 where the world says nothing. */
+export function densityAt(b: EnvBuilders, x: number, z: number): number {
+  return b.plan.densityAt ? b.plan.densityAt(x, z) : 1;
+}
+
+/** The setback at a point (`CityPlan.setbackAt`), else the world's one setback, else `fallback`. */
+export function setbackAt(b: EnvBuilders, x: number, z: number, fallback: number): number {
+  return b.plan.setbackAt ? b.plan.setbackAt(x, z) : (b.plan.setback ?? fallback);
 }
 
 /** Metres of leaf texture per tile. Shared by every plant in the kit, so a weed tuft and a

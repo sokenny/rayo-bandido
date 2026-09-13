@@ -1,7 +1,7 @@
 import type { ZoneId } from '../../../world/cityPlan';
 
 /**
- * The colour script. Two of them:
+ * The colour script. Three of them:
  *
  * ARENA — the test block and the circuit, straight from `docs/VISUAL_DIRECTION.md`: a cold
  * teal/cyan family and a hot pink/magenta family, violet as the bridge, a lifted blue-teal
@@ -14,7 +14,10 @@ import type { ZoneId } from '../../../world/cityPlan';
  * the magenta family of the arena becomes red/coral here, so the sign atlas and the
  * holographic screens come out red and teal instead of pink and purple.
  *
- * Every builder reads `PAL`, which `applyPalette` fills from one of the two before the
+ * STACK — the bay, with every window list and accent list re-weighted warm (see
+ * `STACK_PALETTE` below).
+ *
+ * Every builder reads `PAL`, which `applyPalette` fills from one of the three before the
  * environment is built. Zones are told apart by which family dominates, not by adding a
  * third one: corporate = cool cyan/violet, urban = cyan against magenta, JDM = hot and amber.
  */
@@ -85,6 +88,11 @@ export interface Palette {
   foliageDry: number;
   /** Trunks and branches: kept well above the night floor, or a tree reads as a floating crown. */
   bark: number;
+  /**
+   * The sky dome's three colours, when the palette wants other than `ATMOSPHERE`'s (the
+   * storm sky is tuned once for the bay; the stack's references show a bluer, brighter sky).
+   */
+  sky?: { zenith: number; middle: number; horizon: number };
   /**
    * Spray-can colours, in the order a writer reaches for them: cold, hot, bleached white,
    * a warm accent and two dirty ones. Graffiti is paint, not neon, so these are read by the
@@ -242,13 +250,74 @@ export const BAY_PALETTE: Palette = {
   accentJdm: [0xffb347, 0xff3d4a, 0xff8a5c, 0x3ff0e8],
 };
 
-export type PaletteName = 'arena' | 'bay';
+/**
+ * STACK — The Stack (`src/world/stackSpec.ts`, Phase 3 of `docs/CITY_V2_BRIEF.md`): the bay's
+ * night with the light shifted the way the two reference images have it. Sodium amber leads
+ * every window list, cold white is second and teal third; the accents that go on crowns,
+ * skybridges, shopfronts and corner strips are warm-first with one cold note, and the only
+ * hot colour is the red the passages and portal frames place by hand, one bar to a view. The
+ * old town keeps its coral. Everything else — fog, sky, asphalt, concrete, the two lights —
+ * is the bay's, so the two cities read as one night.
+ */
+export const STACK_PALETTE: Palette = {
+  ...BAY_PALETTE,
+  // Teal third, but the references' teal is a cyan-white, and a tower tinted the bay's
+  // saturated teal through a big-paned style was the last strong green in the frame.
+  windowsCorp: [0xffc27a, 0xffd9a8, 0xdff1ff, 0xffc27a, 0xc4ecf2, 0xffd9a8],
+  windowsUrban: [0xffc27a, 0xffd9a8, 0xffc27a, 0xdff1ff, 0xc4ecf2, 0xffd9a8],
+  windowsJdm: [0xffc27a, 0xffd9a8, 0xffc27a, 0xffb347, 0xdff1ff],
+  accentCorporate: [0xffb347, 0xffd7a0, 0xe6f7ff, 0x3ff0e8],
+  accentUrban: [0xffb347, 0xffd7a0, 0xffb347, 0xe6f7ff, 0x3ff0e8],
+  accentJdm: [0xffb347, 0xffd7a0, 0xff8a5c, 0xffb347, 0x3ff0e8],
+  // The bounce off the wet streets, lifted and warmed. It is the ONLY light a downward face
+  // ever gets under a hemisphere, and the Stack is a city of ceilings: the passage soffits,
+  // the deck undersides over every stacked crossing. The bay's ground term reads them as a
+  // black lid (Phase 2 measured a passage ceiling at 16, 29, 29). A vertical wall takes half
+  // of this and the road none, so the asphalt keeps its contrast with the structure over it.
+  hemiGround: 0x25292b,
+  // MEASURED AGAINST THE REFERENCES (2026-09-12, mean sRGB of patches): the sky is a blue-teal
+  // (36,80,93) and (29,61,75), the far towers in the haze (34,68,80) and (23,49,58), but the
+  // near structure is DARK and NEUTRAL — piers (32,48,53), a slab (39,43,39), a ceiling
+  // (15,14,12), the walls at the driver's shoulder (25,20,15) and (38,29,31), the road
+  // (39,35,29). The bay's greens (its teal fog, its green kerb and concrete, its teal
+  // hemisphere) were putting that far-haze colour onto everything near. So: the air stays
+  // blue-teal, the concrete goes neutral grey, and the light that falls on it goes blue-grey.
+  fog: 0x1a3d4b,
+  skyTop: 0x061523,
+  skyHorizon: 0x2a5d70,
+  skyGlow: 0x1a4050,
+  ground: 0x121517,
+  sidewalk: 0x2c3032,
+  curb: 0x45494a,
+  concrete: 0x33383a,
+  metalDark: 0x1c2124,
+  hemiSky: 0x3d6478,
+  keyColor: 0xa9c6d4,
+  sky: { zenith: 0x040c16, middle: 0x122f3d, horizon: 0x2c5e72 },
+  // The cold windows are cyan-WHITE in the references, not teal: a whole tower tinted teal
+  // through the big `panels` cell was the last strong green in the frame.
+  winCyan: 0xc4ecf2,
+  // The concrete between the panes, as the facade atlas draws it. The bay's is near-black so
+  // its windows carry the light; the references' towers are mid-grey concrete with holes of
+  // light in them. Still well under the atlas shader's glass threshold (linear 0.08).
+  facadeUrban: 0x24292c,
+  facadeCorp: 0x23282b,
+  facadeJdm: 0x272a2a,
+  // More of the panes lit and burning harder: the references' towers are walls of warm
+  // light with concrete between, and the first pass read dimmer than the Bay.
+  litGain: 1.8,
+  windowGain: 1.5,
+  neonGain: 1.15,
+  glowGain: 1.3,
+};
+
+export type PaletteName = 'arena' | 'bay' | 'stack';
 
 /** The live palette every builder reads. Filled by `applyPalette` before a world is built. */
 export const PAL: Palette = { ...ARENA_PALETTE };
 
 export function applyPalette(name: PaletteName): void {
-  Object.assign(PAL, name === 'bay' ? BAY_PALETTE : ARENA_PALETTE);
+  Object.assign(PAL, name === 'bay' ? BAY_PALETTE : name === 'stack' ? STACK_PALETTE : ARENA_PALETTE);
 }
 
 /** Accent colours for a zone, from the live palette. */

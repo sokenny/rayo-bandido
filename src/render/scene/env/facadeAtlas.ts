@@ -11,8 +11,9 @@ import { WINDOW_ACTIVITY_CACHE_KEY } from './windowActivity';
  * in the zone repeated that one tile: the same lit fraction, the same grid, the same colour
  * on every building, which is what made the city read as one box stamped over and over.
  *
- * Now the texture is a 4 x 4 atlas of facade STYLES (ribbon windows, vertical strips, lit
- * clusters, dark service bands, sparse groups, lit corners, inset panels, near-dark, ...).
+ * Now the texture is a 5 x 5 atlas of facade STYLES (ribbon windows, vertical strips, lit
+ * clusters, dark service bands, sparse groups, lit corners, inset panels, near-dark, ...,
+ * and the Stack's concrete ground floors: shutters, grilles and doors, see `GROUND_STYLES`).
  * Every wall quad carries `aFacadeCell`: which cell it samples, plus how bright the concrete
  * between its windows is. The shader tiles the wall's UVs inside that one cell (`fract`), so
  * a 60 m wall still repeats its 12 m tile without ever reading a neighbouring style, and it
@@ -35,10 +36,10 @@ export const FACADE_GRID = { cols: 8, rows: 4 };
 /** Storey height (m), so band edges and roofs can land between floors. */
 export const FLOOR = FACADE_TILE / FACADE_GRID.rows;
 
-const ATLAS_COLS = 4;
-const ATLAS_ROWS = 4;
+const ATLAS_COLS = 5;
+const ATLAS_ROWS = 5;
 const CELL_PX = 256;
-/** Size of a cell in UV space. */
+/** Size of a cell in UV space (the atlas is square, so one number serves both axes). */
 export const FACADE_CELL_UV = 1 / ATLAS_COLS;
 
 export type FacadeStyle =
@@ -57,7 +58,11 @@ export type FacadeStyle =
   | 'stripe'
   | 'stack'
   | 'deck'
-  | 'panels';
+  | 'panels'
+  | 'brut'
+  | 'ground'
+  | 'shops'
+  | 'plant';
 
 /** Cell index of each style in the atlas, row-major from the top left. */
 export const FACADE_STYLES: readonly FacadeStyle[] = [
@@ -77,7 +82,21 @@ export const FACADE_STYLES: readonly FacadeStyle[] = [
   'stack',
   'deck',
   'panels',
+  'brut',
+  'ground',
+  'shops',
+  'plant',
 ];
+
+/**
+ * The ground-floor styles (Phase 3 of `docs/CITY_V2_BRIEF.md`): a cell whose bottom storey
+ * is a run of shutters, grilles, doors and vents at street level, with plain concrete storeys
+ * over it. A street wall's lowest three storeys sample one of these, so every wall that meets
+ * a street has something on it at eye level for the price of two triangles, and no blank run
+ * is longer than the cell (12 m) before the pattern shows a door or a shutter again.
+ * 'shops' carries two lit shopfronts; 'plant' a loading door and a louvred plant room.
+ */
+export const GROUND_STYLES: readonly FacadeStyle[] = ['ground', 'shops', 'plant'];
 
 /** UV origin of a style's cell. Canvas rows grow downward, texture v grows upward. */
 export function facadeCell(style: FacadeStyle): { u0: number; v0: number } {
@@ -211,8 +230,95 @@ function louvres(c: Cell, rows: number[]): void {
   }
 }
 
+type GroundFitting = 'shutter' | 'roller' | 'door' | 'grille' | 'vent' | 'louvre' | 'shop';
+
 /**
- * Draw the whole atlas. Sixteen styles, in the order of `FACADE_STYLES`. Each cell is 12 m
+ * The bottom storey of a ground cell: one fitting per 1.5 m column, drawn into the canvas's
+ * last row (which is the foot of the wall — texture v grows upward). Everything unlit stays
+ * at or under the concrete's own brightness so the shader keeps treating it as wall: only a
+ * shopfront is drawn bright, and that is the one meant to glow.
+ */
+function groundStorey(c: Cell, fittings: readonly GroundFitting[]): void {
+  const { ctx, rng } = c;
+  const row = FACADE_GRID.rows - 1;
+  const y0 = c.y + row * ROW_H;
+  const floor = y0 + ROW_H;
+  // The plinth line: a slightly paler band of concrete at the foot, and the lintel over it.
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(c.x, floor - ROW_H * 0.08, CELL_PX, ROW_H * 0.08);
+  ctx.fillRect(c.x, y0 + ROW_H * 0.12, CELL_PX, ROW_H * 0.05);
+  let k = 0;
+  while (k < fittings.length) {
+    const f = fittings[k];
+    // Neighbouring columns of the same fitting are one wide opening.
+    let n = 1;
+    while (k + n < fittings.length && fittings[k + n] === f) n++;
+    const x = c.x + k * COL_W + COL_W * 0.08;
+    const w = COL_W * n - COL_W * 0.16;
+    const top = y0 + ROW_H * 0.2;
+    const h = floor - ROW_H * 0.03 - top;
+    if (f === 'shutter' || f === 'roller') {
+      // The reveal, then the ribbed steel curtain inside it.
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x - 2, top - 2, w + 4, h + 2);
+      ctx.fillStyle = `rgba(255,255,255,${f === 'roller' ? 0.06 : 0.035 + rng() * 0.03})`;
+      ctx.fillRect(x, top, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      const pitch = ROW_H * (f === 'roller' ? 0.11 : 0.08);
+      for (let yy = top + pitch * 0.5; yy < top + h; yy += pitch) ctx.fillRect(x, yy, w, pitch * 0.32);
+    } else if (f === 'door') {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(x + w * 0.12, top + h * 0.1, w * 0.76, h * 0.9);
+      // A small warm lamp over the door: one pane's worth of light, low.
+      litPane(c, k, row, 0.42 + rng() * 0.16, w * 0.3, COL_W * 0.08 + w * 0.35);
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(x + w * 0.12, top + h * 0.34, w * 0.76, h * 0.66);
+    } else if (f === 'grille') {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(x, top + h * 0.1, w, h * 0.8);
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      for (let i = 0; i < 6; i++) ctx.fillRect(x + (w * (i + 0.5)) / 6 - 1.5, top + h * 0.1, 3, h * 0.8);
+      ctx.fillRect(x, top + h * 0.1, w, 2);
+      ctx.fillRect(x, top + h * 0.9 - 2, w, 2);
+    } else if (f === 'vent') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(x + w * 0.15, top + h * 0.2, w * 0.7, h * 0.45);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      for (let i = 0; i < 5; i++) ctx.fillRect(x + w * 0.15, top + h * (0.2 + 0.45 * (i + 0.3) / 5), w * 0.7, h * 0.03);
+    } else if (f === 'louvre') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(x, top, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      for (let i = 0; i < 8; i++) ctx.fillRect(x, top + (h * (i + 0.3)) / 8, w, h * 0.035);
+    } else {
+      // A lit shopfront: one wide pane, bright, with a dark stall riser under it.
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x - 2, top - 2, w + 4, h + 2);
+      const bright = 0.5 + rng() * 0.25;
+      litPane(c, k, row, bright, w, COL_W * 0.08);
+      // `litPane` draws at the grid's pane height; stretch the glass down to the riser.
+      ctx.fillStyle = paneColor(bright * 0.85, 0.6);
+      ctx.fillRect(x, top + h * 0.12, w, h * 0.7);
+    }
+    k += n;
+  }
+}
+
+/** Narrow slit windows on the concrete storeys over a ground floor, a few of them lit. */
+function slitWindows(c: Cell, rows: number[], litChance: number): void {
+  const w = PANE_W * 0.34;
+  const px = (COL_W - w) / 2;
+  for (const r of rows) {
+    for (let k = 0; k < COLS; k++) {
+      if (c.rng() < 0.4) continue;
+      if (c.rng() < litChance) litPane(c, k, r, LIT_SOFT[0] + c.rng() * 0.25, w, px);
+      else darkPane(c, k, r, w, px);
+    }
+  }
+}
+
+/**
+ * Draw the whole atlas. Twenty styles, in the order of `FACADE_STYLES`. Each cell is 12 m
  * square on a wall: eight 1.5 m panes across, four 3 m floors up. The cell borders are always
  * concrete or the dark slab line, so the mip chain can bleed into a neighbour unnoticed.
  */
@@ -368,6 +474,51 @@ export function makeFacadeAtlas(): THREE.CanvasTexture {
     }
   }
 
+  // 16 brut: brutalist body. Heavy concrete, deep slab lines, small deep-set panes in a
+  // strict grid, about a third of them lit: the reference towers' concrete with warm holes.
+  {
+    const c = cellOf('brut');
+    concrete(c, false, false);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    for (let r = 0; r < FACADE_GRID.rows; r++) ctx.fillRect(c.x, c.y + r * ROW_H, CELL_PX, ROW_H * 0.22);
+    ctx.fillStyle = 'rgba(255,255,255,0.045)';
+    for (let k = 0; k < COLS; k++) ctx.fillRect(c.x + k * COL_W, c.y, COL_W * 0.16, CELL_PX);
+    const w = PANE_W * 0.62;
+    const px = (COL_W - w) / 2;
+    for (let r = 0; r < FACADE_GRID.rows; r++) {
+      for (let k = 0; k < COLS; k++) {
+        // The reveal: a dark recess a little bigger than the pane, so the hole reads deep.
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(c.x + k * COL_W + px - 3, c.y + r * ROW_H + PANE_Y - 3, w + 6, PANE_H + 4);
+        if (c.rng() < 0.34) litPane(c, k, r, LIT_SOFT[0] + c.rng() * (LIT[1] - LIT_SOFT[0]), w, px);
+        else darkPane(c, k, r, w, px);
+      }
+    }
+  }
+  // 17 ground: the street storey — shutters, a grille, doors, a vent — under two storeys of
+  // concrete with slit windows. Row 3 of the canvas is the bottom of the wall.
+  {
+    const c = cellOf('ground');
+    concrete(c, true, false);
+    groundStorey(c, ['shutter', 'shutter', 'door', 'grille', 'shutter', 'shutter', 'vent', 'door']);
+    slitWindows(c, [1, 2], 0.2);
+  }
+  // 18 shops: two lit shopfronts among the shutters, the odd working frontage on a street.
+  {
+    const c = cellOf('shops');
+    concrete(c, true, false);
+    groundStorey(c, ['shop', 'shop', 'door', 'shutter', 'shutter', 'shop', 'shop', 'grille']);
+    slitWindows(c, [1, 2], 0.3);
+  }
+  // 19 plant: a loading door, a louvred plant room and a big extract vent; nothing lit.
+  {
+    const c = cellOf('plant');
+    concrete(c, true, false);
+    groundStorey(c, ['roller', 'roller', 'roller', 'louvre', 'louvre', 'door', 'vent', 'vent']);
+    louvres(c, [1]);
+    slitWindows(c, [2], 0.1);
+  }
+
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   // The shader wraps inside a cell itself; the texture must never wrap across cells.
@@ -380,7 +531,7 @@ export function makeFacadeAtlas(): THREE.CanvasTexture {
 
 /* ------------------------------------------------------------------ material */
 
-export const FACADE_CACHE_KEY = `${WINDOW_ACTIVITY_CACHE_KEY}-atlas-v2-concrete`;
+export const FACADE_CACHE_KEY = `${WINDOW_ACTIVITY_CACHE_KEY}-atlas-v3-5x5`;
 
 /** How many times the concrete photograph repeats across one atlas cell (`FACADE_TILE` m). */
 const CONCRETE_REPEAT = 1.5;

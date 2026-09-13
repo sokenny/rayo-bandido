@@ -15,11 +15,11 @@ import {
   streetPosition,
   streetTierFor,
 } from '../src/sim/streetRace';
-import { createCityWorld } from '../src/world/cityWorld';
-import { addCircuitGate, circuitGateSite } from '../src/world/cityCircuitGate';
-import { addStreetSites } from '../src/world/cityStreetSites';
-import { BUHO_SITE, CITY_ROADS, PASSENGER_STOPS, RAMP_SPECS, RUSH_SITES, VIADUCT_SPEC } from '../src/world/citySpec';
-import { STREET_SHORTCUTS, STREET_SITES, STREET_SPEC } from '../src/world/streetSpec';
+import { CITY_ROADS, RAMP_SPECS, VIADUCT_SPEC } from '../src/world/citySpec';
+import { METRO_BUHO_SITE, METRO_CIRCUIT_SITE, METRO_PASSENGER_STOPS, METRO_RUSH_SITES, METRO_STREET_SITES } from '../src/world/metroSpec';
+import { createOpenWorld } from '../src/world/openWorld';
+import { STREET_SHORTCUTS, STREET_SPEC } from '../src/world/streetSpec';
+import { INTRO } from '../src/content/intro';
 import { createStreetWorld } from '../src/world/streetWorld';
 import { buildTrackPath, createProjection, pointAtStation, projectOntoPath, type TrackPath } from '../src/world/track';
 
@@ -363,24 +363,28 @@ describe('the series', () => {
 /* ------------------------------------------------------------------ the city side */
 
 describe('the rings in the street', () => {
-  const city = addStreetSites(addCircuitGate(createCityWorld()));
+  // The open world's rings (Bandido Metro); the race they open is run on the Bay.
+  const city = createOpenWorld();
   const sites = city.layout.streetSites!;
 
   it('are on the road, mid-block, and clear of every other ring', () => {
     expect(sites).toHaveLength(STREET_RACE.events.length);
     const others = [
-      ...RUSH_SITES.map((s) => ({ ...s, r: RUSH.marker.promptRadius })),
-      ...PASSENGER_STOPS.map((s) => ({ ...s, r: PASSENGER.marker.promptRadius })),
-      { ...BUHO_SITE, r: MOOGUL.marker.promptRadius },
-      { ...circuitGateSite(), r: TIME_ATTACK.marker.promptRadius },
+      ...METRO_RUSH_SITES.map((s) => ({ ...s, r: RUSH.marker.promptRadius })),
+      ...METRO_PASSENGER_STOPS.map((s) => ({ ...s, r: PASSENGER.marker.promptRadius })),
+      { ...METRO_BUHO_SITE, r: MOOGUL.marker.promptRadius },
+      { ...METRO_CIRCUIT_SITE, r: TIME_ATTACK.marker.promptRadius },
+      { ...INTRO.route.meetup, r: INTRO.route.meetup.radius },
     ];
     for (const site of sites) {
       expect(city.plan.isRoad(site.x, site.z, -STREET_RACE.marker.promptRadius)).toBe(true);
+      expect(city.plan.isSolid(site.x, site.z, STREET_RACE.marker.promptRadius)).toBe(false);
       for (const o of others) {
         expect(Math.hypot(site.x - o.x, site.z - o.z)).toBeGreaterThan(STREET_RACE.marker.promptRadius + o.r + 6);
       }
     }
-    expect(STREET_SITES.length).toBe(sites.length);
+    expect(METRO_STREET_SITES.length).toBe(sites.length);
+    expect(city.plan.streetMarkers).toEqual(sites);
   });
 
   it('offer only the events already reached, and one press takes the key once', () => {

@@ -1,6 +1,6 @@
 import type { BlockRect, RailDef, Rect, RibbonDef, ZoneId } from './cityPlan';
 import { inRect } from './cityPlan';
-import { createProjection, projectOntoPath, segmentCount, type TrackPath, type TrackZone } from './track';
+import { createProjection, pathBounds, projectOntoPath, segmentCount, type PathBounds, type TrackPath, type TrackZone } from './track';
 
 /**
  * City generation shared by the circuit and the big city: the block grid that grows around a
@@ -87,6 +87,12 @@ export interface BlockOptions {
   minCell: number;
   /** Shoulder between a road edge and the first building, per zone (m). */
   shoulder: Record<TrackZone, number>;
+  /**
+   * The shoulder at a point, when the world's districts do not all keep the same one:
+   * Bandido Metro stands the Stack's blocks at the kerb inside the Bay's pavements. Missing:
+   * `shoulder[zone]`. Alleys keep `alleyShoulder` either way.
+   */
+  shoulderAt?(x: number, z: number, zone: TrackZone): number;
   alleyShoulder: number;
   /** Corridor either side of a viaduct's footprint (m); the pillars live in it. */
   elevatedShoulder: number;
@@ -123,6 +129,11 @@ export const RACE_BLOCK_OPTIONS: BlockOptions = {
   },
 };
 
+/** The street shoulder at a point: the world's rule for the spot when it has one, else the zone's. */
+export function streetShoulder(opts: BlockOptions, x: number, z: number, zone: TrackZone): number {
+  return opts.shoulderAt ? opts.shoulderAt(x, z, zone) : opts.shoulder[zone];
+}
+
 /** A straight, axis-aligned stretch of road: the constant coordinate and the half extent to clear. */
 interface StraightRun {
   axis: 'x' | 'z';
@@ -139,6 +150,12 @@ interface RibbonBox {
   minZ: number;
   maxZ: number;
   runs: StraightRun[];
+  /**
+   * The box round each segment, grown by its half width and the widest shoulder, four
+   * numbers a segment: a cell far from a segment's box is far from the segment, and on a
+   * street 2.5 km long nearly every segment is far from nearly every cell.
+   */
+  segBox: Float64Array;
 }
 
 /** Shortest stretch of straight road worth splitting a cell along (m). */
@@ -154,7 +171,7 @@ function straightRuns(rb: RibbonDef, opts: BlockOptions): StraightRun[] {
   const shoulderOf = (i: number): number => {
     const s = samples[i];
     const flying = s.y > opts.elevatedAbove;
-    return flying ? opts.elevatedShoulder : rb.kind === 'alley' ? opts.alleyShoulder : opts.shoulder[s.zone];
+    return flying ? opts.elevatedShoulder : rb.kind === 'alley' ? opts.alleyShoulder : streetShoulder(opts, s.x, s.z, s.zone);
   };
   for (const axis of ['x', 'z'] as const) {
     let start = 0;
@@ -196,7 +213,19 @@ function ribbonBoxes(ribbons: readonly RibbonDef[], opts: BlockOptions): RibbonB
       if (s.halfWidth > reach) reach = s.halfWidth;
     }
     reach += maxShoulder + 1;
-    return { rb, minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach, runs: opts.axisSplit ? straightRuns(rb, opts) : [] };
+    const samples = rb.path.samples;
+    const segs = segmentCount(rb.path);
+    const segBox = new Float64Array(segs * 4);
+    for (let i = 0; i < segs; i++) {
+      const a = samples[i];
+      const b = samples[(i + 1) % samples.length];
+      const grow = Math.max(a.halfWidth, b.halfWidth) + maxShoulder + 1;
+      segBox[i * 4] = Math.min(a.x, b.x) - grow;
+      segBox[i * 4 + 1] = Math.max(a.x, b.x) + grow;
+      segBox[i * 4 + 2] = Math.min(a.z, b.z) - grow;
+      segBox[i * 4 + 3] = Math.max(a.z, b.z) + grow;
+    }
+    return { rb, minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach, runs: opts.axisSplit ? straightRuns(rb, opts) : [], segBox };
   });
 }
 
@@ -239,11 +268,19 @@ function rectClearance(r: Rect, boxes: readonly RibbonBox[], opts: BlockOptions)
     const rb = box.rb;
     const samples = rb.path.samples;
     const segs = segmentCount(rb.path);
+    const sb = box.segBox;
     for (let i = 0; i < segs; i++) {
+      // A segment whose grown box misses the cell cannot come within its shoulder of it; and
+      // one whose box is already further off than the best so far cannot beat it.
+      const gx = Math.max(sb[i * 4] - r.maxX, 0, r.minX - sb[i * 4 + 1]);
+      const gz = Math.max(sb[i * 4 + 2] - r.maxZ, 0, r.minZ - sb[i * 4 + 3]);
+      if (gx > 0 || gz > 0) {
+        if (best <= 0 || gx * gx + gz * gz >= best * best) continue;
+      }
       const a = samples[i];
       const b = samples[(i + 1) % samples.length];
       const flying = a.y > opts.elevatedAbove && b.y > opts.elevatedAbove;
-      const shoulder = flying ? opts.elevatedShoulder : rb.kind === 'alley' ? opts.alleyShoulder : opts.shoulder[a.zone];
+      const shoulder = flying ? opts.elevatedShoulder : rb.kind === 'alley' ? opts.alleyShoulder : streetShoulder(opts, a.x, a.z, a.zone);
       const d = segmentRectDistance(a.x, a.z, b.x, b.z, r) - Math.max(a.halfWidth, b.halfWidth) - shoulder;
       if (d < best) best = d;
     }
@@ -408,33 +445,9 @@ export const SAME_LEVEL = 3;
 
 const RAIL_PROJ = createProjection();
 
-interface PathBox {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-}
-const PATH_BOXES = new WeakMap<TrackPath, PathBox>();
-
-/** Bounding box of a path grown by its widest half width, cached per path. */
-export function pathBox(path: TrackPath): PathBox {
-  let box = PATH_BOXES.get(path);
-  if (box) return box;
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  let reach = 0;
-  for (const s of path.samples) {
-    if (s.x < minX) minX = s.x;
-    if (s.x > maxX) maxX = s.x;
-    if (s.z < minZ) minZ = s.z;
-    if (s.z > maxZ) maxZ = s.z;
-    if (s.halfWidth > reach) reach = s.halfWidth;
-  }
-  box = { minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach };
-  PATH_BOXES.set(path, box);
-  return box;
+/** Bounding box of a path grown by its widest half width, cached per path (`track.ts`). */
+export function pathBox(path: TrackPath): PathBounds {
+  return pathBounds(path);
 }
 
 /**

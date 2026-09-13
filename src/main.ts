@@ -20,8 +20,9 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
 }
 
 /**
- * What to load comes from the URL: `?mode=city` (the open world), `?mode=stack` (The Stack,
- * the second city, driven alone while it is built — `docs/CITY_V2_BRIEF.md`), `?mode=circuit`
+ * What to load comes from the URL: `?mode=city` (the open world, Bandido Metro —
+ * `src/world/openWorld.ts`), `?mode=bay` and `?mode=stack` (the two cities the metro was merged
+ * from, Bandido Bay and The Stack, driven alone and on no menu), `?mode=circuit`
  * (the city circuit on your own), `?mp=1` (the same circuit in a room), `?race=1` (the screen
  * that chooses between those two), `?mode=race` (the Bandido Loop, the original circuit —
  * still built and still what the perf gate measures, just no longer on a menu) or
@@ -54,7 +55,9 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  */
 function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
-  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' || mode === 'stack' ? mode : null;
+  // `?mode=metro` was the metro's address while it was a card of its own; it is the open world now.
+  if (mode === 'metro') return 'city';
+  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' || mode === 'stack' || mode === 'bay' ? mode : null;
 }
 
 /**
@@ -223,7 +226,7 @@ async function openWorld(): Promise<void> {
   let session: NetSession | null = null;
 
   if (!solo) {
-    loading.set('CONNECTING TO BANDIDO BAY', 0.06);
+    loading.set('CONNECTING TO BANDIDO METRO', 0.06);
     await loading.paint();
     session = createSession(storedName(), { join: WORLD_ROOM_CODE });
     const connected = await waitForRoom(session, WORLD_CONNECT_MS);

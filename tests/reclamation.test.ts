@@ -172,7 +172,7 @@ describe('the city it produces', () => {
     // simulation already has, within a hand's breadth of one (ivy on a wall, a tag on a
     // barrier — a car that reaches those has already hit the collider behind them), or high
     // enough over the road that a bus passes under it.
-    const check = (name: string, positions: readonly number[]): void => {
+    const check = (name: string, positions: ArrayLike<number>): void => {
       let offending = 0;
       let worst = '';
       for (let i = 0; i < positions.length; i += 3) {

@@ -1,7 +1,7 @@
 import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { concreteAt, finishOf, groundGlow, halo, setbackAt, type EnvBuilders } from './builders';
 import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec, type Volume } from './buildingKit';
 import { buildMegastructures } from './megastructureBuilder';
 import { FLOOR } from './facadeAtlas';
@@ -17,7 +17,7 @@ import { signCell } from './textures';
 /** Metres covered by one asphalt texture tile. */
 export const ROAD_TILE = 8;
 /** Sidewalk ledge kept between the collider edge and the nearest wall. */
-const SIDEWALK = 3.4;
+export const SIDEWALK = 3.4;
 
 /**
  * How far back from a block's collider edge its buildings stand, per axis. A thin plot (the
@@ -304,7 +304,7 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
   b.concrete.color(PAL.sidewalk, blk.zone === 'jdm' ? 0.8 : 1);
   b.concrete.planeY(cx, 0.006, cz, w - 1.7, d - 1.7);
 
-  const setback = blockSetback(w, d, b.plan.setback ?? SIDEWALK);
+  const setback = blockSetback(w, d, setbackAt(b, cx, cz, SIDEWALK));
   const inner: Rect2 = {
     minX: blk.minX + setback.x,
     maxX: blk.maxX - setback.x,
@@ -348,7 +348,7 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
       inner,
       pave: setback,
       seed,
-      spec: { zone: blk.zone, massing: blk.massing, height: h, base: 0.22, detail: 'near', street },
+      spec: { zone: blk.zone, massing: blk.massing, height: h, base: 0.22, detail: 'near', street, ...finishOf(b, (r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2) },
     });
   }
   return plots;
@@ -610,10 +610,16 @@ function tryFacade(
 
   const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
   const zone = blk.zone;
-  const c = accent(zone, rng);
+  // In concrete (the Stack) the street wall is a ground floor of shutters and doors from the
+  // atlas, and the neon band is the odd working shopfront, warm, on one wall in six or so:
+  // neon is rare in the references, and a band on every wall at the driver's shoulder read
+  // as a white streak at zero setback (Phase 2's note).
+  const concrete = concreteAt(b, cx, cz);
+  if (concrete && rng() > (zone === 'jdm' ? 0.65 : 0.45)) return;
+  const c = concrete ? (rng() < 0.7 ? PAL.neonAmber : PAL.winWarm) : accent(zone, rng);
 
   // Shopfront band at ground level.
-  const bandLen = width * (0.5 + rng() * 0.35);
+  const bandLen = width * (concrete ? 0.3 + rng() * 0.25 : 0.5 + rng() * 0.35);
   const bx = faceX + dx * 0.25;
   const bz = faceZ + dz * 0.25;
   // Split roughly half and half between the bass-driven mass and the mid-driven breathers,
@@ -666,7 +672,7 @@ function tryFacade(
   }
 
   // A neon sign, but only rarely: selective neon is the whole point.
-  if (!inDistrict && rng() > (zone === 'urban' ? 0.2 : 0.32)) return;
+  if (!inDistrict && rng() > (concrete ? (zone === 'jdm' ? 0.45 : 0.3) : zone === 'urban' ? 0.2 : 0.32)) return;
   const pool = zone === 'jdm' ? [2, 10, 11, 13, 15] : zone === 'corporate' ? [1, 14, 4, 12, 7] : [0, 1, 3, 5, 6, 8, 9, 12];
   const cell = pool[Math.floor(rng() * pool.length)];
   const uv = signCell(cell);
@@ -745,7 +751,7 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
       buildBuilding(
         b,
         { minX: x - bw / 2, maxX: x + bw / 2, minZ: z - bd / 2, maxZ: z + bd / 2 },
-        { zone, massing: massingFor(h), height: h, base: 0.22, detail: 'mid', street },
+        { zone, massing: massingFor(h), height: h, base: 0.22, detail: 'mid', street, ...finishOf(b, x, z) },
         makeRng(plotSeed(x, z)),
       );
       if (rng() < 0.28) {
@@ -778,7 +784,7 @@ function buildSkyline(b: EnvBuilders, rng: () => number): void {
     buildBuilding(
       b,
       { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 },
-      { zone, massing: massingFor(h), height: h, base: 0, detail: 'far', ...(landmark !== undefined ? { landmark } : {}) },
+      { zone, massing: massingFor(h), height: h, base: 0, detail: 'far', ...(landmark !== undefined ? { landmark } : {}), ...finishOf(b, x, z) },
       makeRng(plotSeed(x, z) ^ 0x51ab),
     );
   };

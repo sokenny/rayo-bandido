@@ -23,13 +23,117 @@ const SOFT_MAX_BEND = 0.5;
 /** Scratch for the four corner normals of one quad (a, b, c, d), 3 floats each. */
 const N4 = new Float64Array(12);
 
+/**
+ * A growable Float32Array: the builders' vertex data as it is drawn, at four bytes a number
+ * rather than the eight of a JavaScript array, and handed to Three without a second copy of
+ * the whole city. Bandido Metro's millions of triangles are the reason; the Bay and the
+ * Stack take half the memory they did for it. Grows by doubling.
+ */
+export class FloatList {
+  private data = new Float32Array(4096);
+  length = 0;
+
+  private grow(n: number): void {
+    if (this.length + n <= this.data.length) return;
+    let size = this.data.length * 2;
+    while (size < this.length + n) size *= 2;
+    const next = new Float32Array(size);
+    next.set(this.data.subarray(0, this.length));
+    this.data = next;
+  }
+
+  push1(a: number): void {
+    this.grow(1);
+    this.data[this.length++] = a;
+  }
+
+  push3(a: number, b: number, c: number): void {
+    this.grow(3);
+    const d = this.data;
+    let i = this.length;
+    d[i++] = a;
+    d[i++] = b;
+    d[i++] = c;
+    this.length = i;
+  }
+
+  push6(a: number, b: number, c: number, d: number, e: number, f: number): void {
+    this.grow(6);
+    const v = this.data;
+    let i = this.length;
+    v[i++] = a;
+    v[i++] = b;
+    v[i++] = c;
+    v[i++] = d;
+    v[i++] = e;
+    v[i++] = f;
+    this.length = i;
+  }
+
+  push9(a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, k: number): void {
+    this.grow(9);
+    const v = this.data;
+    let i = this.length;
+    v[i++] = a;
+    v[i++] = b;
+    v[i++] = c;
+    v[i++] = d;
+    v[i++] = e;
+    v[i++] = f;
+    v[i++] = g;
+    v[i++] = h;
+    v[i++] = k;
+    this.length = i;
+  }
+
+  /** The `i`th value. */
+  at(i: number): number {
+    return this.data[i];
+  }
+
+  /** The values so far, in an array of exactly that length. */
+  take(): Float32Array {
+    return this.data.slice(0, this.length);
+  }
+
+  /** The values so far, as a view over the buffer (no copy; invalid once the list grows again). */
+  view(): Float32Array {
+    return this.data.subarray(0, this.length);
+  }
+
+  clear(): void {
+    this.data = new Float32Array(0);
+    this.length = 0;
+  }
+}
+
 export class MeshBuilder {
-  readonly positions: number[] = [];
-  readonly normals: number[] = [];
-  readonly uvs: number[] = [];
-  readonly colors: number[] = [];
-  readonly faults: number[] = [];
-  readonly cells: number[] = [];
+  private readonly _positions = new FloatList();
+  private readonly _normals = new FloatList();
+  private readonly _uvs = new FloatList();
+  private readonly _colors = new FloatList();
+  private readonly _faults = new FloatList();
+  private readonly _cells = new FloatList();
+
+  /** The vertex data so far, as views (no copy): for the tests and the stats, never for drawing. */
+  get positions(): Float32Array {
+    return this._positions.view();
+  }
+  get normals(): Float32Array {
+    return this._normals.view();
+  }
+  get uvs(): Float32Array {
+    return this._uvs.view();
+  }
+  get colors(): Float32Array {
+    return this._colors.view();
+  }
+  get faults(): Float32Array {
+    return this._faults.view();
+  }
+  get cells(): Float32Array {
+    return this._cells.view();
+  }
   private readonly withColor: boolean;
   private readonly withFault: boolean;
   private readonly withCell: boolean;
@@ -141,11 +245,11 @@ export class MeshBuilder {
   }
 
   get triangles(): number {
-    return this.positions.length / 9;
+    return this._positions.length / 9;
   }
 
   get empty(): boolean {
-    return this.positions.length === 0;
+    return this._positions.length === 0;
   }
 
   /** Quad a-b-c-d in counter-clockwise order seen from the front face. */
@@ -305,28 +409,28 @@ export class MeshBuilder {
     u1: number,
     v1: number,
   ): void {
-    const p = this.positions;
-    const n = this.normals;
-    const t = this.uvs;
+    const p = this._positions;
+    const n = this._normals;
+    const t = this._uvs;
     // a, b, c
-    p.push(ax, ay, az, bx, by, bz, cx, cy, cz);
-    t.push(u0, v0, u1, v0, u1, v1);
-    n.push(N4[0], N4[1], N4[2], N4[3], N4[4], N4[5], N4[6], N4[7], N4[8]);
+    p.push9(ax, ay, az, bx, by, bz, cx, cy, cz);
+    t.push6(u0, v0, u1, v0, u1, v1);
+    n.push9(N4[0], N4[1], N4[2], N4[3], N4[4], N4[5], N4[6], N4[7], N4[8]);
     // a, c, d
-    p.push(ax, ay, az, cx, cy, cz, dx, dy, dz);
-    t.push(u0, v0, u1, v1, u0, v1);
-    n.push(N4[0], N4[1], N4[2], N4[6], N4[7], N4[8], N4[9], N4[10], N4[11]);
+    p.push9(ax, ay, az, cx, cy, cz, dx, dy, dz);
+    t.push6(u0, v0, u1, v1, u0, v1);
+    n.push9(N4[0], N4[1], N4[2], N4[6], N4[7], N4[8], N4[9], N4[10], N4[11]);
     if (this.withColor) {
-      const c = this.colors;
-      for (let i = 0; i < 6; i++) c.push(this.r, this.g, this.b);
+      const c = this._colors;
+      for (let i = 0; i < 6; i++) c.push3(this.r, this.g, this.b);
     }
     if (this.withFault) {
-      const fl = this.faults;
-      for (let i = 0; i < 6; i++) fl.push(this.fa);
+      const fl = this._faults;
+      for (let i = 0; i < 6; i++) fl.push1(this.fa);
     }
     if (this.withCell) {
-      const ce = this.cells;
-      for (let i = 0; i < 6; i++) ce.push(this.cu, this.cv, this.cw);
+      const ce = this._cells;
+      for (let i = 0; i < 6; i++) ce.push3(this.cu, this.cv, this.cw);
     }
   }
 
@@ -440,12 +544,12 @@ export class MeshBuilder {
       ny = by2 / bl;
       nz = bz2 / bl;
     }
-    this.positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
-    this.uvs.push(0, 0, 1, 0, 1, 1);
-    for (let i = 0; i < 3; i++) this.normals.push(nx, ny, nz);
-    if (this.withColor) for (let i = 0; i < 3; i++) this.colors.push(this.r, this.g, this.b);
-    if (this.withFault) for (let i = 0; i < 3; i++) this.faults.push(this.fa);
-    if (this.withCell) for (let i = 0; i < 3; i++) this.cells.push(this.cu, this.cv, this.cw);
+    this._positions.push9(ax, ay, az, bx, by, bz, cx, cy, cz);
+    this._uvs.push6(0, 0, 1, 0, 1, 1);
+    for (let i = 0; i < 3; i++) this._normals.push3(nx, ny, nz);
+    if (this.withColor) for (let i = 0; i < 3; i++) this._colors.push3(this.r, this.g, this.b);
+    if (this.withFault) for (let i = 0; i < 3; i++) this._faults.push1(this.fa);
+    if (this.withCell) for (let i = 0; i < 3; i++) this._cells.push3(this.cu, this.cv, this.cw);
   }
 
   /**
@@ -684,14 +788,28 @@ export class MeshBuilder {
     this.face(blx, yb, blz, brx, yb, brz, brx, yb1, brz, blx, yb1, blz);
   }
 
+  /**
+   * Drop the arrays once `build` has copied them into a geometry. A city's worth of
+   * vertices as JavaScript numbers is several times the size of the same data on the GPU,
+   * and nothing reads a builder after its mesh exists.
+   */
+  release(): void {
+    this._positions.clear();
+    this._normals.clear();
+    this._uvs.clear();
+    this._colors.clear();
+    this._faults.clear();
+    this._cells.clear();
+  }
+
   build(): THREE.BufferGeometry {
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
-    if (this.withColor) geo.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
-    if (this.withFault) geo.setAttribute('aLampFault', new THREE.Float32BufferAttribute(this.faults, 1));
-    if (this.withCell) geo.setAttribute('aFacadeCell', new THREE.Float32BufferAttribute(this.cells, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(this._positions.take(), 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(this._normals.take(), 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(this._uvs.take(), 2));
+    if (this.withColor) geo.setAttribute('color', new THREE.BufferAttribute(this._colors.take(), 3));
+    if (this.withFault) geo.setAttribute('aLampFault', new THREE.BufferAttribute(this._faults.take(), 1));
+    if (this.withCell) geo.setAttribute('aFacadeCell', new THREE.BufferAttribute(this._cells.take(), 3));
     geo.computeBoundingSphere();
     return geo;
   }

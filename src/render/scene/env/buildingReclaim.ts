@@ -1,8 +1,8 @@
 import type { ZoneId } from '../../../world/cityPlan';
 import { PAL } from './palette';
 import { makeRng, type Rect2 } from './meshBuilder';
-import type { EnvBuilders } from './builders';
-import { buildGroundModule, pickGroundModule, type GroundFace } from './groundFloor';
+import { concreteAt, setbackAt, type EnvBuilders } from './builders';
+import { buildGroundModule, pickGroundModule, pickWorkingModule, type GroundFace } from './groundFloor';
 import { grimeSurface, paintSurface } from './graffiti';
 import { canopyTree, crookedTree, fern, sapling, shrub, vine, weedLine, weeds } from './plants';
 import { seedAt, type ReclaimAnchors, type ReclaimProfile } from './reclaim';
@@ -194,14 +194,25 @@ function dressFace(
   const rng = makeRng(seed);
   const tx = -nz;
   const tz = nx;
-  const face: GroundFace = { x, y, z, nx, nz, tx, tz, width, pavement, maxHeight: top - y, zone };
+  const concrete = concreteAt(b, x, z);
+  const flush = setbackAt(b, x, z, 3.4) < 1.5;
+  // A long wall is several ground floors, not one: cut it into pieces of a shop's width so
+  // a 40 m frontage reads as a run of different doors and shutters, never one blank run.
+  const pieces = concrete && width > 18 ? Math.ceil(width / 13) : 1;
+  const pieceW = width / pieces;
+  const face: GroundFace = { x, y, z, nx, nz, tx, tz, width, pavement, maxHeight: top - y, zone, ...(flush ? { flush } : {}) };
   // The creeper goes on whatever the ground floor turns out to be: it lives above it.
   facadeCreepers(b, x, z, y, nx, nz, tx, tz, width, top - y, profile, rng);
-  const kind = pickGroundModule(profile, zone, rng);
-  if (kind) {
-    consumeAnchors(b, buildGroundModule(b, face, kind, profile, rng), profile, seed, rng);
-    return;
+  let any = false;
+  for (let i = 0; i < pieces; i++) {
+    const a = -width / 2 + pieceW * (i + 0.5);
+    const piece: GroundFace = pieces === 1 ? face : { ...face, x: x + tx * a, z: z + tz * a, width: pieceW - 0.3 };
+    const kind = pickGroundModule(profile, zone, rng) ?? (concrete ? pickWorkingModule(profile, zone, rng) : null);
+    if (!kind) continue;
+    consumeAnchors(b, buildGroundModule(b, piece, kind, profile, rng), profile, (seed ^ (0x77 * (i + 1))) >>> 0, rng);
+    any = true;
   }
+  if (any) return;
   // No module: the shopfront stays. It still picks up what a working street picks up — a tag
   // on the plinth where nothing is lit, weeds in the joint, and a streak of damp.
   if (profile.graffiti > 0.05 && rng() < BUILDING_RECLAIM.bareFaceGraffiti) {

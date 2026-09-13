@@ -3,8 +3,7 @@ import { cityRecovery } from './world/cityRecovery';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { STACK_SPEC } from './world/stackSpec';
-import { addCircuitGate } from './world/cityCircuitGate';
-import { addStreetSites } from './world/cityStreetSites';
+import { createOpenWorld } from './world/openWorld';
 import { createStreetWorld } from './world/streetWorld';
 import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
@@ -215,15 +214,19 @@ export function createGame(
           ? // The Street Race's own instance of the city (`src/world/streetWorld.ts`).
             createStreetWorld()
         : mode === 'city'
-          ? // The open world, with a way onto the circuit painted on its start line. A layer over
-            // the city rather than a part of it (`src/world/cityCircuitGate.ts`), for the same
+          ? // The open world: Bandido Metro, with the doors to the races painted on it. Layers
+            // over the city rather than parts of it (`src/world/openWorld.ts`), for the same
             // reason the circuit itself is one: the city does not know the race exists.
-            addStreetSites(addCircuitGate(createCityWorld()))
-          : mode === 'stack'
-            ? // The Stack (`src/world/stackSpec.ts`): the second city, roads and levels first.
-              // Solo, no police, no missions and no intro until Phase 4 moves them in.
-              createCityWorld(STACK_SPEC)
-            : createArenaWorld();
+            createOpenWorld()
+          : mode === 'bay'
+            ? // Bandido Bay, the first open world, kept by address as it was before the metro
+              // took its place: solo, its own activities and police, no doors and no intro.
+              createCityWorld()
+            : mode === 'stack'
+              ? // The Stack (`src/world/stackSpec.ts`): the second city, now the metro's downtown.
+                // Kept by address: solo, no police, no missions and no intro.
+                createCityWorld(STACK_SPEC)
+              : createArenaWorld();
   const layout = world.layout;
 
   /* ------------------------------------------------------------- multiplayer */
@@ -293,10 +296,10 @@ export function createGame(
     timeAttackCleared: timeAttackProgress?.cleared ?? 0,
     streetRaceCleared: streetProgress?.cleared ?? 0,
     intro: introWanted,
-    // THE POLICE (`src/sim/police.ts`): Free Roam only, which is the open world and nothing
-    // else. Whether they may act on any given tick is the sim's question; whether they exist
-    // at all is this one.
-    police: mode === 'city',
+    // THE POLICE (`src/sim/police.ts`): Free Roam only, which is the open world (and the Bay it
+    // replaced) and nothing else. Whether they may act on any given tick is the sim's question;
+    // whether they exist at all is this one.
+    police: mode === 'city' || mode === 'bay',
   });
   // The field: built from the grid, clamped to the events this browser has unlocked.
   const streetRace: StreetRaceState | null =
@@ -1335,7 +1338,7 @@ export function createGame(
       heading = Math.atan2(gate.fx, -gate.fz);
     }
     let y = layout.playerSpawn.y ?? 0;
-    if (mode === 'city' || mode === 'stack') {
+    if (mode === 'city' || mode === 'stack' || mode === 'bay') {
       const recovered = cityRecovery(world.plan, v.x, v.z, v.y, v.heading);
       x = recovered.x; z = recovered.z; y = recovered.y ?? 0; heading = recovered.heading;
     }
@@ -1552,7 +1555,7 @@ export function createGame(
   function simulate(dt: number): void {
     input.poll(command);
 
-    if ((mode === 'city' || mode === 'stack') && command.restart) {
+    if ((mode === 'city' || mode === 'stack' || mode === 'bay') && command.restart) {
       command.restart = false;
       rescue();
     }
@@ -1695,7 +1698,7 @@ export function createGame(
     effects.setCarPose(pose, v, state.drift.active, nitroVisual, frameDt);
     effects.update(frameDt, simTime);
     theme.update(frameDt);
-    environment.update(frameDt, simTime);
+    environment.update(frameDt, simTime, chase.camera.position.x, chase.camera.position.z);
     // After the environment, so the sky and the fog it blends from are this frame's. The
     // envelope is read off the rules' clock: 0 the moment the Moogul is gone, and the
     // controller's own fade takes it from there.

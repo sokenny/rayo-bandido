@@ -448,8 +448,45 @@ export function distanceToPath(path: TrackPath, x: number, z: number): number {
   return projectOntoPath(path, x, z, SCRATCH).dist;
 }
 
+/**
+ * Bounding box of a path grown by its widest half width, computed once per path. A point
+ * outside it is off the road for any pad up to the box's margin; the exhaustive projection
+ * only runs for points that can actually be on the road. A city with sixty streets asks
+ * `isOnPath` millions of times while it is built, and nearly every answer is "no".
+ */
+export interface PathBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+const PATH_BOUNDS = new WeakMap<TrackPath, PathBounds>();
+
+export function pathBounds(path: TrackPath): PathBounds {
+  let box = PATH_BOUNDS.get(path);
+  if (box) return box;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let reach = 0;
+  for (const s of path.samples) {
+    if (s.x < minX) minX = s.x;
+    if (s.x > maxX) maxX = s.x;
+    if (s.z < minZ) minZ = s.z;
+    if (s.z > maxZ) maxZ = s.z;
+    if (s.halfWidth > reach) reach = s.halfWidth;
+  }
+  box = { minX: minX - reach, maxX: maxX + reach, minZ: minZ - reach, maxZ: maxZ + reach };
+  PATH_BOUNDS.set(path, box);
+  return box;
+}
+
 /** True when the point lies on the road, i.e. within half width (+ pad) of the centreline. */
 export function isOnPath(path: TrackPath, x: number, z: number, pad = 0): boolean {
+  const box = pathBounds(path);
+  if (x < box.minX - pad || x > box.maxX + pad || z < box.minZ - pad || z > box.maxZ + pad) return false;
   const p = projectOntoPath(path, x, z, SCRATCH);
   return p.dist <= p.halfWidth + pad;
 }

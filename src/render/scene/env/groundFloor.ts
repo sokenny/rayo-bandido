@@ -82,6 +82,12 @@ export interface GroundFace {
   /** Height of the building above this wall (m): a module never reaches the floor above it. */
   maxHeight: number;
   zone: ZoneId;
+  /**
+   * The wall stands at the kerb (the Stack's half-metre setback): the module may use all but
+   * five centimetres of the pavement in front of it instead of leaving `kerbClearance` bare.
+   * Still inside the block's collider, so still nothing a car can meet.
+   */
+  flush?: boolean;
 }
 
 export const GROUND_FLOOR = {
@@ -117,7 +123,7 @@ export const GROUND_FLOOR = {
  * out of the simulation's business, and it is what `tests/reclamation.test.ts` checks.
  */
 function outLimit(face: GroundFace): number {
-  return Math.max(0.08, face.pavement - GROUND_FLOOR.kerbClearance);
+  return Math.max(0.08, face.pavement - (face.flush ? 0.05 : GROUND_FLOOR.kerbClearance));
 }
 
 /** How far a module on this face wants to stand out from the wall, inside that limit. */
@@ -188,6 +194,23 @@ function surface(
  */
 export function pickGroundModule(profile: ReclaimProfile, zone: ZoneId, rng: () => number): GroundModuleKind | null {
   if (!profile.grafWall) return null;
+  return pickModuleKind(profile, zone, rng);
+}
+
+/**
+ * The working city's ground floors (the Stack, `finish: 'concrete'`): a module on most street
+ * walls whether or not the place is neglected, since the references' streets are shutters,
+ * grilles and loading bays wall after wall. No ruins outside the old town.
+ */
+export function pickWorkingModule(profile: ReclaimProfile, zone: ZoneId, rng: () => number): GroundModuleKind | null {
+  if (rng() > 0.7) return null;
+  const kind = pickModuleKind(profile, zone, rng);
+  if (kind === 'ruinedShop' && zone !== 'jdm') return 'shutter';
+  if (kind === 'retaining') return zone === 'corporate' ? 'podium' : 'panelled';
+  return kind;
+}
+
+function pickModuleKind(profile: ReclaimProfile, zone: ZoneId, rng: () => number): GroundModuleKind | null {
   // Even in a pocket, not every building gives up its ground floor: the street has to keep
   // some active frontage or it reads as a ruin rather than a working city.
   if (rng() > 0.45 + profile.intensity * 0.5) return null;
@@ -231,7 +254,7 @@ export function buildGroundModule(
   rng: () => number,
 ): ReclaimAnchors {
   const anchors = emptyAnchors();
-  if (face.width < GROUND_FLOOR.minWidth || face.pavement < GROUND_FLOOR.minPavement) return anchors;
+  if (face.width < GROUND_FLOOR.minWidth || face.pavement < (face.flush ? 0.3 : GROUND_FLOOR.minPavement)) return anchors;
   const w = face.width - 0.4;
   const half = w / 2;
   const grime = PAL.concrete;

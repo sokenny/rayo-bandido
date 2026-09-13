@@ -3,7 +3,7 @@ import { onRibbonAtLevel } from '../../../world/cityGen';
 import { createProjection, offsetAtStation, projectOntoPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { concreteAt, densityAt, groundGlow, halo, type EnvBuilders } from './builders';
 import { buildViaducts } from './elevatedBuilder';
 import { buildPassages, buildPortalFrames } from './passageBuilder';
 import { lampColor, lampPost } from './propsBuilder';
@@ -107,7 +107,8 @@ function buildShoulders(b: EnvBuilders, rb: RibbonDef): void {
       // The band's two ends: it tapers between them to meet the blocks behind it squarely.
       const wa = kerbs.widthAt(rb, i, side, 0);
       const wc = kerbs.widthAt(rb, i, side, 1);
-      if (Math.min(wa, wc) < 0.8) continue;
+      // A concrete city at zero setback still draws its kerb line on the half-metre it has.
+      if (Math.min(wa, wc) < (concreteAt(b, a.x, a.z) ? 0.45 : 0.8)) continue;
       const ay = a.y + lift;
       const cy = c.y + lift;
       /** A point `off` metres outside the road edge on this side, at the near/far sample. */
@@ -304,6 +305,27 @@ function buildRails(b: EnvBuilders, rails: RailDef[], rng: () => number): void {
       }
       continue;
     }
+    if (concreteAt(b, (ax + bx) / 2, (az + bz) / 2)) {
+      // The Stack: a concrete parapet with a dark steel top rail and an amber marker lamp on
+      // every other segment, the way the reference's rails wear a row of small warm lights.
+      // No strip of colour along it: the one red accent in a view is placed by hand
+      // (`passageBuilder.ts`), not worn by every barrier in a zone.
+      // Sixteen triangles a segment, the Bay's urban barrier's cost: the parapet is a box,
+      // the rail a crossed tube, the marker a stub of tube on every third segment.
+      b.wall.color(PAL.concrete, 1.2);
+      b.wall.slopedBox(ax, az, bx, bz, ya, yb, 0.5, 0.86);
+      b.props.color(PAL.metalDark, 1.35);
+      b.props.tube(r.ax, ya + 0.92, r.az, r.bx, yb + 0.92, r.bz, 0.12);
+      if (i % 3 === 0) {
+        b.neon.color(PAL.neonAmber, 0.75);
+        b.neon.tube(cx, ym + 0.98, cz, cx, ym + 1.16, cz, 0.16);
+      }
+      if (rng() < 0.05) {
+        b.props.color(PAL.rust, 1);
+        b.props.orientedBox(cx, cz, dx, dz, 0.5, 0.5, ym + 0.98, ym + 1.3);
+      }
+      continue;
+    }
     if (r.zone === 'corporate') {
       // Highway guardrail: low base, a top rail, an even cyan reflector line.
       b.props.color(PAL.sidewalk, 1.15);
@@ -343,9 +365,11 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
   const spacing = b.plan.lampSpacing;
   const step = alley ? 24 : rb.elevated ? (spacing?.deck ?? 38) : (spacing?.street ?? 38);
   let side = 1;
-  for (let s = step / 2; s < path.length - (path.closed ? 0 : 4); s += step) {
+  for (let s = step / 2, next = s; s < path.length - (path.closed ? 0 : 4); s = next) {
     side = -side;
     const c = offsetAtStation(path, s, 0);
+    // The gap to the next post: wider in a thinned district (`CityPlan.densityAt`).
+    next = s + step / Math.max(0.2, densityAt(b, c.x, c.z));
     const deck = rb.elevated && c.y > 0.5;
     // On a deck the post hangs off the fascia just outside the rail; on the ground it stands
     // on the pavement beyond the kerb.
@@ -363,7 +387,7 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
     // A bus shelter stands exactly where this post wants to: it brings its own light.
     if (blocked || coveredAbove(b, p.x, p.z, c.y) || inBusStop(b.plan, p.x, p.z, 1)) continue;
     const zone = c.zone;
-    const color = lampColor(zone, rng);
+    const color = lampColor(zone, rng, concreteAt(b, p.x, p.z));
     const y0 = deck ? c.y - 0.4 : rb.elevated ? c.y : b.plan.padY(p.x, p.z);
     // Arm points back toward the road: the opposite of the offset direction.
     const dx = -side * -c.tz;
@@ -391,7 +415,9 @@ function buildAlleyDressing(b: EnvBuilders, rb: RibbonDef, rng: () => number): v
     const wx = Math.abs(nx) > Math.abs(nz) ? Math.sign(nx) : 0;
     const wz = wx === 0 ? Math.sign(nz) : 0;
     if (!b.walls.faceAt(p.x, 2.2, p.z, wx, wz)) continue;
-    const color = rng() < 0.6 ? PAL.neonMagenta : PAL.neonCyan;
+    // Sodium in the Stack's cuts; the Bay's alleys keep their magenta and cyan.
+    const warm = concreteAt(b, p.x, p.z);
+    const color = warm ? (rng() < 0.8 ? PAL.neonAmber : PAL.neonCyan) : rng() < 0.6 ? PAL.neonMagenta : PAL.neonCyan;
     const t = rng() < 0.4 ? b.neonFlicker : b.neonPulse;
     t.color(color, 0.9);
     t.tube(p.x - p.tx * 1.4, 2.2, p.z - p.tz * 1.4, p.x + p.tx * 1.4, 2.2, p.z + p.tz * 1.4, 0.16);
@@ -417,8 +443,9 @@ function buildAlleyDressing(b: EnvBuilders, rb: RibbonDef, rng: () => number): v
     }
     b.signs.panel(p.x, 4.6, p.z, 2.2, 2.2, rot, uv.u0, uv.v0, uv.u1, uv.v1);
     b.signs.panel(p.x, 4.6, p.z, 2.2, 2.2, rot + Math.PI, uv.u0, uv.v0, uv.u1, uv.v1);
-    halo(b, p.x, 4.6, p.z, 8, 5, rot, PAL.neonMagenta, 0.16);
-    groundGlow(b, c.x, c.z, 12, 12, PAL.neonMagenta, 0.1);
+    const mouth = concreteAt(b, c.x, c.z) ? PAL.neonAmber : PAL.neonMagenta;
+    halo(b, p.x, 4.6, p.z, 8, 5, rot, mouth, 0.16);
+    groundGlow(b, c.x, c.z, 12, 12, mouth, 0.1);
   }
 }
 

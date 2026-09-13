@@ -1,3 +1,4 @@
+import type { CarMeetSpec } from './carMeet';
 import type { TrackPath } from './track';
 
 /**
@@ -312,7 +313,7 @@ export interface CityPlan {
   megastructures?: MegastructureDef[];
   bounds: Rect;
   /** Which colour script the world is drawn in. Missing = the arena's. */
-  palette?: 'arena' | 'bay';
+  palette?: 'arena' | 'bay' | 'stack';
   /**
    * The world's haze, when it wants other than the default linear fog. `exp2` never fully
    * saturates, so a big world keeps some contrast in its skyline all the way to the far clip
@@ -356,6 +357,12 @@ export interface CityPlan {
    * wants it drawn. The blocks already stand that far back; this is only the surface.
    */
   shoulders?: { corporate: number; urban: number; jdm: number; alley: number };
+  /**
+   * The pavement width at a point, in a world whose districts do not all keep the same
+   * (Bandido Metro: the Stack's kerb-tight downtown inside the Bay's pavements). Missing:
+   * `shoulders` by zone everywhere. `alley` is per world in both cases.
+   */
+  shoulderAt?(x: number, z: number, zone: ZoneId): number;
   /** Where that pavement stands proud of the road, when the world raises it. */
   kerbs?: KerbField | null;
   /** Open water. The ground stops at its edge; the quay wall runs along `quayZ`. */
@@ -414,6 +421,8 @@ export interface CityPlan {
   roofClutter?: number;
   /** Roads inside buildings, gathered from the megastructures (`PassageDef`). */
   passages?: PassageDef[];
+  /** The car meets (`carMeet.ts`): the lots, what stands on them and who is parked there. */
+  meets?: CarMeetSpec[];
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.
@@ -421,6 +430,39 @@ export interface CityPlan {
   megaDetail?: 'full' | 'lean';
   /** Tags of the elevated ribbons that carry portal frames over their open stretches. */
   portalFrames?: string[];
+  /**
+   * What the city is built of, as far as the art is concerned. Missing or 'glass': the Bay —
+   * glass towers with lit lobbies, neon shopfront bands on every street wall, per-zone rail
+   * strips, cold lamps. 'concrete': the Stack's brutalism (Phase 3 of `docs/CITY_V2_BRIEF.md`)
+   * — concrete-dominant facade styles, the lower three storeys of every street wall a
+   * concrete ground floor of shutters, grilles and doors with the odd lit shopfront, quiet
+   * concrete parapets with amber markers for rails, sodium lamps, a red accent placed by hand
+   * rather than a strip on every barrier.
+   */
+  finish?: 'glass' | 'concrete';
+  /**
+   * The finish at a point, in a world built of more than one (Bandido Metro: the Stack's
+   * concrete downtown inside the Bay's glass). Missing: `finish` everywhere. Read through
+   * `finishAt` in `env/builders.ts`, never directly.
+   */
+  finishAt?(x: number, z: number): 'glass' | 'concrete';
+  /** The setback at a point, for the same reason. Missing: `setback` everywhere. */
+  setbackAt?(x: number, z: number): number;
+  /**
+   * How much of the dressing a point gets, 0..1: the reclamation, the street lamps, the
+   * rooftop clutter, the blade signs, the cables, the kerb-side junk. Missing: all of it,
+   * everywhere. Bandido Metro keeps its downtown at 1 and thins the outer city, which is
+   * twenty times the Bay's area and cannot carry the Bay's density of everything.
+   */
+  densityAt?(x: number, z: number): number;
+  /**
+   * How the static art is batched. Missing: one mesh per material spanning the whole world,
+   * never frustum-culled (the Bay, the Stack). `chunk` (m) splits every material's geometry
+   * into a grid of that cell, each cell its own mesh, so a world too big to draw whole is
+   * drawn only where the camera can see it; `cullDistance` (m) is where the haze has taken
+   * everything and a cell is switched off outright.
+   */
+  render?: { chunk: number; cullDistance: number };
   /**
    * Where the kit's landmark silhouettes stand, by hand: the plot nearest each point takes
    * `kind` (an index into `buildingKit`'s `LANDMARKS`). Missing: `cityBuilder` picks the

@@ -19,11 +19,13 @@ import {
   type WallRect,
   type ZoneId,
 } from './cityPlan';
-import { buildRails, generateBlocks, hash01, onRibbonAtLevel, railBounds, type BlockOptions } from './cityGen';
+import { buildRails, generateBlocks, hash01, onRibbonAtLevel, pathBox, pointRectDistance, railBounds, streetShoulder, type BlockOptions } from './cityGen';
+import { meetColliders } from './carMeet';
 import type { CitySpec } from './cityDef';
 import { BAY_SPEC } from './citySpec';
 import { reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
+import { createRectIndex } from './spatialIndex';
 import { createSurfaceField } from './surface';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
@@ -112,12 +114,28 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   if (quayZ === null) perimeter.push({ tag: 'wall-s', minX: bounds.minX, maxX: bounds.maxX, minZ: inner.maxZ, maxZ: bounds.maxZ });
   const water = quayZ !== null ? { rect: { minX: bounds.minX - 400, maxX: bounds.maxX + 400, minZ: quayZ, maxZ: bounds.maxZ + 500 }, quayZ } : null;
 
-  /** Zone of the nearest street: the city follows the road it stands on. */
+  /**
+   * Zone of the nearest street: the city follows the road it stands on. A road is only
+   * projected onto when its bounding box is nearer than the best road found so far — the
+   * nearest box first, so that on a map of sixty streets the answer costs two or three
+   * projections rather than sixty.
+   */
   const proj = createProjection();
+  const groundBoxes = ground.map((rb) => pathBox(rb.path));
+  const boxDist = new Float64Array(ground.length);
   const zoneAt = (x: number, z: number): ZoneId => {
     let best = Infinity;
     let zone: ZoneId = 'urban';
-    for (const rb of ground) {
+    let first = 0;
+    for (let i = 0; i < ground.length; i++) {
+      boxDist[i] = pointRectDistance(x, z, groundBoxes[i]);
+      if (boxDist[i] < boxDist[first]) first = i;
+    }
+    for (let k = -1; k < ground.length; k++) {
+      const i = k < 0 ? first : k;
+      if (k === first) continue;
+      if (boxDist[i] >= best) continue;
+      const rb = ground[i];
       projectOntoPath(rb.path, x, z, proj);
       if (proj.dist < best) {
         best = proj.dist;
@@ -128,15 +146,27 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   };
 
   const megastructures = spec.planMegastructures ? spec.planMegastructures(ribbons) : [];
-  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures);
+  // A car meet takes its block whole: every plot the generator put on the lot is given up.
+  const meets = spec.meets ?? [];
+  const lots = meets.map((m) => m.lot);
+  const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
+  const touchesLot = (r: Rect): boolean => lots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
+  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk));
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
     ...v, tag: m.tag, zone: 'urban' as const, massing: 4 as const,
   })));
   const solids: Rect[] = [...blocks, ...groundMasses, ...perimeter];
+  const solidIndex = createRectIndex(solids);
+  const isSolid = (x: number, z: number, pad = 0): boolean => {
+    const near = solidIndex.at(x, z);
+    for (let i = 0; i < near.length; i++) if (inRect(near[i], x, z, -pad)) return true;
+    return false;
+  };
   const shoulders = { ...blockOptions.shoulder, alley: blockOptions.alleyShoulder };
   // The pavement beside the streets: flush with them, so this is art and nothing the car feels.
-  const kerbs = createKerbField(ribbons, shoulders, [...blocks, ...groundMasses]);
+  // A lot stands in for the block it replaced, so the pavement still runs to its edge.
+  const kerbs = createKerbField(ribbons, shoulders, [...blocks, ...groundMasses, ...lots], blockOptions.shoulderAt);
 
   const onGroundRoad = (x: number, z: number, pad: number): boolean => {
     for (const rb of ground) if (isOnPath(rb.path, x, z, pad)) return true;
@@ -183,7 +213,8 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     const fenced = spec.fenceBays === 'few' ? (k: number): boolean => k % 3 === 0 : (k: number): boolean => k % 3 !== 2;
     for (const p of pillars) {
       if (last && !last.wet && !p.wet && Math.hypot(p.x - last.x, p.z - last.z) < pillarStep * 1.5) {
-        if (fenced(bay)) {
+        // A lot the deck crosses is open underneath: its columns stand on the lot.
+        if (fenced(bay) && !inLot((last.x + p.x) / 2, (last.z + p.z) / 2, 2)) {
           for (const side of [-1, 1]) {
             const oa = last.halfWidth - 1.6;
             const ob = p.halfWidth - 1.6;
@@ -227,8 +258,11 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   /* ---------------------------------------------------------- skybridges */
 
-  // The megastructures' ground masses count as buildings to land a bridge in.
-  const skybridges = findSkybridges(ground, elevated, [...blocks, ...groundMasses], zoneAt, spec.skybridgeStreets, spec.downtown, spec.skybridges);
+  // The megastructures' ground masses count as buildings to land a bridge in. A world may
+  // bridge different streets by different rules (`skybridgeSets`); the Bay and the Stack
+  // each have one.
+  const skybridgeSets = spec.skybridgeSets ?? [{ streets: spec.skybridgeStreets, style: spec.skybridges }];
+  const skybridges = skybridgeSets.flatMap((set) => findSkybridges(ground, elevated, [...blocks, ...groundMasses], zoneAt, set.streets, spec.downtown, set.style, set.within));
 
   /* ---------------------------------------------------------- bus stops */
 
@@ -240,13 +274,12 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     elevated,
     kerbs,
     shoulders,
-    (x, z, pad) => {
-      for (const b of solids) if (inRect(b, x, z, pad)) return true;
-      return false;
-    },
+    (x, z, pad) => isSolid(x, z, -pad),
     lanes,
     spec.busRoutes,
     spec.spawn,
+    blockOptions.shoulderAt,
+    spec.busStopSpacing ?? BUS_STOP_SPACING,
   );
   const busRoutes: BusRoute[] = lanes.map((points) => ({ points, stops: callingPoints(points, busStops) }));
 
@@ -346,6 +379,13 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const walls: ObstacleWall[] = rails.map((r) => ({ ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, ...railBounds(r), tag: r.kind }));
   walls.push(...quay);
   for (const f of fences) walls.push({ ax: f.ax, az: f.az, bx: f.bx, bz: f.bz, maxY: f.y - 1.4, tag: 'fence' });
+  // The meets: the lot's edges, and the parked cars, people and props, from the same boxes
+  // the art is drawn from (`carMeet.ts`). Before the buses, which have to stay last.
+  for (const m of meets) {
+    const c = meetColliders(m);
+    colliders.push(...c.boxes);
+    walls.push(...c.walls);
+  }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -379,7 +419,8 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: quayZ !== null ? bounds.maxZ - 20 : inner.maxZ },
-      rects: [],
+      // A lot reads on the map as ground you can drive, like the streets into it.
+      rects: lots.map((l) => ({ ...l })),
       ribbons: ribbons.map((rb) => ({
         points: rb.path.samples.filter((_, i) => i % 2 === 0 || !rb.path.closed).map((s) => ({ x: s.x, z: s.z })),
         width: rb.path.samples.reduce((sum, s) => sum + s.halfWidth * 2, 0) / rb.path.samples.length,
@@ -409,7 +450,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   const plan: CityPlan = {
     bounds,
-    palette: 'bay',
+    palette: spec.palette ?? 'bay',
     // Exponential haze rather than a linear curtain: the far towers stay towers, read
     // through blue air, and their windows keep burning (see `env/haze.ts`).
     fog: { density: spec.fogDensity ?? HAZE.cityDensity },
@@ -423,7 +464,10 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     barriers: [],
     gates: routeGates(ground, spec.gates()),
     billboards: spec.billboards(bounds),
-    cableRuns: cableRuns(ground, blockOptions),
+    // Nothing is strung into a lot: there is no building on it to anchor the far end.
+    cableRuns: cableRuns(ground, blockOptions, spec.art?.finish === 'concrete', spec.finishAt, spec.densityAt).filter(
+      ([ax, az, bx, bz]) => !inLot(ax, az) && !inLot(bx, bz),
+    ),
     pylons: [],
     pillars,
     fences,
@@ -443,18 +487,22 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     checkpoints: [],
     // Roads inside the buildings, and the frames over the open ones (Phase 2 of the Stack).
     passages: megastructures.flatMap((m) => m.passages ?? []),
+    ...(meets.length > 0 ? { meets: meets.map((m) => ({ ...m })) } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),
+    // A world built of more than one city (Bandido Metro) says where each rule applies.
+    ...(spec.finishAt ? { finishAt: spec.finishAt } : {}),
+    ...(spec.setbackAt ? { setbackAt: spec.setbackAt } : {}),
+    ...(spec.densityAt ? { densityAt: spec.densityAt } : {}),
+    ...(blockOptions.shoulderAt ? { shoulderAt: blockOptions.shoulderAt } : {}),
+    ...(spec.render ? { render: { ...spec.render } } : {}),
     zoneAt,
     isRoad(x, z, pad = 0) {
       for (const rb of ribbons) if (isOnPath(rb.path, x, z, pad)) return true;
       return false;
     },
-    isSolid(x, z, pad = 0) {
-      for (const b of solids) if (inRect(b, x, z, -pad)) return true;
-      return false;
-    },
+    isSolid,
     padY() {
       return 0;
     },
@@ -525,6 +573,8 @@ function placeBusStops(
    */
   routes: readonly string[],
   spawn: { x: number; z: number },
+  shoulderAt?: (x: number, z: number, zone: ZoneId) => number,
+  spacing = BUS_STOP_SPACING,
 ): BusStopDef[] {
   const stops: BusStopDef[] = [];
   const station = createProjection();
@@ -540,13 +590,13 @@ function placeBusStops(
     // Searched finely and taken greedily rather than stepped at a fixed stride: a fixed
     // stride lands a third of its stops in a junction and simply loses them.
     for (let s = BUS_STOP_FIRST; s < path.length - BUS_STOP_FIRST; s += BUS_STOP_PROBE) {
-      if (s - last < BUS_STOP_SPACING) continue;
+      if (s - last < spacing) continue;
       const c = offsetAtStation(path, s, 0);
       if (c.halfWidth < BUS_STOP_MIN_HALF_WIDTH) continue;
       // Axis-aligned only: a fattened box round a shelter on the diagonal would be a wall
       // across the pavement that nothing on screen accounts for.
       if (Math.abs(c.tx) < 0.999 && Math.abs(c.tz) < 0.999) continue;
-      const pave = shoulders[c.zone];
+      const pave = shoulderAt ? shoulderAt(c.x, c.z, c.zone) : shoulders[c.zone];
       if (pave < BUS_STOP_MIN_PAVEMENT || pave < BUS_STOP_KERB_GAP + BUS_STOP.depth) continue;
       // The shelter stands just past the kerb, facing the lane a bus would pull into.
       const shelterOut = c.halfWidth + BUS_STOP_KERB_GAP + BUS_STOP.depth / 2;
@@ -719,14 +769,27 @@ function routeGates(ground: RibbonDef[], wanted: ReadonlyArray<[string, number, 
 }
 
 /** Overhead cables across the streets and the alleys, anchored in the blocks either side. */
-function cableRuns(ground: RibbonDef[], opts: BlockOptions): Array<[number, number, number, number]> {
+function cableRuns(
+  ground: RibbonDef[],
+  opts: BlockOptions,
+  everywhere = false,
+  finishAt?: (x: number, z: number) => 'glass' | 'concrete',
+  densityAt?: (x: number, z: number) => number,
+): Array<[number, number, number, number]> {
   const runs: Array<[number, number, number, number]> = [];
   for (const rb of ground) {
-    const step = rb.kind === 'alley' ? 18 : 30;
+    // A street that runs from one finish into the other (Bandido Metro) is strung at the
+    // Stack's spacing along its whole length; where the cables fall is decided per run.
+    const concreteRoad = everywhere || (!!finishAt && rb.path.samples.some((s) => finishAt(s.x, s.z) === 'concrete'));
+    const step = rb.kind === 'alley' ? 18 : concreteRoad ? 22 : 30;
     for (let s = step / 2; s < rb.path.length; s += step) {
       const c = offsetAtStation(rb.path, s, 0);
-      if (rb.kind === 'track' && c.zone === 'corporate') continue;
-      const reach = c.halfWidth + (rb.kind === 'alley' ? opts.alleyShoulder : opts.shoulder[c.zone]) + 2.2;
+      const concrete = everywhere || (!!finishAt && finishAt(c.x, c.z) === 'concrete');
+      // The Bay keeps its corporate highway clean; the Stack strings cables over every street.
+      if (rb.kind === 'track' && c.zone === 'corporate' && !concrete) continue;
+      // A thinned district (Bandido Metro's outskirts) keeps a share of its cables.
+      if (densityAt && hash01(c.x, c.z) > densityAt(c.x, c.z)) continue;
+      const reach = c.halfWidth + (rb.kind === 'alley' ? opts.alleyShoulder : streetShoulder(opts, c.x, c.z, c.zone)) + 2.2;
       runs.push([c.x + -c.tz * -reach, c.z + c.tx * -reach, c.x + -c.tz * reach, c.z + c.tx * reach]);
     }
   }
@@ -749,12 +812,16 @@ function findSkybridges(
   wanted: readonly string[],
   downtownRect: Rect | null,
   style?: CitySpec['skybridges'],
+  /** Only stations inside this are tried: a set of streets that run on past the district its rule is for. */
+  within?: Rect,
 ): SkybridgeDef[] {
   const out: SkybridgeDef[] = [];
   const max = style?.max ?? 22;
   const step = style?.step ?? 55;
+  const index = createRectIndex(blocks);
   const blockAt = (x: number, z: number): BlockRect | null => {
-    for (const b of blocks) if (inRect(b, x, z)) return b;
+    const near = index.at(x, z);
+    for (let i = 0; i < near.length; i++) if (inRect(near[i], x, z)) return near[i];
     return null;
   };
   for (const tag of wanted) {
@@ -774,6 +841,7 @@ function findSkybridges(
       const s = s0 + shift;
       if (s < 50 || s > path.length - 50) continue;
       const c = offsetAtStation(path, s, 0);
+      if (within && !inRect(within, c.x, c.z)) continue;
       const downtown = downtownRect !== null && inRect(downtownRect, c.x, c.z);
       const zone = zoneAt(c.x, c.z);
       if (zone === 'jdm') continue;

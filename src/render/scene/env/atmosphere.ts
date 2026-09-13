@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ATMOSPHERE } from '../../../config/tuning';
-import { createSkyDome, type SkyDome, type SkyQuality } from './skyDome';
+import { createSkyDome, type SkyColors, type SkyDome, type SkyQuality } from './skyDome';
 import { createRain, type Rain } from './rain';
 import { createStorm, type Storm } from './storm';
 
@@ -84,6 +84,8 @@ export interface AtmosphereOptions {
   key: THREE.DirectionalLight;
   /** Touch device: picks `medium` under `quality: 'auto'`. */
   touch?: boolean;
+  /** The palette's own sky gradient, when it has one (`Palette.sky`); else `ATMOSPHERE`'s. */
+  sky?: SkyColors;
 }
 
 export function createAtmosphere(options: AtmosphereOptions): AtmosphereVisual {
@@ -94,7 +96,7 @@ export function createAtmosphere(options: AtmosphereOptions): AtmosphereVisual {
   const root = new THREE.Group();
   root.name = 'atmosphere';
 
-  const sky = createSkyDome(preset);
+  const sky = createSkyDome(preset, options.sky);
   const rain = createRain(Math.round(ATMOSPHERE.rain.count * preset.rainScale));
   const storm = createStorm(ATMOSPHERE.storm);
   root.add(sky.mesh);

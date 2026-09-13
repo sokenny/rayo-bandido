@@ -118,6 +118,18 @@ export function buildRoadGraph(lines: ReadonlyArray<RoadPolyline>): RoadGraph {
     }
     polys.push({ xs, zs, ss, length: ss[n - 1], edges: [] });
   }
+  // The box round each polyline: two streets whose boxes never meet cannot cross, and a
+  // city of sixty streets is 2,000 pairs of a few hundred segments each.
+  const boxes = polys.map((p) => {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < p.xs.length; i++) {
+      if (p.xs[i] < minX) minX = p.xs[i];
+      if (p.xs[i] > maxX) maxX = p.xs[i];
+      if (p.zs[i] < minZ) minZ = p.zs[i];
+      if (p.zs[i] > maxZ) maxZ = p.zs[i];
+    }
+    return { minX, maxX, minZ, maxZ };
+  });
 
   const nodes: Junction[] = [];
   const byKey = new Map<string, number>();
@@ -154,6 +166,9 @@ export function buildRoadGraph(lines: ReadonlyArray<RoadPolyline>): RoadGraph {
     for (let j = i + 1; j < polys.length; j++) {
       const a = polys[i];
       const b = polys[j];
+      const ba = boxes[i];
+      const bb = boxes[j];
+      if (ba.maxX < bb.minX || ba.minX > bb.maxX || ba.maxZ < bb.minZ || ba.minZ > bb.maxZ) continue;
       for (let k = 0; k + 1 < a.xs.length; k++) {
         const ax = a.xs[k];
         const az = a.zs[k];

@@ -13,22 +13,18 @@ import { buildTrackPath, createProjection, projectOntoPath } from './track';
  * one-way dependency, one much smaller thing added — so the free world can offer a way onto the
  * circuit without a single line of the city ever mentioning one.
  *
- * WHERE THE DOOR STANDS is therefore not a number typed into this file either. It is
- * `CIRCUIT_GATES[0]`, THE START/FINISH LINE ITSELF, projected onto the lap so the ring is
- * squared up with the racing line rather than with the street it happens to be drawn on. Move
- * the line in `circuitSpec.ts` and the door in the city moves with it, because there is no
- * second copy of where it is.
+ * WHERE THE DOOR STANDS. On Bandido Bay it is `CIRCUIT_GATES[0]`, THE START/FINISH LINE ITSELF,
+ * projected onto the lap so the ring is squared up with the racing line rather than with the
+ * street it happens to be drawn on (`circuitGateSite`). Move the line in `circuitSpec.ts` and
+ * the door on the Bay moves with it, because there is no second copy of where it is.
  *
- * WHY THAT SPOT WORKS, and it is worth saying because it is luck earned rather than luck: the
- * start line is on av-main, 20 m wide, mid-block between `blvd-center` and `st-n2` — so the 15 m
- * ring sits with 40 m of clear road either side of it and nothing to park it in the middle of a
- * junction, which traffic drives straight through. `tests/circuitGate.test.ts` checks the whole
- * ring against the city's own road and solid predicates rather than trusting that sentence.
+ * The open world is Bandido Metro now (`src/world/openWorld.ts`), where the lap does not exist:
+ * the circuit is still run on the Bay, on the other side of a page load. So the metro's door is
+ * a site of its own (`METRO_CIRCUIT_SITE`), handed in as `site`.
  *
  * COST. One track path built once, at city load, and thrown away — the same build the circuit
- * pays for a race, and a few milliseconds against a world that takes a second and a half. The
- * alternative was a literal pair of coordinates that would go quietly wrong the first time the
- * lap was retuned, which is not cheaper, only later.
+ * pays for a race, and a few milliseconds against a world that takes a second and a half. Only
+ * paid when no site is handed in.
  */
 
 /** What the world calls the place, in the chrome's shouting case. */
@@ -57,13 +53,13 @@ export function circuitGateSite(): ActivitySite {
 
 /**
  * Put the door on a city. Mutates the world it is given and hands it back, so a caller reads as
- * "the city, with a way onto the circuit" — `addCircuitGate(createCityWorld())`.
+ * "the city, with a way onto the circuit" — `addCircuitGate(createCityWorld())`. `site` is where
+ * it stands on a city the lap is not drawn through; omitted, it is the Bay's own start line.
  *
  * Called for the OPEN WORLD only. The circuit must never be given one: a race is not somewhere
  * you start a race from, and `circuitWorld.ts` explicitly clears the field this writes.
  */
-export function addCircuitGate(world: World): World {
-  const site = circuitGateSite();
+export function addCircuitGate(world: World, site: ActivitySite = circuitGateSite()): World {
   // The rules' copy and the art's copy, made separately so neither can write through the other.
   world.layout.circuitSite = { ...site };
   world.plan.circuitMarker = { ...site };

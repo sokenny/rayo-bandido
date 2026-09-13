@@ -72,14 +72,15 @@ describe('the street lamp fixture', () => {
     for (const y of heights) expect(y).toBeGreaterThan(Y0 + POLE_H * 0.8);
     // The strips and the pip are in the same builder and must all be un-tagged.
     expect(b.neon.faults.filter((f) => f === 0).length).toBeGreaterThan(0);
-    expect(new Set(b.neon.faults)).toEqual(new Set([0, 0.7]));
+    // The builders keep their vertex data as float32, which is what the shader reads.
+    expect(new Set(b.neon.faults)).toEqual(new Set([0, Math.fround(0.7)]));
   });
 
   it('takes the halo and the road pool down with the lens, so the light goes as one', () => {
     const b = build(0.7);
     const light = b.glow.faults.filter((f) => f >= 0);
     expect(light.length).toBeGreaterThan(0);
-    expect(light.every((f) => f === 0.7)).toBe(true);
+    expect(light.every((f) => f === Math.fround(0.7))).toBe(true);
   });
 
   it('spits sparks off a broken head, and only off a broken one', () => {
@@ -87,7 +88,7 @@ describe('the street lamp fixture', () => {
     const sparks = new Set(b.glow.faults.filter((f) => f < 0));
     // One seed per speck, each carrying this lamp's own fault seed in its fraction.
     expect(sparks).toEqual(
-      new Set(Array.from({ length: LAMP_SPARKS.count }, (_, i) => lampSparkSeed(0.7, i))),
+      new Set(Array.from({ length: LAMP_SPARKS.count }, (_, i) => Math.fround(lampSparkSeed(0.7, i)))),
     );
     expect(build(0).glow.faults.some((f) => f < 0)).toBe(false);
   });

@@ -2412,3 +2412,340 @@ The draw-call ceiling of 20 stands at 17.
   `city-shots.mjs` still load the spec under plain Node.
 - The uncommitted change to `src/ui/menuScreen.ts` / `src/styles.css` in the working tree (the
   main-menu dossier height lock) predates this run and is not part of Phase 2.
+
+## City v2 "The Stack" — Phase 3, surfaces and light (2026-09-12)
+
+Phase 3 of `docs/CITY_V2_BRIEF.md`, at gate. 836 tests and the typecheck green, `vite build`
+clean. Bandido Bay's suites (`cityWorld`, `megacity`, `reclamation`, `buildingKit`, `circuitWorld`,
+`lampPost`) pass with the same numbers as before: the district still carves to 76,536 triangles
+in 15 batches. Everything below is gated on a plan knob or a palette the Bay does not use.
+
+**Delivered.**
+
+- `palette.ts` — a third palette, `stack`: the bay's night with every window list amber first,
+  cold white second, teal third; accents warm-first with one cold note; no violet, no pink; a
+  lifted, warmed hemisphere ground bounce; a lighter base concrete for the facade atlas.
+  `CitySpec.palette`, `CityPlan.palette` carry it; the Bay's lists are untouched.
+- `CityPlan.finish: 'concrete'` (`STACK_ART.finish`), read by the kit and the builders:
+  - `buildingKit.ts` — concrete-first style pools per zone, the lowest three storeys of every
+    street wall a GROUND-FLOOR cell drawn 1.45x brighter, the odd lit shopfront (`shops`) on one
+    wall in five (one in three in the old town), the megastructures' bands as brut / panels over
+    a louvred service storey with a ground floor where a piece meets the street.
+  - `facadeAtlas.ts` — the atlas grows from 4x4 to 5x5 cells (1280 px) with four new styles:
+    `brut`, `ground` (shutters, a grille, doors, a vent), `shops`, `plant`. Two triangles per
+    wall band, no geometry: at the Stack's half-metre setback the `groundFloor.ts` module kit
+    cannot stand (it needs 0.55 m of pavement), and a module per 20 m of frontage would have cost
+    ~26k triangles against the brief's 25k rule.
+  - `trackBuilder.ts` — rails are a concrete parapet, a dark steel rail and an amber marker on
+    every third segment (the Bay's per-zone red/cyan strips are gone from every view); street
+    and deck lamps sodium three in four; the cuts' tubes and mouth signs amber.
+  - `propsBuilder.ts` — one dim amber edge marker instead of four colours of neon round the map;
+    blade signs a third as frequent; lamp pools 0.22; block clutter skipped where a wall stands
+    within 3.4 m behind the ledge or the ledge is inside one (it was being placed inside the
+    facades at zero setback), the old town's pipes and AC units bolted to the wall itself.
+  - `cityBuilder.ts` — the neon shopfront band on one street wall in six, warm; the sign on one
+    in ten.
+  - `passageBuilder.ts` — the soffit cast in 3 m panels with the nearest strip lamp's light
+    baked into their vertex colour, the ribs likewise; the lamp's glow patch across its whole
+    bay of ceiling, a wash of light standing off each wall, road pools twice Phase 2's, portal
+    frame pools doubled. `elevatedBuilder.ts` draws the deck undersides 1.9x brighter in concrete.
+- `STACK_FOG_DENSITY` 0.0041 (0.00472 in the scene after the atmosphere's 1.15x): a tower at
+  250 m is 75 % fog, the road at 60 m 8 %, 120 m 27 %.
+- `tests/stackWorld.test.ts` +3: the palette and its lists, the fog at 250 m and 60 m, and the
+  facades counted cell by cell (ground bands > 200, shops > 10, concrete family > 55 %, glass
+  < 30 %).
+- QA: `city-shots.mjs --no-traffic` parks the fleet off the map so two runs compare pixel for
+  pixel; new `scripts/stack-frame-test.mjs` builds the before/after page and reads the mean colour
+  and luminance of six rectangles of every frame out of the PNGs (ceiling band, both walls at the
+  driver's shoulder, the vanishing point, the asphalt either side of the car). The Phase 2 build
+  (8349aaf) was checked out into a scratch worktree and shot with the same script for the before
+  column, so the pair differs in nothing but the art.
+
+**Found on the way.** Phase 2's passage soffit strip was wound facing up and had been back-face
+culled all along: the "ceiling" measured at that gate, (16, 29, 29), was the building's raw
+underside behind it, and the first three light passes here moved nothing because they were
+brightening an invisible quad. Proved in the page (walls hidden: the dark bands stay; wall
+material double-sided: they turn into lit concrete), fixed by winding, then the bake scaled to
+the ribs it had been hiding behind.
+
+**Measured against the brief** (`artifacts/stack-phase3/frame-test.html`; the pair without
+traffic in `ab/`, the gate shots with the fleet as `phase3-<view>.png`, metrics in `phase3.json`).
+
+| | |
+|---|---|
+| Static environment | **237,424 triangles, 17 draw calls** (Phase 2: 241,432 / 17; ceiling 250k / 20). Track 138k (decks 69k, rails 24k, columns 22k, streets and lamps 23k), city 77k, reclamation 20k |
+| Sky, vantages 1-4 (must be < 15 %) | **0.0 / 0.6 / 0.0 / 0.0 %**; 7.2 % on the ramp, 1.1 % on the avenue |
+| Structure within 40 m overhead (four of six required) | **1, 2, 4, 5**: a ceiling 9 m over both spine passages and the ramp, the spine 24 m over st-centre |
+| Far end fogged, no map edge | all six; fog 75 % at 250 m |
+| Frame at the 14 views (1440x900 DPR 1, 184 cars in) | 44-440 draw calls, 254k-331k triangles, GPU 1.5-2.6 ms, **60.0 fps at every view** in the capture harness |
+| Drive (`city-drive.mjs --mode stack`, traffic out) | 13 stages, L0 → L1 → L2 → L3 → L2 → L1 → L0, **0 collisions**, no console errors |
+
+Mean luminance (0-255) of the frame-test rectangles, before → after, from the traffic-free pair:
+
+| view | ceiling | wall L | wall R | far | road L | road R |
+|---|---|---|---|---|---|---|
+| spine-passage-north | 27 → 62 | 6 → 39 | 7 → 34 | 38 → 49 | 49 → 70 | 16 → 18 |
+| spine-passage-south | 26 → 97 | 20 → 40 | 16 → 35 | 39 → 46 | 55 → 78 | 25 → 32 |
+| ramp-w-up-12 | 3 → 11 | 29 → 32 | 21 → 40 | 32 → 37 | 30 → 31 | 25 → 18 |
+| gran-via-west | 16 → 35 | 11 → 24 | 13 → 14 | 45 → 46 | 26 → 26 | 15 → 15 |
+| st-centre-south | 27 → 43 | 30 → 29 | 6 → 30 | 41 → 46 | 13 → 13 | 50 → 54 |
+| av-central-ring | 19 → 31 | 36 → 27 | 95 → 28 | 41 → 39 | 26 → 24 | 17 → 13 |
+
+The passage walls went from black to warm window grids; the ceilings from the raw underside to
+lit concrete with the lamp pools on them; the avenue's right wall (95, the Bay's lit lobby band
+at the driver's shoulder) is now a concrete ground floor at 28; the far end of every view is
+further into the haze. The ceiling rectangle includes the black lamp housing over the car.
+
+**Honest notes for the gate.**
+
+- The soffit near a lamp is an ochre concrete, not the reference's grey: the baked colour has
+  to fight the hemisphere's teal ground term to read warm at all, and the south passage (97)
+  sits above the reference's mid-grey. `CEILING` in `passageBuilder.ts` is the knob.
+- The ground-floor cells are subtle at driving speed: shutters and doors drawn at concrete
+  brightness in a 256 px cell. They read at the kerb, not from across an avenue. The module kit
+  (real recessed shutters, bollards) is still available for a few chosen walls if Juan wants
+  depth there; it is not placed anywhere in the Stack.
+- One tint per building, drawn from the list: a megastructure can still come out teal
+  (`west-n` did, one in six of the corporate list), and the corner light strips are cyan on a
+  quarter of the towers. "A few cold ones", but they are large ones.
+- Rain, reclamation and graffiti are as Phase 2 left them: the rain is the atmosphere's and
+  falls through the passages (no occupancy test, a known gap since the storm sky); the greenery
+  floor stays at 0.25 and the old town's pockets carry the paint. No module anchors means the
+  graffiti is the bare-face kind (low on the plinth) everywhere.
+- The atlas layout change (4x4 → 5x5) moves every Bay cell's UV origin; the cells' content is
+  identical, and `tests/buildingKit.test.ts` holds each style to its own square. Texture memory
+  +56 % for the atlas (1280² vs 1024²).
+- The before/after pixels come from the traffic-free pair; the gate shots with the fleet are
+  the same views with cars in some patches, which is why the two sets are kept apart.
+- Nothing is committed: the tree carries Phase 3 on top of `8349aaf`, plus the main-menu
+  dossier height lock in `src/ui/menuScreen.ts` / `src/styles.css` that predates this brief.
+
+### Phase 3, the feedback round (2026-09-12, later)
+
+Juan's feedback on the gate, from the driving seat on a street: it looked emptier than the
+Bay and nothing like the references, and the budget is not the constraint. What the first pass
+had left lean or untouched went back in, and the triangle ceiling in `tests/stackWorld.test.ts`
+went to 420k.
+
+- The Bay's full elevated profile: ribs at 10.5 m, four girders, drain and cable tray, columns
+  every 12 m with fences in two bays of three, lamps every 38 m on streets and decks, rooftop
+  clutter at 1, greenery floor at the Bay's 0.45 (the field now reads 7 / 59 / 28 / 7 % kept /
+  light / overgrown / feral against the first pass's 23 / 59 / 16 / 3).
+- Ground-floor MODULES (`groundFloor.ts`) on most street walls, not only the neglected ones:
+  at a tight setback a module sits flush against the wall using all but 5 cm of the pavement
+  (still inside the block's collider), a wall over 18 m is cut into pieces of a shop's width
+  with a different kind each, ruins stay in the old town. The atlas ground cells remain behind
+  them.
+- Wall EQUIPMENT (`propsBuilder.ts`, `buildFacadeEquipment`): every street-facing ground volume
+  the city registered is walked along its faces every 3.5 m, and four times in five gets an
+  AC unit or a vent hood (pale casing, so it reads at night), a downpipe, a cabinet, bins and
+  crates, a warm door lamp with its pool, or a vent stack. Mounted on the wall, inside its
+  collider.
+- Cables strung over every street (the Bay keeps its corporate highway clean), blade signs at
+  the Bay's rate, the warm shopfront band on nearly half the street walls and the sign on a
+  third, the kerb line drawn on the half-metre shoulder, deck lamp pools doubled, and the
+  windows lit harder (`litGain` 1.8, `windowGain` 1.5, neon and glow up a notch).
+
+**Measured.** 379,626 static triangles in 17 draw calls (first pass 237k): track 196k,
+buildings 49k, ground modules 12k, wall equipment and cables ~60k, reclamation 35k. All fourteen
+views 60.0 fps at 1440x900 DPR 1 with the fleet, GPU 2.7-5.9 ms (was 1.5-2.6). Drive: 13 stages,
+0 collisions. 836 tests, build clean. Sky and overhead unchanged; the pixel table in
+`frame-test.html` is regenerated from the traffic-free pair.
+
+**Still short of the references, said plainly.** The towers at the kerb are flat boxes with a
+window grid; the references' are stepped and articulated at the base, with balconies, recessed
+bays and gantries in real geometry, and that is massing (`buildingKit` archetypes) rather than
+dressing. The street walls now carry equipment and modules, but on a 40 m tower face at night a
+metre-wide unit is a dot; what would read is relief in the facade itself. That is the next
+thing to spend triangles on if this round is still not enough.
+
+### Phase 3, second feedback round: massing and the colour script (2026-09-12, later still)
+
+Juan's second note on the gate: work the massing, and the palette is not there yet — adjust
+the sky and the environment if needed. Both done on the same `finish` / `stack` gates.
+
+**The palette, measured instead of eyeballed.** Mean sRGB of patches of the two references:
+sky (36,80,93) and (29,61,75); far towers in the haze (34,68,80) and (23,49,58); but the NEAR
+structure is dark and neutral — a pier (32,48,53), a slab (39,43,39), a ceiling (15,14,12), the
+walls at the driver's shoulder (25,20,15) and (38,29,31), the road (39,35,29). The bay's greens
+(teal fog, green kerb and concrete, a teal hemisphere sky) had been putting the far-haze colour
+onto everything near. The `stack` palette now keeps the air blue-teal (`fog` 0x1a3d4b) and
+takes the concrete neutral (`concrete` 0x33383a, `curb` 0x45494a, `sidewalk` 0x2c3032,
+`ground` 0x121517, `metalDark` 0x1c2124), lights it blue-grey (`hemiSky` 0x3d6478,
+`hemiGround` 0x25292b, `keyColor` 0xa9c6d4), draws the atlas concrete neutral, and carries
+its own sky gradient: `Palette.sky` (zenith 0x040c16, middle 0x122f3d, horizon 0x2c5e72),
+which `skyDome.ts` / `atmosphere.ts` now take from the palette when it has one, else
+`ATMOSPHERE`'s. The cold windows are cyan-WHITE (0xc4ecf2) in the lists, and in concrete a
+tower's glass only ever comes from the window lists — the kit's one-in-twelve accent roll
+(a saturated cyan, a red) as a whole building's tint was the last strong green in the frames.
+The ceiling bake came down to the reference's dark-with-lamp-pools (`CEILING.base` 1.5).
+
+**Massing.** In concrete the kit weights stepped, podium, cantilevered and offset forms first
+(`CONCRETE_ARCHETYPES`; a plain extruded box is 6-10 %), and every street wall over 12 m gets
+RELIEF in real geometry (`RELIEF`, `wallRelief`): a ledge every three storeys up to 48 m, the
+first over the ground floor half a metre deep, and a pilaster every 6 m between them. All of
+it stands within the half-metre of pavement the wall keeps at the kerb, so no collider moved.
+A hemisphere light shades by normal.y alone; the ledges' top and bottom faces are what put
+floors on a wall that was one tone from kerb to roof.
+
+**Measured.** 454,532 static triangles in 17 draw calls (relief ~75k; the test ceiling is
+500k). 60.0 fps at every one of the fourteen views, GPU 1.4-2.8 ms — with a fleet of 92: the
+spec's traffic was halved in the tree during this run by an edit that is not mine
+(`STACK_TRAFFIC_LOOPS` 3/2 a loop, decks 32/20/12, its comment dated today), and it is left as
+found. Frame test unchanged: sky 0.0 / 0.5 / 0.0 / 0.0 % at vantages 1-4, structure overhead at
+1, 2, 4, 5. Ceilings now 41 (north) and 87 (south) against the first pass's 62 and 97; the walls
+at the shoulder 37-46; the far end 43-55. Stack, kit and atmosphere suites green; the full
+suite ran green on the previous round of this code and only a window tint changed since.
+
+**Left on the table.** The passage soffit is still warmer than the reference's near-black
+ceiling; the tower relief is ledges and pilasters, not the balconies and recessed bays the
+references cut into their bases; the deck edges keep the bay's dim cyan line. The dev server
+on 5178 died once mid-run (a chain re-ran on a fresh one) — another session is working in this
+tree at the same time.
+
+## Bandido Metro — the two cities in one (2026-09-13)
+
+Juan asked for one definitive map: The Stack as the downtown of a city that otherwise looks
+and drives like Bandido Bay (pavements, glass and neon, buses, the reclaimed blocks, the
+water), with both original maps kept as they are. `src/world/metroSpec.ts` is that map, third
+card on the main menu ("BANDIDO METRO", `?mode=metro`, solo). Neither `citySpec.ts` nor
+`stackSpec.ts` changed; their tests hold their exact triangle counts (269k, 455,604).
+
+**The map.** 1,400 x 1,950 m, north up: The Stack moved whole to (0, -120) — every road,
+level, ramp, megastructure site and traffic loop, by translation — with its streets run on
+past its old wall to the edges of the map; a ring of four 20 m boulevards 40 m outside its
+footprint; two avenues and two streets either side; streets every 140 m south of the ring
+down to a quay at z 1200; a Bay-style viaduct at 15 m round the southern district, out over
+the water, with four ramps (two per leg, one merging each way); a screens district in the
+south-west, old town along the water and in the south-east, a corporate midtown band round
+downtown. Rush sites, passenger stops and El Búho placed on the new roads; the police on.
+The first cut was 2.6 km square; Juan trimmed it the same day to the Stack, the viaduct
+district and the shore. `docs/metro-plan.png` (from `scripts/metro-preview.mjs`) is the plan.
+
+**How two cities share one assembler.** Everything that was one value per world became one
+value per point where the two differ, each optional and unset in the Bay and the Stack:
+`CityPlan.finishAt` (concrete inside the Stack's footprint, glass outside), `setbackAt` (0.5 /
+3.4), `BlockOptions.shoulderAt` and `CityPlan.shoulderAt` (kerb-tight / the Bay's pavements),
+`densityAt` (a 0..1 multiplier on the dressing: reclamation, lamp spacing, rooftop clutter,
+blade signs, kerb junk, cables; 1 downtown, 0.85 midtown, 0.7 outside), `skybridgeSets`
+(the Stack's tiers inside its rect, the Bay's over the boulevards), `busStopSpacing`.
+`planStackMassing` takes an offset. The palette is one per world (one sky, one fog): the metro
+is drawn in `bay`, so downtown wears the Stack's concrete in the Bay's light.
+
+**Rendering a bigger world.** `CityPlan.render = { chunk, cullDistance }` cuts every
+material's geometry into a grid of meshes (325 m here), frustum-culled by Three and switched
+off past 850 m where the haze has taken them; `MeshBuilder` keeps its vertex data in growable
+Float32Arrays now (`FloatList`) rather than JavaScript arrays, half the memory, no copy into
+Three. The Bay and the Stack are drawn exactly as before (one mesh per material, never culled).
+
+**Assembling a bigger world.** `isOnPath` rejects on a cached path box first; `zoneAt`
+projects only onto roads whose box is nearer than the best so far; the kerb field, `isSolid`
+and the skybridge probe read a grid index (`src/world/spatialIndex.ts`); the block clearance
+walk skips segments by their boxes; the road graph skips street pairs whose boxes miss. The
+Bay assembles in 1.5 s (was 1.8), the metro in 2.1 s; the Bay's output is unchanged.
+
+**Measured (this machine, Chrome, 800x889 pane at DPR 1.5).** World 2.1 s, geometry 1.9 s;
+1.44 M static triangles in 305 chunk meshes; 179 traffic cars, 48 shelters on 3 bus loops,
+53 skybridges, 601 pillars. At the spawn: 8.3 ms a frame (display-capped 120 fps), GPU
+3.1 ms, 578 draw calls, 877k triangles in view, heap 363 MB; on the viaduct 303 draws, 512k;
+downtown 331 draws, 671k. A 7 s full-throttle run from the spawn through the ring into the
+Stack held 8.3 ms with a 9.3 ms worst frame. `tests/metroWorld.test.ts` (18) is the contract.
+
+**Left for later.** The Stack's own `stack` palette cannot apply to one district while the
+Bay's sky and fog cover the rest; the activity sites are provisional placements; the map is
+solo (the shared room is still the Bay); `scripts/city-shots.mjs` and `city-drive.mjs` have no
+`--mode metro` yet. `METRO_BOUNDS` is where the map grows again.
+
+## Bandido Metro becomes the open world (2026-09-13)
+
+Juan asked for the metro to replace Bandido Bay as OPEN WORLD, with everything the Bay's open
+world had ported across. The main menu is three tabs now: OPEN WORLD, RACE, CHANGELOG. 857 tests
+and the typecheck green.
+
+**Delivered.**
+
+- `?mode=city` builds `createOpenWorld()` (`src/world/openWorld.ts`): `METRO_SPEC` with the race
+  doors layered on. It is the online shared room, gets the intro, the police, RAYO RUSH,
+  passengers and El Búho. `?mode=metro` is an alias for it. `?mode=bay` (Bandido Bay: solo, police
+  and its own activities, no doors, no intro) and `?mode=stack` remain loadable by address only.
+- THE DOORS. Both races are still run on the Bay; the metro only carries the rings that load
+  them. `METRO_CIRCUIT_SITE` (Time Attack, av-s1 at x -156) and `METRO_STREET_SITES` (ring south,
+  ring north, the east quay) live in `metroSpec.ts` but not in `METRO_SPEC`. `addCircuitGate` and
+  `addStreetSites` take a site, defaulting to the Bay's own.
+- THE INTRO moved with its meet: the corridor under the viaduct's west leg, just north of av-s1
+  and south of El Búho's bay. It has the same column spacing as the Bay's east leg, so the cars
+  and BadKala keep their offsets. The start is av-w1 at z 1000, heading north. Line e1 says
+  "del lado oeste" instead of "del lado del río".
+- ONLINE. `WORLD_ROOM_LABEL` is BANDIDO METRO, and `PROTOCOL_VERSION` went 4 → 5 so a tab still
+  driving the Bay is told to reload rather than sharing a room in another map's coordinates.
+- Tests: `intro`, the door and ring placement (`circuitGate`, `streetRace`) and the one-at-a-time
+  activity checks run against `createOpenWorld()`; the Bay door's own tests stay.
+  `megacity-check.mjs`, `city-shots.mjs` and `city-drive.mjs --mode city` load `?mode=bay`, whose
+  coordinates they encode.
+
+**Verified in the browser.** The menu shows three tabs. `?mode=city&intro=1` opens at (-620, 1000)
+with all activities present and 179 cars. The meet draws BadKala and the three cars between the
+columns. Standing on the metro's start line offers TIME ATTACK mission 1/3, and F loads
+`?mode=circuit&from=city` on the Bay.
+
+**Left for later.** The races are not redrawn on the metro, and the RACE card now says the Grid
+runs through Bandido Bay. Traffic sync online is 179 cars at 10 Hz (the Bay sent fewer); not
+measured with a full room yet.
+
+## The car meet under the viaduct corner (2026-09-13)
+
+Juan asked for a Daikoku-style meet in the open world, at the curve of the highway he circled on
+the minimap: underground, graffiti, tuned cars, not all tidily parked, about sixteen of them.
+
+**Where.** The circle is the viaduct's north-west corner, where the deck turns from the west leg
+(x -550) onto the north leg (z 290) on a 70 m radius about the crossing of st-w3 and st-s3. The
+block inside that corner (blvd-ring-s, st-s3, av-w1, st-w3) is now a lot, `METRO_MEET_LOT`,
+116 x 117 m out to the back of the pavement. Seven piers of the curve stand on it. The intro's
+meet and El Búho are one block south on the same leg, untouched.
+
+**Delivered.**
+
+- `src/world/carMeet.ts` — the shape of a meet, as data: the lot, its edges (hoarding, fence,
+  barrier; whatever no edge covers is a way in), the cars (paint, underglow, lamps, steering
+  lock), the people and the props. `meetWalls`, `meetSolids` and `meetColliders` are the one place
+  those numbers become boxes, for the colliders and the art alike. A turned box is four walls,
+  like a bus.
+- `metroSpec.ts` — `METRO_MEET`, on `METRO_SPEC.meets`. Four ways in: the main gate off the
+  boulevard under a green highway sign, the avenue, and under the deck from st-s3 and st-w3.
+  Sixteen cars: five nose-in along the north fence (one across two bays, one backed in), four in
+  a double row by the west wall, three fanned out under a mast with people in front of them, two
+  under the deck between the columns, two in the pocket inside the curve. Also ten people, a kiosk
+  with five vending machines, two trucks (one decked out in marker lamps), a container, eight
+  masts, fire in a drum, speakers, tyres, cones and a table.
+- `cityWorld.ts` — `CitySpec.meets`: a lot clears every block it touches, the fences under the
+  deck through it and the cables strung into it, and the pavement still runs to its edge.
+  Colliders come from `meetColliders`, before the buses. The lot is a paved rect on the minimap.
+- `env/meetBuilder.ts` — the lot drawn into the city's own batches. Old patched asphalt, worn bays,
+  arrows, orange blocks at the gate, hazard squares round every column, tyre donuts, a piece
+  sprayed flat, and oil. Precast hoardings and every column on the lot painted on all four faces.
+  Masts with 42 m pools, the kiosk and its glowing machines, trucks, and the underglow, sill tubes
+  and head-lamp beams of every car. `elevatedBuilder` leaves out its under-deck floor inside a lot.
+- `scene/meetVisual.ts` — the cars as instanced meshes (body with the paint as instance colour,
+  glass, lit and dark tail lamps, wheels with the front pair on lock) and the people merged, seven
+  draw calls for the whole meet. They are hidden beyond 420 m.
+- `tests/metroWorld.test.ts` +4: the block and fences gone and the piers standing; sixteen cars,
+  and every solid inside the lot and off the roads, 0.4 m clear of the columns and 0.7 m of each
+  other; a flood fill from the boulevard reaching the avenue, both under-deck ways in, the middle,
+  the fan and the pocket; exactly one gap per side. The art budget test builds the meet.
+- `scripts/metro-preview.mjs` draws the lot and a dot per car. `docs/metro-plan.png` regenerated.
+
+**Measured.** Static environment 1,444,384 triangles in 19 draw calls, against 1,440,222 / 19
+without the meet: +7.3k drawn, less the eight blocks it replaced. Bus stops unchanged at 48. In
+the browser at 1600x900 the chase camera at the lot runs at 120 fps, 8.3 ms a frame. Driving into
+a parked car stops the player at its bumper plus the car's radius. 861 tests and the typecheck
+green.
+
+**Found on the way.** `decal()` winds its quad along the surface's run and then up, and the decal
+material draws front faces only. A `GraffitiSurface` is visible only when its run is (nz, -nx).
+The meet's first pass had every vertical tag backwards. The same mistake is in the city's
+`runSurface` (the `side = -1` faces) and in the viaduct column paint (the `f = +1` faces), so part
+of the existing graffiti has never been drawn. Making the material double-sided under the west leg
+showed the missing paint. Left as its own task.
+
+**Left for later.** The intro's meet (three cars under the west leg) could move onto this lot. The
+cars are all the Bandidos' coupe in different paint.

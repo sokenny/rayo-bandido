@@ -1,7 +1,7 @@
 import type { GateDef, ZoneId } from '../../../world/cityPlan';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { groundGlow, halo, lampSparks, type EnvBuilders } from './builders';
+import { concreteAt, densityAt, groundGlow, halo, lampSparks, setbackAt, type EnvBuilders, type WallVolume } from './builders';
 import { signCell } from './textures';
 import { rollLampFault } from './lampFaults';
 
@@ -26,6 +26,122 @@ export function buildProps(b: EnvBuilders): void {
   buildCables(b, rng);
   buildBladeSigns(b, rng);
   buildBlockClutter(b, rng);
+  buildFacadeEquipment(b, rng);
+}
+
+/**
+ * THE STUFF ON THE WALLS (the Stack). The references' street walls are not clean: AC units
+ * and vent hoods bolted on at every height, downpipes and conduit runs, cabinets, bollards,
+ * bins and crates at the foot, the odd small lamp over a door. At zero setback there is no
+ * ledge to walk, so every street-facing ground volume the city registered (the blocks' plots
+ * and the megastructures' ground pieces alike) is walked along its own faces, and everything
+ * is mounted on the wall and stays inside the collider the wall belongs to. Boxes only;
+ * nothing here is a light source but the door lamps, in the same neon batch as everything else.
+ */
+const EQUIPMENT = {
+  /** Metres of wall per attempt, and the chance an attempt places something. */
+  step: 3.5,
+  chance: 0.8,
+  /** Highest an AC unit or a hood is hung (m); the driver never looks higher than this. */
+  top: 26,
+} as const;
+
+function buildFacadeEquipment(b: EnvBuilders, rng: () => number): void {
+  const isRoad = b.plan.isRoad;
+  const out: WallVolume[] = [];
+  const seen = new Set<WallVolume>();
+  const bounds = b.plan.bounds;
+  // Every registered ground volume, once, by walking the index cell by cell.
+  for (let x = bounds.minX; x <= bounds.maxX; x += 16) {
+    for (let z = bounds.minZ; z <= bounds.maxZ; z += 16) {
+      b.walls.collect(x, z, 12, out);
+      for (const v of out) {
+        if (seen.has(v) || v.y0 > 0.5) continue;
+        seen.add(v);
+        // Wall equipment is the Stack's dressing: only on walls that stand in concrete.
+        if (!concreteAt(b, (v.minX + v.maxX) / 2, (v.minZ + v.maxZ) / 2)) continue;
+        dressVolumeWalls(b, v, isRoad, rng);
+      }
+    }
+  }
+}
+
+function dressVolumeWalls(b: EnvBuilders, v: WallVolume, isRoad: (x: number, z: number, pad?: number) => boolean, rng: () => number): void {
+  const faces: Array<{ x: number; z: number; dx: number; dz: number; a0: number; a1: number; along: 'x' | 'z' }> = [
+    { x: v.maxX, z: 0, dx: 1, dz: 0, a0: v.minZ, a1: v.maxZ, along: 'z' },
+    { x: v.minX, z: 0, dx: -1, dz: 0, a0: v.minZ, a1: v.maxZ, along: 'z' },
+    { x: 0, z: v.maxZ, dx: 0, dz: 1, a0: v.minX, a1: v.maxX, along: 'x' },
+    { x: 0, z: v.minZ, dx: 0, dz: -1, a0: v.minX, a1: v.maxX, along: 'x' },
+  ];
+  const height = v.y1 - v.y0;
+  for (const f of faces) {
+    if (f.a1 - f.a0 < 5) continue;
+    for (let t = f.a0 + 2; t < f.a1 - 2; t += EQUIPMENT.step) {
+      const x = f.along === 'z' ? f.x : t;
+      const z = f.along === 'z' ? t : f.z;
+      // A street within a short walk of the wall, and no other wall between: this face is the
+      // one at the kerb, not a courtyard wall behind it.
+      if (!isRoad(x + f.dx * 4, z + f.dz * 4) && !isRoad(x + f.dx * 8, z + f.dz * 8)) continue;
+      if (b.walls.inside(x + f.dx * 0.6, 1, z + f.dz * 0.6)) continue;
+      if (rng() > EQUIPMENT.chance) continue;
+      const y0 = b.plan.padY(x, z);
+      const rotY = f.dx === 1 ? Math.PI / 2 : f.dx === -1 ? -Math.PI / 2 : f.dz === 1 ? 0 : Math.PI;
+      const r = rng();
+      const ox = f.dx;
+      const oz = f.dz;
+      if (r < 0.3) {
+        // An AC unit or a vent hood, part-way up the wall, with a short pipe into it.
+        const py = y0 + 3.5 + rng() * Math.max(1, Math.min(EQUIPMENT.top, height - 2) - 3.5);
+        const w = 0.9 + rng() * 0.6;
+        const deep = 0.5 + rng() * 0.3;
+        // Pale, like a real unit's grey casing: dark metal on a dark wall at night is not there.
+        b.props.color(PAL.curb, 1.5 + rng() * 0.5);
+        b.props.box(x + ox * deep * 0.5, py, z + oz * deep * 0.5, f.along === 'x' ? w : deep, 0.7 + rng() * 0.3, f.along === 'x' ? deep : w);
+        b.props.color(PAL.metalDark, 0.8);
+        b.props.box(x + ox * 0.12, py - 0.9, z + oz * 0.12, 0.14, 1.6, 0.14);
+        if (rng() < 0.3) {
+          // A grille face, a shade lighter, so the unit reads as a unit and not a crate.
+          b.props.color(PAL.sidewalk, 1.2);
+          b.props.box(x + ox * (deep + 0.03), py, z + oz * (deep + 0.03), f.along === 'x' ? w * 0.8 : 0.04, 0.5, f.along === 'x' ? 0.04 : w * 0.8);
+        }
+      } else if (r < 0.48) {
+        // A downpipe or a conduit run, the height of the ground floors.
+        const h = 6 + rng() * Math.max(2, Math.min(18, height - 7));
+        b.props.color(rng() < 0.5 ? PAL.metalDark : PAL.rust, 0.9 + rng() * 0.4);
+        b.props.box(x + ox * 0.14, y0 + h / 2, z + oz * 0.14, 0.16, h, 0.16);
+        if (rng() < 0.5) b.props.box(x + ox * 0.14 + (f.along === 'x' ? 0.5 : 0), y0 + h / 2 + 1, z + oz * 0.14 + (f.along === 'x' ? 0 : 0.5), 0.12, h - 2, 0.12);
+      } else if (r < 0.64) {
+        // A cabinet or a meter box at the foot.
+        const w = 0.7 + rng() * 0.7;
+        const h = 0.9 + rng() * 0.8;
+        b.props.color(PAL.curb, 1.2 + rng() * 0.5);
+        b.props.box(x + ox * 0.22, y0 + h / 2 + 0.1, z + oz * 0.22, f.along === 'x' ? w : 0.4, h, f.along === 'x' ? 0.4 : w);
+      } else if (r < 0.78) {
+        // Bins, crates, a pallet: the junk against a working city's wall.
+        const n = 1 + Math.floor(rng() * 3);
+        for (let i = 0; i < n; i++) {
+          const s = 0.5 + rng() * 0.4;
+          const a = (rng() - 0.5) * 2.4;
+          b.props.color(rng() < 0.5 ? PAL.rust : PAL.metalDark, 0.7 + rng() * 0.6);
+          b.props.box(x + ox * (s / 2 + 0.05) + (f.along === 'x' ? a : 0), y0 + s / 2, z + oz * (s / 2 + 0.05) + (f.along === 'x' ? 0 : a), s, s, s);
+        }
+      } else if (r < 0.93) {
+        // A small lamp over a door, warm, with its pool at the foot of the wall.
+        b.props.color(PAL.metalDark, 1.1);
+        b.props.box(x + ox * 0.25, y0 + 3.3, z + oz * 0.25, f.along === 'x' ? 0.4 : 0.3, 0.16, f.along === 'x' ? 0.3 : 0.4);
+        b.neon.color(PAL.lampWarm, 0.9);
+        b.neon.box(x + ox * 0.25, y0 + 3.2, z + oz * 0.25, 0.22, 0.08, 0.22);
+        halo(b, x + ox * 0.5, y0 + 3.1, z + oz * 0.5, 3.5, 3, rotY, PAL.lampWarm, 0.16);
+        groundGlow(b, x + ox * 1.6, z + oz * 1.6, 5, 5, PAL.lampWarm, 0.14, 0.03);
+      } else {
+        // A vent stack: a fat pipe with a hood, the plant room's breath.
+        const h = 4 + rng() * 6;
+        b.props.color(PAL.curb, 1.3);
+        b.props.box(x + ox * 0.3, y0 + h / 2, z + oz * 0.3, 0.45, h, 0.45);
+        b.props.box(x + ox * 0.3, y0 + h + 0.15, z + oz * 0.3, 0.8, 0.3, 0.8);
+      }
+    }
+  }
 }
 
 /**
@@ -41,7 +157,8 @@ function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
     walkLedge(blk, 3.5, 11, (x, z, dx, dz) => {
       if (!isRoad(x + dx * 7, z + dz * 7) && !isRoad(x + dx * 11, z + dz * 11)) return;
       // Rare on purpose. A few blades read as a street; one on every ledge reads as clutter.
-      if (rng() > 0.34) return;
+      // Rarer still in concrete: the references hang one or two signs on a whole street.
+      if (rng() > 0.34 * densityAt(b, x, z)) return;
       const tall = rng() < 0.4;
       const cell = tall ? TALL[Math.floor(rng() * TALL.length)] : SQUARE[Math.floor(rng() * SQUARE.length)];
       const uv = signCell(cell);
@@ -86,10 +203,12 @@ function buildRouteMarkers(b: EnvBuilders): void {
   const cz = (bounds.minZ + bounds.maxZ) / 2;
   const colors = [PAL.neonBlue, PAL.neonPink, PAL.neonCyan, PAL.neonMagenta];
   const y = 1.15;
+  // The Stack's edge is one dim amber line, not four colours of neon round the map.
   b.plan.walls.forEach((wall, i) => {
     const horizontal = wall.maxX - wall.minX > wall.maxZ - wall.minZ;
-    const c = colors[i % colors.length];
-    b.neon.color(c, 0.8);
+    const concrete = concreteAt(b, (wall.minX + wall.maxX) / 2, (wall.minZ + wall.maxZ) / 2);
+    const c = concrete ? PAL.neonAmber : colors[i % colors.length];
+    b.neon.color(c, concrete ? 0.45 : 0.8);
     if (horizontal) {
       const inner = (wall.minZ + wall.maxZ) / 2 < cz ? wall.maxZ : wall.minZ;
       const glowZ = inner + ((wall.minZ + wall.maxZ) / 2 < cz ? 4 : -4);
@@ -164,7 +283,12 @@ function buildBarriers(b: EnvBuilders, rng: () => number): void {
  * Street lamps are the one place the two families sit side by side, so they stay strictly
  * cold-with-an-occasional-rose. No third hue ever enters the street through a lamp head.
  */
-export function lampColor(zone: ZoneId, rng: () => number): number {
+export function lampColor(zone: ZoneId, rng: () => number, warm = false): number {
+  // The Stack (`warm`): sodium first, cold white second, everywhere — the references' streets.
+  if (warm) {
+    if (zone === 'jdm') return rng() < 0.85 ? PAL.lampWarm : PAL.neonPink;
+    return rng() < (zone === 'corporate' ? 0.72 : 0.8) ? PAL.lampWarm : PAL.winCold;
+  }
   if (zone === 'corporate') return rng() < 0.8 ? PAL.winCold : PAL.neonCyan;
   if (zone === 'jdm') return rng() < 0.7 ? PAL.lampWarm : PAL.neonPink;
   return rng() < 0.55 ? PAL.winCold : PAL.lampWarm;
@@ -370,8 +494,9 @@ export function lampPost(
   if (fault > 0) lampSparks(b, hx, lensY, hz, color, fault);
   // The boom is perpendicular to the street, so the halo faces along the street (rotY 0 = +Z).
   halo(b, hx, lensY - 0.05, hz, 6, 4, alongX ? 0 : Math.PI / 2, color, 0.2, fault);
-  // The spill always lands on the asphalt, whatever the pole ended up standing on.
-  groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, 0.14, 0.03, fault);
+  // The spill always lands on the asphalt, whatever the pole ended up standing on. Stronger in
+  // concrete: the references' streets are read by the pools under their lamps.
+  groundGlow(b, x + dx * spill, z + dz * spill, alongX ? 20 : 30, alongX ? 30 : 20, color, b.plan?.finish === 'concrete' ? 0.22 : 0.14, 0.03, fault);
 }
 
 function buildStreetLights(b: EnvBuilders, rng: () => number): void {
@@ -547,10 +672,18 @@ const CONTAINER_COLORS = [PAL.rust, 0x27384f, 0x3a2f46, 0x4a2a3a, 0x2d3a48];
 function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
   const isRoad = b.plan.isRoad;
   const padY = b.plan.padY;
+  // At the Bay's 3.4 m setback the ledge is pavement; at the Stack's half a metre the ledge
+  // is inside the facade, so a container or a stall is only placed where the plot in front of
+  // the wall is genuinely open (a slab or a set-back tower leaves room; a full-plot box does not).
   for (const blk of b.plan.blocks) {
+    const setback = setbackAt(b, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2, 3.4);
+    const tight = setback < 1.5;
     walkLedge(blk, 1.4, 7, (x, z, dx, dz, along) => {
       // Only dress ledges that actually face a street.
       if (!isRoad(x + dx * 6, z + dz * 6)) return;
+      const density = densityAt(b, x, z);
+      if (density < 1 && rng() > density) return;
+      if (tight && (b.walls.inside(x, 1, z) || b.walls.faceAt(x, 1, z, dx, dz, 3.4))) return;
       const zone = blk.zone;
       const y0 = padY(x, z);
       const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
@@ -625,8 +758,10 @@ function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
     });
 
     if (blk.zone !== 'jdm') continue;
-    // Pipe runs, AC units and graffiti on the garage walls.
-    walkLedge(blk, 3.6, 5.5, (x, z, dx, dz, along) => {
+    // Pipe runs, AC units and graffiti on the garage walls. At zero setback the wall is at
+    // the ledge, so the walk moves out to it and the units are kept inside the collider.
+    const inset = tight ? setback + 0.35 : 3.6;
+    walkLedge(blk, inset, 5.5, (x, z, dx, dz, along) => {
       if (!isRoad(x + dx * 8, z + dz * 8)) return;
       const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
       const y0 = padY(x, z);
@@ -637,19 +772,22 @@ function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
       if (r < 0.45) {
         b.props.color(PAL.metalDark, 0.85);
         const py = y0 + 1.2 + rng() * 4;
-        if (along === 'x') b.props.box(x, py, z + dz * 0.35, 5.4, 0.24, 0.24);
-        else b.props.box(x + dx * 0.35, py, z, 0.24, 0.24, 5.4);
-        b.props.box(x + dx * 0.35, (y0 + py) / 2, z + dz * 0.35, 0.22, py - y0, 0.22);
+        const out = tight ? 0.2 : 0.35;
+        if (along === 'x') b.props.box(x, py, z + dz * out, 5.4, 0.24, 0.24);
+        else b.props.box(x + dx * out, py, z, 0.24, 0.24, 5.4);
+        b.props.box(x + dx * out, (y0 + py) / 2, z + dz * out, 0.22, py - y0, 0.22);
       }
       if (r > 0.4 && r < 0.7) {
         b.props.color(PAL.metalDark, 1.1);
+        const deep = tight ? 0.6 : 0.9;
+        const out = tight ? 0.32 : 0.6;
         b.props.box(
-          x + dx * 0.6,
+          x + dx * out,
           y0 + 3.4 + rng() * 3,
-          z + dz * 0.6,
-          along === 'x' ? 1.3 : 0.9,
+          z + dz * out,
+          along === 'x' ? 1.3 : deep,
           1,
-          along === 'x' ? 0.9 : 1.3,
+          along === 'x' ? deep : 1.3,
         );
       }
       if (r > 0.86) {

@@ -1,3 +1,4 @@
+import type { CarMeetSpec } from './carMeet';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TrackSpec } from './track';
@@ -92,19 +93,44 @@ export interface CitySpec {
   /** Streets with bus shelters, and the rectangles the buses drive. Empty: no bus network. */
   busRoutes: string[];
   busRouteLoops: Rect[];
+  /** Least distance between shelters on one route (m). Missing: 130, the Bay's. */
+  busStopSpacing?: number;
   spawn: { x: number; z: number; heading: number };
   /** The free-world activities, in worlds that carry them. */
   rushSites: ActivitySiteSpec[];
   passengerStops: PassengerStopSpec[];
   buhoSite: ActivitySiteSpec | null;
+  /**
+   * Car meets (`carMeet.ts`): blocks given up as lots, with the cars and people on them. Each
+   * lot clears the blocks it touches and the fences under any deck through it. Missing: none.
+   */
+  meets?: CarMeetSpec[];
   /** Exponential haze density. Missing: `HAZE.cityDensity`. */
   fogDensity?: number;
   /** Column spacing under the elevated roads (m). Missing: 12, the Bay's. */
   pillarStep?: number;
   /** Fences between the columns: 'most' is two bays in three (the Bay), 'few' one in three. */
   fenceBays?: 'most' | 'few';
-  /** The art builders' economy knobs (`CityPlan`): rib spacing, girders, lamp spacing, greenery, setback, roof clutter. Missing: the Bay's. */
-  art?: Pick<CityPlan, 'ribSpacing' | 'deckServices' | 'lampSpacing' | 'neglect' | 'setback' | 'roofClutter' | 'megaDetail'>;
+  /** The art builders' economy knobs (`CityPlan`): rib spacing, girders, lamp spacing, greenery, setback, roof clutter, what the city is built of. Missing: the Bay's. */
+  art?: Pick<CityPlan, 'ribSpacing' | 'deckServices' | 'lampSpacing' | 'neglect' | 'setback' | 'roofClutter' | 'megaDetail' | 'finish'>;
+  /** Which colour script the city is drawn in. Missing: 'bay'. */
+  palette?: 'bay' | 'stack';
+  /**
+   * A world built of more than one city (Bandido Metro, `metroSpec.ts`): the finish and the
+   * setback at a point, when they are not `art.finish` / `art.setback` everywhere.
+   */
+  finishAt?(x: number, z: number): 'glass' | 'concrete';
+  setbackAt?(x: number, z: number): number;
+  /** How much of the dressing a point gets, 0..1 (`CityPlan.densityAt`). Missing: all of it. */
+  densityAt?(x: number, z: number): number;
+  /**
+   * Skybridges chosen by more than one rule: each set is its own streets and its own tiers
+   * (`skybridges`), so a world can bridge its downtown the Stack's way and its avenues the
+   * Bay's. Missing: one set, `skybridgeStreets` with `skybridges`.
+   */
+  skybridgeSets?: Array<{ streets: string[]; style?: CitySpec['skybridges']; within?: Rect }>;
+  /** How the static art is batched (`CityPlan.render`). Missing: whole-world meshes. */
+  render?: { chunk: number; cullDistance: number };
   /** Elevated ribbons whose open stretches carry portal frames. Missing: none. */
   portalFrames?: string[];
   /** Hand-placed landmark silhouettes (`CityPlan.landmarkAnchors`). Missing: the builder picks its own. */

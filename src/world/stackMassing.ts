@@ -152,12 +152,17 @@ function massing(site: Site): CityVolume[] {
 
 /* ------------------------------------------------------------------ the plan */
 
-/** Every site carved by every ribbon, with the passages the carve produced. */
-export function planStackMassing(ribbons: readonly RibbonDef[]): MegastructureDef[] {
+/**
+ * Every site carved by every ribbon, with the passages the carve produced. `offset` moves the
+ * footprints: Bandido Metro (`metroSpec.ts`) builds the Stack in the middle of a bigger map,
+ * and its ribbons arrive already translated, so the sites follow them by the same vector.
+ */
+export function planStackMassing(ribbons: readonly RibbonDef[], offset = { x: 0, z: 0 }): MegastructureDef[] {
   return STACK_SITES.map((site) => {
-    const cuts = roadCuts(ribbons, STACK_MASSING, site.footprint);
-    const volumes = carveVolumes(massing(site), cuts, STACK_MASSING.minSliver);
-    const passages = findPassages(volumes, site.footprint, ribbons, PASSAGE_MAX_CEILING, PASSAGE_WALL_REACH, STACK_MASSING.roadMargin);
-    return { tag: `stack-${site.tag}`, footprint: site.footprint, volumes, passages };
+    const footprint: Rect = { minX: site.footprint.minX + offset.x, maxX: site.footprint.maxX + offset.x, minZ: site.footprint.minZ + offset.z, maxZ: site.footprint.maxZ + offset.z };
+    const cuts = roadCuts(ribbons, STACK_MASSING, footprint);
+    const volumes = carveVolumes(massing({ ...site, footprint }), cuts, STACK_MASSING.minSliver);
+    const passages = findPassages(volumes, footprint, ribbons, PASSAGE_MAX_CEILING, PASSAGE_WALL_REACH, STACK_MASSING.roadMargin);
+    return { tag: `stack-${site.tag}`, footprint, volumes, passages };
   });
 }

@@ -1,7 +1,7 @@
-import type { FenceDef, PillarDef, RibbonDef } from '../../../world/cityPlan';
+import { inRect, type FenceDef, type PillarDef, type RibbonDef } from '../../../world/cityPlan';
 import { isOnPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { concreteAt, groundGlow, halo, type EnvBuilders } from './builders';
 import { decal } from './graffiti';
 import { rollLampFault } from './lampFaults';
 import type { MeshBuilder } from './meshBuilder';
@@ -159,7 +159,7 @@ function maintenanceLamp(
   b.glow.color(PAL.lampWarm, 0.34 * level).fault(fault);
   downQuad(b.glow, x, y - 0.02, z, dx, dz, 8.5, 6.5);
   b.glow.fault(0);
-  if (pool) groundGlow(b, x, z, 9, 9, PAL.lampWarm, 0.12 * level, 0.04, fault);
+  if (pool) groundGlow(b, x, z, 10, 10, PAL.lampWarm, (concreteAt(b, x, z) ? 0.24 : 0.12) * level, 0.04, fault);
 }
 
 export function buildViaducts(b: EnvBuilders, rng: () => number): void {
@@ -185,6 +185,10 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
   // The plan's economy: rib spacing and how much hangs under the slab (`CityPlan`).
   const ribSpacing = b.plan.ribSpacing ?? RIB_SPACING;
   const lean = b.plan.deckServices === 'lean';
+  // A concrete city (the Stack) reads its undersides as mid-grey slabs lit from the street,
+  // not as the bay's dark lids: the soffit, girders and ribs are drawn brighter.
+  const mid = samples[Math.floor(samples.length / 2)];
+  const underGain = concreteAt(b, mid.x, mid.z) ? 1.9 : 1;
   // Which side of this ribbon the services run down, and how far in. Fixed per ribbon: a
   // drainage pipe that swapped sides at a module boundary would read as a mistake, not as
   // variety, so what varies module to module is the wear and the lamps, never the routing.
@@ -278,14 +282,14 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     // downward normal takes only the hemisphere's ground colour, so anything under about
     // 1.3 here comes out as a black lid whatever the palette says.
     const panel = 0.9 + vary(mod, ribbon * 3 + 1) * 0.24;
-    b.wall.color(PAL.curb, 4.2 * wear * panel);
+    b.wall.color(PAL.curb, 4.2 * wear * panel * underGain);
     b.wall.quad(alx, bottomA, alz, clx, bottomC, clz, crx, bottomC, crz, arx, bottomA, arz);
     // A repair patch: a plate of newer, paler concrete over part of the width. Two
     // triangles, and it is most of what stops the ceiling looking extruded.
     if (vary(mod, ribbon * 3 + 2) < 0.26) {
       const pw = hw * (0.45 + vary(mod, 41) * 0.55);
       const po = (vary(mod, 42) - 0.5) * hw;
-      b.wall.color(PAL.curb, 5.1 * panel);
+      b.wall.color(PAL.curb, 5.1 * panel * underGain);
       downQuad(b.wall, mx + nx * po, bottom - 0.015, mz + nz * po, dx, dz, len, pw);
     }
 
@@ -293,7 +297,7 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
 
     // Concrete edge girders under the fascias: the deck's own depth, and what a driver on the
     // street below actually sees the highway as.
-    b.wall.color(PAL.curb, 1.55 * wear);
+    b.wall.color(PAL.curb, 1.55 * wear * underGain);
     b.wall.orientedBox(mx + nx * (hw - 0.7), mz + nz * (hw - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.95, bottom, { bottom: true });
     b.wall.orientedBox(mx - nx * (hw - 0.7), mz - nz * (hw - 0.7), dx, dz, len + 0.05, 0.9, bottom - 0.95, bottom, { bottom: true });
     // Two steel longitudinal girders inboard of them, dark against the lit concrete. Real
@@ -347,7 +351,7 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
       const rw = a.halfWidth + (c.halfWidth - a.halfWidth) * t;
       // The rib: a transverse beam the width of the deck, hanging a little deeper than the
       // girders it crosses. Real geometry, because it is the ceiling's whole silhouette.
-      b.wall.color(PAL.curb, 2.2 + vary(k, ribbon * 13 + 4) * 0.8);
+      b.wall.color(PAL.curb, (2.2 + vary(k, ribbon * 13 + 4) * 0.8) * underGain);
       b.wall.orientedBox(px, pz, nx, nz, rw * 2 - 0.4, 0.9, py - 1.12, py, { bottom: true });
 
       // Everything from here is wear on a ceiling, and a ceiling only exists above a bus.
@@ -430,7 +434,8 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     // The floor under the deck — not on a street, not in the bay. The pools of light on it
     // now come from the maintenance lamps overhead rather than from the bay parity, so a
     // dark stretch of ceiling has dark ground under it.
-    if (!overWater && !onStreet(b, mx, mz, 2)) {
+    // A car meet's lot runs on under the deck in its own asphalt (`meetBuilder.ts`).
+    if (!overWater && !onStreet(b, mx, mz, 2) && !(b.plan.meets ?? []).some((m) => inRect(m.lot, mx, mz))) {
       const fw = hw + 1.2;
       b.concrete.color(PAL.ground, 1.25);
       b.concrete.quad(a.x + nx * fw, 0.02, a.z + nz * fw, a.x - nx * fw, 0.02, a.z - nz * fw, c.x - nx * fw, 0.02, c.z - nz * fw, c.x + nx * fw, 0.02, c.z + nz * fw);

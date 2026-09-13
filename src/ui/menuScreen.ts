@@ -91,6 +91,7 @@ export function createMenuScreen<T extends string>(
   const cards = Array.from(menu.querySelectorAll<HTMLButtonElement>('.rb-item'));
   const pick = <E extends HTMLElement>(role: string): E => menu.querySelector<E>(`[data-role="${role}"]`)!;
   const dossierEl = pick('dossier');
+  const dossierBodyEl = menu.querySelector<HTMLElement>('.rb-dossier__body')!;
   const dossierIdEl = pick('dossierId');
   const kickerEl = pick('kicker');
   const nameEl = pick('name');
@@ -107,6 +108,32 @@ export function createMenuScreen<T extends string>(
     nameEl.textContent = entry.name;
     descEl.textContent = entry.desc;
     specEl.innerHTML = entry.spec.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  }
+
+  /**
+   * Hold the dossier at the height of its tallest entry.
+   *
+   * Every entry writes a different amount of copy into the same panel — a description that
+   * wraps to five lines or to two, four spec rows or three — and the console is centred, so a
+   * shorter dossier used to pull the list, the wordmark and the hint line up the screen with
+   * it. Moving the menu under the cursor is the one thing a menu must not do. There is no
+   * CSS answer while the text is written in prose, so the panel is measured once against
+   * every entry and pinned to the largest: entries that fall short leave the space empty.
+   *
+   * Re-measured whenever the wrap can change — the window resizing, the display font
+   * arriving, a polled row rewritten — because all three change how many lines the copy takes.
+   */
+  function lockDossierHeight(): void {
+    if (done) return;
+    const keep = selected;
+    dossierBodyEl.style.minHeight = '';
+    let tallest = 0;
+    entries.forEach((entry, i) => {
+      renderDossier(entry, i);
+      tallest = Math.max(tallest, dossierBodyEl.offsetHeight);
+    });
+    if (keep >= 0) renderDossier(entries[keep], keep);
+    dossierBodyEl.style.minHeight = `${Math.ceil(tallest)}px`;
   }
 
   function select(index: number): void {
@@ -169,7 +196,14 @@ export function createMenuScreen<T extends string>(
     c.addEventListener('click', () => choose(i));
   });
   select(0);
+  lockDossierHeight();
   cards[0]?.focus({ preventScroll: true });
+
+  const onResize = (): void => lockDossierHeight();
+  window.addEventListener('resize', onResize);
+  // The display face is condensed; until it lands, the name and the copy are measured in the
+  // fallback and the lock is short by a line or two.
+  void document.fonts?.ready.then(() => lockDossierHeight());
 
   return {
     setSpec(id, key, value) {
@@ -178,11 +212,14 @@ export function createMenuScreen<T extends string>(
       const row = entries[index].spec.find(([k]) => k === key);
       if (!row || row[1] === value) return;
       row[1] = value;
-      if (index === selected && !done) renderDossier(entries[index], index);
+      if (done) return;
+      if (index === selected) renderDossier(entries[index], index);
+      lockDossierHeight();
     },
     dispose() {
       done = true;
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
       pad.dispose();
       menu.remove();
     },

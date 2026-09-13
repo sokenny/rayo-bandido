@@ -14,7 +14,10 @@ import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
 import { cityRecovery } from '../src/world/cityRecovery';
 import type { RibbonDef } from '../src/world/cityPlan';
-import { STACK_DECK_TRAFFIC, STACK_ELEVATED, STACK_L1_Y, STACK_L2_Y, STACK_L3_Y, STACK_SPEC, STACK_TRAFFIC_LOOPS } from '../src/world/stackSpec';
+import { ATMOSPHERE } from '../src/config/tuning';
+import { FACADE_STYLES, GROUND_STYLES, facadeCell, type FacadeStyle } from '../src/render/scene/env/facadeAtlas';
+import { BAY_PALETTE, STACK_PALETTE } from '../src/render/scene/env/palette';
+import { STACK_DECK_TRAFFIC, STACK_ELEVATED, STACK_FOG_DENSITY, STACK_L1_Y, STACK_L2_Y, STACK_L3_Y, STACK_SPEC, STACK_TRAFFIC_LOOPS } from '../src/world/stackSpec';
 import { STACK_MASSING, STACK_SITES } from '../src/world/stackMassing';
 import { createProjection, maxGrade, offsetAtStation, projectOntoPath } from '../src/world/track';
 
@@ -443,6 +446,61 @@ describe('stack massing and enclosure', () => {
   });
 });
 
+describe('stack surfaces and light', () => {
+  it('draws in the stack palette: amber first in every window list, red nowhere in the accents but the old town', () => {
+    expect(plan.palette).toBe('stack');
+    expect(plan.finish).toBe('concrete');
+    const AMBER = new Set([0xffc27a, 0xffb347]);
+    for (const list of [STACK_PALETTE.windowsCorp, STACK_PALETTE.windowsUrban, STACK_PALETTE.windowsJdm]) {
+      expect(AMBER.has(list[0])).toBe(true);
+      const warm = list.filter((c) => c === 0xffc27a || c === 0xffd9a8 || c === 0xffb347).length;
+      expect(warm / list.length).toBeGreaterThanOrEqual(0.5);
+      // No violet, no pink.
+      expect(list.includes(0x9fd0e8)).toBe(false);
+    }
+    for (const list of [STACK_PALETTE.accentCorporate, STACK_PALETTE.accentUrban]) expect(list.includes(STACK_PALETTE.neonMagenta)).toBe(false);
+    // The bay is untouched: its lists and its air are what they were.
+    expect(BAY_PALETTE.fog).toBe(0x163a41);
+    expect(BAY_PALETTE.windowsCorp[0]).toBe(0xdff1ff);
+  });
+
+  it('fogs a tower at 250 m to 70-80 %, and keeps the road readable at 60 m', () => {
+    const k = STACK_FOG_DENSITY * ATMOSPHERE.fogDensityScale;
+    const fog = (d: number): number => 1 - Math.exp(-(d * k) * (d * k));
+    expect(plan.fog).toEqual({ density: STACK_FOG_DENSITY });
+    expect(fog(250)).toBeGreaterThanOrEqual(0.7);
+    expect(fog(250)).toBeLessThanOrEqual(0.8);
+    expect(fog(60)).toBeLessThan(0.12);
+  });
+
+  it('gives every street wall a concrete ground floor, and favours concrete over glass above it', () => {
+    const b = createBuilders(plan);
+    buildCity(b);
+    // The atlas cell each wall quad samples is in `cells` (three floats a vertex, six vertices
+    // a quad); the ground styles are the Stack's.
+    const at = new Map<string, FacadeStyle>();
+    for (const style of FACADE_STYLES) {
+      const c = facadeCell(style);
+      at.set(`${c.u0.toFixed(3)},${c.v0.toFixed(3)}`, style);
+    }
+    const count = new Map<FacadeStyle, number>();
+    const cells = b.facade.cells;
+    for (let i = 0; i < cells.length; i += 3 * 6) {
+      const style = at.get(`${cells[i].toFixed(3)},${cells[i + 1].toFixed(3)}`);
+      if (style) count.set(style, (count.get(style) ?? 0) + 1);
+    }
+    const total = [...count.values()].reduce((n, v) => n + v, 0);
+    const ground = GROUND_STYLES.reduce((n, st) => n + (count.get(st) ?? 0), 0);
+    const glass = (count.get('curtain') ?? 0) + (count.get('grid') ?? 0) + (count.get('ribbon') ?? 0) + (count.get('cluster') ?? 0) + (count.get('mixed') ?? 0);
+    const concrete = (count.get('brut') ?? 0) + (count.get('panels') ?? 0) + (count.get('louvre') ?? 0) + (count.get('service') ?? 0) + (count.get('stack') ?? 0) + (count.get('strips') ?? 0) + ground;
+    console.log('stack facade styles', Object.fromEntries([...count.entries()].sort((p, q) => q[1] - p[1])));
+    expect(ground, 'ground-floor bands drawn').toBeGreaterThan(200);
+    expect(count.get('shops') ?? 0, 'the odd lit shopfront').toBeGreaterThan(10);
+    expect(concrete / total, 'concrete-dominant').toBeGreaterThan(0.55);
+    expect(glass / total, 'glass second').toBeLessThan(0.3);
+  });
+});
+
 describe('stack art budget', () => {
   it('builds the whole city inside the brief\'s triangle and draw-call ceiling', () => {
     const measure = (build: (b: ReturnType<typeof createBuilders>) => void): { triangles: number; drawCalls: number } => {
@@ -486,7 +544,10 @@ describe('stack art budget', () => {
     // (the megastructures, their passages, the portal frames and the skybridges) landed at
     // ~241k, and Juan raised the triangle ceiling on 2026-09-12 rather than have the
     // enclosure thinned to fit; the draw-call ceiling stands.
-    expect(all.triangles, `stack triangles: ${all.triangles}`).toBeLessThanOrEqual(250000);
+    // Raised again at the Phase 3 gate (2026-09-12): Juan asked for the city to look complete
+    // before it looks cheap, so the Bay's full deck profile, its lamp density and greenery, the
+    // wall equipment and the ground-floor modules all came back in. The draw-call ceiling stands.
+    expect(all.triangles, `stack triangles: ${all.triangles}`).toBeLessThanOrEqual(500000);
     expect(all.triangles, 'the city is not empty').toBeGreaterThan(40000);
     expect(all.drawCalls, `stack draw calls: ${all.drawCalls}`).toBeLessThanOrEqual(20);
   });

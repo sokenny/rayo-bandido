@@ -33,7 +33,7 @@ export interface MainMenu {
 }
 
 /** What the main menu can hand back: a world to drive, a screen one step deeper, or the intro again. */
-export type MenuChoice = 'city' | 'stack' | 'race' | 'changelog' | 'intro';
+export type MenuChoice = 'city' | 'race' | 'changelog' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -42,36 +42,25 @@ const ONLINE_LABEL = 'ONLINE';
 
 const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
   {
+    // Bandido Metro (`src/world/openWorld.ts`): The Stack as downtown inside the Bay's streets,
+    // the open world since 2026-09-13. The Bay and The Stack it was merged from are off the
+    // menu, still loadable as `?mode=bay` and `?mode=stack`.
     id: 'city',
     kicker: 'FREE ROAM · ONLINE',
     name: 'OPEN WORLD',
-    desc: 'Bandido Bay, and whoever else is out driving it. Viaducts, ramps, the skyway, the square, the water. No clock, no flag.',
+    desc: 'Bandido Metro, and whoever else is out driving it. The Stack downtown, the viaduct, the buses and the water at the bottom of the map. No clock, no flag.',
     spec: [
-      ['ZONE', 'BANDIDO BAY'],
-      ['SIZE', '540 x 550 M'],
-      ['ROADS', 'VIADUCT · SKYWAY · ALLEYS'],
+      ['ZONE', 'BANDIDO METRO'],
+      ['SIZE', '1.4 x 2.0 KM'],
+      ['ROADS', 'THE STACK · VIADUCT · ALLEYS'],
       [ONLINE_LABEL, 'CHECKING'],
-    ],
-  },
-  {
-    // City v2 (`docs/CITY_V2_BRIEF.md`), built in phases beside the Bay. Solo until Phase 4
-    // moves the missions and the shared room over; the card says which phase is in.
-    id: 'stack',
-    kicker: 'FREE ROAM · SOLO · IN PROGRESS',
-    name: 'THE STACK',
-    desc: 'The second city: a highway cut through the middle of it, a deck under that, a skyway over it, and ramps between all four. Roads and levels only for now. Nobody else is here yet.',
-    spec: [
-      ['ZONE', 'THE STACK'],
-      ['SIZE', '600 x 600 M'],
-      ['LEVELS', 'STREET · DECK · SPINE · RING'],
-      ['PHASE', '1 · ROADS AND LEVELS'],
     ],
   },
   {
     id: 'race',
     kicker: 'CIRCUIT · SOLO OR ONLINE',
     name: 'RACE',
-    desc: `Bandido Grid: a street circuit cut through the city itself. Downtown, the waterfront, and the viaduct out over the bay. Run it alone against the clock, or fill the grid with up to ${MAX_PLAYERS} cars.`,
+    desc: `Bandido Grid: a street circuit cut through Bandido Bay. Downtown, the waterfront, and the viaduct out over the bay. Run it alone against the clock, or fill the grid with up to ${MAX_PLAYERS} cars.`,
     spec: [
       ['CIRCUIT', 'BANDIDO GRID'],
       ['LENGTH', '1.5 KM'],

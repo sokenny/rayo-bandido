@@ -3,6 +3,7 @@ import { buildBuilding, plotSeed } from './buildingKit';
 import { makeRng } from './meshBuilder';
 import type { EnvBuilders } from './builders';
 import { paintSurface } from './graffiti';
+import { finishOf } from './builders';
 
 /**
  * Shared facade atlas and merged static equipment: no lights, textures or physics per prop.
@@ -15,10 +16,14 @@ export function buildMegastructures(b: EnvBuilders): void {
   const lean = b.plan.megaDetail === 'lean';
   for (const m of b.plan.megastructures ?? []) {
     const rng = makeRng(plotSeed(m.footprint.minX, m.footprint.minZ));
+    const cx = (m.footprint.minX + m.footprint.maxX) / 2;
+    const cz = (m.footprint.minZ + m.footprint.maxZ) / 2;
     buildBuilding(b, m.footprint, {
-      volumes: m.volumes, zone: 'urban', massing: 4, base: 0,
+      // The Bay's district is urban by construction; the Stack's sites take their district's
+      // light and the plan's finish (concrete bands, ground floors on the street pieces).
+      volumes: m.volumes, zone: lean ? b.plan.zoneAt(cx, cz) : 'urban', massing: 4, base: 0,
       height: Math.max(...m.volumes.map((v) => v.y1)), detail: 'mid', archetype: 'twin',
-      street: [true, false, true, false],
+      street: lean ? [true, true, true, true] : [true, false, true, false], ...finishOf(b, cx, cz),
     }, rng);
     if (lean) continue;
     for (const v of m.volumes) {

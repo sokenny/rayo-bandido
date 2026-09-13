@@ -7,7 +7,7 @@
  * the duplication cannot rot silently. Change one, change the other.
  */
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const MAX_PLAYERS = 4;
 export const MAX_WORLD_PLAYERS = 8;
 export const SNAPSHOT_HZ = 20;
@@ -28,7 +28,7 @@ export const EMPTY_ROOM_TTL_MS = 120000;
 
 /* The open world is one permanent room on a reserved code. See `src/net/protocol.ts`. */
 export const WORLD_ROOM_CODE = 'WRLD';
-export const WORLD_ROOM_LABEL = 'BANDIDO BAY';
+export const WORLD_ROOM_LABEL = 'BANDIDO METRO';
 
 /** Client -> server. */
 export const C2S = {

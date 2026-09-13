@@ -27,6 +27,15 @@ export interface ChangelogEntry {
 /** Newest first. The tab shows them in this order. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-09-13',
+    items: [
+      'OPEN WORLD is now Bandido Metro: The Stack rebuilt as downtown, with the Bay\'s streets and water around it.',
+      'A car meet under the viaduct\'s north-west corner: sixteen tuned cars, a crowd, a kiosk and masts to drive through.',
+      'The introduction now opens under the viaduct\'s west leg, on the Metro.',
+      'Bandido Grid still runs through Bandido Bay for now.',
+    ],
+  },
+  {
     date: '2026-09-11',
     items: [
       'The introduction: a first drive through the city with BadKala on the phone, ending in Free Roam.',

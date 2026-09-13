@@ -8,7 +8,7 @@ const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 try {
-  await page.goto('http://127.0.0.1:5173/?mode=city&solo=1&debug=1&intro=0');
+  await page.goto('http://127.0.0.1:5173/?mode=bay&solo=1&debug=1&intro=0');
   await page.waitForFunction(() => window.__rb?.ready?.(), { timeout: 60000 });
   await page.click('#game-canvas');
   for (const v of [

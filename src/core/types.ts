@@ -24,8 +24,12 @@
 import type { TrackPath } from '../world/track';
 import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 
-/** Which world is loaded: the free-roam test city, the racing circuit or the big city. */
-export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street' | 'stack';
+/**
+ * Which world is loaded: the test arena, a racing circuit, or a free-roam city. `city` is the open
+ * world (Bandido Metro, `src/world/openWorld.ts`); `bay` and `stack` are the two cities it was
+ * merged from, kept loadable by address only.
+ */
+export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street' | 'stack' | 'bay';
 
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {

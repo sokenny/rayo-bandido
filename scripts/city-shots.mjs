@@ -3,7 +3,7 @@
  * to settle, and saves a screenshot and the renderer metrics for each. Used to compare the
  * look and the cost of the city before and after an art change.
  *
- * Usage: node scripts/city-shots.mjs --tag before [--mode city|stack] [--url ...] [--headed] [--out artifacts/shots]
+ * Usage: node scripts/city-shots.mjs --tag before [--mode city|stack] [--url ...] [--headed] [--out artifacts/shots] [--no-traffic]
  * Requires a dev or preview server on the URL. `&solo=1` keeps the shot out of the shared open
  * world, so nobody else's car turns up in it.
  *
@@ -26,9 +26,12 @@ const getArg = (n, d) => {
 };
 const tag = getArg('--tag', 'shot');
 const mode = getArg('--mode', 'city');
-const url = getArg('--url', mode === 'stack' ? 'http://127.0.0.1:5173/?mode=stack&debug=1&intro=0' : 'http://127.0.0.1:5178/?mode=city&solo=1&debug=1');
+const url = getArg('--url', mode === 'stack' ? 'http://127.0.0.1:5173/?mode=stack&debug=1&intro=0' : 'http://127.0.0.1:5178/?mode=bay&solo=1&debug=1');
 const outDir = getArg('--out', 'artifacts/shots');
 const headed = args.includes('--headed');
+// `--no-traffic` parks the fleet off the map before the shots, so two runs of the same
+// vantage can be compared pixel for pixel (a car in a patch is not an art change).
+const noTraffic = args.includes('--no-traffic');
 const viewport = mode === 'stack' ? { width: 1440, height: 900 } : { width: 1600, height: 900 };
 
 /**
@@ -231,6 +234,24 @@ try {
   await page.waitForFunction(() => !window.__rb.ready || window.__rb.ready(), { timeout: 60000 });
   await page.click('#game-canvas').catch(() => {});
   await sleep(1200);
+  if (noTraffic) {
+    // Parked far off the map and marked destroyed, so the sim leaves them there and nothing
+    // of them (not even the wreck a destroyed car plays) is in any frame.
+    await page.evaluate(() => {
+      for (const t of window.__rb.state.targets) {
+        t.status = 'destroyed';
+        t.hitTime = -1;
+        t.x = t.prevX = -20000;
+        t.z = t.prevZ = -20000;
+        t.vx = 0;
+        t.vz = 0;
+      }
+    });
+  }
+  out.fog = await page.evaluate(() => {
+    const f = window.__rb.scene.fog;
+    return f && 'density' in f ? { density: f.density } : f ? { near: f.near, far: f.far } : null;
+  });
 
   for (const v of VIEWS) {
     await page.evaluate((view) => {

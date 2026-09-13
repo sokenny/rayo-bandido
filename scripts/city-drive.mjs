@@ -29,7 +29,9 @@ const getArg = (n, d) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : d;
 };
 const mode = getArg('--mode', 'city');
-const url = getArg('--url', `http://127.0.0.1:5173/?mode=${mode}&solo=1&debug=1&intro=0`);
+// `--mode city` is Bandido Bay, whose streets `RUNS` names: `?mode=bay` since the open world
+// (`?mode=city`) became Bandido Metro.
+const url = getArg('--url', `http://127.0.0.1:5173/?mode=${mode === 'city' ? 'bay' : mode}&solo=1&debug=1&intro=0`);
 const headed = args.includes('--headed');
 
 /** Straight runs through reclaimed streets, and the heading that follows each one. */

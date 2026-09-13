@@ -1,6 +1,6 @@
 import type { ZoneId } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
-import { groundGlow, halo, type EnvBuilders } from './builders';
+import { type EnvBuilders, densityAt, groundGlow, halo } from './builders';
 import { facadeCell, FACADE_GRID, FACADE_TILE, FLOOR, type FacadeStyle } from './facadeAtlas';
 import { makeRng, subtractRect, type Rect2 } from './meshBuilder';
 
@@ -45,6 +45,13 @@ export interface BuildingSpec {
   landmark?: number;
   /** Force an archetype (tests, landmarks). */
   archetype?: Archetype;
+  /**
+   * What the building is made of (`CityPlan.finish`). Missing or 'glass': the Bay's kit as it
+   * always was. 'concrete': the Stack's — concrete-first style pools (`CONCRETE_POOLS`), the
+   * lower three storeys of every street wall a ground floor of shutters, grilles and doors
+   * (`GROUND_STYLES`) with the odd lit shopfront, and brighter concrete between the panes.
+   */
+  finish?: 'glass' | 'concrete';
 }
 
 export interface Band {
@@ -150,10 +157,84 @@ const STYLE_POOLS: Record<ZoneId, Record<'body' | 'podium' | 'top' | 'back', Fac
   },
 };
 
+/**
+ * The Stack's pools (`finish: 'concrete'`): brutalist bodies, panels, louvres and stacked
+ * strips first, glass last. Same shape as `STYLE_POOLS`; only the order and the members differ.
+ */
+const CONCRETE_POOLS: Record<ZoneId, Record<'body' | 'podium' | 'top' | 'back', FacadeStyle[]>> = {
+  corporate: {
+    body: ['brut', 'panels', 'stack', 'strips', 'louvre', 'brut', 'inset', 'grid', 'service', 'ribbon'],
+    podium: ['louvre', 'panels', 'service', 'brut', 'stripe'],
+    top: ['brut', 'stack', 'dark', 'panels', 'strips'],
+    back: ['brut', 'service', 'dark', 'sparse'],
+  },
+  urban: {
+    body: ['brut', 'panels', 'deck', 'stack', 'service', 'brut', 'mixed', 'grid', 'louvre', 'sparse'],
+    podium: ['panels', 'louvre', 'service', 'brut', 'deck'],
+    top: ['brut', 'panels', 'dark', 'sparse', 'deck'],
+    back: ['brut', 'service', 'dark', 'sparse'],
+  },
+  jdm: {
+    body: ['deck', 'brut', 'panels', 'mixed', 'service', 'sparse', 'grid'],
+    podium: ['panels', 'service', 'deck', 'brut'],
+    top: ['deck', 'brut', 'dark', 'sparse'],
+    back: ['brut', 'dark', 'service'],
+  },
+};
+
+/**
+ * Archetype weights in concrete: the references' towers step, overhang and stand on podiums;
+ * a plain extruded box is the exception there and the rule in the bay's kit.
+ */
+const CONCRETE_ARCHETYPES: Record<number, Partial<Record<Archetype, number>>> = {
+  1: { low: 0.7, shabby: 0.3 },
+  2: { stepped: 0.3, offset: 0.2, podium: 0.15, cantilever: 0.15, recessed: 0.1, tower: 0.1 },
+  3: { stepped: 0.28, podium: 0.22, cantilever: 0.16, offset: 0.14, recessed: 0.08, twin: 0.06, tower: 0.06 },
+  4: { stepped: 0.3, podium: 0.26, cantilever: 0.18, offset: 0.12, twin: 0.08, recessed: 0.06 },
+};
+
+/**
+ * Relief on a concrete street wall (`finish: 'concrete'`), in real geometry: a ledge every
+ * three storeys (the first, over the ground floor, deep enough to read as the base stepping
+ * back) and a pilaster every six metres between them, up to `top` metres — the driver never
+ * looks higher. Everything stands within the pavement the wall already keeps (half a metre
+ * at the kerb), so no collider changes. A hemisphere light shades by normal.y alone, so the
+ * ledges' top and bottom faces are what put the floors on a wall that would otherwise be one
+ * flat tone from kerb to roof.
+ */
+export const RELIEF = {
+  top: 48,
+  ledgeEvery: 9,
+  ledgeDepth: 0.32,
+  baseLedgeDepth: 0.48,
+  ledgeHeight: 0.28,
+  pilasterEvery: 6,
+  pilasterWidth: 0.55,
+  pilasterDepth: 0.3,
+} as const;
+
+function poolsFor(spec: BuildingSpec): Record<'body' | 'podium' | 'top' | 'back', FacadeStyle[]> {
+  return spec.finish === 'concrete' ? CONCRETE_POOLS[spec.zone] : STYLE_POOLS[spec.zone];
+}
+
+/**
+ * The concrete finish's ground floor: how tall (three storeys), how much brighter its concrete
+ * is drawn than the wall above (the street lamps light it), and how often a street wall keeps
+ * a working, lit shopfront instead of shutters — rare, and more often in the old town.
+ */
+export const GROUND_FLOOR_BAND = {
+  storeys: 3,
+  wallLift: 1.45,
+  shopChance: { corporate: 0.14, urban: 0.2, jdm: 0.36 } as Record<ZoneId, number>,
+  plantChance: 0.2,
+} as const;
+
 /** Window tints per zone: the palette's window lights, plus a rare accent (red, amber). */
-function tintFor(zone: ZoneId, rng: () => number): number {
+function tintFor(zone: ZoneId, rng: () => number, finish?: BuildingSpec['finish']): number {
   const list = zone === 'corporate' ? PAL.windowsCorp : zone === 'jdm' ? PAL.windowsJdm : PAL.windowsUrban;
-  if (rng() < 0.08) {
+  // In concrete the windows only ever take the window lists: an accent (a saturated cyan, a
+  // red) as a whole tower's glass was the last strong green in the Stack's frames.
+  if (finish !== 'concrete' && rng() < 0.08) {
     const accents = zoneAccent(zone);
     return accents[Math.floor(rng() * accents.length)];
   }
@@ -482,7 +563,7 @@ function landmarkMassing(f: Frame, which: number): Volume[] {
 function pickArchetype(f: Frame): Archetype {
   if (f.spec.archetype) return f.spec.archetype;
   if (f.spec.landmark !== undefined) return 'landmark';
-  const table = KIT.archetypes[f.spec.massing] ?? KIT.archetypes[2];
+  const table = (f.spec.finish === 'concrete' ? CONCRETE_ARCHETYPES : KIT.archetypes)[f.spec.massing] ?? KIT.archetypes[2];
   let entries = Object.entries(table) as Array<[Archetype, number]>;
   if (f.spec.massing === 1 && f.spec.zone === 'jdm') entries = [['shabby', KIT.jdmShabby], ['low', 1 - KIT.jdmShabby]];
   const total = entries.reduce((s, [, w]) => s + w, 0);
@@ -512,15 +593,48 @@ function band(y0: number, y1: number, style: FacadeStyle, tint: number, bright: 
   return { y0, y1, style, tint, bright, wall };
 }
 
+/** Which ground-floor cell a street wall gets: mostly shutters, sometimes plant, now and then a lit shop. */
+function groundStyle(zone: ZoneId, rng: () => number): FacadeStyle {
+  const r = rng();
+  if (r < GROUND_FLOOR_BAND.shopChance[zone]) return 'shops';
+  if (r < GROUND_FLOOR_BAND.shopChance[zone] + GROUND_FLOOR_BAND.plantChance) return 'plant';
+  return 'ground';
+}
+
 /**
  * Cut a volume's walls into bands. Roles: a podium is one band from its own pool; a body
  * gets the primary style, maybe a lit lobby or a blank ground floor where it meets the
  * street, maybe a dark service band part-way up and a second pattern for the top storeys.
  */
 function assignBands(v: Volume, f: Frame, primary: FacadeStyle, tint: number, bright: number, wall: number, dark: boolean, hasStreet: boolean): void {
-  const pools = STYLE_POOLS[f.spec.zone];
+  const pools = poolsFor(f.spec);
   const rng = f.rng;
   const h = v.y1 - v.y0;
+  const concrete = f.spec.finish === 'concrete';
+  if (f.spec.volumes && concrete) {
+    // The Stack's carved buildings: a ground floor of shutters and doors where a piece stands
+    // on the street, then twelve-metre cycles of brutalist grid or panels over a louvred
+    // service storey, on absolute floors so the pieces of one carved mass line up. The tint
+    // is the zone's (warm, in the stack palette); the passage walls are these same bands.
+    let y = v.y0;
+    if (v.y0 <= 0.01 && hasStreet) {
+      const gh = Math.min(h, FLOOR * GROUND_FLOOR_BAND.storeys);
+      v.bands.push(band(y, y + gh, groundStyle(f.spec.zone, rng), tint, bright, wall * GROUND_FLOOR_BAND.wallLift));
+      y += gh;
+    }
+    const first = Math.floor(y / 12) * 12;
+    for (let floor = first; floor < v.y1; floor += 12) {
+      const lo = Math.max(y, floor);
+      const hi = Math.min(v.y1, floor + 12);
+      if (hi <= lo) continue;
+      const split = Math.max(lo, Math.min(hi, floor + 9));
+      const body: FacadeStyle = v.role === 'wing' ? 'panels' : (floor / 12) % 2 === 0 ? 'brut' : 'panels';
+      if (split > lo) v.bands.push(band(lo, split, body, tint, bright, wall));
+      if (hi > split) v.bands.push(band(split, hi, 'service', tint, bright * 0.6, wall));
+    }
+    v.backStyle = 'brut';
+    return;
+  }
   if (f.spec.volumes) {
     // The carved district uses broad quiet service surfaces and grouped occupied floors.
     // Absolute floor bands remain aligned across pieces of the same carved mass.
@@ -544,8 +658,13 @@ function assignBands(v: Volume, f: Frame, primary: FacadeStyle, tint: number, br
     return;
   }
   let y = v.y0;
-  // Ground floors on the street: a lit lobby or a blank plinth.
-  if (v.y0 <= f.base + 0.01 && hasStreet && h > FLOOR * 3 && f.spec.detail !== 'far') {
+  // Ground floors on the street: a lit lobby or a blank plinth — or, in concrete, the three
+  // storeys of shutters, grilles and doors every street wall wears (`GROUND_STYLES`).
+  if (concrete && v.y0 <= f.base + 0.01 && hasStreet && f.spec.detail !== 'far') {
+    const gh = Math.min(h, FLOOR * GROUND_FLOOR_BAND.storeys);
+    v.bands.push(band(y, y + gh, groundStyle(f.spec.zone, rng), tint, bright, wall * GROUND_FLOOR_BAND.wallLift));
+    y += gh;
+  } else if (v.y0 <= f.base + 0.01 && hasStreet && h > FLOOR * 3 && f.spec.detail !== 'far') {
     const r = rng();
     if (r < KIT.lobbyChance) {
       const hh = FLOOR * (h > FLOOR * 6 && rng() < 0.4 ? 2 : 1);
@@ -571,7 +690,7 @@ function assignBands(v: Volume, f: Frame, primary: FacadeStyle, tint: number, br
   if (bodyEnd > y) v.bands.push(band(y, bodyEnd, primary, tint, bright, wall));
   if (topStyle && topH > 0) {
     // The top storeys sometimes take their own light.
-    const topTint = rng() < 0.3 ? tintFor(f.spec.zone, rng) : tint;
+    const topTint = rng() < 0.3 ? tintFor(f.spec.zone, rng, f.spec.finish) : tint;
     v.bands.push(band(bodyEnd, v.y1, topStyle, topTint, bright, wall));
   }
 }
@@ -616,7 +735,7 @@ function outline(v: Volume): Array<[number, number, number]> {
   ];
 }
 
-function emitVolume(b: EnvBuilders, v: Volume, below: Volume | null, street: [boolean, boolean, boolean, boolean], uo: number, vo: number, rng: () => number): void {
+function emitVolume(b: EnvBuilders, v: Volume, below: Volume | null, street: [boolean, boolean, boolean, boolean], uo: number, vo: number, rng: () => number, relief = false): void {
   const pts = outline(v);
   for (let i = 0; i < pts.length; i++) {
     const [px, pz, face] = pts[i];
@@ -628,6 +747,7 @@ function emitVolume(b: EnvBuilders, v: Volume, below: Volume | null, street: [bo
       b.facade.color(bd.tint, bd.bright).cell(cell.u0, cell.v0, bd.wall);
       wall(b, px, pz, qx, qz, bd.y0, bd.y1, v.y0, uo, vo);
     }
+    if (relief && face < 4 && facesStreet && v.y1 - v.y0 > 12) wallRelief(b, px, pz, qx, qz, v.y0, v.y1);
   }
   // Roof: the full rectangle, plus the corner triangles cut away by a chamfer left dark.
   b.roof.color(PAL.concrete, 0.7 + rng() * 0.5);
@@ -655,6 +775,36 @@ function emitVolume(b: EnvBuilders, v: Volume, below: Volume | null, street: [bo
       if (p.maxX - p.minX < 0.2 || p.maxZ - p.minZ < 0.2) continue;
       b.roof.quad(p.minX, v.y0, p.minZ, p.maxX, v.y0, p.minZ, p.maxX, v.y0, p.maxZ, p.minX, v.y0, p.maxZ);
     }
+  }
+}
+
+/** Ledges and pilasters on one street wall from (px, pz) to (qx, qz); see `RELIEF`. */
+function wallRelief(b: EnvBuilders, px: number, pz: number, qx: number, qz: number, y0: number, y1: number): void {
+  const len = Math.hypot(qx - px, qz - pz);
+  if (len < 6) return;
+  const dx = (qx - px) / len;
+  const dz = (qz - pz) / len;
+  // The wall's outward normal: the outline is clockwise from above, so outward is to the
+  // right of the direction of travel, which is (-dz, dx) in a y-up, x-east, z-south frame.
+  const nx = -dz;
+  const nz = dx;
+  const cx = (px + qx) / 2;
+  const cz = (pz + qz) / 2;
+  const top = Math.min(y1 - 1, y0 + RELIEF.top);
+  let k = 0;
+  for (let y = y0 + RELIEF.ledgeEvery; y < top; y += RELIEF.ledgeEvery, k++) {
+    const depth = k === 0 ? RELIEF.baseLedgeDepth : RELIEF.ledgeDepth;
+    b.wall.color(PAL.curb, k === 0 ? 1.3 : 1.15);
+    b.wall.orientedBox(cx + nx * (depth / 2), cz + nz * (depth / 2), dx, dz, len - 0.1, depth, y, y + RELIEF.ledgeHeight, { bottom: true });
+  }
+  const pTop = Math.min(top, y1 - 0.5);
+  const pBottom = y0 + RELIEF.ledgeEvery + RELIEF.ledgeHeight;
+  if (pTop - pBottom < 6) return;
+  for (let t = RELIEF.pilasterEvery / 2; t < len - 1; t += RELIEF.pilasterEvery) {
+    const x = px + dx * t + nx * (RELIEF.pilasterDepth / 2);
+    const z = pz + dz * t + nz * (RELIEF.pilasterDepth / 2);
+    b.wall.color(PAL.concrete, 1.15);
+    b.wall.orientedBox(x, z, dx, dz, RELIEF.pilasterWidth, RELIEF.pilasterDepth, pBottom, pTop);
   }
 }
 
@@ -780,7 +930,7 @@ function roofFurniture(b: EnvBuilders, bld: Building, spec: BuildingSpec, rng: (
 
   // Mechanical blocks, off to one side so the crown keeps the centre. A world that would
   // rather spend its triangles on the structure the driver is inside turns these down.
-  const clutter = b.plan.roofClutter ?? 1;
+  const clutter = (b.plan.roofClutter ?? 1) * densityAt(b, cx, cz);
   if (rng() < KIT.mechChance * clutter && w > 4 && d > 4) {
     const n = 1 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
@@ -922,11 +1072,13 @@ export function buildBuilding(b: EnvBuilders, plot: Rect2, spec: BuildingSpec, r
 
   // The building's own light: one tint, one wall brightness, one pattern offset.
   const zone = spec.zone;
-  const tint = tintFor(zone, rng);
+  const tint = tintFor(zone, rng, spec.finish);
   const bright = 0.75 + rng() * 0.4;
-  const wallBright = (zone === 'corporate' ? 0.7 : zone === 'jdm' ? 0.9 : 0.8) + rng() * 0.35;
+  // Concrete is drawn a shade brighter between its panes: the references' towers are mid-grey
+  // concrete with holes of light in it, not black glass with lit panes.
+  const wallBright = (zone === 'corporate' ? 0.7 : zone === 'jdm' ? 0.9 : 0.8) + rng() * 0.35 + (spec.finish === 'concrete' ? 0.25 : 0);
   const dark = spec.massing >= 2 && spec.landmark === undefined && rng() < KIT.darkChance[zone];
-  const pools = STYLE_POOLS[zone];
+  const pools = poolsFor(spec);
   const primary = pick(pools.body, rng, 1.25);
   const backStyle = spec.detail === 'near' && rng() < KIT.backStyleChance ? pick(pools.back, rng) : undefined;
   const uo = Math.floor(rng() * FACADE_GRID.cols) / FACADE_GRID.cols;
@@ -949,7 +1101,7 @@ export function buildBuilding(b: EnvBuilders, plot: Rect2, spec: BuildingSpec, r
       below = o;
       break;
     }
-    emitVolume(b, v, below, street, uo, vo, rng);
+    emitVolume(b, v, below, street, uo, vo, rng, spec.finish === 'concrete' && spec.detail !== 'far');
   }
 
   let top = -Infinity;

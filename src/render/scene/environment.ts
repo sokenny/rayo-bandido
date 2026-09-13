@@ -10,6 +10,8 @@ import { buildTransit } from './env/transitBuilder';
 import { buildTrack } from './env/trackBuilder';
 import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
+import { buildCarMeets } from './env/meetBuilder';
+import { createMeetVisual } from './meetVisual';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
@@ -86,8 +88,12 @@ export interface EnvironmentVisual {
   };
   /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
   ready: Promise<void>;
-  /** Called once per render frame for cheap animation (blinking signs, holograms). */
-  update(frameDt: number, time: number): void;
+  /**
+   * Called once per render frame for cheap animation (blinking signs, holograms). A world
+   * drawn in chunks (`CityPlan.render`) also takes the camera's ground position here, and
+   * switches off every chunk the haze has already taken.
+   */
+  update(frameDt: number, time: number, camX?: number, camZ?: number): void;
   dispose(): void;
 }
 
@@ -140,6 +146,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     hemi,
     key,
     touch: isTouchDevice(),
+    ...(PAL.sky ? { sky: PAL.sky } : {}),
   });
   root.add(atmosphere.root);
 
@@ -325,21 +332,47 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // brighter than they are.
   buildNeonWalls(b);
   buildLandmarks(b);
+  // The car meets' lots, paint, edges and the light off the parked cars (`env/meetBuilder.ts`).
+  buildCarMeets(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
 
   const geometries: THREE.BufferGeometry[] = [];
+  /**
+   * The chunks of a world too big to draw whole (`CityPlan.render`): every material's
+   * geometry cut into a grid, one mesh per cell, frustum-culled by Three and switched off
+   * by distance in `update` once the haze has taken the cell. The Bay and the Stack are
+   * one mesh per material, never culled, as they always were.
+   */
+  const chunks: Array<{ mesh: THREE.Mesh; x: number; z: number; radius: number }> = [];
+  const chunked = plan.render ?? null;
   const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
     if (builder.empty) return;
     const geo = builder.build();
-    geometries.push(geo);
-    const mesh = new THREE.Mesh(geo, material);
-    mesh.name = name;
-    mesh.renderOrder = order;
-    // Each mesh spans the whole arena, so a frustum test can never reject one.
-    mesh.frustumCulled = false;
-    root.add(mesh);
+    if (!chunked) {
+      geometries.push(geo);
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.name = name;
+      mesh.renderOrder = order;
+      // Each mesh spans the whole arena, so a frustum test can never reject one.
+      mesh.frustumCulled = false;
+      root.add(mesh);
+      return;
+    }
+    for (const part of splitGeometry(geo, chunked.chunk)) {
+      geometries.push(part);
+      const mesh = new THREE.Mesh(part, material);
+      mesh.name = name;
+      mesh.renderOrder = order;
+      mesh.frustumCulled = true;
+      root.add(mesh);
+      const sphere = part.boundingSphere!;
+      chunks.push({ mesh, x: sphere.center.x, z: sphere.center.z, radius: sphere.radius });
+    }
+    geo.dispose();
+    // The builder's own arrays are the biggest thing in memory once the geometry exists.
+    builder.release();
   };
 
   add(b.concrete, concreteMat, 'env-concrete');
@@ -406,6 +439,13 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const streetMarkers = (plan.streetMarkers ?? []).map((site) => createActivityMarker(site, STREET_MARKER));
   for (const m of streetMarkers) root.add(m.group);
 
+  /* ------------------------------------------------- car meets */
+
+  // The parked cars and the people round them, instanced (`meetVisual.ts`): the lots and the
+  // light on them are in the batches above.
+  const meets = plan.meets && plan.meets.length > 0 ? createMeetVisual(plan.meets) : null;
+  if (meets) root.add(meets.root);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -423,7 +463,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     streetMarkers,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
-    update(frameDt: number, time: number) {
+    update(frameDt: number, time: number, camX?: number, camZ?: number) {
+      if (chunks.length > 0 && camX !== undefined && camZ !== undefined) {
+        const far = chunked!.cullDistance;
+        for (let i = 0; i < chunks.length; i++) {
+          const c = chunks[i];
+          c.mesh.visible = Math.hypot(c.x - camX, c.z - camZ) - c.radius < far;
+        }
+      }
       // The sky, the rain and the storm. First, because a strike rewrites the fog colour and
       // the two scene lights that everything below is then drawn with.
       atmosphere.update(frameDt, time);
@@ -464,6 +511,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       rushMarker?.update(time);
       circuitMarker?.update(time);
       for (let i = 0; i < streetMarkers.length; i++) streetMarkers[i].update(time);
+      meets?.update(camX, camZ);
     },
     dispose() {
       atmosphere.dispose();
@@ -471,6 +519,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       rushMarker?.dispose();
       circuitMarker?.dispose();
       for (const m of streetMarkers) m.dispose();
+      meets?.dispose();
       badkala.dispose();
       graffiti.dispose();
       roadArt.dispose();
@@ -487,4 +536,52 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       key.dispose();
     },
   };
+}
+
+/**
+ * Cut a non-indexed geometry into a grid of `cell` metres by triangle centroid, every
+ * attribute carried across. Each piece gets its own bounding sphere, which is what the
+ * frustum test and the distance cull read. Pieces come back in no particular order.
+ */
+function splitGeometry(geo: THREE.BufferGeometry, cell: number): THREE.BufferGeometry[] {
+  const names = Object.keys(geo.attributes);
+  const position = geo.getAttribute('position') as THREE.BufferAttribute;
+  const triangles = position.count / 3;
+  // Which cell each triangle belongs to, then how many triangles each cell holds.
+  const cellOf = new Int32Array(triangles);
+  const counts = new Map<number, number>();
+  const p = position.array as Float32Array;
+  for (let t = 0; t < triangles; t++) {
+    const i = t * 9;
+    const x = (p[i] + p[i + 3] + p[i + 6]) / 3;
+    const z = (p[i + 2] + p[i + 5] + p[i + 8]) / 3;
+    // Fits an Int32 with room to spare: cells are hundreds of metres, maps a few kilometres.
+    const key = (Math.floor(x / cell) + 2048) * 4096 + (Math.floor(z / cell) + 2048);
+    cellOf[t] = key;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  // One geometry per cell, filled attribute by attribute.
+  const parts = new Map<number, { geo: THREE.BufferGeometry; arrays: Float32Array[]; fill: number }>();
+  const sizes = names.map((n) => (geo.getAttribute(n) as THREE.BufferAttribute).itemSize);
+  for (const [key, n] of counts) {
+    const part = new THREE.BufferGeometry();
+    const arrays = names.map((_, k) => new Float32Array(n * 3 * sizes[k]));
+    names.forEach((name, k) => part.setAttribute(name, new THREE.BufferAttribute(arrays[k], sizes[k])));
+    parts.set(key, { geo: part, arrays, fill: 0 });
+  }
+  const sources = names.map((n) => (geo.getAttribute(n) as THREE.BufferAttribute).array as Float32Array);
+  for (let t = 0; t < triangles; t++) {
+    const part = parts.get(cellOf[t])!;
+    for (let k = 0; k < names.length; k++) {
+      const size = sizes[k] * 3;
+      part.arrays[k].set(sources[k].subarray(t * size, t * size + size), part.fill * size);
+    }
+    part.fill++;
+  }
+  const out: THREE.BufferGeometry[] = [];
+  for (const part of parts.values()) {
+    part.geo.computeBoundingSphere();
+    out.push(part.geo);
+  }
+  return out;
 }
