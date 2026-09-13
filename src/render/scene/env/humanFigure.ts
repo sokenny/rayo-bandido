@@ -18,24 +18,21 @@ import { MeshBuilder } from './meshBuilder';
  *
  * PROPORTIONS. One reference body, 1.96 m to the top of the head — hair and hats sit above that,
  * as they do on a person — standing at its own origin, facing local -z, with its feet at y = 0.
- * `height` scales it, `build` widens the shoulders. Poses are axis-aligned boxes rather than a
- * rig: this city is low-poly and seen from a moving car.
+ * `height` scales it, `build` widens the shoulders.
  *
- * A FEW MESHES, THREE MATERIALS, NOTHING PER FRAME:
- *   `body`   - everything attached to the person, including what they carry. Sways.
- *   `prop`   - what they set on the ground. Does NOT sway, because a cooler does not.
- *   `accent` - the unlit bits: lenses, an LED, a hi-vis band, the seam of a glowing case.
- *   `aura`   - the pool of light they stand in, so they can be seen at all on a dark street.
- *   `arm`    - the one raised arm, when a look hails. The only thing animated by more than a
- *              scalar write.
- * The lit meshes share one `MeshStandardMaterial`, and every optional mesh is skipped entirely
- * when a look does not ask for it — a plain figure is one mesh.
+ * RIGGED, NOT POSED. Every box belongs to one of `HUMAN_BONES` — hips, spine, head, two legs,
+ * two upper arms, two forearms, and the hand that holds a phone or a camera — and the geometry
+ * carries that as a per-vertex `aBone` attribute, with each bone's joint in `HumanParts.joints`.
+ * The body is built standing straight with its arms at its sides; folded arms, a hand in a
+ * pocket, a wave, a walk are all rotations of those bones (`humanActs.ts`), applied on the GPU
+ * by a skinned mesh (`humanRig.ts`). Rigid boxes on joints is the whole of it: this city is
+ * low-poly and seen from a moving car, and a knee would not be seen.
  *
  * DOM-FREE ON PURPOSE. Everything below is arithmetic and buffers, so a figure can be built and
  * measured in a test (`tests/humanFigure.test.ts`) without a canvas.
  */
 
-/** What the arms are doing. Poses are static box arrangements; only `hail` moves. */
+/** What the arms do while nothing else is asking for them. The rig poses them; the mesh is the same. */
 export type HumanPose =
   /** Both arms hanging. */
   | 'idle'
@@ -43,7 +40,7 @@ export type HumanPose =
   | 'pocket'
   /** Folded across the chest. */
   | 'folded'
-  /** One hanging, one raised and waving the car down. */
+  /** Flagging a car down. */
   | 'hail';
 
 /** What is on the head. `crop` is hair alone; the rest add to it. */
@@ -52,7 +49,7 @@ export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'hood';
 /** The one thing about a face that is visible at night, if anything is. */
 export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
 
-/** What they brought. `camera` is carried; the rest stand on the ground beside them. */
+/** What they brought. `camera` is held in the hand; the rest stand on the ground beside them. */
 export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera';
 
 /**
@@ -103,22 +100,46 @@ export interface HumanLook {
   propColor?: number;
   /** The lit part of the prop: an amber tube on a cooler lid, the seam of a case. */
   propAccent?: number;
+  /**
+   * A phone in the right hand, with its screen lit this colour. Only seen while what they are
+   * doing takes it out (`HumanPoseState.item`); the rest of the time it is folded away to nothing.
+   */
+  phone?: number;
 }
+
+/** The bones of a person, in skeleton order. `place` is where they stand and is never posed. */
+export const HUMAN_BONES = [
+  'place',
+  'hips',
+  'spine',
+  'head',
+  'legL',
+  'legR',
+  'upperArmL',
+  'foreArmL',
+  'upperArmR',
+  'foreArmR',
+  'hand',
+] as const;
+export type HumanBone = (typeof HUMAN_BONES)[number];
+export const HUMAN_BONE_COUNT = HUMAN_BONES.length;
+/** Index of a bone by name. */
+export const BONE = Object.fromEntries(HUMAN_BONES.map((name, i) => [name, i])) as Record<HumanBone, number>;
+/** Each bone's parent, by index; -1 for `place`, which hangs from whatever holds the person. */
+export const HUMAN_BONE_PARENT: readonly number[] = [-1, 0, 1, 2, 1, 1, 2, 6, 2, 8, 9];
 
 /** The geometry of one person, before anything is decided about materials or scene graph. */
 export interface HumanParts {
-  /** The person and what they carry. Never null: everyone has a body. */
+  /** The person and what they hold, with `aBone`. Never null: everyone has a body. */
   body: THREE.BufferGeometry;
-  /** What they set down beside them, or null. Built in the same space as `body`. */
+  /** What they set down beside them, or null. On `place`, so it has no `aBone`. */
   prop: THREE.BufferGeometry | null;
-  /** The unlit accents, vertex-coloured so several colours share one mesh. Null when unlit. */
+  /** The unlit accents, vertex-coloured so several colours share one mesh, with `aBone`. Null when unlit. */
   accent: THREE.BufferGeometry | null;
-  /** The raised arm, built about its own shoulder. Null unless the pose is `hail`. */
-  arm: THREE.BufferGeometry | null;
-  /** Where that shoulder is, in the same space as `body`. */
-  armPivot: THREE.Vector3;
-  /** The pool of light on the ground under them, or null. Additive; never lit. */
+  /** The pool of light on the ground under them, or null. Additive; never lit; never moves. */
   aura: THREE.BufferGeometry | null;
+  /** Each bone's joint relative to its parent's, three numbers a bone, in `HUMAN_BONES` order. */
+  joints: Float32Array;
 }
 
 /* ================================================================== proportions */
@@ -137,8 +158,14 @@ const HEAD_H = 0.32;
 export const HUMAN_CROWN = HEAD_Y + HEAD_H / 2;
 const TORSO_W = 0.62;
 const TORSO_D = 0.38;
-/** Where the hailing arm turns. */
-const SHOULDER_PIVOT_Y = 1.5;
+/** The joints: where the head nods, the arms swing, the elbows bend and the legs step. */
+const NECK_JOINT = 1.63;
+const SHOULDER_JOINT = 1.48;
+const ELBOW_JOINT = 1.2;
+const WRIST = 0.93;
+/** Where a held thing is gripped, at the bottom of the hand. */
+const GRIP_JOINT = 0.86;
+const LEG_X = 0.15;
 /** How far a body's normals lean towards the sky by default. See `HumanLook.skyBias`. */
 const SKY_BIAS = 0.5;
 /**
@@ -153,19 +180,29 @@ const AURA_Y = 0.05;
 const AURA_RINGS = 7;
 const AURA_SEGMENTS = 14;
 
+/** How far out from the middle the arms hang, before `height` scales it. */
+function armOffset(build: number): number {
+  return (TORSO_W * build) / 2 + 0.085;
+}
+
 /**
- * A thin wrapper over `MeshBuilder` that scales and offsets everything one figure emits, so the
- * part functions below can be written in the reference body's own numbers and never think about
- * where the person is standing or how tall they are.
+ * A thin wrapper over `MeshBuilder` that scales everything one figure emits, so the part
+ * functions below can be written in the reference body's own numbers and never think about how
+ * tall the person is — and that writes down which bone every vertex it emits belongs to.
  */
 class Body {
+  private current = BONE.spine;
+  private readonly bones: number[] = [];
+
   constructor(
     private readonly b: MeshBuilder,
     private readonly k: number,
-    private readonly ox = 0,
-    private readonly oy = 0,
-    private readonly oz = 0,
   ) {}
+
+  /** Everything emitted from here on belongs to this bone. */
+  bone(index: number): void {
+    this.current = index;
+  }
 
   color(hex: number, mul = 1): void {
     this.b.color(hex, mul);
@@ -173,13 +210,15 @@ class Body {
 
   box(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, bottom = false): void {
     const k = this.k;
-    this.b.box(this.ox + cx * k, this.oy + cy * k, this.oz + cz * k, sx * k, sy * k, sz * k, { bottom });
+    this.b.box(cx * k, cy * k, cz * k, sx * k, sy * k, sz * k, { bottom });
+    this.tag();
   }
 
   /** A flat panel on the front (-z) or the back (+z) of the figure: bands, seams, lenses. */
   panel(cx: number, cy: number, cz: number, w: number, h: number, back = false): void {
     const k = this.k;
-    this.b.panel(this.ox + cx * k, this.oy + cy * k, this.oz + cz * k, w * k, h * k, back ? 0 : Math.PI);
+    this.b.panel(cx * k, cy * k, cz * k, w * k, h * k, back ? 0 : Math.PI);
+    this.tag();
   }
 
   /**
@@ -189,9 +228,9 @@ class Body {
    */
   disc(cx: number, cy: number, cz: number, r: number, seg = 8): void {
     const k = this.k;
-    const x = this.ox + cx * k;
-    const y = this.oy + cy * k;
-    const z = this.oz + cz * k;
+    const x = cx * k;
+    const y = cy * k;
+    const z = cz * k;
     const rr = r * k;
     // Clockwise in XY, which is what puts the normal on -z.
     for (let i = 0; i < seg; i += 2) {
@@ -205,6 +244,7 @@ class Body {
         x + Math.cos(a2) * rr, y + Math.sin(a2) * rr, z,
       );
     }
+    this.tag();
   }
 
   /**
@@ -217,9 +257,7 @@ class Body {
    */
   pool(color: number, radius: number, rings: number, seg: number): void {
     const k = this.k;
-    const cx = this.ox;
-    const y = this.oy + AURA_Y * k;
-    const cz = this.oz;
+    const y = AURA_Y * k;
     const r = radius * k;
     for (let i = 0; i < rings; i++) {
       const t = 1 - (i + 0.5) / rings;
@@ -233,14 +271,22 @@ class Body {
         const s0 = Math.sin(a0);
         const c1 = Math.cos(a1);
         const s1 = Math.sin(a1);
-        this.b.quad(
-          cx + c0 * r0, y, cz + s0 * r0,
-          cx + c1 * r0, y, cz + s1 * r0,
-          cx + c1 * r1, y, cz + s1 * r1,
-          cx + c0 * r1, y, cz + s0 * r1,
-        );
+        this.b.quad(c0 * r0, y, s0 * r0, c1 * r0, y, s1 * r0, c1 * r1, y, s1 * r1, c0 * r1, y, s0 * r1);
       }
     }
+  }
+
+  /** Mark every vertex emitted since the last call as the current bone's. */
+  private tag(): void {
+    const vertices = this.b.triangles * 3;
+    while (this.bones.length < vertices) this.bones.push(this.current);
+  }
+
+  /** The builder's geometry, with the bone of every vertex as `aBone`. */
+  build(): THREE.BufferGeometry {
+    const geo = this.b.build();
+    geo.setAttribute('aBone', new THREE.BufferAttribute(Uint8Array.from(this.bones), 1));
+    return geo;
   }
 }
 
@@ -249,18 +295,18 @@ class Body {
 /** Boots and legs. Two of everything; the boot is a little longer, so there is a toe. */
 function buildLegs(f: Body, look: HumanLook): void {
   for (const side of [-1, 1]) {
-    const x = side * 0.15;
-    // The far leg stands a touch back, which is the whole of "standing" rather than "at attention".
-    const z = side * 0.04;
+    f.bone(side < 0 ? BONE.legL : BONE.legR);
+    const x = side * LEG_X;
     f.color(look.legs, 1);
-    f.box(x, (FOOT + HIP) / 2, z, 0.22, HIP - FOOT, 0.26);
+    f.box(x, (FOOT + HIP) / 2, 0, 0.22, HIP - FOOT, 0.26);
     f.color(look.boots, 1);
-    f.box(x, FOOT / 2, z - 0.02, 0.24, FOOT, 0.3, true);
+    f.box(x, FOOT / 2, -0.02, 0.24, FOOT, 0.3, true);
   }
 }
 
 /** The coat down to whatever its hem is, the shoulders on top of it, and the neck above that. */
 function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
+  f.bone(BONE.spine);
   const hem = HIP - 0.44 * (look.coatLength ?? 0.3);
   f.color(look.coat, 1.04);
   f.box(0, (hem + SHOULDER) / 2, 0, w, SHOULDER - hem, d, true);
@@ -275,49 +321,26 @@ function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
 }
 
 /**
- * The arms, in whatever the pose is. Everything here is axis-aligned: a raised arm is an L of
- * two boxes rather than a rotated one, which is the same trick the rest of the city's geometry
- * uses and reads identically at the distance a car sees it from.
- *
- * Returns the shoulder of the raised arm, when there is one, for the caller to pivot on.
+ * Both arms, hanging: an upper arm, a forearm that tucks a little way up inside it so a bent
+ * elbow never opens a gap, and a hand. Whatever the arms are doing is the rig's business.
  */
-function buildArms(f: Body, look: HumanLook, w: number, d: number): { x: number } | null {
-  const pose = look.pose ?? 'idle';
-  const armX = w / 2 + 0.085;
-  f.color(look.coat, 1);
-  if (pose === 'folded') {
-    // Two bars across the chest, one in front of the other: arms folded, waiting, cold.
-    f.box(-0.02, 1.28, -d / 2 - 0.06, w + 0.12, 0.17, 0.19);
-    f.box(0.02, 1.12, -d / 2 - 0.02, w + 0.06, 0.16, 0.18);
-    // The upper arms still have to come off the shoulders, or the coat has no sleeves.
-    f.box(-armX, 1.4, 0, 0.17, 0.3, 0.2);
-    f.box(armX, 1.4, 0, 0.17, 0.3, 0.2);
-    return null;
+function buildArms(f: Body, look: HumanLook, armX: number): void {
+  for (const side of [-1, 1]) {
+    const x = side * armX;
+    f.bone(side < 0 ? BONE.upperArmL : BONE.upperArmR);
+    f.color(look.coat, 1);
+    f.box(x, (ELBOW_JOINT + 1.56) / 2, 0, 0.17, 1.56 - ELBOW_JOINT, 0.2);
+    f.bone(side < 0 ? BONE.foreArmL : BONE.foreArmR);
+    f.color(look.coat, 0.94);
+    f.box(x, (WRIST + ELBOW_JOINT + 0.05) / 2, 0, 0.155, ELBOW_JOINT + 0.05 - WRIST, 0.185);
+    f.color(look.skin, 1);
+    f.box(x, WRIST - 0.065, 0, 0.12, 0.13, 0.14);
   }
-  // The hanging arm, on the figure's left. Everyone has one.
-  f.box(-armX, 1.22, 0, 0.17, 0.66, 0.2);
-  if (pose === 'pocket') {
-    // The other is shorter and forward: the hand is inside the coat.
-    f.box(armX, 1.28, -0.06, 0.17, 0.58, 0.22);
-    return null;
-  }
-  if (pose === 'hail') return { x: armX };
-  f.box(armX, 1.22, 0.02, 0.17, 0.66, 0.2);
-  return null;
-}
-
-/** The raised arm, built about its own shoulder so the mesh can be swung from it. */
-function buildHailArm(f: Body, look: HumanLook): void {
-  f.color(look.coat, 1);
-  // Up out of the shoulder, then the forearm, then a hand.
-  f.box(0, 0.24, 0, 0.17, 0.48, 0.2);
-  f.box(0, 0.66, -0.02, 0.16, 0.42, 0.18);
-  f.color(look.skin, 1);
-  f.box(0, 0.93, -0.02, 0.15, 0.16, 0.16);
 }
 
 /** The head, the hair, and whatever is over it. */
 function buildHead(f: Body, look: HumanLook): void {
+  f.bone(BONE.head);
   const head = look.head ?? 'crop';
   const hairAccent = look.hairAccent ?? look.hair;
   const headwear = look.headwear ?? look.coat;
@@ -368,18 +391,26 @@ function buildHead(f: Body, look: HumanLook): void {
   }
 }
 
-/** What they hold: part of the person, so it sways with them. */
-function buildCarried(f: Body, look: HumanLook, w: number): void {
-  if ((look.prop ?? 'none') !== 'camera') return;
-  const x = -(w / 2 + 0.085);
-  f.color(look.propColor ?? 0x1a1a22, 1);
-  // Held up at the chest, pointing at whoever is in front of them.
-  f.box(x + 0.02, 1.16, -0.26, 0.22, 0.16, 0.24);
-  f.color(look.propColor ?? 0x1a1a22, 0.7);
-  f.box(x + 0.02, 1.16, -0.4, 0.12, 0.12, 0.06);
+/**
+ * What they hold, in the right hand, on the `hand` bone. Both are built hanging from the grip
+ * with the arm at their side, which is to say sideways: a camera's lens points down the forearm,
+ * so it looks where the hand points once the elbow is bent to film; a phone's screen faces
+ * forward, so it faces the eyes once it is lifted to read.
+ */
+function buildHeld(f: Body, look: HumanLook, armX: number): void {
+  f.bone(BONE.hand);
+  if ((look.prop ?? 'none') === 'camera') {
+    f.color(look.propColor ?? 0x1a1a22, 1);
+    f.box(armX, GRIP_JOINT - 0.1, -0.02, 0.16, 0.24, 0.22);
+    f.color(look.propColor ?? 0x1a1a22, 0.7);
+    f.box(armX, GRIP_JOINT - 0.26, -0.02, 0.12, 0.08, 0.12);
+  } else if (look.phone !== undefined) {
+    f.color(0x15161a, 1);
+    f.box(armX, GRIP_JOINT - 0.04, -0.02, 0.09, 0.16, 0.03);
+  }
 }
 
-/** What they set down beside them. Its own mesh, because the ground does not sway. */
+/** What they set down beside them. Its own mesh, on `place`, because the ground does not move. */
 function buildGrounded(f: Body, look: HumanLook): void {
   switch (look.prop) {
     case 'cooler':
@@ -407,11 +438,12 @@ function buildGrounded(f: Body, look: HumanLook): void {
   }
 }
 
-/** Everything that is lit from inside: the face, the band, the prop's seam. */
-function buildAccents(f: Body, look: HumanLook, w: number, d: number): void {
+/** Everything that is lit from inside: the face, the band, the screen, the prop's seam. */
+function buildAccents(f: Body, look: HumanLook, w: number, d: number, armX: number): void {
   const eyes = look.eyes ?? 'none';
   const eyeColor = look.eyeColor ?? 0xf0b34a;
   const face = -0.16;
+  f.bone(BONE.head);
   if (eyes === 'lenses') {
     // Two round lenses where the eyes would be. Owls.
     f.color(eyeColor, 1);
@@ -428,13 +460,21 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number): void {
 
   if (look.band !== undefined) {
     // Across the chest and across the back, so it reads from either side of the street.
+    f.bone(BONE.spine);
     f.color(look.band, 1);
     f.panel(0, 1.3, -d / 2 - 0.012, w * 0.92, 0.08);
     f.panel(0, 1.3, d / 2 + 0.012, w * 0.92, 0.08, true);
   }
 
+  f.bone(BONE.hand);
+  if (look.phone !== undefined && look.prop !== 'camera') {
+    f.color(look.phone, 1);
+    f.panel(armX, GRIP_JOINT - 0.04, -0.037, 0.07, 0.13);
+  }
+
   if (look.propAccent === undefined) return;
   f.color(look.propAccent, 1);
+  f.bone(BONE.place);
   switch (look.prop) {
     case 'cooler':
       // One warm tube on the lid, the same strip the stalls under the deck run.
@@ -447,181 +487,88 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number): void {
       f.panel(-0.62, 0.2, -0.22, 0.44, 0.04);
       break;
     case 'camera':
-      // The dot that says it is recording, on the front of the lens housing.
-      f.panel(-(w / 2 + 0.065), 1.22, -0.44, 0.05, 0.05);
+      // The dot that says it is recording, on the face that is on top while they film.
+      f.bone(BONE.hand);
+      f.panel(armX + 0.04, GRIP_JOINT - 0.08, -0.135, 0.05, 0.05);
       break;
     default:
       break;
   }
 }
 
+/** Each bone's joint relative to its parent, for this body. */
+function buildJoints(k: number, armX: number): Float32Array {
+  const j = new Float32Array(HUMAN_BONE_COUNT * 3);
+  const set = (bone: number, x: number, y: number, z: number): void => {
+    j[bone * 3] = x * k;
+    j[bone * 3 + 1] = y * k;
+    j[bone * 3 + 2] = z * k;
+  };
+  set(BONE.hips, 0, HIP, 0);
+  set(BONE.head, 0, NECK_JOINT - HIP, 0);
+  set(BONE.legL, -LEG_X, 0, 0);
+  set(BONE.legR, LEG_X, 0, 0);
+  set(BONE.upperArmL, -armX, SHOULDER_JOINT - HIP, 0);
+  set(BONE.upperArmR, armX, SHOULDER_JOINT - HIP, 0);
+  set(BONE.foreArmL, 0, ELBOW_JOINT - SHOULDER_JOINT, 0);
+  set(BONE.foreArmR, 0, ELBOW_JOINT - SHOULDER_JOINT, 0);
+  set(BONE.hand, 0, GRIP_JOINT - ELBOW_JOINT, 0);
+  return j;
+}
+
+/** Where each bone's joint is with the body standing at rest, relative to its feet. */
+export function restJoints(joints: Float32Array): Float32Array {
+  const out = new Float32Array(joints.length);
+  for (let i = 0; i < HUMAN_BONE_COUNT; i++) {
+    const p = HUMAN_BONE_PARENT[i];
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = joints[i * 3 + c] + (p >= 0 ? out[p * 3 + c] : 0);
+  }
+  return out;
+}
+
 /* ================================================================== assembly */
 
 /**
- * One person's geometry, standing at (`x`, `y`, `z`) facing local -z. Nothing here touches the
- * document, so it can be built and measured in a test.
+ * One person's geometry, standing at their own origin facing local -z, with every vertex tagged
+ * with its bone. Nothing here touches the document, so it can be built and measured in a test.
  */
-export function buildHumanParts(look: HumanLook, at?: { x?: number; y?: number; z?: number }): HumanParts {
+export function buildHumanParts(look: HumanLook): HumanParts {
   const k = look.height ?? 1;
   const build = look.build ?? 1;
   const w = TORSO_W * build;
   const d = TORSO_D * build;
-  const ox = at?.x ?? 0;
-  const oy = at?.y ?? 0;
-  const oz = at?.z ?? 0;
+  const armX = armOffset(build);
 
   // A small fillet on the shading only: free, and it stops a person reading as a stack of
   // crates. The sky bias is what stops them reading as a black one — see `HumanLook.skyBias`.
   const sky = look.skyBias ?? SKY_BIAS;
   const bodyBuilder = new MeshBuilder(true);
   bodyBuilder.soft(0.06).normalUp(sky);
-  const body = new Body(bodyBuilder, k, ox, oy, oz);
+  const body = new Body(bodyBuilder, k);
   buildLegs(body, look);
   buildTorso(body, look, w, d);
-  const hail = buildArms(body, look, w, d);
+  buildArms(body, look, armX);
   buildHead(body, look);
-  buildCarried(body, look, w);
+  buildHeld(body, look, armX);
 
   const propBuilder = new MeshBuilder(true);
   propBuilder.soft(0.05).normalUp(sky);
-  buildGrounded(new Body(propBuilder, k, ox, oy, oz), look);
+  buildGrounded(new Body(propBuilder, k), look);
 
   const accentBuilder = new MeshBuilder(true);
-  buildAccents(new Body(accentBuilder, k, ox, oy, oz), look, w, d);
+  const accent = new Body(accentBuilder, k);
+  buildAccents(accent, look, w, d, armX);
 
   const auraBuilder = new MeshBuilder(true);
   if (look.aura !== undefined) {
-    new Body(auraBuilder, k, ox, oy, oz).pool(look.aura, look.auraRadius ?? AURA_RADIUS, AURA_RINGS, AURA_SEGMENTS);
-  }
-
-  // The raised arm is built about its own shoulder, so the mesh carrying it can be placed there
-  // and simply rotated. Nothing else in a figure moves relative to anything else.
-  let arm: THREE.BufferGeometry | null = null;
-  const armPivot = new THREE.Vector3();
-  if (hail) {
-    const armBuilder = new MeshBuilder(true);
-    armBuilder.soft(0.06);
-    buildHailArm(new Body(armBuilder, k), look);
-    arm = armBuilder.build();
-    armPivot.set(ox + hail.x * k, oy + SHOULDER_PIVOT_Y * k, oz);
+    new Body(auraBuilder, k).pool(look.aura, look.auraRadius ?? AURA_RADIUS, AURA_RINGS, AURA_SEGMENTS);
   }
 
   return {
-    body: bodyBuilder.build(),
+    body: body.build(),
     prop: propBuilder.empty ? null : propBuilder.build(),
-    accent: accentBuilder.empty ? null : accentBuilder.build(),
-    arm,
-    armPivot,
+    accent: accentBuilder.empty ? null : accent.build(),
     aura: auraBuilder.empty ? null : auraBuilder.build(),
-  };
-}
-
-/** A person in the scene: the meshes, the idle, and the one call that throws it all away. */
-export interface HumanFigureVisual {
-  /** Positioned and turned by the caller. The figure stands at its origin, facing local -z. */
-  group: THREE.Group;
-  /** Drives the idle. Cheap: a handful of scalar writes, nothing allocated. */
-  update(time: number): void;
-  dispose(): void;
-}
-
-export interface HumanFigureOptions {
-  /**
-   * Offsets the idle, so two people standing near each other do not breathe in time. Any
-   * number will do; a character's own hash is as good as anything.
-   */
-  phase?: number;
-  /** Name given to the group, for anyone reading a scene graph in the debugger. */
-  name?: string;
-}
-
-/**
- * Builds one person and the small amount of life they have: a shift of weight, and — for
- * someone flagging a car down — the arm.
- *
- * Two to four meshes, two materials. The lit meshes share one `MeshStandardMaterial`, so a
- * person takes the street's own light like the kerb they stand on rather than looking like
- * something out of a cutscene.
- */
-export function createHumanFigure(look: HumanLook, options: HumanFigureOptions = {}): HumanFigureVisual {
-  const parts = buildHumanParts(look);
-  const phase = options.phase ?? 0;
-  const group = new THREE.Group();
-  group.name = options.name ?? 'human';
-
-  const litMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 });
-  const body = new THREE.Mesh(parts.body, litMat);
-  body.name = `${group.name}-body`;
-  group.add(body);
-
-  if (parts.prop) {
-    const prop = new THREE.Mesh(parts.prop, litMat);
-    prop.name = `${group.name}-prop`;
-    group.add(prop);
-  }
-
-  let arm: THREE.Mesh | null = null;
-  if (parts.arm) {
-    arm = new THREE.Mesh(parts.arm, litMat);
-    arm.name = `${group.name}-arm`;
-    arm.position.copy(parts.armPivot);
-    group.add(arm);
-  }
-
-  let auraMat: THREE.MeshBasicMaterial | null = null;
-  if (parts.aura) {
-    auraMat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.7,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      toneMapped: false,
-    });
-    const aura = new THREE.Mesh(parts.aura, auraMat);
-    aura.name = `${group.name}-aura`;
-    aura.renderOrder = 2;
-    group.add(aura);
-  }
-
-  let accentMat: THREE.MeshBasicMaterial | null = null;
-  if (parts.accent) {
-    accentMat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      toneMapped: false,
-      transparent: true,
-      opacity: 0.95,
-    });
-    const accent = new THREE.Mesh(parts.accent, accentMat);
-    accent.name = `${group.name}-accent`;
-    group.add(accent);
-  }
-
-  return {
-    group,
-    update(time) {
-      // A shift of weight, about their own axis: two slow sines that never quite line up.
-      body.rotation.y = 0.05 * Math.sin(time * 0.37 + phase) + 0.02 * Math.sin(time * 1.3 + phase);
-      // The raised arm swings from the shoulder, and turns with the body under it.
-      if (arm) {
-        arm.rotation.y = body.rotation.y;
-        arm.rotation.z = -0.18 + 0.22 * Math.sin(time * 3.6 + phase);
-      }
-      // The lit parts breathe a little rather than sitting at one brightness, and the pool
-      // under them breathes with them.
-      if (accentMat) accentMat.color.setScalar(0.85 + 0.15 * Math.sin(time * 0.9 + phase));
-      if (auraMat) auraMat.opacity = 0.64 + 0.1 * Math.sin(time * 0.9 + phase);
-    },
-    dispose() {
-      group.clear();
-      parts.body.dispose();
-      parts.prop?.dispose();
-      parts.accent?.dispose();
-      parts.arm?.dispose();
-      parts.aura?.dispose();
-      litMat.dispose();
-      accentMat?.dispose();
-      auraMat?.dispose();
-    },
+    joints: buildJoints(k, armX),
   };
 }

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { PassengerStop } from '../../../core/types';
-import { createHumanFigure, type HumanFigureVisual, type HumanLook } from './humanFigure';
+import type { CrowdSubject } from './humanActs';
+import type { HumanLook } from './humanFigure';
+import { createHumanFigure, type HumanFigureVisual } from './humanRig';
 
 /**
  * THE PERSON AT THE STOP.
@@ -209,7 +211,8 @@ export interface PassengerFigureVisual {
   /** Stand this character at this stop. Builds their figure the first time they are seen. */
   show(portrait: string, stop: PassengerStop): void;
   hide(): void;
-  update(time: number): void;
+  /** `subject` is the player's car, in world space: whoever is waiting waves it down. */
+  update(time: number, subject?: CrowdSubject | null): void;
   dispose(): void;
 }
 
@@ -243,9 +246,9 @@ export function createPassengerFigure(isRoad?: (x: number, z: number, pad?: numb
     hide() {
       group.visible = false;
     },
-    update(time) {
+    update(time, subject) {
       if (!group.visible || !current) return;
-      current.update(time);
+      current.update(time, subject);
     },
     dispose() {
       for (const figure of built.values()) figure.dispose();

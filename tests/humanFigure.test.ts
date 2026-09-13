@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { HUMAN_CROWN, buildHumanParts, createHumanFigure, type HumanLook } from '../src/render/scene/env/humanFigure';
+import { BONE, HUMAN_BONE_COUNT, HUMAN_CROWN, buildHumanParts, restJoints, type HumanLook } from '../src/render/scene/env/humanFigure';
+import { createHumanCrowd, createHumanFigure } from '../src/render/scene/env/humanRig';
 import { passengerLook, standAt } from '../src/render/scene/env/passengerFigure';
 import { PASSENGERS } from '../src/content/passengers';
 import type { PassengerStop } from '../src/core/types';
@@ -11,8 +12,8 @@ import { PASSENGER } from '../src/config/tuning';
  * The shared body (`src/render/scene/env/humanFigure.ts`) is what every person in this city is
  * made of, so what is worth pinning is the contract the rest of the game leans on rather than
  * the shape of anyone's coat: that a figure stands on the ground at its own origin, that it is
- * as tall as it says it is, that a look's choices actually change the geometry, that a waving
- * arm turns about a real shoulder, and that nobody costs more than a person should.
+ * as tall as it says it is, that a look's choices actually change the geometry, that every part
+ * of it hangs off the joint it should, and that nobody costs more than a person should.
  *
  * And, for the stops: that a passenger waits somewhere a passenger would wait — at the kerb,
  * out of the parking space, looking at the road.
@@ -28,6 +29,16 @@ function boundsOf(geo: THREE.BufferGeometry): THREE.Box3 {
 function trianglesOf(geo: THREE.BufferGeometry | null): number {
   if (!geo) return 0;
   return geo.getAttribute('position').count / 3;
+}
+
+/** The bounds of just the vertices on one bone. */
+function boneBounds(geo: THREE.BufferGeometry, bone: number): THREE.Box3 {
+  const pos = geo.getAttribute('position');
+  const tag = geo.getAttribute('aBone');
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) if (tag.getX(i) === bone) box.expandByPoint(v.fromBufferAttribute(pos, i));
+  return box;
 }
 
 describe('the shared body', () => {
@@ -56,23 +67,20 @@ describe('the shared body', () => {
     expect(wide.max.y).toBeCloseTo(plain.max.y, 5);
   });
 
-  it('stands where it is put', () => {
-    const box = boundsOf(buildHumanParts(PLAIN, { x: 40, y: 3, z: -12 }).body);
-    expect(box.min.y).toBeCloseTo(3, 5);
-    expect((box.min.x + box.max.x) / 2).toBeCloseTo(40, 1);
-    expect((box.min.z + box.max.z) / 2).toBeCloseTo(-12, 1);
-  });
-
-  it('carries what is carried and grounds what is grounded', () => {
-    // A camera is held, so it belongs to the body that sways; a case is set down, so it does not.
-    const filming = buildHumanParts({ ...PLAIN, pose: 'hail', prop: 'camera' });
+  it('holds what is held and grounds what is grounded', () => {
+    // A camera is in the hand, so it moves with the hand; a case is set down, so it does not.
+    const filming = buildHumanParts({ ...PLAIN, prop: 'camera' });
     expect(filming.prop).toBeNull();
+    expect(boneBounds(filming.body, BONE.hand).isEmpty()).toBe(false);
     const carrying = buildHumanParts({ ...PLAIN, prop: 'case' });
     expect(carrying.prop).not.toBeNull();
+    expect(carrying.prop!.getAttribute('aBone')).toBeUndefined();
     const propBox = boundsOf(carrying.prop!);
     expect(propBox.min.y).toBeCloseTo(0, 5);
     // Beside them rather than through them.
     expect(propBox.max.x).toBeLessThan(boundsOf(carrying.body).min.x + 0.2);
+    // Nobody holds a phone they were not given.
+    expect(boneBounds(buildHumanParts(PLAIN).body, BONE.hand).isEmpty()).toBe(true);
   });
 
   it('only lights what a look asks to be lit', () => {
@@ -81,50 +89,87 @@ describe('the shared body', () => {
     expect(lit.accent).not.toBeNull();
     // Vertex-coloured, so several colours share one unlit mesh.
     expect(lit.accent!.getAttribute('color')).toBeTruthy();
-    const eyesBox = boundsOf(lit.accent!);
-    // The lenses are on the face: high up, and in front.
+    // The lenses are on the face: high up, in front, and on the head, so they turn with it.
+    const eyesBox = boneBounds(lit.accent!, BONE.head);
     expect(eyesBox.max.y).toBeGreaterThan(1.6);
     expect(eyesBox.min.z).toBeLessThan(0);
+    expect(boneBounds(lit.accent!, BONE.spine).isEmpty()).toBe(false);
   });
 
-  it('gives a hailing figure an arm that turns about its shoulder', () => {
-    const still = buildHumanParts(PLAIN);
-    expect(still.arm).toBeNull();
-    const waving = buildHumanParts({ ...PLAIN, pose: 'hail' });
-    expect(waving.arm).not.toBeNull();
-    // The pivot is a shoulder: chest height, out at the side of the torso.
-    expect(waving.armPivot.y).toBeGreaterThan(1.2);
-    expect(waving.armPivot.y).toBeLessThan(HUMAN_CROWN);
-    expect(Math.abs(waving.armPivot.x)).toBeGreaterThan(0.25);
-    // The arm's own geometry starts at that shoulder and goes up from it, so placing the mesh
-    // at the pivot is all that is needed to hang it on the body.
-    const armBox = boundsOf(waving.arm!);
-    expect(armBox.min.y).toBeCloseTo(0, 1);
-    expect(armBox.max.y).toBeGreaterThan(0.9);
+  it('tags every vertex with a bone, and hangs every part off its joint', () => {
+    const parts = buildHumanParts({ ...PLAIN, phone: 0xffffff, eyes: 'eyes' });
+    for (const geo of [parts.body, parts.accent!]) {
+      const tag = geo.getAttribute('aBone');
+      expect(tag.count).toBe(geo.getAttribute('position').count);
+      for (let i = 0; i < tag.count; i++) expect(tag.getX(i)).toBeLessThan(HUMAN_BONE_COUNT);
+    }
+    const rest = restJoints(parts.joints);
+    const joint = (bone: number): THREE.Vector3 => new THREE.Vector3(rest[bone * 3], rest[bone * 3 + 1], rest[bone * 3 + 2]);
+    // The shoulders are at chest height, out at the sides; the upper arm starts at its shoulder
+    // and ends where the forearm's elbow is.
+    for (const [upper, fore, side] of [[BONE.upperArmL, BONE.foreArmL, -1], [BONE.upperArmR, BONE.foreArmR, 1]] as const) {
+      const shoulder = joint(upper);
+      expect(shoulder.y).toBeGreaterThan(1.2);
+      expect(shoulder.y).toBeLessThan(HUMAN_CROWN);
+      expect(Math.sign(shoulder.x)).toBe(side);
+      const arm = boneBounds(parts.body, upper);
+      expect(arm.max.y).toBeGreaterThan(shoulder.y);
+      expect(arm.min.y).toBeCloseTo(joint(fore).y, 1);
+      expect(boneBounds(parts.body, fore).max.y).toBeGreaterThan(joint(fore).y);
+    }
+    // The legs hang from the hips, the head sits on the neck.
+    expect(boneBounds(parts.body, BONE.legL).max.y).toBeCloseTo(joint(BONE.legL).y, 2);
+    expect(boneBounds(parts.body, BONE.head).min.y).toBeGreaterThan(joint(BONE.head).y);
+    // The phone is held at the hand.
+    const phone = boneBounds(parts.body, BONE.hand);
+    expect(phone.max.y).toBeCloseTo(joint(BONE.hand).y, 1);
   });
 
-  it('poses change the arms without changing the person', () => {
-    const heights = (['idle', 'pocket', 'folded', 'hail'] as const).map((pose) =>
-      boundsOf(buildHumanParts({ ...PLAIN, pose }).body).max.y,
-    );
-    // The raised arm is a mesh of its own, so no pose makes the body itself any taller.
-    for (const h of heights) expect(h).toBeCloseTo(heights[0], 5);
-    const folded = trianglesOf(buildHumanParts({ ...PLAIN, pose: 'folded' }).body);
-    const idle = trianglesOf(buildHumanParts({ ...PLAIN, pose: 'idle' }).body);
-    expect(folded).not.toBe(idle);
+  it('is the same body whatever its arms are doing', () => {
+    // Folded, in a pocket or waving is the rig's business: the mesh is identical.
+    const counts = (['idle', 'pocket', 'folded', 'hail'] as const).map((pose) => trianglesOf(buildHumanParts({ ...PLAIN, pose }).body));
+    for (const c of counts) expect(c).toBe(counts[0]);
   });
 
   it('stays inside a person-sized budget', () => {
     for (const p of PASSENGERS) {
       const look = passengerLook(p.portrait);
       const parts = buildHumanParts(look);
-      const total = trianglesOf(parts.body) + trianglesOf(parts.prop) + trianglesOf(parts.accent) + trianglesOf(parts.arm);
+      const total = trianglesOf(parts.body) + trianglesOf(parts.prop) + trianglesOf(parts.accent);
       expect(total, `${p.id} is too heavy`).toBeLessThan(500);
     }
   });
+});
 
-  it('builds into a scene, animates without allocating, and lets go of everything', () => {
-    const figure = createHumanFigure({ ...PLAIN, pose: 'hail', eyes: 'eyes', prop: 'case', propAccent: 0xa8ff3e });
+describe('the rig', () => {
+  it('draws a whole crowd in two skinned meshes on one skeleton, each person where they stand', () => {
+    const looks = [PLAIN, { ...PLAIN, prop: 'cooler' as const, propAccent: 0xffd9a0 }, { ...PLAIN, band: 0x3fe8ff, phone: 0xcfe6ff }];
+    const crowd = createHumanCrowd(
+      looks.map((look, i) => ({ look, x: i * 5, y: 0, z: -i * 3, heading: i, act: 'stand' as const, seed: i })),
+    );
+    const skinned = crowd.group.children.filter((c) => (c as THREE.SkinnedMesh).isSkinnedMesh) as THREE.SkinnedMesh[];
+    expect(skinned).toHaveLength(2);
+    expect(skinned[0].skeleton).toBe(skinned[1].skeleton);
+    expect(skinned[0].skeleton.bones).toHaveLength(looks.length * HUMAN_BONE_COUNT);
+
+    // Each person's hips are over the spot they were put on.
+    crowd.update(1, 1 / 60, null);
+    crowd.group.updateMatrixWorld(true);
+    const bones = skinned[0].skeleton.bones;
+    const at = new THREE.Vector3();
+    for (let i = 0; i < looks.length; i++) {
+      at.setFromMatrixPosition(bones[i * HUMAN_BONE_COUNT + BONE.hips].matrixWorld);
+      expect(Math.hypot(at.x - i * 5, at.z + i * 3)).toBeLessThan(0.1);
+      expect(at.y).toBeGreaterThan(0.8);
+    }
+    // Culling uses a sphere that holds all of them.
+    const sphere = skinned[0].boundingSphere!;
+    for (let i = 0; i < looks.length; i++) expect(sphere.distanceToPoint(new THREE.Vector3(i * 5, 1, -i * 3))).toBeLessThan(0);
+    crowd.dispose();
+  });
+
+  it('builds a figure into a scene, moves it without allocating, and lets go of everything', () => {
+    const figure = createHumanFigure({ ...PLAIN, pose: 'hail', eyes: 'eyes', prop: 'case', propAccent: 0xa8ff3e, aura: 0xff3df0 });
     let meshes = 0;
     let released = 0;
     const geometries = new Set<THREE.BufferGeometry>();
@@ -138,18 +183,22 @@ describe('the shared body', () => {
     });
     for (const geo of geometries) geo.addEventListener('dispose', () => released++);
     for (const mat of materials) mat.addEventListener('dispose', () => released++);
-    // Body, prop, accent, arm — and the three lit ones share a single material.
-    expect(meshes).toBe(4);
-    expect(materials.size).toBe(2);
+    // Body and prop in one, the accents, the pool on the ground.
+    expect(meshes).toBe(3);
+    expect(materials.size).toBe(3);
 
-    const arm = figure.group.getObjectByName('human-arm')!;
-    figure.update(0);
-    const first = arm.rotation.z;
-    figure.update(0.4);
-    expect(arm.rotation.z).not.toBeCloseTo(first, 4);
+    // A look that hails waves at a car coming for it: the right hand goes up past the shoulders.
+    const hand = (figure.group.getObjectByName('human-body') as THREE.SkinnedMesh).skeleton.bones[BONE.hand];
+    const car = { x: 0, z: -30, speed: 12, drifting: false };
+    for (let i = 0; i < 90; i++) {
+      figure.group.updateMatrixWorld(true);
+      figure.update(i / 30, car);
+    }
+    figure.group.updateMatrixWorld(true);
+    expect(new THREE.Vector3().setFromMatrixPosition(hand.matrixWorld).y).toBeGreaterThan(1.7);
 
     figure.dispose();
-    // Every geometry and both materials, once each: nothing is left on the GPU.
+    // Every geometry and every material, once each: nothing is left on the GPU.
     expect(released).toBe(geometries.size + materials.size);
     expect(figure.group.children).toHaveLength(0);
   });

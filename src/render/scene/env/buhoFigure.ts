@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MOOGUL } from '../../../config/tuning';
 import type { ActivitySite } from '../../../core/types';
-import { createHumanFigure, type HumanFigureVisual, type HumanLook } from './humanFigure';
+import type { CrowdSubject } from './humanActs';
+import type { HumanLook } from './humanFigure';
+import { createHumanFigure, type HumanFigureVisual } from './humanRig';
 
 /**
  * El Búho, as seen from the road: a man in a parka with his hood up, standing in a ring of
@@ -24,7 +26,8 @@ export interface BuhoFigureVisual {
   group: THREE.Group;
   /** How close the player is, 0 (far) .. 1 (in the ring). Brightens the ring. */
   setProximity(value: number): void;
-  update(time: number): void;
+  /** `subject` is the player's car, in world space: he watches it come. */
+  update(time: number, subject?: CrowdSubject | null): void;
   dispose(): void;
 }
 
@@ -133,14 +136,14 @@ export function createBuhoFigure(site: ActivitySite): BuhoFigureVisual {
     setProximity(value) {
       proximity = value < 0 ? 0 : value > 1 ? 1 : value;
     },
-    update(time) {
+    update(time, subject) {
       // The ring holds steady, a place rather than a person; it warms as the car closes.
       const pulse = 0.5 + 0.5 * Math.sin(time * 1.2);
       ringMat.opacity = 0.2 + proximity * 0.28 + pulse * 0.06;
       backingMat.opacity = 0.3 + proximity * 0.18;
       glowMat.opacity = 0.28 + 0.05 * Math.sin(time * 0.9) + proximity * 0.1;
-      // The shift of weight and the lenses catching the light belong to the body.
-      man.update(time);
+      // The shift of weight, the lenses catching the light and the head turning to the car belong to the body.
+      man.update(time, subject);
     },
     dispose() {
       group.clear();

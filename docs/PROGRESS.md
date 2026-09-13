@@ -2747,5 +2747,55 @@ The meet's first pass had every vertical tag backwards. The same mistake is in t
 of the existing graffiti has never been drawn. Making the material double-sided under the west leg
 showed the missing paint. Left as its own task.
 
-**Left for later.** The intro's meet (three cars under the west leg) could move onto this lot. The
-cars are all the Bandidos' coupe in different paint.
+**Left for later.** The cars are all the Bandidos' coupe in different paint.
+
+### The intro's meet moves onto the lot (2026-09-13, later)
+
+Juan asked for BadKala's pinned spot to be in the car meet rather than under the west leg.
+`INTRO.route.meetup` is now (-596, 307), radius 6, just inside the lot's west gate off av-w1, the
+avenue the drive starts on. Her three cars stand just past the circle, axis-aligned as their
+colliders need, between the double row by the wall and the fan. BadKala stands a step ahead of
+them, facing the gate. Line e1 says "en el estacionamiento abajo de la curva de la autopista,
+del lado oeste", and the cinematic brief describes the lot. The destination arrow still routes to
+av-w1 at the gate, the nearest road. `tests/intro.test.ts`: the meet circle, the cars and BadKala
+must be on the lot. The way in from av-w1 to the circle must be clear, and her cars clear of the
+lot's own cars and props. Checked in the browser with `intro=1`.
+
+### The people come to life (2026-09-13, later)
+
+Juan asked for the people, starting with the car meet, to be animated NPCs doing things that fit
+where they stand, at a sensible cost.
+
+**How.** Every person is now rigged: `humanFigure.ts` tags each vertex with one of eleven bones
+(place, hips, spine, head, two legs, two upper arms, two forearms, the hand) and the arms gained
+elbows and hands. `humanRig.ts` merges any number of people into one skinned mesh for the lit
+parts and one for the accents, on one skeleton, so the meet's fifteen people still cost two draw
+calls. `humanActs.ts` poses them on the CPU from what each is doing: `stand`, `chat` (to the
+nearest person), `film`, `phone`, `pace` (a short beat, phone at the ear), `vibe` (to the
+speakers, on a shared 96 BPM), `warm` (hands over the fire drum), `vendor` (bends to the cooler,
+hands something over), `inspect` (leans on a bonnet, points) and `hail`. Deterministic spells on
+each person's seed vary it, so nobody moves in step. Over any act, three reactions to the
+player's car: heads and shoulders turn to a moving car within 32 m, a drift within 42 m gets arms
+up and phones out (the filmer tracks it), and a car closing fast within 7 m makes them throw their
+arms up and step back 0.3 m. Tuning is `CROWD` in `src/config/tuning.ts`. Render-only: the sim,
+the colliders and the wire are untouched.
+
+**The meet.** Acts are data (`MeetPersonSpec.act`, `focus`, `to`); unsaid, the kind decides.
+Five people added: a second person at the drum, one moving to the speakers, one leaning on the
+middle car of the fan, and two pacing on the phone (behind the north row, and in front of the
+kiosk). A pacer's collider is a box along their whole beat, so what can be hit is wherever they
+could be. BadKala, El Búho and the passengers are crowds of one and got the same life: BadKala
+and El Búho watch the car come in, a passenger waves it down as it approaches.
+
+**Measured.** 15 people, 165 bones, 2,992 triangles, 2 draw calls. Acts, bone matrices and the
+bone texture fill take about 24 µs a frame for all of them, measured in Node on this machine. Level of detail:
+every frame within 90 m of the camera, every third frame to 220 m, frozen beyond; the meet is
+not drawn past 420 m as before. Shader warm-up covers the skinned programs (`compileScene`
+compiles hidden objects). In Chrome the lot holds 120 fps. Checked with free-camera shots at the
+group, the drum, the bonnet, the pacer and the vendor, then with the car driven at the group
+(heads turn, then the flinch) and a forced drift (arms up, filmer tracking). 869 tests and the
+typecheck green; new `tests/humanActs.test.ts`, and `tests/humanFigure.test.ts` pins the rig.
+
+**Left for later.** People who walk any distance need moving colliders in the sim, the way buses
+have; until then only short beats are walked. A car can still be driven into a person's collider
+until its nose visibly overlaps them, as before.

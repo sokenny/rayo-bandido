@@ -107,6 +107,7 @@ export const CONTROLS = [
   ['P', 'camera'],
   ['T', 'auto/manual'],
   ['F', 'activity'],
+  ['N', 'map'],
   ['X/Z', 'shift'],
   ['ESC', 'menu'],
   ['F3', 'debug'],

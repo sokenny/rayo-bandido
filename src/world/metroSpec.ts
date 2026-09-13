@@ -411,16 +411,29 @@ export const METRO_MEET: CarMeetSpec = {
     { x: -524.5, z: 340.5, heading: 0.08, paint: 0x8a5a2b, glow: 0x39ff6a },
     { x: -510.5, z: 322.5, heading: 1.25, paint: 0x1b7f86, glow: 0xff9a2e, head: true },
   ],
+  // What each of them is doing is theirs (`carMeet.ts`, `MeetPersonAct`): unsaid, a camera films,
+  // a cooler sells, a case is someone on their phone and anyone else talks to the nearest person.
   people: [
+    // In front of the fan of cars: one filming whoever pulls in, two talking.
     { x: -579, z: 313, heading: Math.PI - 0.25, kind: 'camera', seed: 1 },
     { x: -574.6, z: 313.6, heading: Math.PI + 0.35, kind: 'folded', seed: 2 },
     { x: -571.8, z: 312.4, heading: -2.4, kind: 'pocket', seed: 3 },
-    { x: -561.5, z: 327.8, heading: -Math.PI / 2, kind: 'idle', seed: 4 },
+    // Leaning on the bonnet of the middle car of the fan, a step off its bumper.
+    { x: -576, z: 318.35, heading: Math.PI, kind: 'idle', seed: 11, act: 'inspect', focus: { x: -576, z: 321.4 } },
+    // Round the fire in the drum, and moving to the speakers beside it.
+    { x: -562.13, z: 327.32, heading: -Math.PI / 2, kind: 'idle', seed: 4, act: 'warm', focus: { x: -563.2, z: 326.5 } },
+    { x: -564.28, z: 325.69, heading: 0.9, kind: 'pocket', seed: 12, act: 'warm', focus: { x: -563.2, z: 326.5 } },
+    { x: -564.2, z: 321.6, heading: 1.93, kind: 'idle', seed: 15, act: 'vibe', focus: { x: -561.8, z: 322.5 } },
+    // Behind the row along the north fence: two talking, the cooler, and someone pacing on the phone.
     { x: -547.2, z: 243.2, heading: 0.15, kind: 'folded', seed: 5 },
     { x: -544.9, z: 244.2, heading: -0.7, kind: 'pocket', seed: 6 },
     { x: -539.9, z: 250.3, heading: -1.2, kind: 'cooler', seed: 7 },
+    { x: -528.5, z: 244.5, heading: Math.PI / 2, kind: 'phone', seed: 13, act: 'pace', to: { x: -525.5, z: 244.5 } },
+    // By the vending machines, and pacing the pocket in front of the kiosk.
     { x: -510.8, z: 334.4, heading: 0.15, kind: 'case', seed: 8 },
     { x: -507.2, z: 333.6, heading: -0.5, kind: 'pocket', seed: 9 },
+    { x: -503.5, z: 330.8, heading: Math.PI / 2, kind: 'phone', seed: 14, act: 'pace', to: { x: -499.8, z: 330.8 } },
+    // Under the deck, filming the car stopped between the columns.
     { x: -533.6, z: 323.8, heading: -2.3, kind: 'camera', seed: 10 },
   ],
   props: [

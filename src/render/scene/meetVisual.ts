@@ -1,29 +1,33 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { VEHICLE } from '../../config/tuning';
+import { CROWD, VEHICLE } from '../../config/tuning';
 import type { CarMeetSpec, MeetPersonSpec } from '../../world/carMeet';
 import { buildBodyGeometry, buildGlassGeometry, buildTailGeometry } from './carVisual';
-import { buildHumanParts, type HumanHead, type HumanLook } from './env/humanFigure';
+import type { CrowdSubject, HumanAct } from './env/humanActs';
+import type { HumanHead, HumanLook } from './env/humanFigure';
+import { createHumanCrowd, type CrowdMember } from './env/humanRig';
 import { buildWheelGeometry } from './vehicles/wheel';
 
 /**
  * THE CARS AND PEOPLE AT A MEET (`world/carMeet.ts`). The parked cars are the Bandidos' coupe,
  * the rivals' car (`rivalCarVisual.ts`), but a rival costs five draw calls and a meet parks
  * sixteen of them: so here each part is ONE instanced mesh for every car at every meet — body,
- * glass, tail lamps, wheels — with the paint as the instance colour. The people are built by
- * the shared body (`env/humanFigure.ts`) and merged: one lit mesh and one for their lit bits.
- * Seven draw calls for the whole meet, and none at all once the car is far enough away that the
- * haze has taken the lot.
+ * glass, tail lamps, wheels — with the paint as the instance colour. The people are the shared
+ * body (`env/humanFigure.ts`) as one skinned crowd (`env/humanRig.ts`): one lit mesh and one for
+ * their lit bits, whoever is filming, pacing or warming their hands. Seven draw calls for the
+ * whole meet, and none at all once the car is far enough away that the haze has taken the lot.
  *
  * The light they throw (underglow, sill tubes, head lamps on the ground) is static art in the
  * city's own glow and neon batches (`env/meetBuilder.ts`), from the same list of cars.
  *
- * Nothing here moves. Nothing is allocated per frame: `update` compares one distance.
+ * The cars stand still; the people do not. Nothing is allocated per frame.
  */
 export interface MeetVisual {
   root: THREE.Group;
-  /** Show the meets only while the camera is near enough to see them. */
-  update(camX?: number, camZ?: number): void;
+  /**
+   * Show the meets only while the camera is near enough to see them, and move the people on
+   * while it is: `subject` is the player's car, which they notice.
+   */
+  update(camX?: number, camZ?: number, time?: number, dt?: number, subject?: CrowdSubject | null): void;
   dispose(): void;
 }
 
@@ -40,6 +44,8 @@ const COAT = [0x15181e, 0x2a2f36, 0x3b1f2b, 0x1d2a3a, 0x56606a, 0x0f1c14, 0x6a1c
 const LEGS = [0x1b1f27, 0x2b3444, 0x121316, 0x3a3f47, 0x4a4f3a];
 const HEADS: HumanHead[] = ['crop', 'cap', 'hood', 'mop', 'tied', 'fringe', 'cap'];
 const BANDS = [0x3fe8ff, 0x39ff6a, 0xff2fb4];
+/** A phone screen at night: cold white, or the blue of a feed. */
+const SCREENS = [0xcfe6ff, 0x8fc4ff, 0xe8f2ff];
 
 function pick<T>(list: readonly T[], seed: number, salt: number): T {
   const v = Math.abs(Math.sin(seed * 12.9898 + salt * 78.233) * 43758.5453) % 1;
@@ -89,7 +95,55 @@ export function meetLook(p: MeetPersonSpec): HumanLook {
     default:
       break;
   }
+  // Anyone might take a phone out: the screen is only there while they do.
+  if (look.prop !== 'camera') look.phone = pick(SCREENS, s, 11);
   return look;
+}
+
+/** What someone does when the meet's data does not say. */
+function defaultAct(p: MeetPersonSpec): HumanAct {
+  switch (p.kind) {
+    case 'camera':
+      return 'film';
+    case 'cooler':
+      return 'vendor';
+    case 'case':
+    case 'phone':
+      return 'phone';
+    default:
+      return 'chat';
+  }
+}
+
+/** Talking is to somebody: the nearest other person within a few steps, if there is one. */
+function nearestPartner(p: MeetPersonSpec, people: readonly MeetPersonSpec[]): { x: number; z: number } | null {
+  let best: MeetPersonSpec | null = null;
+  let bestD = 4.5;
+  for (const q of people) {
+    if (q === p) continue;
+    const d = Math.hypot(q.x - p.x, q.z - p.z);
+    if (d < bestD) {
+      bestD = d;
+      best = q;
+    }
+  }
+  return best ? { x: best.x, z: best.z } : null;
+}
+
+/** One person at a meet, as the crowd builds them. */
+export function meetMember(p: MeetPersonSpec, index: number, people: readonly MeetPersonSpec[]): CrowdMember {
+  const act = p.act ?? defaultAct(p);
+  return {
+    look: meetLook(p),
+    x: p.x,
+    y: 0.03,
+    z: p.z,
+    heading: p.to ? Math.atan2(p.to.x - p.x, -(p.to.z - p.z)) : p.heading,
+    act,
+    seed: p.seed * 31 + index,
+    focus: p.focus ?? (act === 'chat' || act === 'stand' ? nearestPartner(p, people) : null),
+    to: p.to,
+  };
 }
 
 export function createMeetVisual(meets: readonly CarMeetSpec[]): MeetVisual {
@@ -176,56 +230,33 @@ export function createMeetVisual(meets: readonly CarMeetSpec[]): MeetVisual {
     wheels.name = 'meet-car-wheels';
   }
 
+  // The people: one crowd for every meet, two skinned draw calls, posed from what each of them
+  // is doing (`env/humanActs.ts`).
   const people = meets.flatMap((m) => m.people);
-  if (people.length > 0) {
-    const litParts: THREE.BufferGeometry[] = [];
-    const accentParts: THREE.BufferGeometry[] = [];
-    for (const p of people) {
-      const parts = buildHumanParts(meetLook(p));
-      const place = (g: THREE.BufferGeometry): THREE.BufferGeometry => {
-        g.rotateY(-p.heading);
-        g.translate(p.x, 0.03, p.z);
-        return g;
-      };
-      litParts.push(place(parts.body));
-      if (parts.prop) litParts.push(place(parts.prop));
-      if (parts.accent) accentParts.push(place(parts.accent));
-      parts.aura?.dispose();
-      parts.arm?.dispose();
-    }
-    const litGeo = mergeGeometries(litParts, false);
-    for (const g of litParts) g.dispose();
-    if (litGeo) {
-      const litMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 });
-      const mesh = new THREE.Mesh(litGeo, litMat);
-      mesh.name = 'meet-people';
-      root.add(mesh);
-      geometries.push(litGeo);
-      materials.push(litMat);
-    }
-    const accentGeo = accentParts.length > 0 ? mergeGeometries(accentParts, false) : null;
-    for (const g of accentParts) g.dispose();
-    if (accentGeo) {
-      const accentMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: 0.95 });
-      const mesh = new THREE.Mesh(accentGeo, accentMat);
-      mesh.name = 'meet-people-accents';
-      root.add(mesh);
-      geometries.push(accentGeo);
-      materials.push(accentMat);
-    }
-  }
+  const crowd = people.length > 0 ? createHumanCrowd(people.map((p, i) => meetMember(p, i, people)), 'meet-people') : null;
+  if (crowd) root.add(crowd.group);
+  let stride = 0;
+  let owed = 0;
 
   return {
     root,
-    update(camX, camZ) {
+    update(camX, camZ, time = 0, dt = 0, subject = null) {
       if (camX === undefined || camZ === undefined) return;
-      let near = false;
-      for (let i = 0; i < centres.length; i++) {
-        if (Math.hypot(centres[i].x - camX, centres[i].z - camZ) < SHOW_WITHIN) near = true;
-      }
-      root.visible = near;
+      let nearest = Infinity;
+      for (let i = 0; i < centres.length; i++) nearest = Math.min(nearest, Math.hypot(centres[i].x - camX, centres[i].z - camZ));
+      root.visible = nearest < SHOW_WITHIN;
+      if (!crowd || !root.visible) return;
+      // Level of detail: every frame up close, every few frames across the lot, and not at all
+      // once they are a few pixels tall. A skipped frame's time is owed to the next step.
+      owed += dt;
+      if (nearest > CROWD.animateWithin) return;
+      stride = (stride + 1) % CROWD.farStride;
+      if (nearest > CROWD.fullWithin && stride !== 0) return;
+      crowd.update(time, Math.min(owed, 0.25), subject);
+      owed = 0;
     },
     dispose() {
+      crowd?.dispose();
       root.removeFromParent();
       root.clear();
       for (const g of geometries) g.dispose();

@@ -5,8 +5,8 @@ import { slotCss } from '../core/playerColors';
 /**
  * Minimap: a north-up picture of the drivable roads with the player, the activity markers and,
  * on the circuit, the line and the checkpoints. Electric cars are not shown — finding them is
- * the game. The roads are drawn once into an offscreen canvas; each frame only clears, blits it
- * and draws a handful of dots. Hidden ribbons (the shortcuts) are deliberately left off — they
+ * the game. The roads are drawn once into an offscreen canvas; each frame only clears, blits the
+ * part of it under the car and draws a handful of dots. Hidden ribbons (the shortcuts) are deliberately left off — they
  * are for the player to find.
  *
  * WHAT IS AND IS NOT MARKED. The distinction is whether the thing is a destination. An electric
@@ -19,11 +19,12 @@ import { slotCss } from '../core/playerColors';
  *
  * ONLY THE ACTIVITY IN HAND. While one of them has the car, the others are not marked at all
  * (`src/sim/activities.ts`): the game passes the list it wants drawn, and a run is driven on a
- * map with nothing on it but the run. It goes into the base layer with the roads, and stays there: clearing a mission
- * moves it (`setActivities`), which happens three times in a session and repaints the base once
- * each — so the per-frame cost is still nothing, which is the reason it is in the base at all.
+ * map with nothing on it but the run. Marks are drawn per frame over the roads rather than into
+ * them, because the corner view pins an off-window mark to its rim and so moves them all the time;
+ * there are never more than a handful.
  *
- * Performance contract: no per-frame allocation, one 2D canvas of `MINIMAP.size` CSS pixels.
+ * Performance contract: no per-frame allocation beyond the arrow's halo gradient; one 2D canvas of
+ * `MINIMAP.size` CSS pixels blitting from one prepainted base.
  */
 export interface Minimap {
   /** `targets` is accepted but not drawn; `rivals` is empty outside a multiplayer race. */
@@ -36,10 +37,13 @@ export interface Minimap {
   ): void;
   /**
    * Mark somewhere else. The RAYO RUSH marker moves when a mission is cleared, and the map has
-   * to move with it or it is pointing at a street corner with nothing on it. Repaints the base
-   * layer, so it is called on the event and not per frame.
+   * to move with it or it is pointing at a street corner with nothing on it. Called on the
+   * event and not per frame. `label` is what the full map writes beside the mark; without one
+   * the kind's own name is used.
    */
-  setActivities(points: readonly { x: number; z: number; kind?: ActivityMarkKind }[]): void;
+  setActivities(points: readonly { x: number; z: number; kind?: ActivityMarkKind; label?: string }[]): void;
+  /** Open or close the full map (also bound to `MINIMAP.key` and a click on the minimap). */
+  setExpanded(open: boolean): void;
   dispose(): void;
 }
 
@@ -49,64 +53,289 @@ export interface MinimapPose {
   heading: number;
 }
 
+/** What the full map calls a mark that did not come with a name of its own. */
+const KIND_LABEL: Record<ActivityMarkKind, string> = {
+  rush: 'RAYO RUSH',
+  passenger: 'PASSENGER',
+  destination: 'DROP-OFF',
+  circuit: 'CIRCUIT',
+  street: 'STREET RACE',
+};
+
+interface Mark {
+  x: number;
+  z: number;
+  kind: ActivityMarkKind;
+  label: string;
+}
+
 /**
  * `selfColour` is the player's own arrow: cyan alone, their slot colour in a match, so the
  * map says the same thing about them as every other screen does.
+ *
+ * TWO VIEWS OF ONE PICTURE. The corner is a round window `MINIMAP.viewMeters` across, centred on
+ * the car and north up: the roads are painted once, at that zoom, into one large offscreen canvas
+ * and each frame blits the square of it under the car — so driving scrolls the map rather than
+ * redrawing it. Marks are drawn per frame on top, and one outside the window is pinned to its
+ * rim, in its own direction: at this zoom most destinations are off the map most of the time,
+ * and a mark you cannot see is one you cannot drive to.
+ *
+ * The full map (click the circle, or `MINIMAP.key`) fits the whole world into the screen with a
+ * name beside every mark. Its own base is painted when it opens, not before — most sessions never
+ * open it.
  */
 export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCourse | null, selfColour = '#4ff3ff'): Minimap {
   const size = MINIMAP.size;
-  const pad = MINIMAP.padding;
   const dpr = Math.min(2, typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
 
-  const wrap = document.createElement('div');
+  // A button, so the pointer handler that fires the lightning leaves the click alone
+  // (`src/core/input/keyboard.ts`) — and it never takes focus, or the next Space (the handbrake)
+  // would press it.
+  const wrap = document.createElement('button');
+  wrap.type = 'button';
+  wrap.tabIndex = -1;
   wrap.className = 'rb-minimap';
+  wrap.setAttribute('aria-label', 'Open map');
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(size * dpr);
   canvas.height = Math.round(size * dpr);
   canvas.style.width = `${size}px`;
   canvas.style.height = `${size}px`;
   wrap.appendChild(canvas);
+  const keyBadge = document.createElement('span');
+  keyBadge.className = 'rb-minimap__key';
+  keyBadge.textContent = MINIMAP.keyLabel;
+  wrap.appendChild(keyBadge);
   root.appendChild(wrap);
-
   const ctx = canvas.getContext('2d');
-  const base = document.createElement('canvas');
-  base.width = canvas.width;
-  base.height = canvas.height;
-  const bctx = base.getContext('2d');
 
-  // World -> canvas: fit the bounds inside the padded square, north up (z grows downward).
+  // The zoomed base: the whole world at the corner's zoom, capped so a big world still fits in
+  // one canvas the browser will allocate.
   const b = data.bounds;
   const spanX = b.maxX - b.minX;
   const spanZ = b.maxZ - b.minZ;
-  const scale = ((size - pad * 2) / Math.max(spanX, spanZ)) * dpr;
-  const offX = (canvas.width - spanX * scale) / 2;
-  const offZ = (canvas.height - spanZ * scale) / 2;
-  const px = (x: number): number => offX + (x - b.minX) * scale;
-  const pz = (z: number): number => offZ + (z - b.minZ) * scale;
+  const scale = Math.min((size * dpr) / MINIMAP.viewMeters, MINIMAP.maxBasePx / Math.max(spanX, spanZ));
+  const base = document.createElement('canvas');
+  base.width = Math.ceil(spanX * scale);
+  base.height = Math.ceil(spanZ * scale);
+  const bctx = base.getContext('2d');
+  if (bctx) drawBase(bctx, data, race, (x) => (x - b.minX) * scale, (z) => (z - b.minZ) * scale, scale, dpr);
 
-  // A shallow copy, because `setActivities` writes to it and `data` belongs to the caller —
-  // it is the world's own `ArenaLayout.minimap`, and where the marker has got to is a fact
-  // about this session, not about the city.
-  const mapData: MinimapData = { ...data };
-  if (bctx) drawBase(bctx, mapData, race, px, pz, scale, dpr);
-
+  const marks: Mark[] = [];
+  for (const a of data.activities ?? []) {
+    const kind = a.kind ?? 'rush';
+    marks.push({ x: a.x, z: a.z, kind, label: KIND_LABEL[kind] });
+  }
   const dotR = 2.2 * dpr;
+  const half = canvas.width / 2;
+  const rimR = half - 1.5 * dpr;
+  const markRimR = rimR - 9 * dpr;
+
+  /* ------------------------------------------------------------ the full map */
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rb-bigmap';
+  overlay.hidden = true;
+  overlay.innerHTML =
+    `<div class="rb-bigmap__panel">` +
+    `<div class="rb-bigmap__head"><span class="rb-bigmap__title">MAP</span>` +
+    `<button type="button" tabindex="-1" class="rb-bigmap__close"><span class="rb-key">${MINIMAP.keyLabel}</span> <span class="rb-key">ESC</span> close</button></div>` +
+    `<div class="rb-bigmap__stage"><canvas></canvas><div class="rb-bigmap__labels"></div></div>` +
+    `</div>`;
+  root.appendChild(overlay);
+  const panel = overlay.querySelector('.rb-bigmap__panel') as HTMLElement;
+  const stage = overlay.querySelector('.rb-bigmap__stage') as HTMLElement;
+  const big = overlay.querySelector('canvas') as HTMLCanvasElement;
+  const labelsEl = overlay.querySelector('.rb-bigmap__labels') as HTMLElement;
+  const bigCtx = big.getContext('2d');
+  const bigBase = document.createElement('canvas');
+  const bigBaseCtx = bigBase.getContext('2d');
+  let bigScale = 1;
+  let bigCssScale = 1;
+  let expanded = false;
+  const bigPx = (x: number): number => (x - b.minX) * bigScale;
+  const bigPz = (z: number): number => (z - b.minZ) * bigScale;
+
+  const youLabel = document.createElement('div');
+  youLabel.className = 'rb-bigmap__label rb-bigmap__label--you';
+  youLabel.textContent = 'YOU';
+  youLabel.style.color = selfColour;
+  const rivalLabels: HTMLDivElement[] = [];
+
+  function layoutBig(): void {
+    // Fit the world into the window with room for the header, keeping its proportions.
+    const maxW = Math.max(200, window.innerWidth * 0.9 - 32);
+    const maxH = Math.max(200, window.innerHeight * 0.9 - 80);
+    const cssScale = Math.min(maxW / spanX, maxH / spanZ);
+    const w = Math.round(spanX * cssScale);
+    const h = Math.round(spanZ * cssScale);
+    bigCssScale = cssScale;
+    bigScale = cssScale * dpr;
+    big.width = Math.round(w * dpr);
+    big.height = Math.round(h * dpr);
+    big.style.width = `${w}px`;
+    big.style.height = `${h}px`;
+    stage.style.width = `${w}px`;
+    stage.style.height = `${h}px`;
+    bigBase.width = big.width;
+    bigBase.height = big.height;
+    if (bigBaseCtx) drawBase(bigBaseCtx, data, race, bigPx, bigPz, bigScale, dpr);
+    buildLabels();
+  }
+
+  function placeLabel(el: HTMLElement, x: number, z: number): void {
+    el.style.transform = `translate(${((x - b.minX) * bigCssScale).toFixed(1)}px, ${((z - b.minZ) * bigCssScale).toFixed(1)}px)`;
+  }
+
+  function buildLabels(): void {
+    labelsEl.textContent = '';
+    for (const m of marks) {
+      const el = document.createElement('div');
+      el.className = `rb-bigmap__label rb-bigmap__label--${m.kind}`;
+      el.textContent = m.label;
+      placeLabel(el, m.x, m.z);
+      labelsEl.appendChild(el);
+    }
+    labelsEl.appendChild(youLabel);
+    for (const el of rivalLabels) labelsEl.appendChild(el);
+  }
+
+  function setExpanded(open: boolean): void {
+    if (open === expanded) return;
+    expanded = open;
+    overlay.hidden = !open;
+    wrap.classList.toggle('is-open', open);
+    if (open) layoutBig();
+  }
+
+  wrap.addEventListener('mousedown', (e) => e.preventDefault());
+  wrap.addEventListener('click', () => setExpanded(!expanded));
+  overlay.addEventListener('mousedown', (e) => e.preventDefault());
+  overlay.addEventListener('click', (e) => {
+    // The backdrop and the close button shut it; a click on the map itself does not.
+    const t = e.target as Element;
+    if (!panel.contains(t) || t.closest('.rb-bigmap__close')) setExpanded(false);
+  });
+  // Capture phase, so ESC closes the map before the game's own ESC takes the player to the menu.
+  const onKey = (e: KeyboardEvent): void => {
+    const t = e.target as Element | null;
+    if (t && t.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (e.code === MINIMAP.key && !e.repeat) {
+      setExpanded(!expanded);
+      e.preventDefault();
+    } else if (e.code === 'Escape' && expanded) {
+      setExpanded(false);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  };
+  window.addEventListener('keydown', onKey, true);
+  const onResize = (): void => {
+    if (expanded) layoutBig();
+  };
+  window.addEventListener('resize', onResize);
+
+  function drawPlayer(c: CanvasRenderingContext2D, cx: number, cz: number, heading: number, k: number): void {
+    c.save();
+    c.translate(cx, cz);
+    c.scale(k, k);
+
+    // A soft halo behind the arrow: on a busy grid the eye finds the glow first, then
+    // reads the heading off the arrow inside it.
+    const halo = c.createRadialGradient(0, 0, 0, 0, 0, 13 * dpr);
+    halo.addColorStop(0, 'rgba(255, 255, 255, 0.32)');
+    halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    c.fillStyle = halo;
+    c.beginPath();
+    c.arc(0, 0, 13 * dpr, 0, Math.PI * 2);
+    c.fill();
+
+    // Heading 0 faces -Z, which is up on the map; positive = clockwise.
+    c.rotate(heading);
+    c.fillStyle = selfColour;
+    c.strokeStyle = 'rgba(8, 12, 20, 0.95)';
+    c.lineWidth = 1.6 * dpr;
+    c.lineJoin = 'round';
+    c.shadowColor = selfColour;
+    c.shadowBlur = 10 * dpr;
+    c.beginPath();
+    c.moveTo(0, -9 * dpr);
+    c.lineTo(6.4 * dpr, 7.2 * dpr);
+    c.lineTo(0, 3.8 * dpr);
+    c.lineTo(-6.4 * dpr, 7.2 * dpr);
+    c.closePath();
+    c.fill();
+    c.shadowBlur = 0;
+    c.stroke();
+    c.restore();
+  }
+
+  function drawBig(playerX: number, playerZ: number, heading: number, rivals?: readonly RivalCar[]): void {
+    if (!bigCtx) return;
+    bigCtx.clearRect(0, 0, big.width, big.height);
+    bigCtx.drawImage(bigBase, 0, 0);
+    for (const m of marks) drawActivity(bigCtx, bigPx(m.x), bigPz(m.z), dpr, m.kind);
+    let shown = 0;
+    if (rivals) {
+      for (let i = 0; i < rivals.length; i++) {
+        const r = rivals[i];
+        if (!r.present) continue;
+        bigCtx.fillStyle = slotCss(r.slot);
+        bigCtx.beginPath();
+        bigCtx.arc(bigPx(r.x), bigPz(r.z), dotR * 1.6, 0, Math.PI * 2);
+        bigCtx.fill();
+        let el = rivalLabels[shown];
+        if (!el) {
+          el = document.createElement('div');
+          el.className = 'rb-bigmap__label rb-bigmap__label--rival';
+          rivalLabels.push(el);
+          labelsEl.appendChild(el);
+        }
+        if (el.textContent !== r.name) el.textContent = r.name;
+        el.style.color = slotCss(r.slot);
+        el.hidden = false;
+        placeLabel(el, r.x, r.z);
+        shown++;
+      }
+    }
+    for (let i = shown; i < rivalLabels.length; i++) rivalLabels[i].hidden = true;
+    drawPlayer(bigCtx, bigPx(playerX), bigPz(playerZ), heading, 1.25);
+    placeLabel(youLabel, playerX, playerZ);
+  }
 
   return {
     setActivities(points) {
-      // The whole base is redrawn rather than the old mark erased: the roads under it are the
-      // cheap part, and "clear and draw everything" cannot leave a ghost behind the way
-      // painting over one dark disc with another can.
-      mapData.activities = points.map((p) => ({ x: p.x, z: p.z, kind: p.kind ?? 'rush' }));
-      if (!bctx) return;
-      bctx.clearRect(0, 0, base.width, base.height);
-      drawBase(bctx, mapData, race, px, pz, scale, dpr);
+      marks.length = 0;
+      for (const p of points) {
+        const kind = p.kind ?? 'rush';
+        marks.push({ x: p.x, z: p.z, kind, label: p.label ?? KIND_LABEL[kind] });
+      }
+      if (expanded) buildLabels();
     },
 
+    setExpanded,
+
     update(playerX, playerZ, heading, _targets, rivals) {
+      if (expanded) drawBig(playerX, playerZ, heading, rivals);
       if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(base, 0, 0);
+      const w = canvas.width;
+      ctx.clearRect(0, 0, w, w);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(half, half, rimR, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(5, 7, 13, 0.78)';
+      ctx.fillRect(0, 0, w, w);
+
+      // The square of the base under the car, clipped to the base's own edges so the browser is
+      // never asked for pixels outside it.
+      const sx = (playerX - b.minX) * scale - half;
+      const sz = (playerZ - b.minZ) * scale - half;
+      const x0 = Math.max(0, sx);
+      const z0 = Math.max(0, sz);
+      const x1 = Math.min(base.width, sx + w);
+      const z1 = Math.min(base.height, sz + w);
+      if (x1 > x0 && z1 > z0) ctx.drawImage(base, x0, z0, x1 - x0, z1 - z0, x0 - sx, z0 - sz, x1 - x0, z1 - z0);
 
       // Electric cars are deliberately not drawn: a hundred-odd white dots buried the
       // player's own arrow and the route. Hunting them is the game.
@@ -119,48 +348,46 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
           if (!r.present) continue;
           ctx.fillStyle = slotCss(r.slot);
           ctx.beginPath();
-          ctx.arc(px(r.x), pz(r.z), dotR * 1.35, 0, Math.PI * 2);
+          ctx.arc(half + (r.x - playerX) * scale, half + (r.z - playerZ) * scale, dotR * 1.35, 0, Math.PI * 2);
           ctx.fill();
         }
       }
 
-      // Player: an arrow in their own colour. Heading 0 faces -Z, which is up on the map;
-      // positive = clockwise.
-      const cx = px(playerX);
-      const cz = pz(playerZ);
-      ctx.save();
-      ctx.translate(cx, cz);
+      // Destinations, pinned to the rim when they are off the window, pointing the way.
+      for (let i = 0; i < marks.length; i++) {
+        const m = marks[i];
+        let mx = (m.x - playerX) * scale;
+        let mz = (m.z - playerZ) * scale;
+        const d = Math.hypot(mx, mz);
+        if (d > markRimR) {
+          mx *= markRimR / d;
+          mz *= markRimR / d;
+        }
+        drawActivity(ctx, half + mx, half + mz, dpr, m.kind);
+      }
 
-      // A soft halo behind the arrow: on a busy grid the eye finds the glow first, then
-      // reads the heading off the arrow inside it.
-      const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, 13 * dpr);
-      halo.addColorStop(0, 'rgba(255, 255, 255, 0.32)');
-      halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      ctx.fillStyle = halo;
-      ctx.beginPath();
-      ctx.arc(0, 0, 13 * dpr, 0, Math.PI * 2);
-      ctx.fill();
+      drawPlayer(ctx, half, half, heading, MINIMAP.playerScale);
+      ctx.restore();
 
-      ctx.rotate(heading);
-      ctx.fillStyle = selfColour;
-      ctx.strokeStyle = 'rgba(8, 12, 20, 0.95)';
-      ctx.lineWidth = 1.6 * dpr;
-      ctx.lineJoin = 'round';
-      ctx.shadowColor = selfColour;
-      ctx.shadowBlur = 10 * dpr;
+      // The rim, and a north tick on it: the map does not turn with the car.
+      ctx.strokeStyle = 'rgba(180, 214, 255, 0.28)';
+      ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath();
-      ctx.moveTo(0, -9 * dpr);
-      ctx.lineTo(6.4 * dpr, 7.2 * dpr);
-      ctx.lineTo(0, 3.8 * dpr);
-      ctx.lineTo(-6.4 * dpr, 7.2 * dpr);
+      ctx.arc(half, half, rimR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#4ff3ff';
+      ctx.beginPath();
+      ctx.moveTo(half, 1 * dpr);
+      ctx.lineTo(half + 4 * dpr, 8 * dpr);
+      ctx.lineTo(half - 4 * dpr, 8 * dpr);
       ctx.closePath();
       ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.stroke();
-      ctx.restore();
     },
     dispose() {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
       wrap.remove();
+      overlay.remove();
     },
   };
 }
@@ -417,10 +644,5 @@ function drawBase(
       ctx.lineTo(px(g.bx), pz(g.bz));
       ctx.stroke();
     });
-  }
-
-  // Last, so nothing is drawn over the one mark on this map that is meant to be looked for.
-  if (data.activities) {
-    for (const a of data.activities) drawActivity(ctx, px(a.x), pz(a.z), dpr, a.kind);
   }
 }

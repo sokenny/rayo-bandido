@@ -51,7 +51,14 @@ export interface MeetCarSpec {
   steer?: number;
 }
 
-export type MeetPersonKind = 'camera' | 'folded' | 'pocket' | 'cooler' | 'case' | 'idle';
+export type MeetPersonKind = 'camera' | 'folded' | 'pocket' | 'cooler' | 'case' | 'idle' | 'phone';
+
+/**
+ * What a person at a meet is doing (`render/scene/env/humanActs.ts` draws it). Omitted, the kind
+ * decides: a camera films, a cooler sells, a case or a phone is looked at, and anyone else talks
+ * to whoever is standing nearest.
+ */
+export type MeetPersonAct = 'stand' | 'chat' | 'film' | 'phone' | 'pace' | 'vibe' | 'warm' | 'vendor' | 'inspect';
 
 export interface MeetPersonSpec {
   x: number;
@@ -60,6 +67,14 @@ export interface MeetPersonSpec {
   kind: MeetPersonKind;
   /** Picks the clothes, the hair and the skin: any integer. */
   seed: number;
+  act?: MeetPersonAct;
+  /** What they attend to: the drum they warm their hands at, the speakers, the car they look over. */
+  focus?: { x: number; z: number };
+  /**
+   * `pace` only: the far end of the beat they walk from (x, z) and back. The beat is solid along
+   * its whole length (`meetSolids`), so what can be hit is wherever they could be.
+   */
+  to?: { x: number; z: number };
 }
 
 export type MeetPropKind =
@@ -178,6 +193,25 @@ export function meetSolids(meet: CarMeetSpec): MeetSolid[] {
     out.push({ x: c.x, z: c.z, fx, fz, halfAlong: MEET_CAR_HALF.along, halfAcross: MEET_CAR_HALF.across, height: MEET_CAR_HEIGHT, tag: 'meet-car' });
   }
   for (const p of meet.people) {
+    if (p.to) {
+      // A pacer is solid along the beat: a box from one end to the other, a person wide.
+      const dx = p.to.x - p.x;
+      const dz = p.to.z - p.z;
+      const len = Math.hypot(dx, dz);
+      if (len > 0.01) {
+        out.push({
+          x: (p.x + p.to.x) / 2,
+          z: (p.z + p.to.z) / 2,
+          fx: dx / len,
+          fz: dz / len,
+          halfAlong: len / 2 + MEET_PERSON_HALF,
+          halfAcross: MEET_PERSON_HALF,
+          height: 2,
+          tag: 'meet-person',
+        });
+        continue;
+      }
+    }
     out.push({ x: p.x, z: p.z, fx: 0, fz: -1, halfAlong: MEET_PERSON_HALF, halfAcross: MEET_PERSON_HALF, height: 2, tag: 'meet-person' });
   }
   for (const p of meet.props) {

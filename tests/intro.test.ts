@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { INTRO, introLine, introLineSeconds } from '../src/content/intro';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { clearIntroProgress, readIntroProgress, writeIntroProgress } from '../src/core/progress';
-import type { GameEvent, PlayerCommand } from '../src/core/types';
+import type { ArenaLayout, GameEvent, PlayerCommand } from '../src/core/types';
+import { VEHICLE } from '../src/config/tuning';
+import { inRect } from '../src/world/cityPlan';
 import { engagedActivity, lockOtherActivities } from '../src/sim/activities';
 import { createInitialGameState, resetGameState, stepGame } from '../src/sim/gameState';
 import {
@@ -28,6 +30,25 @@ import { createOpenWorld } from '../src/world/openWorld';
  */
 
 const DT = 1 / 60;
+
+/** The tag of whatever solid at ground level comes within `r` of (x, z), or null. `skip` leaves one tag out. */
+function blocked(layout: ArenaLayout, x: number, z: number, r: number, skip?: string): string | null {
+  for (const b of layout.colliders) {
+    if ((b.minY ?? 0) > 1 || b.tag === skip) continue;
+    const dx = Math.max(b.minX - x, 0, x - b.maxX);
+    const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+    if (Math.hypot(dx, dz) < r) return b.tag ?? 'box';
+  }
+  for (const w of layout.walls) {
+    if ((w.minY ?? 0) > 1 || w.tag === skip) continue;
+    const ex = w.bx - w.ax;
+    const ez = w.bz - w.az;
+    const len2 = ex * ex + ez * ez;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - w.ax) * ex + (z - w.az) * ez) / len2)) : 0;
+    if (Math.hypot(w.ax + ex * t - x, w.az + ez * t - z) < r) return w.tag ?? 'wall';
+  }
+  return null;
+}
 
 /** A fresh open world with the intro installed, exactly as `src/game.ts` builds it. */
 function rig() {
@@ -113,9 +134,10 @@ function kill(r: ReturnType<typeof rig>, id = 0): void {
 }
 
 describe('the places', () => {
-  it('starts on a road and meets under the deck, on level drivable ground', () => {
+  it('starts on a road and meets on the car meet\'s lot, on level drivable ground', () => {
     const { world, layout } = rig();
     const { plan } = world;
+    const lot = plan.meets![0].lot;
     const s = INTRO.route.start;
     expect(plan.isRoad(s.x, s.z, 0)).toBe(true);
     const m = INTRO.route.meetup;
@@ -127,19 +149,23 @@ describe('the places', () => {
       [0, m.radius * 0.6],
       [0, -m.radius * 0.6],
     ]) {
-      expect(plan.isRoad(m.x + ox, m.z + oz), `(${m.x + ox}, ${m.z + oz}) is not drivable`).toBe(true);
+      expect(inRect(lot, m.x + ox, m.z + oz, -1), `(${m.x + ox}, ${m.z + oz}) is not on the lot`).toBe(true);
       expect(plan.isSolid(m.x + ox, m.z + oz), `(${m.x + ox}, ${m.z + oz}) is inside something`).toBe(false);
       layout.surface!.sample(m.x + ox, m.z + oz, 0, out);
       expect(out.y).toBeLessThan(0.5);
     }
-    // Under the deck: an elevated ribbon runs over it.
-    expect(plan.ribbons.some((rb) => rb.elevated && rb.path.samples.some((p) => Math.hypot(p.x - m.x, p.z - m.z) < p.halfWidth))).toBe(true);
+    // Nothing of the meet's own stands in the circle, and the way in from the avenue is open:
+    // straight east from av-w1 through the west gate to the circle's middle.
+    for (let x = -620; x <= m.x; x += 0.5) {
+      expect(blocked(layout, x, m.z, VEHICLE.collisionRadius), `blocked at (${x}, ${m.z})`).toBeNull();
+    }
   });
 
   it('parks the cars and stands BadKala clear of the columns, and makes the cars solid', () => {
     const { world, layout } = rig();
     const { plan } = world;
     const h = INTRO.meetup.carHalf;
+    const lot = plan.meets![0].lot;
     const columns = layout.colliders.filter((c) => c.tag !== 'intro-car' && (c.minY ?? 0) <= 1);
     for (const car of INTRO.meetup.cars) {
       expect(car.heading === 0 || car.heading === Math.PI).toBe(true);
@@ -152,9 +178,11 @@ describe('the places', () => {
       ]) {
         const x = car.x + sx * h.x;
         const z = car.z + sz * h.z;
-        expect(plan.isRoad(x, z, 0), `car corner (${x}, ${z}) off the ground`).toBe(true);
+        expect(inRect(lot, x, z, -1), `car corner (${x}, ${z}) off the lot`).toBe(true);
         expect(plan.isSolid(x, z), `car corner (${x}, ${z}) inside something`).toBe(false);
       }
+      // Clear of the lot's own cars and props, which are walls where they stand at an angle.
+      expect(blocked(layout, car.x, car.z, Math.hypot(h.x, h.z) + 0.3, 'intro-car'), `car at (${car.x}, ${car.z})`).toBeNull();
       for (const c of columns) {
         const overlap = car.x + h.x > c.minX && car.x - h.x < c.maxX && car.z + h.z > c.minZ && car.z - h.z < c.maxZ;
         expect(overlap, `car at (${car.x}, ${car.z}) inside ${c.tag}`).toBe(false);
@@ -163,7 +191,8 @@ describe('the places', () => {
     const parked = layout.colliders.filter((c) => c.tag === 'intro-car');
     expect(parked).toHaveLength(INTRO.meetup.cars.length);
     const bk = INTRO.meetup.badkala;
-    expect(plan.isRoad(bk.x, bk.z, 0)).toBe(true);
+    expect(inRect(lot, bk.x, bk.z, -1)).toBe(true);
+    expect(blocked(layout, bk.x, bk.z, 0.4)).toBeNull();
     expect(plan.isSolid(bk.x, bk.z, 0.4)).toBe(false);
     for (const c of layout.colliders) {
       if ((c.minY ?? 0) > 1) continue;

@@ -31,7 +31,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'OPEN WORLD is now Bandido Metro: The Stack rebuilt as downtown, with the Bay\'s streets and water around it.',
       'A car meet under the viaduct\'s north-west corner: sixteen tuned cars, a crowd, a kiosk and masts to drive through.',
-      'The introduction now opens under the viaduct\'s west leg, on the Metro.',
+      'The introduction now opens at the car meet, on the Metro.',
+      'The meet\'s crowd is alive: chatting, filming, vibing to the music, warming hands by the fire, reacting as you drive by.',
       'Bandido Grid still runs through Bandido Bay for now.',
     ],
   },

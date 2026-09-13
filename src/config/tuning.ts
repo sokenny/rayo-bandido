@@ -1357,8 +1357,18 @@ export const TIME_ATTACK = {
 export const MINIMAP = {
   /** Canvas size in CSS pixels (square). */
   size: 176,
-  /** Padding inside the canvas around the map (px). */
-  padding: 10,
+  /**
+   * Metres of world across the round corner view, which is centred on the car. The roads are
+   * painted at this zoom once; smaller is closer.
+   */
+  viewMeters: 500,
+  /** Player arrow size on the corner view, relative to the full map's. */
+  playerScale: 1.5,
+  /** Largest side of the prepainted road canvas (device px). A bigger world zooms out to fit. */
+  maxBasePx: 4096,
+  /** Opens and closes the full map. M is taken by the mute. */
+  key: 'KeyN',
+  keyLabel: 'N',
 };
 
 /**
@@ -2229,4 +2239,36 @@ export const FLAIR = {
     /** Minimum seconds before the same phrase may be said again. The crash line has its own. */
     repeatSeconds: 10,
   },
+};
+
+/**
+ * The people: how the city's pedestrians notice the player's car and how much they are drawn
+ * (`src/render/scene/env/humanActs.ts`, `humanRig.ts`). Render-only; nothing here touches the
+ * rules, the colliders or the network.
+ */
+export const CROWD = {
+  /** Within this (m) a moving car turns heads; a stopped one only within `noticeStill`. */
+  noticeRadius: 32,
+  noticeStill: 12,
+  /** Speed (m/s) above which a car is worth looking at from `noticeRadius`. */
+  noticeSpeed: 2,
+  /** A drift within this (m) gets arms in the air, phones up and the camera on it. */
+  hypeRadius: 42,
+  /** A car closing faster than `flinchClosing` (m/s) inside this (m) makes people step back. */
+  flinchRadius: 7,
+  flinchClosing: 3,
+  /** How far a flinch steps them back (m). Less than their collider's half width. */
+  flinchStep: 0.3,
+  /** Walking pace of someone pacing a beat on the phone (m/s). */
+  paceSpeed: 0.95,
+  /** Tempo the people by the speakers move to. */
+  bpm: 96,
+  /**
+   * Level of detail, by camera distance to a crowd (m): full rate inside `fullWithin`, every
+   * `farStride`th frame out to `animateWithin`, and frozen beyond — a person there is a few
+   * pixels tall and the meet is not drawn much further out anyway.
+   */
+  fullWithin: 90,
+  animateWithin: 220,
+  farStride: 3,
 };

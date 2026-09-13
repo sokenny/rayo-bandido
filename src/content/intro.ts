@@ -15,16 +15,17 @@ import type { HumanLook } from '../render/scene/env/humanFigure';
  *
  * THE SHAPE. The player starts on the outskirts, the phone rings, and the city is theirs: no
  * marker to follow. She asks for a drift (anywhere), then for an electric car (any one on the
- * street), and only then marks ONE point — the underground meet under the viaduct's west leg,
- * in the corridor El Búho already lives in. The cars parked there and the woman standing by
- * them are in the game; the clip plays on arrival, and Free Roam follows.
+ * street), and only then marks ONE point — the car meet on the lot inside the viaduct's
+ * north-west curve (`METRO_MEET`, `src/world/metroSpec.ts`). The cars parked there and the woman
+ * standing by them are in the game; the clip plays on arrival, and Free Roam follows.
  *
  * THE CITY IS BANDIDO METRO (`src/world/openWorld.ts`), the open world since 2026-09-13. The
- * meet was first placed under the Bay's viaduct; the metro's west leg is the same deck on the
- * same columns, so it moved across bay for bay.
+ * meet was first placed under the Bay's viaduct, then in the corridor under the metro's west leg;
+ * since the car meet was built it is on that lot, just inside the gate off the avenue the drive
+ * starts on.
  *
  * Every point below is checked against the city (`tests/intro.test.ts`): the start on a road,
- * the meet drivable and level, the parked cars clear of every column. Headings follow the
+ * the meet on the lot and level, the parked cars clear of every column and of the lot's own cars. Headings follow the
  * game's convention (0 faces -z, i.e. north; π faces south; π/2 faces east).
  */
 
@@ -141,12 +142,12 @@ export const INTRO = {
     },
     /** Target 8–12 s. Restrained, atmospheric, simple/retro game-compatible visuals. */
     brief:
-      "Night under the viaduct's west leg in Bandido Metro: the concrete corridor between the columns north of " +
-      'Avenida Sur, chain-link in the bays, painted columns, junk, a warm amber pool where El Búho stands with ' +
-      "his cooler, downtown's towers beyond the deck. An underground meet of the Bandidos: a few modified " +
-      "combustion cars parked along the columns (the game's rival-car silhouettes in their slot colours), engines " +
-      'ticking, subtle underglow. One of them is drifting in the corridor between the columns, tyre smoke under the ' +
-      'deck lights, a small aftermarket device on its dash glowing as the slide charges it. BadKala — long dark hair ' +
+      "Night in Bandido Metro, on the lot inside the curve of the viaduct's north-west corner, Daikoku-style: the " +
+      'highway sweeping overhead on painted columns, graffiti on every hoarding, tall sodium masts, a row of glowing ' +
+      "vending machines, downtown's towers beyond the deck. An underground meet of the Bandidos: tuned " +
+      "combustion cars parked loosely across the bays with coloured underglow, three of them in the game's rival-car " +
+      'silhouettes and slot colours right by the gate, people standing round a fire in a drum. One car is drifting ' +
+      'in the open middle of the lot, tyre smoke under the mast lights, a small aftermarket device on its dash glowing as the slide charges it. BadKala — long dark hair ' +
       'with a magenta streak, sunglasses at night, cropped black jacket, heavy boots — leans on a car with her arms ' +
       "folded, phone in hand, and looks up as the player's own car pulls in and stops (src/render/scene/carVisual.ts: " +
       'do not redesign it). El Búho nods. A roadside display somewhere in the shot reads ' +
@@ -188,36 +189,36 @@ export const INTRO = {
     loreAtMetres: { batteries: 12, combustion: 60 },
     driftAskedAtMetres: 110,
     /**
-     * THE MEET: the corridor under the viaduct's west leg, north of Avenida Sur (av-s1, z 500)
-     * and south of El Búho's bay. Turn off the avenue under the deck at (-550, 500) and it is
-     * straight ahead. The radius is what the arrival actually is — the clip starts the moment
-     * the car crosses it, so the circle's SOUTH edge, on the avenue's kerb, is where the player
-     * ends up looking from. It is kept tight and the cars are parked beyond it: coming off the
-     * avenue the player rolls to a stop with the meet filling the windscreen, not with it
-     * somewhere up ahead.
+     * THE MEET: the car meet's lot (`METRO_MEET`), just inside its west gate. The drive starts on
+     * Avenida Oeste (av-w1) heading north; the gate opens off it between z 298 and 316, so the
+     * player turns right off the avenue and the lot opens up ahead: her three cars, the fan of
+     * cars with their lights on behind them, and the curve of the highway over all of it. The
+     * radius is what the arrival actually is — the clip starts the moment the car crosses it, so
+     * the circle's WEST edge, a few metres in from the gate, is where the player ends up looking
+     * from. It is kept tight and the cars are parked beyond it: the player rolls to a stop with
+     * the meet filling the windscreen, not with it somewhere up ahead.
      */
-    meetup: { x: -550, z: 485, radius: 6 },
+    meetup: { x: -596, z: 307, radius: 6 },
   },
 
   /* ------------------------------------------------------------- the meet */
 
   meetup: {
     /**
-     * Parked between the column lines (x -554 and -546; the pillars themselves are at
-     * -558.7 to -556.1 and -543.9 to -541.3), in the bay the player reaches FIRST, south of
-     * El Búho's pool — so the arrival is the cars, and his amber light and the rest of the
-     * corridor are behind them.
+     * Across the view from the west gate, between the double row by the wall (north) and the
+     * fan of cars under the mast (east): two nose to tail, one beside them, so the arrival is
+     * her crew with the rest of the meet behind them.
      */
     cars: [
-      { x: -554, z: 479, heading: 0, slot: 1 },
-      { x: -554, z: 473.4, heading: 0, slot: 4 },
-      { x: -546, z: 476.5, heading: Math.PI, slot: 3 },
+      { x: -586, z: 303.5, heading: 0, slot: 1 },
+      { x: -586, z: 309.4, heading: Math.PI, slot: 4 },
+      { x: -581, z: 306.5, heading: 0, slot: 3 },
     ] as IntroParkedCar[],
     /** Half extents of the box each parked car is solid as (m). */
     carHalf: { x: 0.95, z: 2.25 },
-    /** Where BadKala stands: the west column line, a step ahead of where the car stops, between
-     * the player and the parked cars, facing the arrival. */
-    badkala: { x: -553.6, z: 482.5, heading: Math.PI },
+    /** Where BadKala stands: a step ahead of where the car stops, between the player and her
+     * cars, facing the gate the player comes in by. */
+    badkala: { x: -590.5, z: 306.5, heading: -Math.PI / 2 },
     badkalaLook: BADKALA_LOOK,
   },
 
@@ -283,7 +284,7 @@ export const INTRO = {
       gap: 1.4,
     }),
     // Stage E — the meet
-    line('e1', 'Te marqué un punto. Estamos abajo de la autopista, del lado oeste. Vení que te presento.', { instructional: 'arrival' }),
+    line('e1', 'Te marqué un punto. Estamos en el estacionamiento abajo de la curva de la autopista, del lado oeste. Vení que te presento.', { instructional: 'arrival' }),
     line('e2', 'Listo. Ya estás adentro.', { gap: 1.2 }),
     line('e3', 'Si querés hacer ruido, buscá Rayo Rush.', { requires: 'rush' }),
     line('e4', 'Si querés bajar tiempos, Time Attack.', { requires: 'circuit' }),

@@ -12,6 +12,7 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
 import { createMeetVisual } from './meetVisual';
+import type { CrowdSubject } from './env/humanActs';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
@@ -91,9 +92,10 @@ export interface EnvironmentVisual {
   /**
    * Called once per render frame for cheap animation (blinking signs, holograms). A world
    * drawn in chunks (`CityPlan.render`) also takes the camera's ground position here, and
-   * switches off every chunk the haze has already taken.
+   * switches off every chunk the haze has already taken. `people` is the player's car as the
+   * people standing about the city notice it (`env/humanActs.ts`).
    */
-  update(frameDt: number, time: number, camX?: number, camZ?: number): void;
+  update(frameDt: number, time: number, camX?: number, camZ?: number, people?: CrowdSubject | null): void;
   dispose(): void;
 }
 
@@ -463,7 +465,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     streetMarkers,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
-    update(frameDt: number, time: number, camX?: number, camZ?: number) {
+    update(frameDt: number, time: number, camX?: number, camZ?: number, people: CrowdSubject | null = null) {
       if (chunks.length > 0 && camX !== undefined && camZ !== undefined) {
         const far = chunked!.cullDistance;
         for (let i = 0; i < chunks.length; i++) {
@@ -511,7 +513,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       rushMarker?.update(time);
       circuitMarker?.update(time);
       for (let i = 0; i < streetMarkers.length; i++) streetMarkers[i].update(time);
-      meets?.update(camX, camZ);
+      // The people at the meets notice the car (`people`); the cars parked there do not move.
+      meets?.update(camX, camZ, time, frameDt, people);
     },
     dispose() {
       atmosphere.dispose();

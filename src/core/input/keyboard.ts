@@ -80,7 +80,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   const onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return;
     const el = e.target instanceof Element ? e.target : null;
-    if (el?.closest('.rb-touch, #menu-root, button, input, select, textarea, a')) return;
+    if (el?.closest('.rb-touch, #menu-root, .rb-bigmap, button, input, select, textarea, a')) return;
     firingPointers.add(e.pointerId);
   };
   /** Any end of the pointer releases the shot; a lost `pointerup` would leave the gun stuck on. */

@@ -85,7 +85,8 @@ import { readIntroProgress, writeIntroProgress } from './core/progress';
 import { activitySuppressed, engagedActivity, introEngaged, type ActivityKind } from './sim/activities';
 import { INTRO } from './content/intro';
 import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installIntroMeetup, skipIntro, skipIntroLine } from './sim/intro';
-import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanFigure';
+import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanRig';
+import type { CrowdSubject } from './render/scene/env/humanActs';
 import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
 import { canAffordShot } from './sim/lightning';
 import { MESSAGES as FLAIR_MESSAGES, flairSeconds } from './sim/flair';
@@ -726,14 +727,14 @@ export function createGame(
    * is asked here rather than remembered, because "who has the car" is a question with one
    * answer and one place that answers it.
    */
-  const mapMarks: Array<{ x: number; z: number; kind: ActivityMarkKind }> = [];
+  const mapMarks: Array<{ x: number; z: number; kind: ActivityMarkKind; label?: string }> = [];
   function refreshMapMarks(): void {
     mapMarks.length = 0;
     const engaged = engagedActivity(state);
     // The intro's objective, while it is a place. Everything else is suppressed underneath.
     const intro = state.intro;
     if (intro && intro.active && intro.objective && intro.objectiveRadius > 0) {
-      mapMarks.push({ x: intro.objectiveX, z: intro.objectiveZ, kind: 'destination' });
+      mapMarks.push({ x: intro.objectiveX, z: intro.objectiveZ, kind: 'destination', label: 'OBJECTIVE' });
     }
     if (!activitySuppressed(engaged, 'rush')) {
       const site = rushSite();
@@ -745,7 +746,7 @@ export function createGame(
     // Every open Street Race ring: won events stay on the map, the newest one with them.
     if (!activitySuppressed(engaged, 'street') && streetSites && state.streetGate) {
       const open = streetNewestEvent(state.streetGate.cleared);
-      for (let i = 0; i <= open && i < streetSites.length; i++) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street' });
+      for (let i = 0; i <= open && i < streetSites.length; i++) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street', label: STREET_RACE.events[i]?.name });
     }
     const p = state.passenger;
     if (p && p.trip && passengerStops && !activitySuppressed(engaged, 'passenger')) {
@@ -880,6 +881,8 @@ export function createGame(
   }
 
   const pose: InterpolatedPose = { x: 0, y: 0, z: 0, heading: 0 };
+  /** The car as the people standing about the city see it: where it is, how fast, and whether it is sliding. */
+  const crowdSubject: CrowdSubject = { x: 0, z: 0, speed: 0, drifting: false };
   const cameraPose: CameraPose = { x: 0, y: 0, z: 0, heading: 0, roadPitch: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false, roll: 0, pitch: 0 };
   const snapshot: HudSnapshot = {
     speedKmh: 0,
@@ -1698,7 +1701,11 @@ export function createGame(
     effects.setCarPose(pose, v, state.drift.active, nitroVisual, frameDt);
     effects.update(frameDt, simTime);
     theme.update(frameDt);
-    environment.update(frameDt, simTime, chase.camera.position.x, chase.camera.position.z);
+    crowdSubject.x = pose.x;
+    crowdSubject.z = pose.z;
+    crowdSubject.speed = Math.abs(v.speed);
+    crowdSubject.drifting = state.drift.active;
+    environment.update(frameDt, simTime, chase.camera.position.x, chase.camera.position.z, crowdSubject);
     // After the environment, so the sky and the fog it blends from are this frame's. The
     // envelope is read off the rules' clock: 0 the moment the Moogul is gone, and the
     // controller's own fade takes it from there.
@@ -1714,7 +1721,7 @@ export function createGame(
       // off, and the bay would be a strange empty pocket without him — but his ring stops
       // answering, because it is the part of him that is an offer, and the offer is not open.
       buhoFigure.setProximity(activitySuppressed(engagedActivity(state), 'moogul') ? 0 : near * near);
-      buhoFigure.update(simTime);
+      buhoFigure.update(simTime, crowdSubject);
     }
     chase.update(cameraPose, frameDt);
     audio.update(
@@ -1942,7 +1949,7 @@ export function createGame(
       if (routeField) steerArrow(routeField, frameDt);
       pickupMarker.update(simTime);
       destinationMarker.update(simTime);
-      passengerFigure?.update(simTime);
+      passengerFigure?.update(simTime, crowdSubject);
     }
     const buho = state.buho;
     if (buho && hasBuho) {
@@ -2026,7 +2033,7 @@ export function createGame(
       introMarker?.update(simTime);
     }
     for (let i = 0; i < introParked.length; i++) introParked[i].vis.update(frameDt, simTime);
-    badkalaFigure?.update(simTime);
+    badkalaFigure?.update(simTime, crowdSubject);
     hud.update(snapshot);
     minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
     if (standings) {
