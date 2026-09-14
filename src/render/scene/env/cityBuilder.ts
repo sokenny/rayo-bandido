@@ -7,6 +7,7 @@ import { buildMegastructures } from './megastructureBuilder';
 import { FLOOR } from './facadeAtlas';
 import { dressBuilding } from './buildingReclaim';
 import { signCell } from './textures';
+import { screenPanel } from './screenBuilder';
 
 /**
  * Streets, sidewalks, blocks and skyline, all derived from the rectangles in the plan
@@ -552,8 +553,8 @@ function rooftopSign(b: EnvBuilders, m: Module, roof: Rect2, inner: Rect2, top: 
   const px = dx !== 0 ? (dx === 1 ? roof.maxX : roof.minX) - dx * 1.2 : rcx;
   const pz = dz !== 0 ? (dz === 1 ? roof.maxZ : roof.minZ) - dz * 1.2 : rcz;
   const rotY = dx === 1 ? Math.PI / 2 : dx === -1 ? -Math.PI / 2 : dz === 1 ? 0 : Math.PI;
-  const target = rng() < 0.5 ? b.billA : b.billB;
-  target.panel(px, sy, pz, sw, sh, rotY);
+  const data = rng() < 0.5;
+  screenPanel(b.screens, data ? 'holo-data' : 'holo-column', px, sy, pz, sw, sh, rotY);
   // Posts and a lit rail along the bottom edge.
   const tx = dx !== 0 ? 0 : 1;
   const tz = dx !== 0 ? 1 : 0;
@@ -561,7 +562,7 @@ function rooftopSign(b: EnvBuilders, m: Module, roof: Rect2, inner: Rect2, top: 
   for (const s of [-1, 1]) {
     b.props.box(px + tx * s * (sw / 2 - 0.4), top + (sy + sh / 2 - top) / 2, pz + tz * s * (sw / 2 - 0.4), 0.4, sy + sh / 2 - top, 0.4);
   }
-  const c = target === b.billA ? PAL.neonCyan : PAL.neonMagenta;
+  const c = data ? PAL.neonCyan : PAL.neonMagenta;
   b.neonPulse.color(c, 0.8);
   b.neonPulse.tube(px - tx * (sw / 2), sy - sh / 2 - 0.3, pz - tz * (sw / 2), px + tx * (sw / 2), sy - sh / 2 - 0.3, pz + tz * (sw / 2), 0.2);
   halo(b, px + dx * 0.6, sy, pz + dz * 0.6, sw * 1.8, sh * 2, rotY, c, 0.13);
@@ -659,12 +660,12 @@ function tryFacade(
       if (!sv) break;
       const sf = face(sv);
       const fw = Math.min(sf.width * 0.86, sw);
-      const target = (k + Math.floor(rng() * 2)) % 2 === 0 ? b.billA : b.billB;
-      target.panel(sf.x + dx * 0.45, sy, sf.z + dz * 0.45, fw, sh, rotY);
+      const data = (k + Math.floor(rng() * 2)) % 2 === 0;
+      screenPanel(b.screens, data ? 'holo-data' : 'holo-column', sf.x + dx * 0.45, sy, sf.z + dz * 0.45, fw, sh, rotY);
       b.props.color(PAL.metalDark, 0.7);
       if (dx !== 0) b.props.box(sf.x + dx * 0.2, sy, sf.z, 0.3, sh + 0.6, fw + 0.6);
       else b.props.box(sf.x, sy, sf.z + dz * 0.2, fw + 0.6, sh + 0.6, 0.3);
-      const hc = target === b.billA ? PAL.neonCyan : PAL.neonMagenta;
+      const hc = data ? PAL.neonCyan : PAL.neonMagenta;
       halo(b, sf.x + dx * 0.9, sy, sf.z + dz * 0.9, fw * 1.9, sh * 1.9, rotY, hc, 0.13);
       sy += sh + 1.6 + rng() * 2;
     }

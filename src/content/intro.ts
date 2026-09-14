@@ -13,7 +13,7 @@ import type { HumanLook } from '../render/scene/env/humanFigure';
  * editor: the lines are a flat list with stable ids, the triggers are a few numbers the rules
  * read by name, and there is deliberately no way to branch.
  *
- * THE SHAPE. The player starts on the outskirts, the phone rings, and the city is theirs: no
+ * THE SHAPE. The player starts east of downtown, the phone rings, and the city is theirs: no
  * marker to follow. She asks for a drift (anywhere), then for an electric car (any one on the
  * street), and only then marks ONE point — the car meet on the lot inside the viaduct's
  * north-west curve (`METRO_MEET`, `src/world/metroSpec.ts`). The cars parked there and the woman
@@ -180,18 +180,23 @@ export const INTRO = {
 
   route: {
     /**
-     * The south-west outskirts: Avenida Oeste (av-w1) mid-block between st-s5 and st-s6, pointed
-     * north past the district of screens, with the viaduct's west leg beside it and downtown's
-     * towers at the end of the avenue.
+     * On the Gran Vía (av-gran-via) just inside The Stack's east edge, between st-east and the
+     * ring, pointed west down it. The opening title holds on a building spanning the avenue with
+     * the first deck beyond it, and the obvious drive is straight on: of every road through the
+     * Stack this one spends the most of it under a deck or inside a building. The deck (12 m),
+     * the spine (24 m) and the ring (36 m) cross it one after another in the first 210 m, eight
+     * decks and ramps in all. Held straight, it comes out on the west side and runs on to Avenida
+     * Oeste (av-w1), which leads south to the meet's gate.
      */
-    start: { x: -620, z: 1000, heading: 0 },
+    start: { x: 295, z: -180, heading: -Math.PI / 2 },
     /** Metres driven at which the two lore lines are said, and at which the drift is asked for. */
     loreAtMetres: { batteries: 12, combustion: 60 },
     driftAskedAtMetres: 110,
     /**
-     * THE MEET: the car meet's lot (`METRO_MEET`), just inside its west gate. The drive starts on
-     * Avenida Oeste (av-w1) heading north; the gate opens off it between z 298 and 316, so the
-     * player turns right off the avenue and the lot opens up ahead: her three cars, the fan of
+     * THE MEET: the car meet's lot (`METRO_MEET`), just inside its west gate. The Gran Vía from the
+     * start ends at Avenida Oeste (av-w1); the gate opens off it between z 298 and 316, and the
+     * arrow routes to the avenue there, so the player comes south, turns left off the avenue
+     * and the lot opens up ahead: her three cars, the fan of
      * cars with their lights on behind them, and the curve of the highway over all of it. The
      * radius is what the arrival actually is — the clip starts the moment the car crosses it, so
      * the circle's WEST edge, a few metres in from the gate, is where the player ends up looking

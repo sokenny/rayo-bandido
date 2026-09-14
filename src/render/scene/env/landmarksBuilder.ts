@@ -5,6 +5,7 @@ import { groundGlow, halo, type EnvBuilders } from './builders';
 import { facadeCell } from './facadeAtlas';
 import { lampPost } from './propsBuilder';
 import { rollLampFault } from './lampFaults';
+import { screenQuad } from './screenBuilder';
 
 /**
  * The big city's landmarks, from the plan: the quay along the water, lattice radio masts and
@@ -230,11 +231,12 @@ function buildRingBillboard(b: EnvBuilders, r: RingBillboardDef, rng: () => numb
     const x1 = r.x + Math.cos(a1) * r.radius;
     const z1 = r.z + Math.sin(a1) * r.radius;
     const third = Math.floor((i * 3) / N);
-    const target = third % 2 === 0 ? b.billA : b.billB;
+    const data = third % 2 === 0;
     const u0 = (i % 3) / 3;
     const u1 = u0 + 1 / 3;
     // Outward winding: the later angle first (see `panel` in meshBuilder for the convention).
-    target.quad(x1, bottom, z1, x0, bottom, z0, x0, top, z0, x1, top, z1, u0, 0, u1, 1);
+    // One seed per column, so a third of the drum scrolls as one screen.
+    screenQuad(b.screens, data ? 'holo-data' : 'holo-column', data ? 0.37 : 0.61, [x1, bottom, z1, x0, bottom, z0, x0, top, z0, x1, top, z1], u0, 0, u1, 1);
   }
   // Rim tubes and caps.
   for (const [y, c, t] of [

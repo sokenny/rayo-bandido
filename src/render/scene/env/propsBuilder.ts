@@ -4,6 +4,7 @@ import { makeRng } from './meshBuilder';
 import { concreteAt, densityAt, groundGlow, halo, lampSparks, setbackAt, type EnvBuilders, type WallVolume } from './builders';
 import { signCell } from './textures';
 import { rollLampFault } from './lampFaults';
+import { screenPanel } from './screenBuilder';
 
 /**
  * Everything that dresses the streets: guardrails, street lights, the neon route gates from
@@ -583,10 +584,10 @@ function buildGates(b: EnvBuilders): void {
 
 function buildBillboards(b: EnvBuilders): void {
   for (const d of b.plan.billboards) {
-    // 0 and 1 scroll the hologram atlas; 2 is the portrait BADKALA WANTED ad, which owns a
-    // whole texture rather than a strip of one, so it takes the full UV rect.
-    const target = d.variant === 0 ? b.billA : d.variant === 1 ? b.billB : b.badkala;
-    target.panel(d.x, d.y, d.z, d.w, d.h, d.rotY);
+    // 0 and 1 are the two scrolling holographic columns on the screen atlas; 2 is the portrait
+    // BADKALA WANTED ad, which owns a whole texture of its own.
+    if (d.variant === 2) b.badkala.panel(d.x, d.y, d.z, d.w, d.h, d.rotY);
+    else screenPanel(b.screens, d.variant === 0 ? 'holo-data' : 'holo-column', d.x, d.y, d.z, d.w, d.h, d.rotY);
     // Frame + masts.
     const nx = Math.sin(d.rotY);
     const nz = Math.cos(d.rotY);

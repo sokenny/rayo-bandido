@@ -477,6 +477,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     skybridges,
     busStops,
     neonDistricts: spec.neonDistricts.map((r) => ({ ...r })),
+    screens: (spec.screens ?? []).map((z) => ({ ...z, within: { ...z.within } })),
     shoulders,
     kerbs,
     water,

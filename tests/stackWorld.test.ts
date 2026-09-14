@@ -11,6 +11,7 @@ import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
+import { buildScreens } from '../src/render/scene/env/screenBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
 import { cityRecovery } from '../src/world/cityRecovery';
 import type { RibbonDef } from '../src/world/cityPlan';
@@ -522,6 +523,7 @@ describe('stack art budget', () => {
       buildTransit(b);
       buildTrack(b);
       buildLandmarks(b);
+      buildScreens(b);
       buildReclamation(b);
     });
     // The track's own split, for the phase report: what the decks, the rails, the columns and

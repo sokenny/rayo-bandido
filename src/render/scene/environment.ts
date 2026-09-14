@@ -11,13 +11,16 @@ import { buildTrack } from './env/trackBuilder';
 import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
+import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
 import type { CrowdSubject } from './env/humanActs';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
 import { createBadkalaPoster } from './env/badkalaPoster';
-import { makeAsphaltTexture, makeBillboardTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
+import { makeAsphaltTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
+import { createScreenAtlas, screenLayout } from './env/screenAtlas';
+import { createScreenMaterials } from './env/screenMaterial';
 import { createFacadeMaterial, makeFacadeAtlas } from './env/facadeAtlas';
 import { createWallMaterial } from './env/wallDetail';
 import { applyHaze, HAZE } from './env/haze';
@@ -164,8 +167,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // Every printed and back-lit surface the bus network carries, on one atlas.
   const transitTex = makeTransitAtlas();
   const glowTex = makeGlowTexture();
-  const billTexA = makeBillboardTexture(0);
-  const billTexB = makeBillboardTexture(1);
+  // Every frame every screen in the city can show, on one atlas (`env/screenAtlas.ts`). It
+  // disposes itself, like the poster, because it owns the images it draws in.
+  const screenAtlas = createScreenAtlas();
   // Every tag, piece, damp streak and crack in the city on one atlas: twelve cells of real
   // graffiti art out of `public/textures/graffiti/`, loaded in the background behind a
   // procedural fallback, and four procedural cells of dirt. One material for all of it.
@@ -175,7 +179,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const badkala = createBadkalaPoster();
   // The graffiti atlas disposes itself (it owns the images it composites), so it stays out
   // of this list, exactly as the BADKALA poster does.
-  const textures = [envTex, asphaltTex, facadeTex, signTex, transitTex, glowTex, billTexA, billTexB];
+  const textures = [envTex, asphaltTex, facadeTex, signTex, transitTex, glowTex];
 
   /* ---------------------------------------------------------------- materials */
 
@@ -272,13 +276,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   lampFaults.apply(glowMat);
   const signMat = new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false });
   const transitMat = new THREE.MeshBasicMaterial({ map: transitTex, toneMapped: false });
-  const billMatA = new THREE.MeshBasicMaterial({ map: billTexA, toneMapped: false });
-  const billMatB = new THREE.MeshBasicMaterial({ map: billTexB, toneMapped: false });
+  // The LED boards and the holograms: two materials, one clock, every screen in the city.
+  const screenMats = createScreenMaterials(screenAtlas.texture, screenLayout(), PAL.screenGain);
   const badkalaMat = new THREE.MeshBasicMaterial({ map: badkala.texture, toneMapped: false });
   signMat.color.setScalar(PAL.screenGain);
   transitMat.color.setScalar(PAL.screenGain);
-  billMatA.color.setScalar(PAL.screenGain);
-  billMatB.color.setScalar(PAL.screenGain);
   badkalaMat.color.setScalar(PAL.screenGain);
   neonMat.color.setScalar(PAL.neonGain);
   glowMat.color.setScalar(PAL.glowGain);
@@ -294,10 +296,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // after every other patch above — the window activity and the lamp faults each install
   // their own `onBeforeCompile`, and `applyHaze` composes with whatever it finds.
   applyHaze(facadeMat, { lightKeep: HAZE.facadeLightKeep });
-  for (const m of [neonMat, neonPulseMat, neonFlickerMat, signMat, transitMat, billMatA, billMatB, badkalaMat]) {
+  for (const m of [neonMat, neonPulseMat, neonFlickerMat, signMat, transitMat, screenMats.boards, badkalaMat]) {
     applyHaze(m, { strength: HAZE.neonStrength, lightKeep: HAZE.neonLightKeep });
   }
   applyHaze(glowMat, { strength: HAZE.glowStrength, additive: true });
+  applyHaze(screenMats.holograms, { strength: HAZE.glowStrength, additive: true });
   // Paint fades into the haze exactly as the wall under it does.
   applyHaze(decalMat);
   const materials = [
@@ -317,8 +320,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     glowMat,
     signMat,
     transitMat,
-    billMatA,
-    billMatB,
+    screenMats.boards,
+    screenMats.holograms,
     badkalaMat,
   ];
 
@@ -334,6 +337,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // brighter than they are.
   buildNeonWalls(b);
   buildLandmarks(b);
+  // The LED boards, blades and holograms, on the walls the city has registered by now
+  // (`env/screenBuilder.ts`), clear of every deck and skybridge.
+  // What went up, on the root, for the QA scripts to find (`scripts/` read `userData.screens`).
+  root.userData.screens = buildScreens(b);
   // The car meets' lots, paint, edges and the light off the parked cars (`env/meetBuilder.ts`).
   buildCarMeets(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
@@ -390,13 +397,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   add(b.decal, decalMat, 'env-decals', 1);
   add(b.signs, signMat, 'env-signs', 1);
   add(b.transit, transitMat, 'env-transit', 1);
-  add(b.billA, billMatA, 'env-billboard-a', 1);
-  add(b.billB, billMatB, 'env-billboard-b', 1);
+  add(b.screens, screenMats.boards, 'env-screens', 1);
   add(b.badkala, badkalaMat, 'env-badkala', 1);
   add(b.neon, neonMat, 'env-neon', 1);
   add(b.neonPulse, neonPulseMat, 'env-neon-pulse', 1);
   add(b.neonFlicker, neonFlickerMat, 'env-neon-flicker', 1);
   add(b.glow, glowMat, 'env-glow', 2);
+  // After the halos: a projection is the brightest thing in the air it stands in.
+  add(b.holo, screenMats.holograms, 'env-holograms', 3);
 
   /* ------------------------------------------------- water */
 
@@ -464,7 +472,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     circuitMarker,
     streetMarkers,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
-    ready: Promise.all([wantedBoard.ready, badkala.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
+    ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number, camX?: number, camZ?: number, people: CrowdSubject | null = null) {
       if (chunks.length > 0 && camX !== undefined && camZ !== undefined) {
         const far = chunked!.cullDistance;
@@ -495,9 +503,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
       // Wet reflections and light pools: a gentle shimmer in opacity.
       glowMat.opacity = Math.min(1, 0.86 + 0.1 * Math.sin(time * 0.8));
-      // Holographic billboards scroll in opposite directions.
-      billTexA.offset.y = (billTexA.offset.y + frameDt * 0.035) % 1;
-      billTexB.offset.y = (billTexB.offset.y - frameDt * 0.026 + 1) % 1;
+      // Every screen's frame, scroll, wipe and glitch reads this one clock (`env/screenMaterial.ts`).
+      screenMats.time.value = time;
       // The BADKALA ad: a slow breath with the occasional dropped frame.
       const ad = Math.floor(time * 3.1);
       if (ad !== adSlot) {
@@ -524,6 +531,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       for (const m of streetMarkers) m.dispose();
       meets?.dispose();
       badkala.dispose();
+      screenAtlas.dispose();
       graffiti.dispose();
       roadArt.dispose();
       concreteArt.dispose();

@@ -247,6 +247,27 @@ export interface GateDef {
   trusted?: boolean;
 }
 
+/**
+ * Where a world puts up LED screens and holograms (`env/screenBuilder.ts`): the walls inside
+ * `within` are searched for the best-seen faces, and at most this many of each kind go up.
+ */
+export interface ScreenZoneDef {
+  within: Rect;
+  /** Boards flat on a facade, heroes included. */
+  boards: number;
+  /** Of those, the big ones at the end of a long view. */
+  heroes: number;
+  /** Double-sided blade signs standing out of a street wall. */
+  blades: number;
+  /** Boards on posts on a low roof. */
+  roofBoards: number;
+  /** Decks crossing over a road that carry a board on each fascia, facing the traffic below. */
+  crossings: number;
+  /** Skybridges that carry screens. */
+  bridges: number;
+  holograms: number;
+}
+
 export interface BillboardDef {
   /** 0 and 1 are the scrolling holograms; 2 is the BADKALA WANTED ad, which is portrait. */
   variant: 0 | 1 | 2;
@@ -350,6 +371,8 @@ export interface CityPlan {
   busStops?: BusStopDef[];
   /** Districts where every street facade is stacked with screens. */
   neonDistricts?: Rect[];
+  /** Where the LED boards, blades and holograms go up (`ScreenZoneDef`). Missing: nowhere. */
+  screens?: ScreenZoneDef[];
   /** The versus circuit's barriers, when this world is hosting a race inside the city. */
   neonWalls?: NeonWallDef[];
   /**

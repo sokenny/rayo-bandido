@@ -84,9 +84,15 @@ export interface EnvBuilders {
   signs: MeshBuilder;
   /** Bus-stop and bus panels sampling the transit atlas (`makeTransitAtlas`). */
   transit: MeshBuilder;
-  /** The two animated holographic billboards. */
-  billA: MeshBuilder;
-  billB: MeshBuilder;
+  /**
+   * Every LED screen in the city: facade boards, blade signs, rooftop boards, tickers, the Bay's
+   * holographic columns and the drum of screens. Each quad carries its channel and its own
+   * seed (`MeshBuilder.screen`), and the shader decides what it shows (`screenMaterial.ts`).
+   * Draw them with `screenPanel` / `screenQuad` in `screenBuilder.ts`.
+   */
+  screens: MeshBuilder;
+  /** The holograms: the same atlas and attributes as `screens`, drawn additive and double-sided. */
+  holo: MeshBuilder;
   /**
    * Every surface carrying the BADKALA WANTED ad: the portrait city billboards and the
    * poster bay of half the bus shelters, all sampling one texture (`badkalaPoster.ts`).
@@ -121,12 +127,15 @@ const WALL_CELL = 16;
  */
 export class WallIndex {
   private readonly cells = new Map<number, WallVolume[]>();
+  /** Every volume registered, in the order it was: for a pass that walks all of them (`screenBuilder.ts`). */
+  readonly volumes: WallVolume[] = [];
 
   private static key(x: number, z: number): number {
     return (Math.floor(x / WALL_CELL) + 2048) * 4096 + Math.floor(z / WALL_CELL) + 2048;
   }
 
   add(v: WallVolume): void {
+    this.volumes.push(v);
     for (let x = v.minX; x <= v.maxX + WALL_CELL; x += WALL_CELL) {
       for (let z = v.minZ; z <= v.maxZ + WALL_CELL; z += WALL_CELL) {
         const k = WallIndex.key(Math.min(x, v.maxX), Math.min(z, v.maxZ));
@@ -319,8 +328,8 @@ export function createBuilders(plan: CityPlan): EnvBuilders {
     glow: new MeshBuilder(true, true),
     signs: new MeshBuilder(false),
     transit: new MeshBuilder(false),
-    billA: new MeshBuilder(false),
-    billB: new MeshBuilder(false),
+    screens: new MeshBuilder(true, false, false, true),
+    holo: new MeshBuilder(true, false, false, true),
     badkala: new MeshBuilder(false),
   };
 }

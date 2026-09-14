@@ -343,6 +343,14 @@ export const STACK_LANDMARKS = [
  */
 export const STACK_SKYBRIDGES = { heights: [16, 27, 40], concreteShare: 0.4, max: 28, step: 45 };
 
+/**
+ * The screens (2026-09-13): LED boards, blades, rooftop boards and holograms on the Stack's
+ * towers, after the Cyberpunk street Juan sent. The concrete stays the city; the screens are
+ * the light that lives on it. Counts are ceilings: `env/screenBuilder.ts` fills them with the
+ * best-seen walls it can find and places nothing where nothing is seen.
+ */
+export const STACK_SCREENS = { boards: 170, heroes: 14, blades: 80, roofBoards: 20, holograms: 10, crossings: 40, bridges: 24 };
+
 export const STACK_SPEC: CitySpec = {
   name: 'The Stack',
   bounds: STACK_BOUNDS,
@@ -365,8 +373,10 @@ export const STACK_SPEC: CitySpec = {
   landmarks: STACK_LANDMARKS,
   skybridges: STACK_SKYBRIDGES,
   downtown: STACK_CORE,
-  // Neon is rare in the references: no screen districts, no holograms, no drum of screens.
+  // Neon is rare in the concrete references: no district of stacked screens, no drum. The LED
+  // boards and holograms are placed on the towers instead (`STACK_SCREENS`).
   neonDistricts: [],
+  screens: [{ within: STACK_BOUNDS, ...STACK_SCREENS }],
   ringBillboards: [],
   radioTowers: [
     { x: -294, z: -240, height: 100, base: 8 },

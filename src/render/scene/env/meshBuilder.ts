@@ -57,6 +57,17 @@ export class FloatList {
     this.length = i;
   }
 
+  push4(a: number, b: number, c: number, d: number): void {
+    this.grow(4);
+    const v = this.data;
+    let i = this.length;
+    v[i++] = a;
+    v[i++] = b;
+    v[i++] = c;
+    v[i++] = d;
+    this.length = i;
+  }
+
   push6(a: number, b: number, c: number, d: number, e: number, f: number): void {
     this.grow(6);
     const v = this.data;
@@ -114,6 +125,8 @@ export class MeshBuilder {
   private readonly _colors = new FloatList();
   private readonly _faults = new FloatList();
   private readonly _cells = new FloatList();
+  private readonly _screenSlots = new FloatList();
+  private readonly _screenInfos = new FloatList();
 
   /** The vertex data so far, as views (no copy): for the tests and the stats, never for drawing. */
   get positions(): Float32Array {
@@ -137,6 +150,7 @@ export class MeshBuilder {
   private readonly withColor: boolean;
   private readonly withFault: boolean;
   private readonly withCell: boolean;
+  private readonly withScreen: boolean;
   private r = 1;
   private g = 1;
   private b = 1;
@@ -144,14 +158,17 @@ export class MeshBuilder {
   private cu = 0;
   private cv = 0;
   private cw = 1;
+  private readonly slot = [0, 0, 0, 0];
+  private readonly info = [0, 0, 0, 0];
   private softRadius = 0;
   private chamferSize = 0;
   private upBias = 0;
 
-  constructor(withColor = false, withFault = false, withCell = false) {
+  constructor(withColor = false, withFault = false, withCell = false, withScreen = false) {
     this.withColor = withColor;
     this.withFault = withFault;
     this.withCell = withCell;
+    this.withScreen = withScreen;
   }
 
   /** Sets the vertex colour used by subsequent primitives. `mul` scales brightness. */
@@ -180,6 +197,18 @@ export class MeshBuilder {
     this.cu = u0;
     this.cv = v0;
     this.cw = wall;
+    return this;
+  }
+
+  /**
+   * Tags subsequent primitives as a screen (see `screenAtlas.screenAttributes`): which channel's
+   * frames they show, where those sit in the atlas, and the screen's own seed and motion.
+   */
+  screen(slot: ArrayLike<number>, info: ArrayLike<number>): this {
+    for (let i = 0; i < 4; i++) {
+      this.slot[i] = slot[i];
+      this.info[i] = info[i];
+    }
     return this;
   }
 
@@ -431,6 +460,16 @@ export class MeshBuilder {
     if (this.withCell) {
       const ce = this._cells;
       for (let i = 0; i < 6; i++) ce.push3(this.cu, this.cv, this.cw);
+    }
+    if (this.withScreen) {
+      const sl = this._screenSlots;
+      const si = this._screenInfos;
+      const a = this.slot;
+      const b = this.info;
+      for (let i = 0; i < 6; i++) {
+        sl.push4(a[0], a[1], a[2], a[3]);
+        si.push4(b[0], b[1], b[2], b[3]);
+      }
     }
   }
 
@@ -800,6 +839,8 @@ export class MeshBuilder {
     this._colors.clear();
     this._faults.clear();
     this._cells.clear();
+    this._screenSlots.clear();
+    this._screenInfos.clear();
   }
 
   build(): THREE.BufferGeometry {
@@ -810,6 +851,10 @@ export class MeshBuilder {
     if (this.withColor) geo.setAttribute('color', new THREE.BufferAttribute(this._colors.take(), 3));
     if (this.withFault) geo.setAttribute('aLampFault', new THREE.BufferAttribute(this._faults.take(), 1));
     if (this.withCell) geo.setAttribute('aFacadeCell', new THREE.BufferAttribute(this._cells.take(), 3));
+    if (this.withScreen) {
+      geo.setAttribute('aScreenSlot', new THREE.BufferAttribute(this._screenSlots.take(), 4));
+      geo.setAttribute('aScreenInfo', new THREE.BufferAttribute(this._screenInfos.take(), 4));
+    }
     geo.computeBoundingSphere();
     return geo;
   }

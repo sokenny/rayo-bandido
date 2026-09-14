@@ -16,6 +16,7 @@ import {
   STACK_ELEVATED,
   STACK_LANDMARKS,
   STACK_ROADS,
+  STACK_SCREENS,
   STACK_SKYBRIDGES,
   STACK_SPEC,
   STACK_TRAFFIC_LOOPS,
@@ -611,6 +612,8 @@ export const METRO_SPEC: CitySpec = {
   skybridgeStreets: [],
   skybridgeSets: METRO_SKYBRIDGE_SETS,
   neonDistricts: [{ ...SOUTHWEST }],
+  // Downtown's LED boards, blades and holograms, as the Stack has them.
+  screens: [{ within: STACK_RECT, ...STACK_SCREENS }],
   ringBillboards: [{ x: -520, z: 700, y: 60, radius: 13, height: 11 }],
   radioTowers: [
     ...STACK_SPEC.radioTowers.map((t) => ({ ...t, x: t.x + STACK_OFFSET.x, z: t.z + STACK_OFFSET.z })),

@@ -9,6 +9,7 @@ import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
+import { buildScreens } from '../src/render/scene/env/screenBuilder';
 import { PASSENGERS, validatePassengerCatalog } from '../src/content/passengers';
 import { createCityWorld } from '../src/world/cityWorld';
 import { inRect, type RibbonDef } from '../src/world/cityPlan';
@@ -354,9 +355,13 @@ describe('metro art budget', () => {
     buildTransit(b);
     buildTrack(b);
     buildLandmarks(b);
+    const screens = buildScreens(b);
     buildCarMeets(b);
     buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
+    // Downtown's screens, and only downtown's.
+    expect(screens.length).toBeGreaterThan(150);
+    for (const p of screens) expect(p.x > STACK_RECT.minX - 20 && p.x < STACK_RECT.maxX + 20 && p.z > STACK_RECT.minZ - 20 && p.z < STACK_RECT.maxZ + 20, `${p.kind} at (${p.x}, ${p.z})`).toBe(true);
     // Nine times the Bay's area with the Stack at the top. Drawn in chunks and culled by
     // distance (`CityPlan.render`), so what the GPU sees per frame is a Stack's worth; the
     // whole must still fit in memory as one set of arrays while it is built.

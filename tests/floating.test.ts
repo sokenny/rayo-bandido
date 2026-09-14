@@ -42,7 +42,7 @@ function buildEverything(): { b: EnvBuilders; cityTris: (mb: MeshBuilder) => num
   const b = createBuilders(plan);
   buildCity(b);
   const cityEnd = new Map<MeshBuilder, number>();
-  for (const mb of [b.signs, b.billA, b.billB]) cityEnd.set(mb, mb.positions.length / 9);
+  for (const mb of [b.signs, b.screens]) cityEnd.set(mb, mb.positions.length / 9);
   buildTrack(b);
   buildProps(b);
   buildTransit(b);
@@ -148,6 +148,5 @@ describe('nothing floats in the air', () => {
   };
 
   check('sign', b.signs, GROUND);
-  check('billboard A', b.billA, GROUND);
-  check('billboard B', b.billB, GROUND);
+  check('screen', b.screens, GROUND);
 });

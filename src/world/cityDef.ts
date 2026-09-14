@@ -1,5 +1,5 @@
 import type { CarMeetSpec } from './carMeet';
-import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ZoneId } from './cityPlan';
+import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TrackSpec } from './track';
 
@@ -74,6 +74,8 @@ export interface CitySpec {
   downtown: Rect | null;
   /** Districts where every street facade is stacked with screens. */
   neonDistricts: Rect[];
+  /** Where the LED boards, blades and holograms go up (`env/screenBuilder.ts`). Missing: nowhere. */
+  screens?: ScreenZoneDef[];
   ringBillboards: RingBillboardDef[];
   radioTowers: Array<{ x: number; z: number; height: number; base: number }>;
   /** A transmission line of pylons along `z`, or none. */

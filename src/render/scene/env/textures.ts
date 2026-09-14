@@ -427,58 +427,6 @@ export function makeSignAtlas(): THREE.CanvasTexture {
 }
 
 /**
- * Tall holographic billboard panel. Scrolls vertically in `update`, so it repeats on T.
- * `variant` 0 = corporate cyan data wall, 1 = magenta/violet ad column.
- */
-export function makeBillboardTexture(variant: number): THREE.CanvasTexture {
-  const W = 256;
-  const H = 512;
-  const { cv, ctx } = canvas(W, H);
-  const rng = makeRng(variant === 0 ? 4242 : 8181);
-  const a = variant === 0 ? PAL.neonCyan : PAL.neonMagenta;
-  const b = variant === 0 ? PAL.neonBlue : PAL.neonViolet;
-
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#04060c');
-  g.addColorStop(0.5, variant === 0 ? '#061420' : '#12061c');
-  g.addColorStop(1, '#04060c');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // Data bands.
-  for (let i = 0; i < 18; i++) {
-    const y = rng() * H;
-    const h = 6 + rng() * 22;
-    ctx.globalAlpha = 0.14 + rng() * 0.3;
-    ctx.fillStyle = hex(rng() > 0.5 ? a : b);
-    ctx.fillRect(rng() * W * 0.4, y, W * (0.25 + rng() * 0.7), h);
-  }
-  ctx.globalAlpha = 1;
-
-  // Big glyph column.
-  ctx.font = `700 120px ${CJK_FONT}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  glow(ctx, hex(a), 40);
-  ctx.fillStyle = hex(a);
-  const glyphs = variant === 0 ? ['高', '速', '電'] : ['雷', '速', '夜'];
-  for (let i = 0; i < glyphs.length; i++) ctx.fillText(glyphs[i], W / 2, 90 + i * 160);
-  clearGlow(ctx);
-
-  // Scanlines keep it reading as a hologram.
-  ctx.globalAlpha = 0.28;
-  ctx.fillStyle = '#000000';
-  for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 2);
-  ctx.globalAlpha = 1;
-
-  const tex = toTexture(cv, true);
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
-
-
-/**
  * Tiny equirectangular environment map. Not a real reflection probe: just a dark sky with a
  * neon-lit horizon so `metalness` on the asphalt reads as a cheap wet sheen.
  */

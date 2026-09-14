@@ -2799,3 +2799,95 @@ typecheck green; new `tests/humanActs.test.ts`, and `tests/humanFigure.test.ts` 
 **Left for later.** People who walk any distance need moving colliders in the sim, the way buses
 have; until then only short beats are walked. A car can still be driven into a person's collider
 until its nose visibly overlaps them, as before.
+
+### The intro starts in The Stack (2026-09-13, later still)
+
+Juan wanted the first drive to go through The Stack so the player sees the stacked city early.
+Every road crossing the Stack was scored by how much of it runs under a deck or through a building.
+The Gran Vía won: 29 % under decks, 24 % through buildings, eight decks and ramps overhead (av-central:
+20 % / 11 %). `INTRO.route.start` is now (295, -180), heading west, just inside the Stack's east
+edge. The deck, spine and ring cross the avenue at 12, 24 and 36 m within the first 210 m. Held
+straight, the avenue leaves the Stack on the west and meets av-w1, which runs south to the meet's
+west gate, so the arrival shot is unchanged. The centreline is clear from the start to av-w1, and
+no traffic, bus stop or activity site is within 30 m of the start. Checked with `intro=1` in the
+browser.
+
+
+## The screens of The Stack (2026-09-13)
+
+Juan sent a Cyberpunk street (a plaza under towers covered in LED boards, blade signs and a
+hologram) and asked for the same sightings in the open world, above all in The Stack, with
+generic content for now and his own images and videos on them later.
+
+**What went up.** In Bandido Metro's downtown (and the standalone Stack), placed by
+`src/render/scene/env/screenBuilder.ts` from the walls the city registered, nothing by hand:
+
+- **boards** flat on the towers: 190, 14 of them heroes (28 x 16 m or 13 x 27 m) where a ray out
+  of the board runs 85 m or more over road, which is the end of a street or a tower a whole
+  avenue drives at; the rest from 10 x 6 m at shopfront height to 18 x 10 m, and 26 x 3 m tickers;
+- **passage boards** on the walls of the roads that run inside the buildings (spine, Gran Vía);
+- **crossing boards**: 13, on the fascias of a deck where it crosses over another road, facing the
+  traffic below, a board hung under the fascia where there is room and a ticker along it where not;
+- **bridge boards**: 7 skybridges, a board on each side or one double-faced board hung under it;
+- **blades**: 68, double-sided, two 1:2 panels a side, out of the street walls above the lamps;
+- **rooftop boards**: 20 on posts on the lower roofs, and **holograms**: 10 (a koi, the RAYO bolt),
+  crossed additive projections standing on roofs seen from two or more streets.
+
+A board needs the wall really behind all of it, open air in front, no deck, ramp, skybridge or
+portal frame through it and no viaduct column in the street in front of it (a column cut the first
+Hikari board in two from every lane). The first pass put boards only on walls, and from the chase
+camera they were edge-on: in the Stack's zero-setback canyons a wall is seen along its length. What
+a driver looks straight at is a blade, a deck crossing overhead and a skybridge, which is why those
+three kinds exist and are placed first.
+
+**How it is drawn.** Every frame of every channel is on one 2048 x 2016 canvas atlas
+(`screenAtlas.ts`, painted by `screenArt.ts`: eleven invented ads, two tickers, two hologram
+flipbooks, and the Bay's two holographic columns). Two materials (`screenMaterial.ts`), boards and
+holograms, replace the Bay's two holographic billboard builders one for one, so the Bay, the arena,
+the circuit and the metro keep their draw-call counts; the Bay's perimeter boards, rooftop signs,
+district screens and the drum of screens now sample the atlas and look as they did. Each quad
+carries its channel and its own seed (`MeshBuilder.screen`), and the fragment shader does
+everything a screen does from one clock: the frame cycle with a scan wipe (a hologram cuts, which
+makes it a flipbook), scrolling columns and tickers, the LED diode grid up close, a refresh band,
+torn frames, and a faulty board in twelve that stutters. The texture is never re-uploaded in the
+frame loop.
+
+**Juan's own media.** `src/content/screens.ts` is the catalogue: a channel is a short playlist of
+frames, and a frame is a placeholder design or `{ image: '/screens/…' }` from `public/`, drawn to
+cover its slot (wide 500 x 276, tall 244 x 500, strip 1012 x 116) once it loads, the placeholder
+showing until then. Checked by pointing a channel at `/rayo-wanted.webp` in the browser, then put
+back. Video is not built: the plan is to draw a `<video>` into its slot on a small canvas and copy
+only that rectangle to the GPU each frame (`copyTextureToTexture`), never the whole atlas.
+
+**Measured.** Standalone Stack static art 464,186 triangles in 17 draw calls, against 455,604 / 17
+without (+8.6k, frames and halos included). The counts above are the metro's. Placement 230 ms in Node (518 ms before remembering
+road membership on a 2 m grid for the pass); the atlas paints in ~3 ms and uploads in ~9 ms. In
+Chrome at St. Centre under the RAYO COLA board: 120 fps, GPU 6.6-7.4 ms with the screens shown and
+7.0 ms with them hidden, i.e. inside the frame noise. Screenshots:
+`artifacts/stack-screens/01-09-*.png` (intro start, St. Centre, the blades, Av. Central, the Gran
+Vía, a spine passage, a deck ticker, a hologram, over the Stack). New `tests/screens.test.ts` (8):
+the atlas lays every frame out where the shader looks for it; in the Stack every kind goes up,
+every wall board has wall behind all of it (it caught a board over a 1.4 m slot in a carved
+building), none cuts a deck (it caught a ticker through a ramp), blades clear the lamps, and the
+same screens are built twice. The Stack and metro budget tests build the screens; the metro's all
+stand inside the Stack. The screenshots then caught two more: a board hung under a bridge or a deck
+with only its far face placed showed traffic its bare black back (both faces or neither now), and a
+straight ticker on a curving deck cut into its own slab (both ends must clear it). 876 tests and
+the typecheck green.
+
+**Left for later.** Video channels. The metro's district of screens in the south-west still shows
+the Bay's holographic columns rather than the new ads. Heroes can land 90-100 m up a tower, which
+reads on the skyline but not from the street.
+
+### BADKALA WANTED on the big screens (2026-09-13, later)
+
+Juan asked for some of the bigger signs to carry the BADKALA WANTED poster the bus shelters show.
+It is portrait 1:2, the shape of a tall board and of a blade's panel, so those draw straight into
+the poster's own builder and material (`badkalaPoster.ts`, glitch and stutter included) instead of
+the screen atlas. In the metro that costs no draw call (the shelters already use it); the
+standalone Stack, which has no shelters, goes from 17 to 18. In `screenBuilder.ts`: a tall hero
+takes it 60 % of the time and a full-size tall board 40 %, only when centred under 50 m (read from
+the road, not the skyline), and a blade 30 % of the time on the top panel of both faces. No two
+within 80 m. In the metro that is 16: 5 boards and 11 blades. `tests/screens.test.ts` +1: boards
+and blades both carry it, the right number of poster triangles, portrait, low enough, 80 m apart.
+Checked in the browser on a blade and on a board. 877 tests and the typecheck green.
