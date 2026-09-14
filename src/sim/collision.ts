@@ -223,6 +223,28 @@ export function pushOutOfWorld(
 }
 
 /**
+ * The player's car against one fixed round post (an EV charger, `src/sim/streetProps.ts`):
+ * pushed out and answered exactly as a wall answers it. Returns the speed into the post (m/s),
+ * 0 when there was no contact or the car was already leaving. Emits nothing; the caller does.
+ */
+export function pushOutOfPost(v: VehicleState, cx: number, cz: number, radius: number, dt: number): number {
+  const r = VEHICLE.collisionRadius + radius;
+  const dx = v.x - cx;
+  const dz = v.z - cz;
+  const d2 = dx * dx + dz * dz;
+  if (d2 >= r * r) return 0;
+  const d = Math.sqrt(d2);
+  const nx = d > 1e-6 ? dx / d : -forwardX(v.heading);
+  const nz = d > 1e-6 ? dz / d : -forwardZ(v.heading);
+  v.x = cx + nx * r;
+  v.z = cz + nz * r;
+  const impact = answerSurface(v, nx, nz, WALL, dt);
+  v.speed = v.vx * forwardX(v.heading) + v.vz * forwardZ(v.heading);
+  v.lateralSpeed = v.vx * rightX(v.heading) + v.vz * rightZ(v.heading);
+  return impact;
+}
+
+/**
  * Work a car that is stopped with its nose in a wall back off it.
  *
  * Yaw comes from road speed (`src/sim/vehicle.ts`, step 5), so a car pinned at a standstill

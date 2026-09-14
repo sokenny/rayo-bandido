@@ -1,5 +1,6 @@
 import type { AudioCore } from './core';
-import { AUDIO, NEAR_MISS } from '../config/tuning';
+import { AUDIO, NEAR_MISS, STREET_PROPS } from '../config/tuning';
+import type { StreetPropKind } from '../core/types';
 
 export interface OneShots {
   /** The lightning weapon firing: a sharp electric crack with a sizzling tail. */
@@ -32,6 +33,13 @@ export interface OneShots {
   shield(): void;
   /** The phone: two short buzzes of a clipped square wave, an encrypted-channel ringtone. */
   ring(): void;
+  /**
+   * A street prop knocked (`src/sim/streetProps.ts`), by material: a soft bag thump, a cardboard
+   * whump, a hollow plastic tock, a metal clank, and the zap of a charger breaking. `strength`
+   * 0..1. Rate-limited here (`STREET_PROPS.soundGap`), so ploughing a cafe is a clatter and
+   * not a wall of noise. No sample files: synthesised like the rest of the kit.
+   */
+  propHit(kind: StreetPropKind, strength: number, damaged: boolean): void;
 }
 
 /**
@@ -119,6 +127,8 @@ export function createOneShots(core: AudioCore): OneShots {
   const CHAIN_LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19];
   /** A6-ish: over the engine, under the lightning crack, out of the way of both. */
   const CHIME_ROOT = 880;
+  let lastPropAt = -Infinity;
+  let propBurst = 0;
   let nearMissStep = 0;
   let lastNearMissAt = -Infinity;
 
@@ -174,10 +184,11 @@ export function createOneShots(core: AudioCore): OneShots {
 
     ring() {
       const t = ctx.currentTime;
-      const v = AUDIO.pickupVolume * 0.7;
+      const v = AUDIO.phoneRingVolume;
       // Two buzzes, each a fifth over a low root, gated hard: a device on a table, not a chime.
-      for (let b = 0; b < 2; b++) {
-        const at = t + b * 0.42;
+      // The pair twice over, so it is still ringing when she picks up.
+      for (let b = 0; b < 4; b++) {
+        const at = t + b * 0.42 + (b >= 2 ? 0.5 : 0);
         playOsc('square', at, at + 0.16, 660, 660, 0.22 * v, 0.004, 2400);
         playOsc('square', at, at + 0.16, 990, 990, 0.12 * v, 0.004, 2400);
         playOsc('square', at + 0.19, at + 0.34, 660, 660, 0.22 * v, 0.004, 2400);
@@ -242,6 +253,59 @@ export function createOneShots(core: AudioCore): OneShots {
       playOsc('triangle', t, t + 0.09, 2400, 2100, 0.5 * v, 0.002, 9000);
       playOsc('sine', t, t + 0.12, 3170, 2900, 0.3 * v, 0.002);
       playNoise(t, t + 0.04, 'highpass', 6000, 6000, 0.8, 0.35 * v, 0.001);
+    },
+
+    propHit(kind, strength, damaged) {
+      const t = ctx.currentTime;
+      const v = STREET_PROPS.volume * (0.35 + 0.65 * (strength < 0 ? 0 : strength > 1 ? 1 : strength));
+      if (damaged) {
+        // The charger shorting out: a crack, a falling zap, a fizzle. Never skipped.
+        playNoise(t, t + 0.05, 'highpass', 3000, 2600, 0.8, 0.5 * v, 0.002);
+        playOsc('sawtooth', t, t + 0.3, 1800, 120, 0.3 * v, 0.004, 2400);
+        playNoise(t + 0.02, t + 0.45, 'bandpass', 3800, 1500, 6, 0.28 * v, 0.01);
+        playOsc('square', t, t + 0.18, 180, 90, 0.18 * v, 0.004, 900);
+        lastPropAt = t;
+        return;
+      }
+      // One every `soundGap`, and never more than six in a row without a breath.
+      if (t - lastPropAt < STREET_PROPS.soundGap) return;
+      propBurst = t - lastPropAt > 0.5 ? 0 : propBurst + 1;
+      if (propBurst > 6) return;
+      lastPropAt = t;
+      const pitch = 0.85 + Math.random() * 0.3;
+      switch (kind) {
+        case 'bag':
+          playNoise(t, t + 0.14, 'lowpass', 700 * pitch, 240, 0.7, 0.45 * v, 0.004);
+          break;
+        case 'box':
+          playNoise(t, t + 0.12, 'bandpass', 520 * pitch, 260, 1.4, 0.55 * v, 0.003);
+          playOsc('sine', t, t + 0.1, 120 * pitch, 70, 0.35 * v, 0.003);
+          break;
+        case 'dumpster':
+          // A steel skip: a deep hollow boom under the metal.
+          playOsc('sine', t, t + 0.35, 95 * pitch, 55, 0.5 * v, 0.003);
+          playNoise(t, t + 0.12, 'bandpass', 380 * pitch, 220, 1.2, 0.45 * v, 0.002);
+          playOsc('triangle', t, t + 0.25, 310 * pitch, 260, 0.2 * v, 0.002, 1800);
+          break;
+        case 'bin':
+          // A can clattering over: a thin ring and a rattle.
+          playOsc('triangle', t, t + 0.14, 980 * pitch, 720, 0.26 * v, 0.002, 5000);
+          playNoise(t, t + 0.1, 'bandpass', 2200 * pitch, 1400, 1.5, 0.32 * v, 0.002);
+          playNoise(t + 0.08, t + 0.2, 'bandpass', 1800 * pitch, 1200, 1.5, 0.18 * v, 0.002);
+          break;
+        case 'cone':
+        case 'chair':
+        case 'table':
+          playOsc('triangle', t, t + 0.08, 420 * pitch, 240, 0.4 * v, 0.002, 2400);
+          playNoise(t, t + 0.05, 'bandpass', 1500 * pitch, 900, 2, 0.3 * v, 0.002);
+          break;
+        default:
+          // Metal: signs, barrier legs, a charger shrugging off a knock.
+          playOsc('triangle', t, t + 0.18, 760 * pitch, 610, 0.3 * v, 0.002, 5000);
+          playOsc('sine', t, t + 0.22, 1130 * pitch, 1010, 0.18 * v, 0.002);
+          playNoise(t, t + 0.06, 'highpass', 2800, 2400, 0.8, 0.28 * v, 0.001);
+          break;
+      }
     },
 
     shutdown() {

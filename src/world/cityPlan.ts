@@ -1,4 +1,5 @@
 import type { CarMeetSpec } from './carMeet';
+import type { GasStationSpec } from './gasStation';
 import type { TrackPath } from './track';
 
 /**
@@ -446,6 +447,8 @@ export interface CityPlan {
   passages?: PassageDef[];
   /** The car meets (`carMeet.ts`): the lots, what stands on them and who is parked there. */
   meets?: CarMeetSpec[];
+  /** The gas stations (`gasStation.ts`): their forecourts and what stands on them. */
+  gasStations?: GasStationSpec[];
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.

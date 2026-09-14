@@ -14,6 +14,8 @@ export interface SkidInput {
   drifting: boolean;
   /** Rear wheels spinning (0..1): a burnout scrubs even at a standstill. */
   wheelspin: number;
+  /** Body rotation rate (rad/s): a spinning car scrubs even when its velocity lines up with it. */
+  yawRate: number;
 }
 
 /**
@@ -95,7 +97,7 @@ export function createAudio(targetCount: number): AudioSystem {
       // 'suspended' while the game kept rendering, which is silence with no other symptom.
       core.resume();
       engine.update(dt, engineInput);
-      tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin), skid.speed);
+      tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin, skid.yawRate), Math.hypot(skid.speed, skid.lateralSpeed));
       hums.update(dt, listener, targets);
       if (policeInput) police.update(dt, listener, policeInput.units, policeInput.siren);
     },
@@ -165,6 +167,9 @@ export function createAudio(targetCount: number): AudioSystem {
         case 'introCall':
           // The phone on the dash, ringing. Connecting and hanging up are silent on purpose.
           if (ev.phase === 'ringing') oneShots.ring();
+          break;
+        case 'propHit':
+          oneShots.propHit(ev.kind, ev.impact / 12, ev.damaged);
           break;
         case 'policeCleared':
           police.setChase(false);

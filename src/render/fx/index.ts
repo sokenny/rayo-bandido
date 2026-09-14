@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { VehicleState } from '../../core/types';
+import type { StreetPropKind, VehicleState } from '../../core/types';
 import { VEHICLE } from '../../config/tuning';
 import { clamp01, forwardX, forwardZ, rightX, rightZ } from '../../core/math';
 import { createFxTextures } from './sprites';
@@ -75,6 +75,12 @@ export interface EffectsSystem {
    */
   rushPopup(x: number, y: number, z: number, amount: number): void;
   collision(x: number, y: number, z: number, impact: number): void;
+  /**
+   * A street prop knocked (`propHit`): a puff of dust off cardboard and bin bags, a scrape of
+   * sparks off metal, and one electrical burst when a charger breaks. Budgeted: at most a few
+   * per fraction of a second, whatever the car ploughs through.
+   */
+  propImpact(kind: StreetPropKind, x: number, y: number, z: number, impact: number, damaged: boolean): void;
   update(frameDt: number, time: number): void;
   reset(): void;
   dispose(): void;
@@ -83,7 +89,7 @@ export interface EffectsSystem {
 /** Lateral speed (m/s) at which the tires start to complain, and where they scream. */
 const SLIP_START = 2.5;
 const SLIP_FULL = 10;
-/** Below this forward speed nothing is emitted, so a parked car never smokes. */
+/** Below this ground speed nothing is emitted, so a parked car never smokes. */
 const MIN_SMOKE_SPEED = 2.5;
 /** Slip that counts as sliding even when the drift rules have not latched yet. */
 const SLIDE_LATERAL = 4;
@@ -105,6 +111,10 @@ const BANG_B = 0.07;
  * handful of tracers reads as a crisp pop, where a dense burst starts to look like a plume.
  */
 const BANG_EMBERS = 5;
+
+/** Prop impact effects: this many at once, refilled at this many per second. */
+const PROP_FX_BURST = 4;
+const PROP_FX_RATE = 8;
 
 export function createEffects(scene: THREE.Scene): EffectsSystem {
   const root = new THREE.Group();
@@ -130,6 +140,7 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
   let tipRightX = 0;
   let tipRightZ = 0;
   let tipY = EXHAUST_LOCAL_Y;
+  let propFxBudget = PROP_FX_BURST;
 
   return {
     setCarPose(pose, vehicle, drifting, nitro, frameDt) {
@@ -146,8 +157,10 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       const rightWheelX = rearX + rx * halfTrack;
       const rightWheelZ = rearZ + rz * halfTrack;
 
-      const lateral = Math.abs(vehicle.lateralSpeed);
-      const moving = Math.abs(vehicle.speed) > MIN_SMOKE_SPEED;
+      // Ground speed and axle yaw scrub, as in `audio/dsp.ts:skidIntensity`: mid-180 the car is
+      // all sideways with no forward speed, and it must keep smoking through the spin.
+      const lateral = Math.max(Math.abs(vehicle.lateralSpeed), Math.abs(vehicle.yawRate) * halfBase);
+      const moving = Math.hypot(vehicle.speed, vehicle.lateralSpeed) > MIN_SMOKE_SPEED;
       const sliding = moving && (drifting || lateral > SLIDE_LATERAL);
       let intensity = 0;
       if (sliding) {
@@ -240,7 +253,30 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       sparkFx.flash(x, y + 0.5, z, 0.7 + strength * 0.9, 0.1, 1, 0.7, 0.4);
     },
 
+    propImpact(kind, x, y, z, impact, damaged) {
+      if (damaged) {
+        // The charger's one burst: hot white-blue sparks, a flash, and a little smoke.
+        sparkFx.burst(x, y, z, 22, 6.5, 0.5, 0.16, 0.7, 0.9, 1);
+        sparkFx.burst(x, y, z, 8, 3.5, 0.35, 0.12, 1, 0.75, 0.3);
+        sparkFx.flash(x, y, z, 1.6, 0.14, 0.6, 0.9, 1);
+        smoke.puff(x, y - 0.2, z, 1.4, 1.2, 0.35);
+        propFxBudget = 0;
+        return;
+      }
+      if (propFxBudget <= 0) return;
+      propFxBudget--;
+      const strength = clamp01(impact / 12);
+      if (kind === 'bag' || kind === 'box' || kind === 'bin') {
+        // A can going over spills: the same grimy puff as a split bag.
+        smoke.puff(x, y + 0.1, z, 0.7 + strength * 0.8, 0.6, 0.42);
+        if (strength > 0.4) smoke.puff(x, y + 0.2, z, 0.9, 0.7, 0.38);
+      } else if (kind === 'sign' || kind === 'barrier' || kind === 'charger' || kind === 'dumpster') {
+        sparkFx.burst(x, y + 0.2, z, 3 + Math.round(strength * 5), 2.5 + strength * 3, 0.3, 0.1, 1, 0.66, 0.32);
+      }
+    },
+
     update(frameDt, time) {
+      propFxBudget = Math.min(PROP_FX_BURST, propFxBudget + frameDt * PROP_FX_RATE);
       smoke.update(frameDt);
       nitroFx.update(frameDt, time);
       bolt.update(frameDt);

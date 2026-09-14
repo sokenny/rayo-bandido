@@ -1125,11 +1125,16 @@ export const AUDIO = {
    */
   pickupVolume: 0.5,
   /**
+   * BadKala's call in the intro ringing. It has to cut through the engine and the theme on the
+   * first drive — it was 0.35 (pickup × 0.7) and got lost under both.
+   */
+  phoneRingVolume: 1.1,
+  /**
    * Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke.
    * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
    * there and not from this knob — raising this only makes a slide loud.
    */
-  tireVolume: 0.26,
+  tireVolume: 0.3,
   /** Per-car electric hover hum level. Deliberately near-silent. */
   humVolume: 0.05,
   /** Lightning zap one-shot level. */
@@ -1618,8 +1623,8 @@ export const PASSENGER = {
    */
   arrow: {
     /**
-     * How far up the route it hovers (m). Far enough that it has already turned into the next
-     * street while the car is still in this one; near enough to read at a glance.
+     * How far up the route the road walk looks (m). The arrow no longer aims at this point — it
+     * points straight at the destination — but the walk still gates it on/off the network.
      */
     lookahead: 34,
     /**
@@ -2271,4 +2276,104 @@ export const CROWD = {
   fullWithin: 90,
   animateWithin: 220,
   farStride: 3,
+};
+
+/**
+ * Crashable street props (`src/world/streetProps.ts` places them, `src/sim/streetProps.ts`
+ * knocks them about, `src/render/scene/streetPropsVisual.ts` draws them). Local and cosmetic:
+ * nothing here is synchronised, and only the player's own car touches them.
+ *
+ * The four knobs worth reaching for first are `density`, `activeCap`, `detailDistance` and
+ * `cleanupSeconds`; everything under `kinds` is feel.
+ */
+export const STREET_PROPS = {
+  /** Scales the chance of an arrangement at each pavement station (0 = none, 1 = the design). */
+  density: 1,
+  /** Share of arrangements kept per quality preset (`ATMOSPHERE.quality`): decorative density. */
+  qualityDensity: { low: 0.45, medium: 0.75, high: 1 } as Record<'low' | 'medium' | 'high', number>,
+  /** Props allowed to be flying or sliding at once. A hit past it is ignored until one settles. */
+  activeCap: 16,
+  /** Props allowed to lie away from home at once (moving ones included). Oldest settled one is recycled. */
+  debrisCap: 40,
+  /** Camera distance (m) out to which props are drawn, per quality preset. */
+  detailDistance: { low: 75, medium: 110, high: 150 } as Record<'low' | 'medium' | 'high', number>,
+  /** Seconds a settled prop (or a broken charger) is left lying before it may be put back... */
+  cleanupSeconds: 20,
+  /** ...and only once the car is at least this far from it (m), so it never pops back in view. */
+  cleanupDistance: 160,
+  /** Least seconds between two hit events from the same prop: contact is not a stream of crashes. */
+  hitCooldown: 0.35,
+  /** Approach speed (m/s) under which contact only nudges the prop and raises nothing. */
+  minImpact: 0.8,
+  gravity: 14,
+  /** Hardest a kicked prop leaves (m/s) along the ground, and upward. */
+  maxKick: 12,
+  maxLift: 4.5,
+  /** Longest a prop is simulated after a hit (s) before it is laid down where it is. */
+  maxFlight: 6,
+  /** Master gain of the knock sounds, and least seconds between two of them. */
+  volume: 0.55,
+  soundGap: 0.06,
+  charger: {
+    /** Impact (m/s into it) that breaks a charger. Under this it is only a solid bump. */
+    damageImpact: 5.5,
+  },
+  /**
+   * Per kind. `carLoss` is the share of the car's closing speed the prop takes off it (a bag
+   * next to nothing); `kick` scales how hard the prop leaves; `lift` how much of that goes up;
+   * `spin` how fast it tumbles (rad/s per m/s); `friction` its sliding grip (x g); `bounce` its
+   * restitution off the ground. Chargers are fixed: they use the car's wall response instead.
+   */
+  kinds: {
+    bag: { carLoss: 0.01, kick: 0.75, lift: 0.28, spin: 0.9, friction: 0.9, bounce: 0.15 },
+    box: { carLoss: 0.015, kick: 0.85, lift: 0.32, spin: 1.1, friction: 0.6, bounce: 0.3 },
+    cone: { carLoss: 0.02, kick: 0.9, lift: 0.3, spin: 1.4, friction: 0.45, bounce: 0.35 },
+    chair: { carLoss: 0.03, kick: 0.8, lift: 0.3, spin: 1.2, friction: 0.5, bounce: 0.3 },
+    sign: { carLoss: 0.04, kick: 0.55, lift: 0.1, spin: 0.9, friction: 0.55, bounce: 0.15 },
+    table: { carLoss: 0.06, kick: 0.5, lift: 0.1, spin: 0.7, friction: 0.6, bounce: 0.15 },
+    barrier: { carLoss: 0.08, kick: 0.5, lift: 0.08, spin: 0.7, friction: 0.7, bounce: 0.1 },
+    // A can goes over and rolls on: little grip, a ringing bounce.
+    bin: { carLoss: 0.05, kick: 0.75, lift: 0.18, spin: 1.0, friction: 0.3, bounce: 0.35 },
+  },
+  /**
+   * The trash downtown: how much likelier a pavement station is to carry anything at all inside
+   * the world's `downtown` rect, in the plain `urban` zone and under a viaduct deck. The share of
+   * those that are trash piles rather than shops or works is in `pickArrangement`.
+   */
+  trashBoost: { downtown: 1.9, urban: 1.25, underDeck: 1.5 },
+};
+
+/**
+ * Sewer vents (`src/world/streetProps.ts` places them, `src/render/scene/sewerSteamVisual.ts`
+ * draws the covers and the steam). Art only: nothing here touches the simulation.
+ */
+export const SEWER_STEAM = {
+  /** Metres between the stations tried along a street, and least metres between two vents. */
+  step: 9,
+  spacing: 24,
+  /** Chance a station gets a vent, downtown and elsewhere. */
+  chance: { downtown: 0.55, other: 0.22 },
+  /** Chance a vent steams, downtown and elsewhere. */
+  steamChance: { downtown: 0.55, other: 0.2 },
+  /** The grate's size (m): along the kerb, and out from it into the road. */
+  grateLength: 1.7,
+  grateWidth: 0.75,
+  /** Share of the steaming vents kept per quality preset. The covers are always drawn. */
+  qualityShare: { low: 0.4, medium: 0.7, high: 1 } as Record<'low' | 'medium' | 'high', number>,
+  /** Camera distance (m) out to which vents steam, and most vents steaming at once. */
+  distance: { low: 60, medium: 85, high: 110 } as Record<'low' | 'medium' | 'high', number>,
+  maxActive: { low: 6, medium: 10, high: 14 } as Record<'low' | 'medium' | 'high', number>,
+  /** Puffs per second from a vent at `steam` 1, and how long each lives (s). */
+  rate: 22,
+  life: 2.8,
+  /** Rise (m/s), start size and growth over a life. */
+  rise: 1.3,
+  size: 0.8,
+  endScale: 4.5,
+  opacity: 0.55,
+  /** A slow common drift (m/s), so the columns lean together like a breeze down the street. */
+  windX: 0.35,
+  windZ: 0.2,
+  /** A car crossing a steaming vent faster than this (m/s) tears the column along with it. */
+  gustSpeed: 6,
 };

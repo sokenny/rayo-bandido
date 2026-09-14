@@ -14,6 +14,7 @@ import { FLAIR, NITRO } from '../config/tuning';
 import { stepVehicle } from './vehicle';
 import { resolveCollisions, resolveTargetCollisions } from './collision';
 import { resolveRivalCollisions } from './rivalCollision';
+import { createStreetPropsState, resetStreetPropsState, stepStreetProps } from './streetProps';
 import { stepDrift } from './drift';
 import { stepNitro } from './nitro';
 import { stepLightning } from './lightning';
@@ -153,6 +154,7 @@ export function createInitialGameState(
     streetGate: layout.streetSites && layout.streetSites.length > 0 ? createStreetGateState(options.streetRaceCleared ?? 0) : null,
     police: options.police ? createPoliceState(layout) : null,
     intro: options.intro ? createIntroState() : null,
+    streetProps: createStreetPropsState(layout),
     events: [],
   };
   return state;
@@ -184,6 +186,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.police) resetPoliceState(state.police);
   // The intro goes back to its safe beginning (`resetIntroState` leaves a finished one alone).
   if (state.intro) resetIntroState(state.intro);
+  if (state.streetProps) resetStreetPropsState(state.streetProps);
   state.events.length = 0;
 }
 
@@ -326,6 +329,8 @@ export function stepGame(
   // read before the collision pass.
   settleVehicle(state.vehicle, layout);
   resolveCollisions(state.vehicle, layout, state.events, dt);
+  // The pavement's light clutter and chargers, right behind the walls (`src/sim/streetProps.ts`).
+  if (state.streetProps) stepStreetProps(state.streetProps, state.vehicle, layout, state.time, dt, state.events);
   if (rivals) resolveRivalCollisions(state.vehicle, rivals, state.events);
   stepDrift(state.drift, state.vehicle, dt, state.events);
   stepTargets(state.targets, layout, state.time, dt, respawnTraffic);

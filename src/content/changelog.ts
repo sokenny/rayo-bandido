@@ -27,6 +27,18 @@ export interface ChangelogEntry {
 /** Newest first. The tab shows them in this order. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-09-14',
+    items: [
+      'Gas stations on street corners around the city: a canopy, pumps, a lit shop and a price sign, in four brands.',
+      'Street clutter downtown you can crash through: bags, boxes, cones, chairs, tables, bins and barriers.',
+      'Sidewalk EV chargers can be smashed off their post — they spark and short out.',
+      'Steaming sewer grates along downtown curbs.',
+      'The destination arrow now points straight at where you are going, instead of swinging at the last turn.',
+      'The introduction now walks you through the drift and the lightning shot with an on-screen step card.',
+      'More traffic on the streets, the ring and the viaduct.',
+    ],
+  },
+  {
     date: '2026-09-13',
     items: [
       'OPEN WORLD is now Bandido Metro: The Stack rebuilt as downtown, with the Bay\'s streets and water around it.',

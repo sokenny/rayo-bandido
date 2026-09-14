@@ -16,11 +16,11 @@ import * as THREE from 'three';
  * the moment they are lost and need it. Riding the roof, it is on screen in every camera, at
  * every heading, at every speed, and the answer is always in the same place to look for.
  *
- * WHERE THE HEADING COMES FROM. `world/roadGraph.ts` walks the route a fixed distance along the
- * streets and hands back a point; the arrow points from the car AT that point. So it lies down
- * the street while the street is the way, and swings across towards the turn as the junction
- * comes up — the corner is announced before it arrives. It never points through a building,
- * because the point it aims at is never off the road.
+ * WHERE THE HEADING COMES FROM. The straight-line bearing from the car to the destination
+ * itself — locked on it like a compass, through buildings if that is where it is. It used to aim
+ * at a point a fixed distance up the route, which made it lie down the street and then swing
+ * across at the last junction; players read that as "straight on… now suddenly left" and found
+ * it hard to follow. They know how the streets run; what they want is where the thing is.
  *
  * WHY IT IS PITCHED. The chase camera sits low and looks flat along the road, so an arrow lying
  * level would be seen edge-on, and a shape seen edge-on has no shape. It is tipped a third of a

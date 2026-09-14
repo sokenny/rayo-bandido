@@ -1,4 +1,5 @@
 import type { CarMeetSpec } from './carMeet';
+import type { GasStationSpec } from './gasStation';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TrackSpec } from './track';
@@ -107,6 +108,11 @@ export interface CitySpec {
    * lot clears the blocks it touches and the fences under any deck through it. Missing: none.
    */
   meets?: CarMeetSpec[];
+  /**
+   * Gas stations (`gasStation.ts`): corners of blocks given up as forecourts. Each lot cuts the
+   * plots it touches back to its edge. Missing: none.
+   */
+  gasStations?: GasStationSpec[];
   /** Exponential haze density. Missing: `HAZE.cityDensity`. */
   fogDensity?: number;
   /** Column spacing under the elevated roads (m). Missing: 12, the Bay's. */

@@ -21,6 +21,7 @@ import {
 } from './cityPlan';
 import { buildRails, generateBlocks, hash01, onRibbonAtLevel, pathBox, pointRectDistance, railBounds, streetShoulder, type BlockOptions } from './cityGen';
 import { meetColliders } from './carMeet';
+import { clipBlocksToLots, stationColliders } from './gasStation';
 import type { CitySpec } from './cityDef';
 import { BAY_SPEC } from './citySpec';
 import { reserveMegastructurePlots } from './cityMegastructures';
@@ -148,10 +149,16 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const megastructures = spec.planMegastructures ? spec.planMegastructures(ribbons) : [];
   // A car meet takes its block whole: every plot the generator put on the lot is given up.
   const meets = spec.meets ?? [];
-  const lots = meets.map((m) => m.lot);
+  const meetLots = meets.map((m) => m.lot);
+  // A gas station takes only a corner: the plots it touches are cut back to its edge.
+  const gasStations = spec.gasStations ?? [];
+  const lots = [...meetLots, ...gasStations.map((g) => g.lot)];
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
-  const touchesLot = (r: Rect): boolean => lots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
-  const blocks = reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk));
+  const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
+  const blocks = clipBlocksToLots(
+    reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
+    gasStations.map((g) => g.lot),
+  );
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
     ...v, tag: m.tag, zone: 'urban' as const, massing: 4 as const,
@@ -386,6 +393,12 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     colliders.push(...c.boxes);
     walls.push(...c.walls);
   }
+  // The gas stations: islands, columns, the shop, the pylon and the low walls (`gasStation.ts`).
+  for (const g of gasStations) {
+    const c = stationColliders(g);
+    colliders.push(...c.boxes);
+    walls.push(...c.walls);
+  }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -489,6 +502,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     // Roads inside the buildings, and the frames over the open ones (Phase 2 of the Stack).
     passages: megastructures.flatMap((m) => m.passages ?? []),
     ...(meets.length > 0 ? { meets: meets.map((m) => ({ ...m })) } : {}),
+    ...(gasStations.length > 0 ? { gasStations: gasStations.map((g) => ({ ...g })) } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),

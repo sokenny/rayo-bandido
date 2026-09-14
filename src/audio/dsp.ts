@@ -23,13 +23,20 @@ export function engineNote(rpm01: number): number {
 
 /**
  * Slide intensity (0..1) for the tire scrub, mirroring the smoke emission in `render/fx/index.ts`
- * so the screech and the smoke rise and fall together. Below `MIN_SPEED` (a parked car) nothing
- * scrubs sideways; a latched drift always scrubs at least `DRIFT_FLOOR`; otherwise it ramps with
- * lateral speed between `LATERAL_START` and `LATERAL_FULL`. Spinning rear wheels scrub at any
- * speed — a burnout at a standstill — scaled by `SPIN_GAIN`.
+ * so the screech and the smoke rise and fall together. Below `MIN_SPEED` of *ground* speed (a
+ * parked car) nothing scrubs sideways; a latched drift always scrubs at least `DRIFT_FLOOR`;
+ * otherwise it ramps with slide speed between `LATERAL_START` and `LATERAL_FULL`. Spinning rear
+ * wheels scrub at any speed — a burnout at a standstill — scaled by `SPIN_GAIN`.
+ *
+ * Ground speed, not forward speed, decides "moving": halfway through a 180 the car travels fully
+ * sideways with ~0 forward speed, and gating on forward speed cut the screech mid-spin. The slide
+ * speed is also at least the yaw scrub at the axles (`|yawRate| * YAW_ARM`), so a car rotating
+ * through the moment its velocity lines up with the body keeps howling instead of blinking out.
  */
 export const SKID = {
   MIN_SPEED: 2.5,
+  /** Distance (m) from the car's centre to an axle: half the wheelbase. */
+  YAW_ARM: 1.3,
   /** Lateral speed that counts as sliding even before a drift latches. */
   SLIDE_LATERAL: 4,
   LATERAL_START: 2.5,
@@ -41,9 +48,9 @@ export const SKID = {
   SPIN_GAIN: 0.6,
 } as const;
 
-export function skidIntensity(lateralSpeed: number, speed: number, drifting: boolean, wheelspin = 0): number {
-  const lateral = Math.abs(lateralSpeed);
-  const moving = Math.abs(speed) > SKID.MIN_SPEED;
+export function skidIntensity(lateralSpeed: number, speed: number, drifting: boolean, wheelspin = 0, yawRate = 0): number {
+  const lateral = Math.max(Math.abs(lateralSpeed), Math.abs(yawRate) * SKID.YAW_ARM);
+  const moving = Math.hypot(speed, lateralSpeed) > SKID.MIN_SPEED;
   const sliding = moving && (drifting || lateral > SKID.SLIDE_LATERAL);
   let i = 0;
   if (sliding) {

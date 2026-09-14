@@ -14,8 +14,8 @@ import { isTouchDevice } from './viewport';
  *   - the INCOMING CALL card (her face, the name, the channel), then the call panel she
  *     talks from — the same face, larger, beside the name and the channel light;
  *   - the SUBTITLE strip, one line at a time, quiet between lines;
- *   - the OBJECTIVE strip with the real control hints for the device in the player's hands;
- *   - CONTINUAR when the rules offer the assist, and SALTAR INTRODUCCIÓN throughout.
+ *   - the INSTRUCTION CARD in the middle of the screen: the one step the player is on, with the
+ *     real key for the device in their hands, and SALTAR INTRODUCCIÓN quietly in a corner.
  *
  * Built the way the other overlays are: the DOM once, writes only on change, timing owned by
  * the simulation (a line is up for as long as the rules say), flashes on the Web Animations
@@ -35,7 +35,6 @@ export interface IntroOverlayOptions {
   onCinematicDone(): void;
   onSkipLine(): void;
   onSkipIntro(): void;
-  onAssist(): void;
   /** Music under a voice clip: a fraction of the theme's volume, 1 to restore. */
   duckMusic(level: number): void;
 }
@@ -43,9 +42,14 @@ export interface IntroOverlayOptions {
 export interface IntroOverlaySnapshot {
   stage: IntroStage;
   objective: IntroObjectiveId | null;
-  assistOffered: boolean;
   /** A line is on screen. */
   talking: boolean;
+  /** Simulation seconds: what the card's timed flashes count against. */
+  time: number;
+  /** The meter can pay for a shot right now. */
+  canShoot: boolean;
+  /** The player has driven far enough that the driving keys no longer need showing. */
+  moving: boolean;
 }
 
 export interface IntroOverlay {
@@ -81,58 +85,17 @@ function binding(action: string): string {
   return '?';
 }
 
-/** The hint chips for an objective, for the device in hand. Labels come from the binding tables. */
-function hintsFor(objective: IntroObjectiveId | null, device: Device): Array<[string, string]> {
-  if (device === 'touch') {
-    // The thumb pad's own labels (`src/ui/touchControls.ts`); the screen itself is the trigger.
-    switch (objective) {
-      case 'approach':
-      case 'arrival':
-        return [
-          ['GAS', 'acelerar'],
-          ['◀ ▶', 'girar'],
-          ['BRAKE', 'frenar'],
-        ];
-      case 'drift':
-        return [
-          ['GAS', 'entrá con velocidad'],
-          ['◀ ▶', 'girá'],
-          ['HAND', 'freno de mano'],
-        ];
-      case 'disable':
-        return [['DEDO EN PANTALLA', 'mantené para apuntar · soltá para disparar']];
-      default:
-        return [];
-    }
-  }
-  const drive = binding('drive');
-  // The card says 'WASD' as one word; the lesson wants the gas and the steering apart. Split
-  // only when the binding is exactly that word, so a rebound card still reads as itself.
-  const wasd = drive === 'WASD';
-  const gas = wasd ? 'W' : drive;
-  const steer = wasd ? 'A / D' : drive;
-  const hand = binding('handbrake');
-  const aim = binding('hold: aim');
-  switch (objective) {
-    case 'approach':
-    case 'arrival':
-      return wasd
-        ? [
-            ['W / S', 'acelerar / frenar'],
-            [steer, 'doblar'],
-          ]
-        : [[drive, 'acelerar · girar · frenar']];
-    case 'drift':
-      return [
-        [gas, 'tomá velocidad'],
-        [steer, 'doblá'],
-        [hand, 'freno de mano: mantenelo'],
-      ];
-    case 'disable':
-      return [[aim, 'mantené para apuntar · soltá para disparar']];
-    default:
-      return [];
-  }
+/** A key from the binding table as the card names it: the first of its alternatives, in Spanish. */
+function keyLabel(action: string): string {
+  const key = binding(action).split(' or ')[0];
+  return key === 'SPACE' ? 'ESPACIO' : key;
+}
+
+/** Card text with `{hand}` / `{aim}` filled in as key caps. The config is ours: no user text. */
+function withKeys(text: string): string {
+  return text
+    .replace('{hand}', `<b class="rb-key">${keyLabel('handbrake')}</b>`)
+    .replace('{aim}', `<b class="rb-key">${keyLabel('hold: aim')}</b>`);
 }
 
 export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
@@ -161,14 +124,9 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
     // The subtitle strip.
     `<div class="rb-intro__subtitle"><span class="rb-intro__speaker"></span><span class="rb-intro__text"></span>` +
     `<button type="button" class="rb-intro__line-skip" title="Saltar línea"><span class="rb-key">ENTER</span></button></div>` +
-    // The objective strip, hints and the skip.
-    `<div class="rb-intro__objective">` +
-    `<span class="rb-intro__objective-label">OBJETIVO</span>` +
-    `<span class="rb-intro__objective-text"></span>` +
-    `<span class="rb-intro__hints"></span>` +
-    `<button type="button" class="rb-intro__assist"><span class="rb-key">ENTER</span> CONTINUAR</button>` +
-    `<button type="button" class="rb-intro__skip">SALTAR INTRODUCCIÓN</button>` +
-    `</div>`;
+    // The instruction card, centre screen, and the quiet skip in the corner.
+    `<div class="rb-intro__card"><b class="rb-intro__card-title"></b><span class="rb-intro__card-text"></span></div>` +
+    `<button type="button" class="rb-intro__skip">SALTAR INTRODUCCIÓN</button>`;
 
   const cineEl = pick<HTMLElement>(root, '.rb-intro__cine');
   const cineTitleEl = pick<HTMLElement>(root, '.rb-intro__cine-title b');
@@ -182,11 +140,13 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
   const speakerEl = pick<HTMLElement>(root, '.rb-intro__speaker');
   const textEl = pick<HTMLElement>(root, '.rb-intro__text');
   const lineSkipEl = pick<HTMLButtonElement>(root, '.rb-intro__line-skip');
-  const objectiveEl = pick<HTMLElement>(root, '.rb-intro__objective');
-  const objectiveTextEl = pick<HTMLElement>(root, '.rb-intro__objective-text');
-  const hintsEl = pick<HTMLElement>(root, '.rb-intro__hints');
-  const assistEl = pick<HTMLButtonElement>(root, '.rb-intro__assist');
+  const cardEl = pick<HTMLElement>(root, '.rb-intro__card');
+  const cardTitleEl = pick<HTMLElement>(root, '.rb-intro__card-title');
+  const cardTextEl = pick<HTMLElement>(root, '.rb-intro__card-text');
   const skipEl = pick<HTMLButtonElement>(root, '.rb-intro__skip');
+  // The HUD's full controls card is too much to read on a first drive: the intro card says
+  // which key matters now, so the list stays away until the intro is over.
+  options.hudRoot.classList.add('rb-intro-running');
   const message: SystemMessage = createSystemMessage(root);
 
   /* ----------------------------------------------------------- the portrait */
@@ -215,10 +175,15 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
 
   /* ----------------------------------------------------------- state */
 
-  let shownObjective: IntroObjectiveId | null | undefined = undefined;
   let shownStage: IntroStage | null = null;
-  let shownAssist = false;
   let shownTalking: boolean | null = null;
+  /** Sim time the current stage was first seen at, for the card's timed flashes. */
+  let stageSeenAt = 0;
+  let shownObjective: IntroObjectiveId | null = null;
+  /** Sim time the current objective was first seen at. */
+  let objectiveSeenAt = 0;
+  /** What the card shows, as a key: the DOM is written only when it changes. */
+  let shownCard = '';
   let opaque = false;
   let video: HTMLVideoElement | null = null;
   let openingTimer = 0;
@@ -226,9 +191,63 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
   let disposed = false;
   let over = false;
 
-  function renderHints(): void {
-    const chips = hintsFor(shownObjective ?? null, device);
-    hintsEl.innerHTML = chips.map(([key, what]) => `<span><b class="rb-key">${key}</b> ${what}</span>`).join('');
+  /* ----------------------------------------------------------- the card */
+
+  type CardTone = 'step' | 'warn' | 'done' | 'hint';
+
+  /** Put `key`'s content on the card, or take it down with ''. Writes only on change. */
+  function showCard(key: string, tone: CardTone = 'step', title = '', html = ''): void {
+    if (key === shownCard) return;
+    shownCard = key;
+    // The charge ring is pointed at while filling it is the thing to do.
+    highlightCharge(key === 'drift' || key === 'empty');
+    if (!key) {
+      cardEl.classList.remove('is-on');
+      return;
+    }
+    cardTitleEl.textContent = title;
+    cardTitleEl.hidden = !title;
+    cardTextEl.innerHTML = html;
+    cardTextEl.hidden = !html;
+    cardEl.className = `rb-intro__card is-on is-${tone}`;
+    if (canAnimate) {
+      cardEl.animate([{ opacity: 0, transform: 'translate(-50%, -50%) scale(0.94)' }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' }], {
+        duration: 240,
+        easing: 'ease-out',
+      });
+    }
+  }
+
+  /**
+   * One step at a time, and only the step the player is on: the driving keys until the car is
+   * moving, the drift until there has been one, the shot until a car is down — or, while the
+   * meter cannot pay for it, that it has to be charged first — then where to go.
+   */
+  function renderCard(s: IntroOverlaySnapshot): void {
+    const c = cfg.card;
+    const touch = device === 'touch';
+    // A step just done flashes first, over whatever she says about it.
+    if (s.time - stageSeenAt < c.doneSeconds) {
+      if (s.stage === 'disableEV') return showCard('drift-done', 'done', c.driftDone);
+      if (s.stage === 'arrival') return showCard('ev-done', 'done', c.evDone);
+    }
+    // Then the step she has asked for — the objective is set by the line that asks — and
+    // nothing at all while she is still getting to it.
+    switch (s.objective) {
+      case 'approach':
+        if (!s.moving) return showCard('approach', 'hint', '', touch ? c.approach.touch : c.approach.keys);
+        return showCard('');
+      case 'drift':
+        return showCard('drift', 'step', c.drift.title, withKeys(touch ? c.drift.touch : c.drift.keys));
+      case 'disable':
+        if (s.canShoot) return showCard('shoot', 'step', c.shoot.title, withKeys(touch ? c.shoot.touch : c.shoot.keys));
+        return showCard('empty', 'warn', c.empty.title, withKeys(touch ? c.empty.touch : c.empty.keys));
+      case 'arrival':
+        if (s.time - objectiveSeenAt < c.arrivalSeconds) return showCard('arrival', 'step', c.arrival.title, c.arrival.text);
+        return showCard('');
+      default:
+        return showCard('');
+    }
   }
 
   function flash(el: HTMLElement): void {
@@ -384,8 +403,6 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
     if (e.repeat) return;
     if (running) {
       finishPresentation();
-    } else if (shownAssist) {
-      options.onAssist();
     } else if (shownTalking) {
       options.onSkipLine();
     } else {
@@ -396,7 +413,6 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
   window.addEventListener('keydown', onKey);
   cineSkipEl.addEventListener('click', () => finishPresentation());
   lineSkipEl.addEventListener('click', () => options.onSkipLine());
-  assistEl.addEventListener('click', () => options.onAssist());
   skipEl.addEventListener('click', () => options.onSkipIntro());
 
   /* ----------------------------------------------------------- the gauge */
@@ -413,11 +429,12 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
     stopVoice();
     highlightCharge(false);
     finishPresentation();
+    options.hudRoot.classList.remove('rb-intro-running');
     callEl.classList.remove('is-on');
     panelEl.classList.remove('is-on');
     subtitleEl.classList.remove('is-on');
-    objectiveEl.classList.remove('is-on');
-    assistEl.classList.remove('is-on');
+    skipEl.classList.remove('is-on');
+    showCard('');
     if (reason === 'completed') message.show(cfg.notes.completed, { tone: 'calm', duration: 2600 });
     else message.show(cfg.notes.skipped, { tone: 'calm', duration: 1400 });
   }
@@ -434,16 +451,13 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
       if (over) return;
       if (s.stage !== shownStage) {
         shownStage = s.stage;
-        highlightCharge(s.stage === 'drift');
+        stageSeenAt = s.time;
       }
       if (s.objective !== shownObjective) {
         shownObjective = s.objective;
-        renderHints();
+        objectiveSeenAt = s.time;
       }
-      if (s.assistOffered !== shownAssist) {
-        shownAssist = s.assistOffered;
-        assistEl.classList.toggle('is-on', s.assistOffered);
-      }
+      renderCard(s);
       if (s.talking !== shownTalking) {
         shownTalking = s.talking;
         panelEl.classList.toggle('is-quiet', !s.talking);
@@ -457,7 +471,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
         case 'introCall':
           if (ev.phase === 'ringing') {
             callEl.classList.add('is-on');
-            objectiveEl.classList.add('is-on');
+            skipEl.classList.add('is-on');
             try {
               navigator.vibrate?.(cfg.call.vibrateMs);
             } catch {
@@ -466,7 +480,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           } else if (ev.phase === 'connected') {
             callEl.classList.remove('is-on');
             panelEl.classList.add('is-on', 'is-quiet');
-            objectiveEl.classList.add('is-on');
+            skipEl.classList.add('is-on');
           } else {
             panelEl.classList.remove('is-on');
             subtitleEl.classList.remove('is-on');
@@ -487,11 +501,6 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           // Pulling into the meet: the clip, over the car standing among the others.
           if (ev.stage === 'meetup') startCinematic();
           break;
-        case 'introObjective':
-          objectiveTextEl.textContent = ev.text;
-          objectiveEl.classList.toggle('has-objective', ev.id !== null);
-          if (ev.id !== null) flash(objectiveEl);
-          break;
         case 'introNote':
           message.show(ev.text, { tone: 'calm', duration: 1400 });
           break;
@@ -505,8 +514,9 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           callEl.classList.remove('is-on');
           panelEl.classList.remove('is-on');
           subtitleEl.classList.remove('is-on');
-          objectiveEl.classList.remove('is-on', 'has-objective');
-          assistEl.classList.remove('is-on');
+          skipEl.classList.remove('is-on');
+          shownStage = null;
+          showCard('');
           break;
         default:
           break;
@@ -518,6 +528,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
       over = true;
       stopVoice();
       highlightCharge(false);
+      options.hudRoot.classList.remove('rb-intro-running');
       window.clearTimeout(openingTimer);
       if (video) {
         video.pause();

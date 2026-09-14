@@ -14,11 +14,14 @@ import { canAffordShot } from './lightning';
  * EVENT-DRIVEN, NOT A TIMELINE. A stage ends when the player has done the thing — driven a
  * little way, held a slide, put the bolt in a car, reached the meet — never because a clock
  * ran out. There is no marker to follow until she has finished teaching: the drift is anywhere,
- * the electric car is any one on the street, and the meet is only pinned once the last line
- * about the shot has been said. Dialogue is a queue said one line at a time with silence
- * between lines; a line marked `instructional` for an objective is dropped unsaid if that
- * objective is already done by the time it would start, so nobody is told how to do what they
- * just did. Skipping a line ends the line and nothing else.
+ * the electric car is any one on the street, and the meet is pinned by the line that says so.
+ *
+ * IN STEP WITH HER, BOTH WAYS. Each objective is set by the `instructional` line that asks for
+ * it, as that line starts (`stepDialogue`), and doing the thing counts only once it is set — a
+ * slide before she asks for one, or a car shot while she is still praising the slide, teaches
+ * nothing and counts for nothing. And the next part of what she says is only queued once the
+ * player has done the thing. Dialogue is a queue said one line at a time with silence between
+ * lines. Skipping a line ends the line and nothing else.
  *
  * THE CAR SHOT is an ordinary electric car and pays what any kill pays; the whole introduction
  * is an engaged activity (`src/sim/activities.ts`), so there are no police, no run and no fare
@@ -65,7 +68,6 @@ export function createIntroState(): IntroState {
     driftAssisted: false,
     struggleTime: 0,
     hintGiven: false,
-    assistOffered: false,
     assistAccepted: false,
     evDone: false,
     noChargeFor: 0,
@@ -114,8 +116,9 @@ export function skipIntro(intro: IntroState): void {
   intro.skipRequested = true;
 }
 
+/** Automation only: count the drift as done. The player is never offered a way past it. */
 export function acceptIntroAssist(intro: IntroState): void {
-  if (intro.assistOffered) intro.assistAccepted = true;
+  if (intro.stage === 'drift' || intro.stage === 'approach') intro.assistAccepted = true;
 }
 
 /* ------------------------------------------------------------- internals */
@@ -129,7 +132,9 @@ function say(intro: IntroState, id: string): void {
 function objectiveDone(intro: IntroState, id: IntroObjectiveId): boolean {
   switch (id) {
     case 'approach':
-      return intro.approachDone;
+      // "Drive" is never stale: it is part of the story as much as an instruction, and the
+      // drift's instruction is queued after it and takes the card over regardless.
+      return false;
     case 'drift':
       return intro.driftDone;
     case 'disable':
@@ -191,6 +196,9 @@ function stepDialogue(intro: IntroState, cfg: IntroConfig, state: GameState, dt:
     intro.lineTimeLeft = seconds;
     intro.lineSeq++;
     events.push({ type: 'introLine', id, speaker: l.speaker, text: l.text, voice: l.voice, seconds });
+    // She asks for it, and only then is it asked for: the objective — the card, the pin, and
+    // whether doing the thing counts at all — starts with the line that gives it.
+    if (l.instructional) setObjective(intro, cfg, l.instructional, events);
     return;
   }
 }
@@ -243,7 +251,6 @@ function finish(intro: IntroState, reason: 'completed' | 'skipped', events: Game
   intro.queue.length = 0;
   endLine(intro, events);
   intro.ringing = false;
-  intro.assistOffered = false;
   if (intro.callConnected) {
     intro.callConnected = false;
     events.push({ type: 'introCall', phase: 'ended' });
@@ -292,67 +299,67 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
         say(intro, 'a1');
         say(intro, 'a2');
         say(intro, 'a3');
-        setObjective(intro, cfg, 'approach', events);
         setStage(intro, 'approach', events);
       }
       break;
     }
 
     case 'approach': {
-      // The lore is paced by the road driven; the drift is asked for once there has been enough
-      // of it — or at once, if the player is already sliding.
+      // The lore is paced by the road driven; the lesson is queued once there has been enough of
+      // it. A slide on the way in teaches nothing and counts for nothing: she has not asked yet.
       const at = cfg.route.loreAtMetres;
       if (intro.odometer >= at.batteries) say(intro, 'b1');
       if (intro.odometer >= at.combustion) say(intro, 'b2');
-      const d = state.drift;
-      const sliding = d.active && d.duration >= cfg.drift.seconds && d.chargeRate > 0;
-      if (intro.odometer >= cfg.route.driftAskedAtMetres || sliding) {
+      if (intro.odometer >= cfg.route.driftAskedAtMetres) {
         intro.approachDone = true;
         say(intro, 'b1');
         say(intro, 'b2');
         say(intro, 'b3');
         say(intro, 'b4');
         say(intro, 'c1');
-        setObjective(intro, cfg, 'drift', events);
+        setObjective(intro, cfg, null, events);
         setStage(intro, 'drift', events);
       }
       break;
     }
 
     case 'drift': {
+      // TWO GATES. The player's: nothing about the shot is said or shown until a real drift has
+      // been held (automation's assist, `__rb.intro.assist()`, or skipping are the only ways
+      // past). Hers: the drift counts only once she has asked for it (c1 set the objective).
       const d = state.drift;
-      if (d.active && d.duration >= cfg.drift.seconds && d.chargeRate > 0) {
+      if (intro.objective === 'drift' && d.active && d.duration >= cfg.drift.seconds && d.chargeRate > 0) {
         intro.driftDone = true;
-        intro.assistOffered = false;
         topUpCharge(state, cfg);
         say(intro, 'c2');
       } else if (intro.assistAccepted) {
         intro.driftDone = true;
         intro.driftAssisted = true;
-        intro.assistOffered = false;
         topUpCharge(state, cfg);
       } else {
         // The struggle clock runs from the moment the instruction has been given (or dropped),
         // not from the stage: the lore said on the way in is not time spent failing.
-        const explained = intro.said.has('c1') && intro.lineId !== 'c1' && intro.queue.indexOf('c1') < 0;
+        const explained = intro.objective === 'drift' && intro.lineId !== 'c1';
         if (explained) intro.struggleTime += dt;
         if (!intro.hintGiven && intro.struggleTime >= cfg.drift.hintAfterSeconds) {
           intro.hintGiven = true;
           say(intro, 'c-hint');
         }
-        if (!intro.assistOffered && intro.struggleTime >= cfg.drift.assistAfterSeconds) intro.assistOffered = true;
         break;
       }
       intro.assistAccepted = false;
       say(intro, 'c3');
       say(intro, 'd1');
       say(intro, 'd2');
-      setObjective(intro, cfg, 'disable', events);
+      // Nothing on the card while she praises the slide: d1 puts the shot up when she asks for it.
+      setObjective(intro, cfg, null, events);
       setStage(intro, 'disableEV', events);
       break;
     }
 
     case 'disableEV': {
+      // Nothing counts, and the meter is left alone, until she has asked for the shot (d1).
+      if (intro.objective !== 'disable') break;
       // Any electric car on the street. The police are a separate list and never raise this.
       for (let i = 0; i < events.length; i++) {
         const e = events[i];
@@ -365,8 +372,7 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
         say(intro, 'd3');
         say(intro, 'd4');
         say(intro, 'e1');
-        // The strip clears while she finishes: the point she marks is the last thing she
-        // gives you, and the `arrival` stage puts it on the map once she has stopped talking.
+        // The pin goes on the map when she says she has marked it (e1), not before.
         setObjective(intro, cfg, null, events);
         setStage(intro, 'arrival', events);
         break;
@@ -389,14 +395,9 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
     }
 
     case 'arrival': {
-      // THE ONE MARKER OF THE WHOLE INTRODUCTION, and it waits for the lesson to be over: no
-      // pin while she is still explaining the shot. Driving in before it is up still counts —
-      // the meet is the payoff, not a gate.
-      if (intro.objective !== 'arrival' && intro.queue.length === 0 && !intro.lineId && intro.gapLeft <= 0) {
-        setObjective(intro, cfg, 'arrival', events);
-      }
+      // THE ONE MARKER OF THE WHOLE INTRODUCTION, up since she said she marked it.
       const r = cfg.route.meetup;
-      if (within(state, r.x, r.z, r.radius)) {
+      if (intro.objective === 'arrival' && within(state, r.x, r.z, r.radius)) {
         intro.arrivalDone = true;
         setObjective(intro, cfg, null, events);
         // The clip plays here; the car is held until it is over (`introHoldsPlayer`). Whatever

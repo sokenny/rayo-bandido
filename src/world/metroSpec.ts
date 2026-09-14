@@ -1,5 +1,6 @@
 import type { CarMeetSpec } from './carMeet';
 import type { CityRoadSpec, CitySpec, ElevatedRoadSpec, PassengerStopSpec } from './cityDef';
+import type { GasStationSpec } from './gasStation';
 import type { BlockOptions } from './cityGen';
 import type { Rect, ZoneId } from './cityPlan';
 // Value imports spelt with their extension, so `scripts/metro-preview.mjs` can load this spec
@@ -463,6 +464,65 @@ export const METRO_MEET: CarMeetSpec = {
   ],
 };
 
+/* ------------------------------------------------------------------ gas stations */
+
+/**
+ * FOUR GAS STATIONS (`gasStation.ts`), each on the corner of two streets and each a different
+ * part of the map, for variety rather than for anything to do yet (2026-09-14):
+ *
+ *   - NEOGAS in midtown, where the two ring boulevards cross north-west of downtown, under the
+ *     towers: the reference's own picture, teal and amber,
+ *   - OCTANO on the east avenue at st-south, in the low urban blocks past the ring,
+ *   - VOLTA in the south-west, on av-s1 at st-w3, a block from the viaduct's west ramps,
+ *   - MAREA on the old town's quay, open on three sides with the bay and the viaduct behind it.
+ *
+ * Each lot runs from the back of the pavement on its street sides (road half-width plus that
+ * zone's shoulder) and its inner edges sit on the plot lines the generator already draws there,
+ * so the plots cut back to it keep a buildable width (`tests/metroWorld.test.ts`).
+ */
+export const METRO_GAS_STATIONS: GasStationSpec[] = [
+  {
+    tag: 'gas-ring-nw',
+    label: 'NEOGAS · RING NORTH',
+    brand: 'neogas',
+    lot: { minX: -410, maxX: RING.west - 10 - BAY_SHOULDER.corporate, minZ: -529.8, maxZ: RING.north - 10 - BAY_SHOULDER.corporate },
+    front: 's',
+    corner: 'e',
+    streets: ['s', 'e'],
+    prices: [23.9, 25.4, 27.9, 19.9],
+  },
+  {
+    tag: 'gas-av-east',
+    label: 'OCTANO · AV EAST',
+    brand: 'octano',
+    lot: { minX: 536.9, maxX: 620 - 9 - BAY_SHOULDER.urban, minZ: -48.5, maxZ: 10 - 6.5 - BAY_SHOULDER.urban },
+    front: 's',
+    corner: 'e',
+    streets: ['s', 'e'],
+    prices: [22.9, 24.9, 26.5, 18.9],
+  },
+  {
+    tag: 'gas-southwest',
+    label: 'VOLTA · AV SOUTH',
+    brand: 'volta',
+    lot: { minX: -480 + 6.5 + BAY_SHOULDER.urban, maxX: -410, minZ: 500 + 9 + BAY_SHOULDER.urban, maxZ: 551.2 },
+    front: 'n',
+    corner: 'w',
+    streets: ['n', 'w'],
+    prices: [24.5, 26.9, 28.9, 20.5],
+  },
+  {
+    tag: 'gas-quay',
+    label: 'MAREA · THE QUAY',
+    brand: 'marea',
+    lot: { minX: 160 + 6 + BAY_SHOULDER.jdm, maxX: 250 - 6.5 - BAY_SHOULDER.jdm, minZ: 1120, maxZ: METRO_QUAY_Z - 14 - 8 - BAY_SHOULDER.jdm },
+    front: 's',
+    corner: 'w',
+    streets: ['s', 'w', 'e'],
+    prices: [21.9, 23.9, 25.9, 17.9],
+  },
+];
+
 /* ------------------------------------------------------------------ traffic */
 
 const loop =(minX: number, maxX: number, minZ: number, maxZ: number, cars: number): { rect: Rect; cars: number } => ({ rect: { minX, maxX, minZ, maxZ }, cars });
@@ -470,39 +530,43 @@ const loop =(minX: number, maxX: number, minZ: number, maxZ: number, cars: numbe
 /**
  * Traffic: the Stack's ten rectangles moved with it, plus rectangles of the outer streets,
  * every corner a real crossing of two straight roads. Two blocks a side in the outer city,
- * two cars each (three round the ring), so the fleet stays near the Bay's size on a map
- * twenty times its area:
+ * three cars each (four round the ring):
  * the cars are where the player is likely to be, round downtown and along the boulevards.
+ * Raised 2026-09-14 (about 1.5x); the Stack's own loops get two more cars each (one per direction) here only,
+ * so the standalone Stack keeps its halved fleet.
  */
 export const METRO_TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
-  ...STACK_TRAFFIC_LOOPS.map((l) => ({ rect: shift(l.rect), cars: l.cars })),
+  ...STACK_TRAFFIC_LOOPS.map((l) => ({ rect: shift(l.rect), cars: l.cars + 2 })),
   // The ring's quadrants: the ring and the Stack's own edge streets.
-  loop(RING.west, -252, RING.north, -320, 3),
-  loop(250, RING.east, RING.north, -320, 3),
-  loop(RING.west, -252, 10, RING.south, 3),
-  loop(250, RING.east, 10, RING.south, 3),
-  loop(-252, -60, RING.north, -320, 3),
-  loop(30, 250, RING.north, -320, 3),
-  loop(-252, -60, 132, RING.south, 3),
+  loop(RING.west, -252, RING.north, -320, 4),
+  loop(250, RING.east, RING.north, -320, 4),
+  loop(RING.west, -252, 10, RING.south, 4),
+  loop(250, RING.east, 10, RING.south, 4),
+  loop(-252, -60, RING.north, -320, 4),
+  loop(30, 250, RING.north, -320, 4),
+  loop(-252, -60, 132, RING.south, 4),
   // North of the ring, and the flanks.
-  loop(-620, -340, -600, RING.north, 2),
-  loop(340, 620, -600, RING.north, 2),
-  loop(-620, -340, -320, 10, 2),
-  loop(340, 620, -320, 10, 2),
+  loop(-620, -340, -600, RING.north, 3),
+  loop(340, 620, -600, RING.north, 3),
+  loop(-620, -340, -320, 10, 3),
+  loop(340, 620, -320, 10, 3),
   // South: the viaduct district down to the water.
-  loop(-620, -340, RING.south, 500, 2),
-  loop(340, 620, RING.south, 500, 2),
-  loop(-620, -340, 500, 780, 2),
-  loop(-340, -60, 500, 780, 2),
-  loop(30, 340, 500, 780, 2),
-  loop(340, 620, 500, 780, 2),
-  loop(-620, -340, 780, 1060, 2),
-  loop(-60, 250, 780, 1060, 2),
-  loop(340, 620, 780, 1060, 2),
+  loop(-620, -340, RING.south, 500, 3),
+  loop(340, 620, RING.south, 500, 3),
+  loop(-620, -340, 500, 780, 3),
+  loop(-340, -60, 500, 780, 3),
+  loop(30, 340, 500, 780, 3),
+  loop(340, 620, 500, 780, 3),
+  loop(-620, -340, 780, 1060, 3),
+  loop(-60, 250, 780, 1060, 3),
+  loop(340, 620, 780, 1060, 3),
 ];
 
-/** Cars lapping the viaduct: the Bay's density scaled by length, then halved as the Stack's were, then a little less. */
-export const METRO_VIADUCT_CARS = 40;
+/** Cars lapping the viaduct: the Bay's density scaled by length, then halved as the Stack's were; raised 2026-09-14. Multiple of its four lane files. */
+export const METRO_VIADUCT_CARS = 60;
+
+/** The Stack's elevated loops in the open world: its own counts, raised 1.5x (kept to multiples of four lane files). */
+const METRO_DECK_TRAFFIC = STACK_DECK_TRAFFIC.map((d) => ({ ...d, cars: Math.round((d.cars * 1.5) / 4) * 4 }));
 
 /* ------------------------------------------------------------------ buses */
 
@@ -642,7 +706,7 @@ export const METRO_SPEC: CitySpec = {
     ['blvd-ring-w', 1500, PAL.neonCyan, PAL.neonBlue],
   ],
   trafficLoops: METRO_TRAFFIC_LOOPS,
-  deckTraffic: [...STACK_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }],
+  deckTraffic: [...METRO_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }],
   cruiseLoop: METRO_BUS_LOOPS[0],
   busRoutes: METRO_BUS_ROUTES,
   busRouteLoops: METRO_BUS_LOOPS,
@@ -652,6 +716,7 @@ export const METRO_SPEC: CitySpec = {
   passengerStops: METRO_PASSENGER_STOPS,
   buhoSite: METRO_BUHO_SITE,
   meets: [METRO_MEET],
+  gasStations: METRO_GAS_STATIONS,
   // Drawn in chunks: a map this size cannot be one mesh per material. Beyond the cull the
   // Bay's haze (`HAZE.cityDensity`) has taken everything but the brightest windows.
   render: { chunk: 325, cullDistance: 850 },

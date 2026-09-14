@@ -115,10 +115,15 @@ function askDrift(r: ReturnType<typeof rig>): void {
   expect(r.intro.stage).toBe('drift');
 }
 
-/** Straight past the drift, by the assist. */
+/** Play on until she has asked for `id` (the line that asks sets the objective). */
+function untilObjective(r: ReturnType<typeof rig>, id: string): void {
+  for (let i = 0; i < 60 * 180 && r.intro.objective !== id; i++) r.tick();
+  expect(r.intro.objective).toBe(id);
+}
+
+/** Straight past the drift, by automation's assist. */
 function passDrift(r: ReturnType<typeof rig>): void {
   askDrift(r);
-  r.intro.assistOffered = true;
   acceptIntroAssist(r.intro);
   r.tickIntro(1);
   expect(r.intro.stage).toBe('disableEV');
@@ -234,8 +239,10 @@ describe('the opening and the call', () => {
     expect(connected.find((e) => e.type === 'introCall' && e.phase === 'connected')).toBeTruthy();
     expect(r.intro.stage).toBe('approach');
     expect(r.intro.callConnected).toBe(true);
-    // No place to go yet: the objective is a thing to do, not a point.
-    expect(r.intro.objective).toBe('approach');
+    // Nothing asked for until she says to drive; then a thing to do, not a point.
+    expect(r.intro.objective).toBe(null);
+    untilObjective(r, 'approach');
+    expect(r.intro.lineId).toBe('a3');
     expect(r.intro.objectiveRadius).toBe(0);
   });
 
@@ -268,28 +275,44 @@ describe('the stages', () => {
     expect(r.intro.said.has('b1')).toBe(true);
     expect(r.intro.said.has('b2')).toBe(true);
     expect([...r.intro.queue, ...lines]).toEqual(expect.arrayContaining(['b3', 'c1']));
-    expect(r.intro.objective).toBe('drift');
+    // The drift card waits for her to ask for it.
+    expect(r.intro.objective).not.toBe('drift');
+    untilObjective(r, 'drift');
+    expect(r.intro.lineId).toBe('c1');
     expect(r.intro.objectiveRadius).toBe(0);
   });
 
-  it('a slide before she asks counts, and the instruction is never said', () => {
+  it('a slide before she asks for it counts for nothing', () => {
     const r = rig();
     connect(r);
-    r.state.drift.active = true;
-    r.state.drift.duration = INTRO.drift.seconds + 0.01;
-    r.state.drift.chargeRate = 8;
+    const slide = (on: boolean): void => {
+      r.state.drift.active = on;
+      r.state.drift.duration = on ? INTRO.drift.seconds + 0.01 : 0;
+      r.state.drift.chargeRate = on ? 8 : 0;
+    };
+    // On the approach...
+    slide(true);
+    r.tickIntro(30);
+    expect(r.intro.stage).toBe('approach');
+    expect(r.intro.driftDone).toBe(false);
+    // ...and in the drift stage while she is still on the lore before the instruction.
+    r.intro.odometer = INTRO.route.driftAskedAtMetres;
     r.tickIntro(2);
+    expect(r.intro.stage).toBe('drift');
+    expect(r.intro.objective).not.toBe('drift');
+    expect(r.intro.driftDone).toBe(false);
+    slide(false);
+    untilObjective(r, 'drift');
+    slide(true);
+    r.tickIntro(1);
     expect(r.intro.driftDone).toBe(true);
     expect(r.intro.stage).toBe('disableEV');
-    r.state.drift.active = false;
-    const lines = drain(r).filter((e) => e.type === 'introLine').map((e) => (e as { id: string }).id);
-    expect(lines).not.toContain('c1');
-    expect(lines).toEqual(expect.arrayContaining(['b3', 'c2', 'd1', 'd2']));
   });
 
   it('counts a brief real drift and tops the meter up once', () => {
     const r = rig();
     askDrift(r);
+    untilObjective(r, 'drift');
     r.state.drift.active = true;
     r.state.drift.duration = INTRO.drift.seconds + 0.01;
     r.state.drift.chargeRate = 8;
@@ -299,7 +322,8 @@ describe('the stages', () => {
     expect(r.intro.driftAssisted).toBe(false);
     expect(r.state.lightning.charge).toBe(INTRO.drift.chargeBonus);
     expect(r.intro.stage).toBe('disableEV');
-    expect(r.intro.objective).toBe('disable');
+    // The shot is not asked for while she praises the slide.
+    expect(r.intro.objective).toBe(null);
     expect(types(events)).toContain('introStage');
     expect(r.intro.said.has('c2')).toBe(true);
     // The nitro is mentioned once the slide is behind us, on the way to the shot.
@@ -318,7 +342,7 @@ describe('the stages', () => {
     expect(r.intro.stage).toBe('drift');
   });
 
-  it('offers the hint once, then CONTINUAR, and the assist counts as done without the praise', () => {
+  it('gives the hint once and never lets the player past the drift without one', () => {
     const r = rig();
     askDrift(r);
     // The lore and the instruction on the way in are not time spent struggling.
@@ -328,14 +352,23 @@ describe('the stages', () => {
     r.tick(seconds(INTRO.drift.hintAfterSeconds) + 2);
     expect(r.intro.hintGiven).toBe(true);
     expect(r.intro.said.has('c-hint')).toBe(true);
-    expect(r.intro.assistOffered).toBe(false);
-    r.tick(seconds(INTRO.drift.assistAfterSeconds - INTRO.drift.hintAfterSeconds) + 2);
-    expect(r.intro.assistOffered).toBe(true);
+    // A long time later: still the drift, nothing about the shot said, no kill counted.
+    r.tick(seconds(90));
+    expect(r.intro.stage).toBe('drift');
+    expect(r.intro.said.has('d1')).toBe(false);
+    kill(r, 2);
+    expect(r.intro.evDone).toBe(false);
+    expect(r.intro.stage).toBe('drift');
+  });
+
+  it("automation's assist counts as done without the praise", () => {
+    const r = rig();
+    askDrift(r);
+    drain(r);
     acceptIntroAssist(r.intro);
     r.tick(1);
     expect(r.intro.driftDone).toBe(true);
     expect(r.intro.driftAssisted).toBe(true);
-    expect(r.intro.assistOffered).toBe(false);
     expect(r.state.lightning.charge).toBeGreaterThanOrEqual(INTRO.drift.chargeBonus);
     expect(r.intro.said.has('c2')).toBe(false);
     // ...but the nitro is still mentioned: the assist skips the praise, not the lesson.
@@ -346,6 +379,11 @@ describe('the stages', () => {
   it('any electric car counts, once, and a dry meter is topped up', () => {
     const r = rig();
     passDrift(r);
+    // A car shot before she asks for it counts for nothing.
+    kill(r, 2);
+    expect(r.intro.evDone).toBe(false);
+    untilObjective(r, 'disable');
+    expect(r.intro.lineId).toBe('d1');
     // The meter run dry: topped up after the beat, with a note, not a restart.
     r.state.lightning.charge = 0;
     const note = r.tickIntro(seconds(INTRO.ev.rechargeAfterSeconds) + 1);
@@ -353,21 +391,21 @@ describe('the stages', () => {
     expect(r.state.lightning.charge).toBeGreaterThanOrEqual(INTRO.drift.chargeBonus);
     expect(r.intro.rechargeAssists).toBe(1);
 
-    // Any street car shot: the shutdown lines, and no point to drive to while she talks.
+    // Any street car shot: the shutdown lines, and the pin when she says she has marked it.
     kill(r, 3);
     expect(r.intro.evDone).toBe(true);
     expect(r.intro.stage).toBe('arrival');
-    expect(r.intro.objective).toBe(null);
-    expect(r.intro.objectiveRadius).toBe(0);
     expect(r.intro.said.has('d3')).toBe(true);
     expect(r.intro.said.has('d4')).toBe(true);
-    // The pin goes up only once the last of them has been said and the silence after it is over.
-    for (let i = 0; i < 60 * 150 && r.intro.objective === null; i++) {
-      r.tick();
-      if (r.intro.lineId) expect(r.intro.objective).toBe(null);
-    }
-    expect(r.intro.said.has('e1')).toBe(true);
-    expect(r.intro.objective).toBe('arrival');
+    expect(r.intro.objective).toBe(null);
+    // Driving into the meet before the pin is up is not the arrival.
+    r.put(INTRO.route.meetup.x, INTRO.route.meetup.z);
+    r.tickIntro(1);
+    expect(r.intro.stage).toBe('arrival');
+    const s = INTRO.route.start;
+    r.put(s.x, s.z);
+    untilObjective(r, 'arrival');
+    expect(r.intro.lineId).toBe('e1');
     expect(r.intro.objectiveX).toBe(INTRO.route.meetup.x);
     expect(r.intro.objectiveRadius).toBe(INTRO.route.meetup.radius);
     // A second kill changes nothing.
@@ -379,6 +417,7 @@ describe('the stages', () => {
   it('holds the car for the clip at the meet, then talks, then ends once', () => {
     const r = rig();
     passDrift(r);
+    untilObjective(r, 'disable');
     kill(r);
     expect(r.intro.stage).toBe('arrival');
     for (let i = 0; i < 60 * 150 && r.intro.lineId !== 'e1'; i++) r.tick();
@@ -473,7 +512,9 @@ describe('isolation and the ways out', () => {
   it('skipping during the clip releases the car', () => {
     const r = rig();
     passDrift(r);
+    untilObjective(r, 'disable');
     kill(r);
+    untilObjective(r, 'arrival');
     r.put(INTRO.route.meetup.x, INTRO.route.meetup.z);
     r.tick(1);
     expect(introHoldsPlayer(r.intro)).toBe(true);

@@ -27,7 +27,7 @@ import type {
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -106,6 +106,10 @@ import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
 import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
 import { createEnvironment } from './render/scene/environment';
+import { createStreetPropsVisual, type StreetPropsVisual } from './render/scene/streetPropsVisual';
+import { resolveQuality } from './render/scene/env/atmosphere';
+import { thinSewerSteam, thinStreetProps } from './world/streetProps';
+import { createSewerSteamVisual, type SewerSteamVisual } from './render/scene/sewerSteamVisual';
 import { createCarVisual } from './render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
 import { createPoliceCarVisual, disposePoliceCarResources, type PoliceCarVisual } from './render/scene/policeCarVisual';
@@ -229,6 +233,11 @@ export function createGame(
                 createCityWorld(STACK_SPEC)
               : createArenaWorld();
   const layout = world.layout;
+  // The street props' decorative density follows the quality preset (`STREET_PROPS.qualityDensity`),
+  // decided before the state is built so the rules never collide with a prop that is not drawn.
+  const propQuality = resolveQuality(ATMOSPHERE.quality, isTouchDevice());
+  if (layout.streetProps) layout.streetProps = thinStreetProps(layout.streetProps, STREET_PROPS.qualityDensity[propQuality]);
+  if (layout.sewerVents) layout.sewerVents = thinSewerSteam(layout.sewerVents, SEWER_STEAM.qualityShare[propQuality]);
 
   /* ------------------------------------------------------------- multiplayer */
 
@@ -327,6 +336,18 @@ export function createGame(
 
   end = measure('environment');
   const environment = createEnvironment(scene, world.plan);
+  // The crashable pavement props (`src/sim/streetProps.ts`), in the worlds that carry them.
+  let streetPropsVisual: StreetPropsVisual | null = null;
+  if (state.streetProps) {
+    streetPropsVisual = createStreetPropsVisual(state.streetProps.defs, environment.signAtlas, propQuality);
+    scene.add(streetPropsVisual.root);
+  }
+  // Manholes and kerb grates, some of them steaming (`src/render/scene/sewerSteamVisual.ts`).
+  let sewerVisual: SewerSteamVisual | null = null;
+  if (layout.sewerVents && layout.sewerVents.length > 0) {
+    sewerVisual = createSewerSteamVisual(layout.sewerVents, propQuality);
+    scene.add(sewerVisual.root);
+  }
   end();
 
   end = measure('vehicles');
@@ -604,9 +625,6 @@ export function createGame(
         onSkipIntro: () => {
           if (state.intro) skipIntro(state.intro);
         },
-        onAssist: () => {
-          if (state.intro) acceptIntroAssist(state.intro);
-        },
         duckMusic: (level) => theme.duck(level),
       })
     : null;
@@ -662,7 +680,7 @@ export function createGame(
     badkalaFigure.group.rotation.y = -bk.heading;
     scene.add(badkalaFigure.group);
   }
-  const introSnapshot: IntroOverlaySnapshot = { stage: 'opening', objective: null, assistOffered: false, talking: false };
+  const introSnapshot: IntroOverlaySnapshot = { stage: 'opening', objective: null, talking: false, time: 0, canShoot: false, moving: false };
   /** The road route to the intro's current objective, for the arrow. Rebuilt per objective. */
   let introRoute: RouteField | null = null;
   let introRewarded = false;
@@ -805,22 +823,24 @@ export function createGame(
    * is the only moment in a ride when the player can look at the person they just drove.
    */
   /**
-   * Aim the arrow along a route. The arrow rides the car and only turns: `follow` is the car's
-   * own pose, and the heading is the bearing FROM the car TO a point a fixed distance up the
-   * route. So it lies down the street while the street is the way and swings across as the
-   * junction comes up, while never leaving the screen. It goes away rather than point at
-   * nothing when the walk finds no way — off the network, or nowhere left to go. One arrow for
-   * the fare's destination and for the intro's objectives, which never coexist.
+   * Aim the arrow at a destination. The arrow rides the car and only turns: `follow` is the car's
+   * own pose, and the heading is the straight-line bearing FROM the car TO the destination
+   * itself — a compass lock, not turn-by-turn. The player knows which way the streets go; what
+   * they want is where the thing IS, steady, so a straight street towards a diagonal target
+   * reads as "over there, left", not "straight on… now left". The route is still walked, for the
+   * road distance that drives the dive and to hide the arrow rather than point at nothing when
+   * the car is off the network. One arrow for the fare's destination and for the intro's
+   * objectives, which never coexist.
    */
   function steerArrow(field: RouteField, frameDt: number): void {
     if (!destinationArrow || !roadGraph) return;
     if (aimAlong(roadGraph, field, pose.x, pose.z, PASSENGER.arrow.lookahead, routeAim)) {
-      const toAimX = routeAim.x - pose.x;
-      const toAimZ = routeAim.z - pose.z;
+      const toGoalX = field.goalX - pose.x;
+      const toGoalZ = field.goalZ - pose.z;
       destinationArrow.follow(pose.x, pose.y, pose.z, pose.heading);
-      // Standing on the aim point itself there is no bearing to take, so the road's own
-      // direction there stands in — which is what the player would do anyway.
-      if (toAimX * toAimX + toAimZ * toAimZ > 1) destinationArrow.face(toAimX, toAimZ);
+      // Standing on the destination itself there is no bearing to take, so the road's own
+      // direction there stands in; the arrow is nosed down at the kerb by then anyway.
+      if (toGoalX * toGoalX + toGoalZ * toGoalZ > 1) destinationArrow.face(toGoalX, toGoalZ);
       else destinationArrow.face(routeAim.dirX, routeAim.dirZ);
       destinationArrow.setDive(1 - Math.min(1, routeAim.remaining / PASSENGER.arrow.diveDistance));
       destinationArrow.show();
@@ -1462,6 +1482,9 @@ export function createGame(
           net.reportBump(ev.targetId, ev.knockX ?? 0, ev.knockZ ?? 0);
         }
         break;
+      case 'propHit':
+        effects.propImpact(ev.kind, ev.x, ev.y, ev.z, ev.impact, ev.damaged);
+        break;
       case 'passengerOffer':
       case 'passengerBoard':
       case 'passengerCancel':
@@ -1706,6 +1729,8 @@ export function createGame(
     crowdSubject.speed = Math.abs(v.speed);
     crowdSubject.drifting = state.drift.active;
     environment.update(frameDt, simTime, chase.camera.position.x, chase.camera.position.z, crowdSubject);
+    if (streetPropsVisual && state.streetProps) streetPropsVisual.update(state.streetProps, chase.camera.position.x, chase.camera.position.z, alpha);
+    if (sewerVisual) sewerVisual.update(frameDt, chase.camera.position.x, chase.camera.position.z, v.x, v.z, v.vx, v.vz);
     // After the environment, so the sky and the fog it blends from are this frame's. The
     // envelope is read off the rules' clock: 0 the moment the Moogul is gone, and the
     // controller's own fade takes it from there.
@@ -1736,7 +1761,7 @@ export function createGame(
       },
       pose,
       state.targets,
-      { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin },
+      { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin, yawRate: v.yawRate },
       policeAudio,
     );
 
@@ -2026,8 +2051,10 @@ export function createGame(
         if (introRoute) steerArrow(introRoute, frameDt);
         introSnapshot.stage = intro.stage;
         introSnapshot.objective = intro.objective;
-        introSnapshot.assistOffered = intro.assistOffered;
         introSnapshot.talking = intro.lineId !== '';
+        introSnapshot.time = state.time;
+        introSnapshot.canShoot = canAffordShot(state.lightning.charge);
+        introSnapshot.moving = intro.odometer >= INTRO.route.loreAtMetres.batteries;
         introOverlay.update(introSnapshot);
       }
       introMarker?.update(simTime);
@@ -2234,6 +2261,14 @@ export function createGame(
       debug.dispose();
       audio.dispose();
       effects.dispose();
+      if (streetPropsVisual) {
+        scene.remove(streetPropsVisual.root);
+        streetPropsVisual.dispose();
+      }
+      if (sewerVisual) {
+        scene.remove(sewerVisual.root);
+        sewerVisual.dispose();
+      }
       for (const t of targetVisuals) t.dispose();
       for (const b of busVisuals) b.dispose();
       for (const p of policeVisuals) p.dispose();
@@ -2641,7 +2676,6 @@ export function createGame(
               said: Array.from(i.said),
               ringing: i.ringing,
               connected: i.callConnected,
-              assistOffered: i.assistOffered,
               driftDone: i.driftDone,
               evDone: i.evDone,
               done: i.done,
@@ -2670,6 +2704,51 @@ export function createGame(
 
     /** Which activity has the car right now, or null. The one answer everything else is derived from. */
     engaged: () => engagedActivity(state),
+
+    /**
+     * THE STREET PROPS, for automation. Null in worlds without them.
+     *
+     *   __rb.props.status()          // { props, moving, lying, broken, drawn, stats }
+     *   __rb.props.near(x, z, kind?) // the nearest prop (of a kind): { index, kind, x, z, yaw, home, damaged }
+     *   __rb.props.state             // the live `StreetPropsState`
+     */
+    props: state.streetProps
+      ? {
+          get state() {
+            return state.streetProps;
+          },
+          status: () => {
+            const s = state.streetProps!;
+            return {
+              props: s.defs.length,
+              moving: s.moving,
+              lying: s.bodies.filter((b) => b.prop >= 0 && !b.moving).length,
+              broken: s.chargers.filter((p) => s.damaged[p]).length,
+              drawn: streetPropsVisual ? streetPropsVisual.stats() : null,
+              sewers: sewerVisual ? sewerVisual.stats() : null,
+              stats: { ...s.stats },
+            };
+          },
+          near: (x: number, z: number, kind?: string) => {
+            const s = state.streetProps!;
+            let best = -1;
+            let bestD = Infinity;
+            for (let i = 0; i < s.defs.length; i++) {
+              const d = s.defs[i];
+              if (kind && d.kind !== kind) continue;
+              const dd = Math.hypot(d.x - x, d.z - z);
+              if (dd < bestD) {
+                bestD = dd;
+                best = i;
+              }
+            }
+            if (best < 0) return null;
+            const d = s.defs[best];
+            const b = s.bodyOf[best] >= 0 ? s.bodies[s.bodyOf[best]] : null;
+            return { index: best, kind: d.kind, variant: d.variant, x: d.x, z: d.z, yaw: d.yaw, home: !b, at: b ? { x: b.x, y: b.y, z: b.z, moving: b.moving } : null, damaged: !!s.damaged[best], distance: bestD };
+          },
+        }
+      : null,
 
     /**
      * THE POLICE, for automation. Null everywhere but the open world.

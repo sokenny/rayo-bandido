@@ -238,15 +238,47 @@ export const INTRO = {
      * `LIGHTNING.cost`; the margin is a missed shot's worth of down payment.
      */
     chargeBonus: Math.min(LIGHTNING.capacity, LIGHTNING.cost + LIGHTNING.minCost),
-    /** Seconds without a valid drift before the one hint. */
+    /** Seconds without a valid drift before the one hint. There is no way past it but a drift. */
     hintAfterSeconds: 15,
-    /** Seconds without a valid drift before CONTINUAR is offered. */
-    assistAfterSeconds: 28,
   },
 
   ev: {
-    /** Seconds the meter may sit unable to pay for a shot before it is topped up again. */
-    rechargeAfterSeconds: 4,
+    /**
+     * Seconds the meter may sit unable to pay for a shot before it is topped up again. Long
+     * enough that the card telling the player to drift for charge is the thing that teaches it;
+     * the top-up is only the safety net.
+     */
+    rechargeAfterSeconds: 12,
+  },
+
+  /**
+   * THE INSTRUCTION CARD: one short, big line in the middle of the screen for the step the
+   * player is on, with the key to press. It is the lesson; the subtitles are the story.
+   * `{hand}` and `{aim}` are filled with the device's own key names by the overlay.
+   */
+  card: {
+    approach: { keys: 'W ACELERAR · A / D DOBLAR', touch: 'GAS PARA ACELERAR · ◀ ▶ PARA DOBLAR' },
+    drift: {
+      title: 'PASO 1 · DERRAPÁ',
+      keys: 'Tomá velocidad, doblá y mantené {hand} para derrapar',
+      touch: 'Tomá velocidad, doblá y mantené HAND para derrapar',
+    },
+    driftDone: 'DERRAPE LOGRADO · RAYO CARGADO',
+    shoot: {
+      title: 'PASO 2 · DISPARÁ EL RAYO',
+      keys: 'Mantené {aim} apuntando a un auto eléctrico y soltá para disparar',
+      touch: 'Mantené el dedo sobre un auto eléctrico y soltá para disparar',
+    },
+    empty: {
+      title: 'EL RAYO NO TIENE CARGA',
+      keys: 'Primero cargalo: derrapá con {hand} doblando a alta velocidad',
+      touch: 'Primero cargalo: derrapá con HAND doblando a alta velocidad',
+    },
+    evDone: 'ELÉCTRICO APAGADO',
+    arrival: { title: 'PASO 3 · ANDÁ A LA JUNTADA', text: 'Seguí la flecha y el punto en el mapa' },
+    /** Seconds the success flash and the arrival card stay up. */
+    doneSeconds: 2.2,
+    arrivalSeconds: 7,
   },
 
   /* ------------------------------------------------------------- the dialogue */
@@ -265,7 +297,7 @@ export const INTRO = {
     // Stage A — back on the radar
     line('a1', 'Mirá quién volvió a encenderse… Pensé que habían enterrado ese auto con vos.', { gap: 1.6 }),
     line('a2', 'Tu Rayo acaba de aparecer en la red de la ciudad. Por ahora la única que lo vio fui yo, pero eso no va a durar.', { gap: 1.2 }),
-    line('a3', 'Dale, manejá. Metete en la ciudad; yo te voy poniendo al día.', { gap: 1.4 }),
+    line('a3', 'Dale, manejá. Metete en la ciudad; yo te voy poniendo al día.', { instructional: 'approach', gap: 1.4 }),
     // Stage B — entering the city
     line('b1', 'Mientras no estabas, cambiaron los motores por baterías. Casi no queda nadie haciendo ruido.', { gap: 1.4 }),
     line('b2', 'Nosotros seguimos con combustión. Y con un par de modificaciones que no pasan la revisión.', { gap: 1.4 }),

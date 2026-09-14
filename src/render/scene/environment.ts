@@ -11,6 +11,7 @@ import { buildTrack } from './env/trackBuilder';
 import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
+import { buildGasStations } from './env/gasStationBuilder';
 import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
 import type { CrowdSubject } from './env/humanActs';
@@ -78,6 +79,8 @@ export interface EnvironmentVisual {
   circuitMarker: ActivityMarkerVisual | null;
   /** The STREET RACE rings, one per event, in the open world; empty everywhere else. */
   streetMarkers: ActivityMarkerVisual[];
+  /** The neon sign atlas (`env/textures.ts`), shared with the pavement signs (`streetPropsVisual.ts`). Owned here. */
+  signAtlas: THREE.Texture;
   /**
    * What the Moogul may touch (`render/scene/moogulTrip.ts`): the two scene lights, the
    * surface uniforms patched into the facade and graffiti materials, and the index of every
@@ -343,6 +346,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   root.userData.screens = buildScreens(b);
   // The car meets' lots, paint, edges and the light off the parked cars (`env/meetBuilder.ts`).
   buildCarMeets(b);
+  // The gas stations' forecourts, canopies, pumps, shops and pylons (`env/gasStationBuilder.ts`).
+  buildGasStations(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
@@ -471,6 +476,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     rushMarker,
     circuitMarker,
     streetMarkers,
+    signAtlas: signTex,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number, camX?: number, camZ?: number, people: CrowdSubject | null = null) {

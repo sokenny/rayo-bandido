@@ -46,7 +46,14 @@ describe('distanceGain', () => {
 
 describe('skidIntensity', () => {
   it('is silent when parked, even with lateral velocity noise', () => {
-    expect(skidIntensity(5, 1, false)).toBe(0); // below MIN_SPEED
+    expect(skidIntensity(1.5, 1, false)).toBe(0); // ground speed below MIN_SPEED
+  });
+
+  it('keeps scrubbing mid-spin with no forward speed', () => {
+    // Fully sideways halfway through a 180: forward speed ~0, drift unlatched.
+    expect(skidIntensity(15, 0, false)).toBe(1);
+    // Rolling backwards through the end of the spin, still rotating hard.
+    expect(skidIntensity(0.5, -12, false, 0, 4)).toBeGreaterThan(0);
   });
 
   it('is silent when gripping and barely sliding', () => {

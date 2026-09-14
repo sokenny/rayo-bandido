@@ -23,6 +23,7 @@
 
 import type { TrackPath } from '../world/track';
 import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
+import type { StreetPropsState } from '../sim/streetProps';
 
 /**
  * Which world is loaded: the test arena, a racing circuit, or a free-roam city. `city` is the open
@@ -716,6 +717,12 @@ export type GameEvent =
       knockX?: number;
       knockZ?: number;
     }
+  /**
+   * The car met a crashable street prop (`src/sim/streetProps.ts`). Presentation only — dust,
+   * sparks and a knock by ear. A charger hit hard enough to break also raises `collision`,
+   * because that one really is a solid thing; the light props never do.
+   */
+  | { type: 'propHit'; kind: StreetPropKind; x: number; y: number; z: number; impact: number; damaged: boolean }
   | { type: 'restart' }
   | { type: 'raceCountdown'; seconds: number }
   | { type: 'raceStart' }
@@ -1217,14 +1224,12 @@ export interface IntroState {
   objectiveRadius: number;
   approachDone: boolean;
   driftDone: boolean;
-  /** The drift objective was cleared by the CONTINUAR assist rather than by a drift. */
+  /** The drift objective was cleared by automation's assist rather than by a drift. */
   driftAssisted: boolean;
   /** Seconds since the drift was asked for (the instruction said, or dropped) without one. */
   struggleTime: number;
   hintGiven: boolean;
-  /** The CONTINUAR assist is on offer (drift stage). */
-  assistOffered: boolean;
-  /** Written by the presentation when the player takes the assist. */
+  /** Written by automation (`__rb.intro.assist()`): count the drift as done. Never offered to the player. */
   assistAccepted: boolean;
   evDone: boolean;
   /** Seconds the meter has been unable to pay for a shot, in the shutdown stage. */
@@ -1290,9 +1295,50 @@ export interface GameState {
    * it — the open world, on a browser that has not seen it — and null everywhere else.
    */
   intro: IntroState | null;
+  /** The crashable street props (`src/sim/streetProps.ts`), in worlds that carry them. Local only. */
+  streetProps: StreetPropsState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
+}
+
+/**
+ * `bin` is a metal can or a wheelie bin; `dumpster` is fixed and solid like a charger (it never
+ * breaks); `litter` (newspapers, cans) is drawn only — the car rolls over it.
+ */
+export type StreetPropKind = 'bag' | 'box' | 'cone' | 'barrier' | 'sign' | 'chair' | 'table' | 'charger' | 'bin' | 'dumpster' | 'litter';
+
+/**
+ * A storm grate in the asphalt at the kerb (`src/world/streetProps.ts`). Flat and drivable — the
+ * rules never read it; the art draws the grate and, when `steam` > 0, a column of steam out of it
+ * (`src/render/scene/sewerSteamVisual.ts`).
+ */
+export interface SewerVentDef {
+  x: number;
+  /** Road height under it (m), the asphalt's lift included. */
+  y: number;
+  z: number;
+  /** Rotation about +Y (rad): the grate's long side runs along local X, the road's direction. */
+  yaw: number;
+  /** How hard it steams, 0 (a dry cover) to 1. */
+  steam: number;
+  /** 0..1: lower quality settings keep only the steam of vents under their share. */
+  rank: number;
+}
+
+/** One crashable street prop where the city put it. See `src/world/streetProps.ts`. */
+export interface StreetPropDef {
+  kind: StreetPropKind;
+  /** Which look of the kind (shape or colour), `0..STREET_PROP_SHAPES[kind].variants - 1`. */
+  variant: number;
+  x: number;
+  z: number;
+  /** Ground under it (m). Always ground level in this pass. */
+  y: number;
+  /** Rotation about +Y (rad, three.js sense): local +Z, the prop's front, faces (sin, cos). */
+  yaw: number;
+  /** 0..1, per arrangement: lower quality settings keep only the arrangements under their density. */
+  rank: number;
 }
 
 /**
@@ -1476,6 +1522,14 @@ export interface ArenaLayout {
   streetSites?: ActivitySite[] | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
+  /**
+   * Crashable street props (`src/world/streetProps.ts`): bags, boxes, cones, barriers, signs,
+   * cafe furniture and EV chargers on the pavements. Ground level only, never on a lane. The
+   * rules read them (`src/sim/streetProps.ts`), the art draws them (`streetPropsVisual.ts`).
+   */
+  streetProps?: StreetPropDef[] | null;
+  /** Storm grates at the kerb, some steaming (`src/world/streetProps.ts`). Art only. */
+  sewerVents?: SewerVentDef[] | null;
   minimap: MinimapData;
 }
 
