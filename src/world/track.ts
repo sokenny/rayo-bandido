@@ -388,11 +388,19 @@ export function projectOntoPath(
   out: PathProjection,
   hint = -1,
   window = 12,
+  /**
+   * The height of the point, when it is known. A course that passes over itself (a ramp over a
+   * street of the same lap) has two stretches under one (x, z); the one at the car's height wins.
+   * Omitted, the projection is the plain 2D one it always was.
+   */
+  y = Number.NaN,
 ): PathProjection {
   const samples = path.samples;
   const n = samples.length;
   const segs = segmentCount(path);
+  const byHeight = !Number.isNaN(y);
   let best = Infinity;
+  let bestD2 = Infinity;
   let bestI = 0;
   let bestT = 0;
   const from = hint < 0 ? 0 : hint - window;
@@ -410,8 +418,16 @@ export function projectOntoPath(
     const px = a.x + dx * t - x;
     const pz = a.z + dz * t - z;
     const d2 = px * px + pz * pz;
-    if (d2 < best) {
-      best = d2;
+    let cost = d2;
+    if (byHeight) {
+      // Within a couple of metres of the road is on it; beyond that, each metre of height
+      // weighs five metres of distance, so a deck 12 m overhead loses to the street under it.
+      const dy = Math.abs(a.y + (b.y - a.y) * t - y);
+      if (dy > 2) cost += (dy - 2) * (dy - 2) * 25;
+    }
+    if (cost < best) {
+      best = cost;
+      bestD2 = d2;
       bestI = i;
       bestT = t;
     }
@@ -431,7 +447,7 @@ export function projectOntoPath(
   out.t = bestT;
   out.s = a.s + len * bestT;
   out.lateral = lateral;
-  out.dist = Math.sqrt(best);
+  out.dist = Math.sqrt(bestD2);
   out.halfWidth = a.halfWidth + (b.halfWidth - a.halfWidth) * bestT;
   out.tx = tx;
   out.tz = tz;

@@ -456,6 +456,9 @@ function buildStartLine(b: EnvBuilders, line: TrackLineDef): void {
   const nz = line.tx;
   const tx = line.tx;
   const tz = line.tz;
+  // On a deck the whole gantry stands on it, its feet inside the deck's own rails.
+  const lift = line.y ?? 0;
+  const raised = lift > 1;
   // Checkered band: two rows of squares across the whole width.
   const cell = 1.0;
   const cols = Math.floor((line.halfWidth * 2) / cell);
@@ -470,39 +473,39 @@ function buildStartLine(b: EnvBuilders, line: TrackLineDef): void {
       const pz = line.z + nz * u + tz * v;
       const h = cell / 2;
       b.lane.quad(
-        px - nx * h - tx * h, PAINT_Y + 0.002, pz - nz * h - tz * h,
-        px + nx * h - tx * h, PAINT_Y + 0.002, pz + nz * h - tz * h,
-        px + nx * h + tx * h, PAINT_Y + 0.002, pz + nz * h + tz * h,
-        px - nx * h + tx * h, PAINT_Y + 0.002, pz - nz * h + tz * h,
+        px - nx * h - tx * h, PAINT_Y + lift + 0.002, pz - nz * h - tz * h,
+        px + nx * h - tx * h, PAINT_Y + lift + 0.002, pz + nz * h - tz * h,
+        px + nx * h + tx * h, PAINT_Y + lift + 0.002, pz + nz * h + tz * h,
+        px - nx * h + tx * h, PAINT_Y + lift + 0.002, pz - nz * h + tz * h,
       );
     }
   }
   // Gantry: two pylons outside the rails, a deep beam, and a neon underline across the road.
   const height = 12;
-  const reach = line.halfWidth + 2.4;
+  const reach = line.halfWidth + (raised ? 0.8 : 2.4);
   for (const side of [-1, 1]) {
     const x = line.x + nx * side * reach;
     const z = line.z + nz * side * reach;
     b.props.color(PAL.metalDark, 0.9);
-    b.props.box(x, height / 2, z, 1.2, height, 1.2);
+    b.props.box(x, lift + height / 2, z, 1.2, height, 1.2);
     const c = side < 0 ? PAL.neonCyan : PAL.neonMagenta;
     b.neonPulse.color(c, 1);
-    b.neonPulse.tube(x, 1.2, z, x, height - 0.8, z, 0.36);
-    halo(b, x - tx * 0.8, height / 2, z - tz * 0.8, 9, height * 1.2, Math.atan2(-tx, -tz), c, 0.16);
-    groundGlow(b, x - nx * side * 5, z - nz * side * 5, 26, 26, c, 0.12);
+    b.neonPulse.tube(x, lift + 1.2, z, x, lift + height - 0.8, z, 0.36);
+    halo(b, x - tx * 0.8, lift + height / 2, z - tz * 0.8, 9, height * 1.2, Math.atan2(-tx, -tz), c, 0.16);
+    if (!raised) groundGlow(b, x - nx * side * 5, z - nz * side * 5, 26, 26, c, 0.12);
   }
   b.props.color(PAL.metalDark, 0.85);
-  b.props.orientedBox(line.x, line.z, nx, nz, reach * 2 + 1.2, 2.2, height - 2.4, height);
+  b.props.orientedBox(line.x, line.z, nx, nz, reach * 2 + 1.2, 2.2, lift + height - 2.4, lift + height);
   // Neon under the beam, cyan into magenta across the width: the line the whole lap is measured from.
   const half = reach;
   b.neon.color(PAL.neonCyan, 1);
-  b.neon.tube(line.x - nx * half, height - 2.6, line.z - nz * half, line.x, height - 2.6, line.z, 0.26);
+  b.neon.tube(line.x - nx * half, lift + height - 2.6, line.z - nz * half, line.x, lift + height - 2.6, line.z, 0.26);
   b.neon.color(PAL.neonMagenta, 1);
-  b.neon.tube(line.x, height - 2.6, line.z, line.x + nx * half, height - 2.6, line.z + nz * half, 0.26);
+  b.neon.tube(line.x, lift + height - 2.6, line.z, line.x + nx * half, lift + height - 2.6, line.z + nz * half, 0.26);
   b.neonPulse.color(PAL.neonWhite, 0.9);
-  b.neonPulse.tube(line.x - nx * half, height - 2.0, line.z - nz * half, line.x + nx * half, height - 2.0, line.z + nz * half, 0.16);
-  halo(b, line.x, height - 2.3, line.z, reach * 2, 6, Math.atan2(-tx, -tz), PAL.neonViolet, 0.14);
-  groundGlow(b, line.x, line.z, reach * 2.2, 30, PAL.neonViolet, 0.1);
+  b.neonPulse.tube(line.x - nx * half, lift + height - 2.0, line.z - nz * half, line.x + nx * half, lift + height - 2.0, line.z + nz * half, 0.16);
+  halo(b, line.x, lift + height - 2.3, line.z, reach * 2, 6, Math.atan2(-tx, -tz), PAL.neonViolet, 0.14);
+  if (!raised) groundGlow(b, line.x, line.z, reach * 2.2, 30, PAL.neonViolet, 0.1);
 }
 
 /** Slim cyan arch: a checkpoint. Legible from far, cheap up close. */
@@ -510,17 +513,19 @@ function buildCheckpointArch(b: EnvBuilders, cp: TrackLineDef): void {
   const nx = -cp.tz;
   const nz = cp.tx;
   const height = 7.5;
-  const reach = cp.halfWidth + 2.0;
+  const lift = cp.y ?? 0;
+  const raised = lift > 1;
+  const reach = cp.halfWidth + (raised ? 0.6 : 2.0);
   for (const side of [-1, 1]) {
     const x = cp.x + nx * side * reach;
     const z = cp.z + nz * side * reach;
     b.props.color(PAL.metalDark, 0.8);
-    b.props.box(x, height / 2, z, 0.5, height, 0.5);
+    b.props.box(x, lift + height / 2, z, 0.5, height, 0.5);
     b.neon.color(PAL.neonCyan, 0.9);
-    b.neon.tube(x, 0.8, z, x, height, z, 0.22);
+    b.neon.tube(x, lift + 0.8, z, x, lift + height, z, 0.22);
   }
   b.neonPulse.color(PAL.neonCyan, 1);
-  b.neonPulse.tube(cp.x - nx * reach, height, cp.z - nz * reach, cp.x + nx * reach, height, cp.z + nz * reach, 0.24);
-  halo(b, cp.x, height - 1, cp.z, reach * 2, 5, Math.atan2(-cp.tx, -cp.tz), PAL.neonCyan, 0.12);
-  groundGlow(b, cp.x, cp.z, reach * 2, 18, PAL.neonCyan, 0.07);
+  b.neonPulse.tube(cp.x - nx * reach, lift + height, cp.z - nz * reach, cp.x + nx * reach, lift + height, cp.z + nz * reach, 0.24);
+  halo(b, cp.x, lift + height - 1, cp.z, reach * 2, 5, Math.atan2(-cp.tx, -cp.tz), PAL.neonCyan, 0.12);
+  if (!raised) groundGlow(b, cp.x, cp.z, reach * 2, 18, PAL.neonCyan, 0.07);
 }

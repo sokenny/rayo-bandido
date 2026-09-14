@@ -200,6 +200,10 @@ export function stepVehicle(
   // --- 4. Longitudinal. -----------------------------------------------------------------
   const maxForward = VEHICLE.maxSpeed + (nitroActive ? NITRO.boostMaxSpeedBonus : 0);
   const fwdSpeed = speed > 0 ? speed : 0;
+  // The ceiling stops the car *gaining* speed past it; it never takes speed away. Speed carried
+  // above it (nitro just ran out, a collision shove) is momentum, and bleeds off through drag —
+  // at no less than `overspeedBleed` so the car does not hover just over its top speed.
+  const ceiling = Math.max(maxForward, fwdSpeed - VEHICLE.overspeedBleed * dt);
   // A gear cannot be pushed past its top: the limiter cuts the engine there and holds the car
   // at that speed. The automatic shifts up before this can bite, so it only ever acts on the
   // manual box — flat out in a gear, or after a downshift the road speed was too high for.
@@ -286,7 +290,7 @@ export function stepVehicle(
     VEHICLE.driftDrag * slide * (lateral < 0 ? -lateral : lateral);
   const resistDv = Math.min(absSpeed, resist * dt);
   speed -= speed > 0 ? resistDv : -resistDv;
-  speed = clamp(speed, -VEHICLE.maxReverseSpeed, maxForward);
+  speed = clamp(speed, -VEHICLE.maxReverseSpeed, ceiling);
   absSpeed = speed < 0 ? -speed : speed;
 
   // --- 5. Yaw. --------------------------------------------------------------------------

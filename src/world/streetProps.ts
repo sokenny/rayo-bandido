@@ -135,7 +135,7 @@ export function placeStreetProps(world: World): StreetPropDef[] {
   const wallRects = walls.map((w) => ({ minX: Math.min(w.ax, w.bx), maxX: Math.max(w.ax, w.bx), minZ: Math.min(w.az, w.bz), maxZ: Math.max(w.az, w.bz), w }));
   const wallIndex = createRectIndex(wallRects, 32, 2);
   const blockIndex = createRectIndex<BlockRect>(plan.blocks, 32, 2);
-  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? [])].map((m) => m.lot);
+  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
   const downtownRect = plan.downtown ?? null;
   const megas: Rect[] = (plan.megastructures ?? []).map((m) => m.footprint);
 
@@ -146,6 +146,7 @@ export function placeStreetProps(world: World): StreetPropDef[] {
   for (const s of layout.streetSites ?? []) markers.push({ x: s.x, z: s.z, r: P.markerClear + 6 });
   if (layout.circuitSite) markers.push({ x: layout.circuitSite.x, z: layout.circuitSite.z, r: P.markerClear + 10 });
   if (layout.buhoSite) markers.push({ x: layout.buhoSite.x, z: layout.buhoSite.z, r: P.markerClear });
+  if (layout.garageSite) markers.push({ x: layout.garageSite.x, z: layout.garageSite.z, r: P.markerClear });
   for (const st of plan.busStops ?? []) markers.push({ x: st.x, z: st.z, r: 12 });
 
   const placed: StreetPropDef[] = [];
@@ -336,7 +337,7 @@ export function placeSewerVents(world: World): SewerVentDef[] {
   const { plan, layout } = world;
   const ground = plan.ribbons.filter((rb) => !rb.elevated);
   const downtownRect = plan.downtown ?? null;
-  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? [])].map((m) => m.lot);
+  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
   const markers: Array<{ x: number; z: number; r: number }> = [{ x: layout.playerSpawn.x, z: layout.playerSpawn.z, r: 14 }];
   for (const s of layout.rushSites ?? []) markers.push({ x: s.x, z: s.z, r: 10 });
   for (const s of layout.passengerStops ?? []) markers.push({ x: s.x, z: s.z, r: 8 });

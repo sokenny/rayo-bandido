@@ -137,8 +137,12 @@ export function createAudio(targetCount: number): AudioSystem {
           // The phrases (`src/sim/flair.ts`). The big ones borrow the marker chime — a short
           // rising figure the kit already has, and already means "that was the good one" — and
           // the small ones say nothing at all: a sound on every DE COSTADO would be a rattle.
-          // The crash line is silent too; the crash itself was loud enough.
+          // The crash line is silent too: its sound is the crash's own, below.
           if (ev.tier === 'special' || ev.tier === 'peak') oneShots.pickup();
+          break;
+        case 'crashDamage':
+        case 'crashStall':
+          oneShots.crash(ev.severity === 'heavy' ? 1 : ev.severity === 'medium' ? 0.65 : 0.35);
           break;
         case 'rushLevelUp':
           // A mission cleared gets the GO beat, which is the one sound in the kit that already

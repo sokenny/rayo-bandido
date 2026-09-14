@@ -1,5 +1,6 @@
 import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
+import type { GarageSpec } from './garage';
 import type { TrackPath } from './track';
 
 /**
@@ -294,6 +295,8 @@ export interface TrackLineDef {
   tx: number;
   tz: number;
   halfWidth: number;
+  /** Height of the road under the line (m); omitted on the ground. A gate on a deck stands on it. */
+  y?: number;
 }
 
 /** Exact occupied boxes, after reserving road and chase-camera corridors. */
@@ -449,6 +452,8 @@ export interface CityPlan {
   meets?: CarMeetSpec[];
   /** The gas stations (`gasStation.ts`): their forecourts and what stands on them. */
   gasStations?: GasStationSpec[];
+  /** Loco Mustang's garage (`garage.ts`): its lot and the building on it. */
+  garage?: GarageSpec;
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.

@@ -52,6 +52,21 @@ describe('vehicle acceleration', () => {
     expect(boosted.speed).toBeLessThanOrEqual(VEHICLE.maxSpeed + NITRO.boostMaxSpeedBonus + 1e-6);
   });
 
+  it('carries boosted speed after the nitro ends and bleeds it off over a few seconds', () => {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    run(v, cmd, 40, true);
+    const boosted = v.speed;
+    run(v, cmd, 1 / 60);
+    // No snap back to the unboosted ceiling on the tick the boost goes out.
+    expect(v.speed).toBeGreaterThan(boosted - 0.2);
+    run(v, cmd, 1);
+    expect(v.speed).toBeGreaterThan(VEHICLE.maxSpeed + 5);
+    run(v, cmd, 8);
+    expect(v.speed).toBeLessThanOrEqual(VEHICLE.maxSpeed + 1e-6);
+  });
+
   it('brakes hard from speed', () => {
     const v = createVehicleState(0, 0, 0);
     const cmd = createPlayerCommand();

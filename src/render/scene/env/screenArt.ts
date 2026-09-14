@@ -654,9 +654,9 @@ function pills(ctx: Ctx, page: number, w: number, h: number): void {
     ctx.roundRect(-pw / 2, 0, pw, ph / 2, [0, 0, pw / 2, pw / 2]);
     ctx.fill();
     ctx.restore();
-    text(ctx, 'CALMEX', w / 2, h * 0.76, { size: 52, color: '#0b3c3a', align: 'center', maxW: w * 0.92 });
-    text(ctx, 'TOMA UNA.', w / 2, h * 0.86, { size: 28, color: '#0b3c3a', align: 'center', font: COND, weight: 700 });
-    text(ctx, 'SONRÍE.', w / 2, h * 0.93, { size: 28, color: '#138b82', align: 'center', font: COND, weight: 700 });
+    text(ctx, 'RESCATINOL', w / 2, h * 0.76, { size: 52, color: '#0b3c3a', align: 'center', maxW: w * 0.92 });
+    text(ctx, 'PARA RESCATARSE', w / 2, h * 0.86, { size: 28, color: '#0b3c3a', align: 'center', font: COND, weight: 700, maxW: w * 0.92 });
+    text(ctx, 'DE LA RESACA.', w / 2, h * 0.93, { size: 28, color: '#138b82', align: 'center', font: COND, weight: 700, maxW: w * 0.92 });
   } else {
     ctx.fillStyle = '#0b3c3a';
     ctx.beginPath();
@@ -668,9 +668,9 @@ function pills(ctx: Ctx, page: number, w: number, h: number): void {
     ctx.beginPath();
     ctx.arc(w / 2, h * 0.34, w * 0.26, 0.2 * Math.PI, 0.8 * Math.PI);
     ctx.stroke();
-    text(ctx, 'TODO', w / 2, h * 0.66, { size: 56, color: '#0b3c3a', align: 'center' });
-    text(ctx, 'ESTÁ', w / 2, h * 0.77, { size: 56, color: '#0b3c3a', align: 'center' });
-    text(ctx, 'BIEN', w / 2, h * 0.88, { size: 56, color: '#138b82', align: 'center' });
+    text(ctx, 'RESCÁTATE', w / 2, h * 0.66, { size: 56, color: '#0b3c3a', align: 'center', maxW: w * 0.92 });
+    text(ctx, 'DE LA', w / 2, h * 0.77, { size: 56, color: '#0b3c3a', align: 'center' });
+    text(ctx, 'RESACA', w / 2, h * 0.88, { size: 56, color: '#138b82', align: 'center', maxW: w * 0.92 });
   }
 }
 

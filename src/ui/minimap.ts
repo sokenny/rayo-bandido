@@ -60,6 +60,8 @@ const KIND_LABEL: Record<ActivityMarkKind, string> = {
   destination: 'DROP-OFF',
   circuit: 'CIRCUIT',
   street: 'STREET RACE',
+  buho: 'EL BÚHO',
+  garage: 'GARAGE',
 };
 
 interface Mark {
@@ -129,7 +131,7 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const dotR = 2.2 * dpr;
   const half = canvas.width / 2;
   const rimR = half - 1.5 * dpr;
-  const markRimR = rimR - 9 * dpr;
+  const markRimR = rimR - 9 * dpr * MINIMAP.iconScale;
 
   /* ------------------------------------------------------------ the full map */
 
@@ -402,9 +404,19 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
  * The bolt is a stroked zigzag rather than the filled silhouette the HUD and the world marker
  * share, because at ten pixels a filled bolt is a blob and three strokes still read as lightning.
  */
-function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number, kind: ActivityMarkKind = 'rush'): void {
+function drawActivity(ctx: CanvasRenderingContext2D, cx: number, cz: number, pxRatio: number, kind: ActivityMarkKind = 'rush'): void {
+  // Every mark is drawn in units of `dpr`, so scaling it scales the whole icon at once.
+  const dpr = pxRatio * MINIMAP.iconScale;
   if (kind === 'circuit') {
     drawCircuitMark(ctx, cx, cz, dpr);
+    return;
+  }
+  if (kind === 'buho') {
+    drawBuhoMark(ctx, cx, cz, dpr);
+    return;
+  }
+  if (kind === 'garage') {
+    drawGarageMark(ctx, cx, cz, dpr);
     return;
   }
   if (kind === 'street') {
@@ -524,6 +536,95 @@ function drawStreetMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, d
   ctx.fillRect(-2.6 * dpr, -3.9 * dpr, 2 * dpr, 1 * dpr);
   ctx.fillRect(-1 * dpr, 1.4 * dpr, 4.6 * dpr, 1.5 * dpr);
   ctx.fillRect(0.6 * dpr, 0.4 * dpr, 2 * dpr, 1 * dpr);
+
+  ctx.restore();
+}
+
+/**
+ * El Búho's bay under the viaduct: a ring in acid green — nothing else on this map uses it —
+ * around an owl's face, two big eyes under a pair of ear tufts. Fixed pixel size, same reason as
+ * the RUSH mark.
+ */
+function drawBuhoMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+  const r = 6.2 * dpr;
+  const GREEN = '#7dff6a';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = GREEN;
+  ctx.shadowColor = GREEN;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Ear tufts, then two eyes with dark pupils.
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = GREEN;
+  ctx.beginPath();
+  ctx.moveTo(-3.6 * dpr, -3.6 * dpr);
+  ctx.lineTo(-1.2 * dpr, -1.8 * dpr);
+  ctx.lineTo(-3.2 * dpr, -1.2 * dpr);
+  ctx.closePath();
+  ctx.moveTo(3.6 * dpr, -3.6 * dpr);
+  ctx.lineTo(1.2 * dpr, -1.8 * dpr);
+  ctx.lineTo(3.2 * dpr, -1.2 * dpr);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-1.8 * dpr, 0.9 * dpr, 1.7 * dpr, 0, Math.PI * 2);
+  ctx.arc(1.8 * dpr, 0.9 * dpr, 1.7 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.95)';
+  ctx.beginPath();
+  ctx.arc(-1.8 * dpr, 0.9 * dpr, 0.7 * dpr, 0, Math.PI * 2);
+  ctx.arc(1.8 * dpr, 0.9 * dpr, 0.7 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+/**
+ * Loco Mustang's garage: a ring in the red of the 99 on his shirt around a spanner, head up and
+ * to the left. Fixed pixel size, same reason as the RUSH mark.
+ */
+function drawGarageMark(ctx: CanvasRenderingContext2D, cx: number, cz: number, dpr: number): void {
+  const r = 6.2 * dpr;
+  const RED = '#ff5a3c';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = RED;
+  ctx.shadowColor = RED;
+  ctx.shadowBlur = 6 * dpr;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // The spanner: a shaft corner to corner, an open jaw at the top-left end.
+  ctx.shadowBlur = 0;
+  ctx.rotate(-Math.PI / 4);
+  ctx.fillStyle = RED;
+  ctx.fillRect(-0.9 * dpr, -1.2 * dpr, 1.8 * dpr, 5.4 * dpr);
+  ctx.beginPath();
+  ctx.arc(0, -2.4 * dpr, 2.3 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.95)';
+  ctx.fillRect(-0.85 * dpr, -5 * dpr, 1.7 * dpr, 2.9 * dpr);
 
   ctx.restore();
 }

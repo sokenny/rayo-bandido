@@ -12,12 +12,15 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
 import { buildGasStations } from './env/gasStationBuilder';
+import { buildGarage } from './env/garageBuilder';
 import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
 import type { CrowdSubject } from './env/humanActs';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
-import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual } from './env/activityMarker';
+import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual, type MarkerGround } from './env/activityMarker';
+import { pathBox } from '../../world/cityGen';
+import { createProjection, projectOntoPath } from '../../world/track';
 import { createBadkalaPoster } from './env/badkalaPoster';
 import { makeAsphaltTexture, makeEnvTexture, makeGlowTexture, makeSignAtlas, makeTransitAtlas } from './env/textures';
 import { createScreenAtlas, screenLayout } from './env/screenAtlas';
@@ -348,6 +351,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   buildCarMeets(b);
   // The gas stations' forecourts, canopies, pumps, shops and pylons (`env/gasStationBuilder.ts`).
   buildGasStations(b);
+  // Loco Mustang's garage: the whitewashed block, the dark mouth and the van in it (`env/garageBuilder.ts`).
+  buildGarage(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
@@ -443,15 +448,17 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
 
   // Built at the first mission's site; the game moves it to whichever one the player has
   // actually reached (`ActivityMarkerVisual.moveTo`) as soon as it knows their progress.
-  const rushMarker = plan.rushMarkers && plan.rushMarkers.length > 0 ? createActivityMarker(plan.rushMarkers[0], RUSH_MARKER) : null;
+  // Every marker's paint is laid on the asphalt that is really under it (`markerGround`).
+  const ground = markerGround(plan);
+  const rushMarker = plan.rushMarkers && plan.rushMarkers.length > 0 ? createActivityMarker(plan.rushMarkers[0], RUSH_MARKER, ground) : null;
   if (rushMarker) root.add(rushMarker.group);
 
   // The circuit missions' door. It never moves: the start line is where the start line is.
-  const circuitMarker = plan.circuitMarker ? createActivityMarker(plan.circuitMarker, CIRCUIT_MARKER) : null;
+  const circuitMarker = plan.circuitMarker ? createActivityMarker(plan.circuitMarker, CIRCUIT_MARKER, ground) : null;
   if (circuitMarker) root.add(circuitMarker.group);
 
   // The Street Race rings: all three built, and hidden by the game until their event is reached.
-  const streetMarkers = (plan.streetMarkers ?? []).map((site) => createActivityMarker(site, STREET_MARKER));
+  const streetMarkers = (plan.streetMarkers ?? []).map((site) => createActivityMarker(site, STREET_MARKER, ground));
   for (const m of streetMarkers) root.add(m.group);
 
   /* ------------------------------------------------- car meets */
@@ -552,6 +559,36 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       hemi.dispose();
       key.dispose();
     },
+  };
+}
+
+/** How far off a site's level a ribbon can be and still count as the road it stands on (m). */
+const MARKER_SAME_LEVEL = 1;
+/** The shoulders are drawn this far over their ribbon's own lift (`trackBuilder.ts`). */
+const SHOULDER_LIFT = 0.012;
+
+/**
+ * THE TOP OF THE ASPHALT UNDER A MARKER. A site's `y` is the road's level, but no at-grade ribbon
+ * is drawn at it: each one carries its own lift so crossings never z-fight (`cityWorld.ts` gives
+ * the i-th road `i * 0.004`), which on the metro's long road list reaches well over a decimetre.
+ * A ring painted 3.5 cm over `y` was therefore under the tarmac on every road late in the list and
+ * only showed on the early ones. So the paint stands on the highest slab any ribbon at the site's
+ * level draws within the paint's reach — a crossing that clips the ring lifts it too, rather than
+ * cutting a bite out of it.
+ */
+function markerGround(plan: CityPlan): MarkerGround {
+  const proj = createProjection();
+  return (x, z, y, reach) => {
+    let top = y;
+    for (const rb of plan.ribbons) {
+      const box = pathBox(rb.path);
+      if (x < box.minX - reach || x > box.maxX + reach || z < box.minZ - reach || z > box.maxZ + reach) continue;
+      const p = projectOntoPath(rb.path, x, z, proj);
+      if (p.dist > p.halfWidth + reach || Math.abs(p.y - y) > MARKER_SAME_LEVEL) continue;
+      const lift = rb.lift ?? (rb.kind === 'alley' ? 0.006 : 0);
+      top = Math.max(top, p.y + lift + (rb.elevated ? 0 : SHOULDER_LIFT));
+    }
+    return top;
   };
 }
 

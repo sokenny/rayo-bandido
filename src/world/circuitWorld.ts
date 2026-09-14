@@ -226,6 +226,7 @@ export function createCircuitWorld(seed: number = (Math.random() * 0xffffffff) >
   layout.rushSites = null;
   layout.passengerStops = null;
   layout.buhoSite = null;
+  layout.garageSite = null;
   layout.circuitSite = null;
   // The minimap draws the race, not the city it is cut out of.
   layout.minimap = {

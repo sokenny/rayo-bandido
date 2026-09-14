@@ -26,8 +26,8 @@ function pick<T extends Element>(root: ParentNode, selector: string): T {
 
 /** "STREET RACE II · MEDIUM · 2 RIVALS", with a note when it has already been won. */
 export function streetMissionLabel(gate: StreetGateHudSnapshot): string {
-  const rivals = `${gate.rivals} RIVAL${gate.rivals === 1 ? '' : 'S'}`;
-  const done = gate.completed ? ' · WON' : '';
+  const rivals = `${gate.rivals} RIVAL${gate.rivals === 1 ? '' : 'ES'}`;
+  const done = gate.completed ? ' · GANADA' : '';
   return `${gate.eventName} · ${gate.difficulty} · ${rivals}${done}`;
 }
 
@@ -40,14 +40,15 @@ export function createStreetOverlay(options: StreetOverlayOptions): StreetOverla
     `<span class="rb-rush__prompt-mission"></span>` +
     `<span class="rb-rush__prompt-lines">` +
     `<span class="rb-rush__prompt-blurb"></span>` +
-    `<span class="rb-rush__prompt-target">${STREET_RACE.laps} LAPS OF THE QUAY CIRCUIT · FIRST TO THE FLAG</span>` +
+    `<span class="rb-rush__prompt-target"></span>` +
     `</span>` +
-    `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> RACE</span>` +
+    `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> CORRER</span>` +
     `</button>`;
 
   const promptEl = pick<HTMLButtonElement>(root, '.rb-rush__prompt');
   const missionEl = pick<HTMLElement>(root, '.rb-rush__prompt-mission');
   const blurbEl = pick<HTMLElement>(root, '.rb-rush__prompt-blurb');
+  const targetEl = pick<HTMLElement>(root, '.rb-rush__prompt-target');
 
   const onClick = (e: Event): void => {
     e.preventDefault();
@@ -72,6 +73,7 @@ export function createStreetOverlay(options: StreetOverlayOptions): StreetOverla
         missionEl.textContent = streetMissionLabel(gate);
         missionEl.classList.toggle('is-clear', gate.completed);
         blurbEl.textContent = gate.blurb;
+        targetEl.textContent = `${gate.laps === 1 ? 'UNA VUELTA' : `${gate.laps} VUELTAS`} AL ${gate.circuit} · GANA EL PRIMERO EN LLEGAR`;
       }
     },
     dispose() {

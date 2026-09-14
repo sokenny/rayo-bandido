@@ -19,7 +19,7 @@ import { resolveRivalCollisions } from './rivalCollision';
 import { settleVehicle } from './surface';
 import { createRaceState, resetRaceState, stepRace } from './race';
 import { createRivalAiState, resetRivalAiState, stepRivalAi, type RivalAiState } from './rivalAi';
-import { clampStreetCleared, streetEventCount } from './streetGate';
+import { clampStreetCleared, streetEventCount, streetEventStandalone } from './streetGate';
 
 /**
  * STREET RACE: the PvE race against AI rivals, and the series it belongs to.
@@ -75,6 +75,8 @@ export interface StreetRaceState {
   /** The shortcut the player was in last tick, to raise the enter/leave event once. */
   playerShortcut: number;
   results: StreetRaceResults | null;
+  /** A standalone event (La Curva) already won on this browser: its reward is not paid twice. */
+  wonBefore: boolean;
 }
 
 /** The scratch event list every rival's collision passes write into and nobody reads. */
@@ -126,11 +128,13 @@ export function streetTierFor(event: number): (typeof STREET_RACE.ai)[keyof type
 /**
  * Build the field for `event` on `course`. `cleared` is how many events are won, read back from
  * storage by the caller; the event is clamped to the ones that are open, so a URL cannot ask
- * for a race the player has not unlocked.
+ * for a race the player has not unlocked. A standalone event is always open; `wonBefore` says
+ * whether it has been won here before, which is all its reward needs to know.
  */
-export function createStreetRaceState(course: RaceCourse, event: number, cleared = 0): StreetRaceState {
+export function createStreetRaceState(course: RaceCourse, event: number, cleared = 0, wonBefore = false): StreetRaceState {
   const safeCleared = clampStreetCleared(cleared);
-  const safeEvent = Math.max(0, Math.min(Math.floor(event) || 0, safeCleared, streetEventCount() - 1));
+  const asked = Math.floor(event) || 0;
+  const safeEvent = streetEventStandalone(asked) ? asked : Math.max(0, Math.min(asked, safeCleared, streetEventCount() - 1));
   const spec = streetEvent(safeEvent);
   const tier = STREET_RACE.ai[spec.ai];
   const count = Math.max(1, Math.min(spec.rivals, course.grid.length - 1));
@@ -160,6 +164,7 @@ export function createStreetRaceState(course: RaceCourse, event: number, cleared
     phase: 'countdown',
     playerShortcut: -1,
     results: null,
+    wonBefore,
   };
 }
 
@@ -337,9 +342,17 @@ function endRace(sr: StreetRaceState, race: RaceState, state: GameState, events:
   const spec = streetEvent(sr.event);
   const placement = streetPosition(sr, race);
   const won = placement === 1;
-  const advanced = won && sr.event === sr.cleared;
+  const standalone = streetEventStandalone(sr.event);
+  const advanced = !standalone && won && sr.event === sr.cleared;
   let reward = 0;
   let unlockedName: string | null = null;
+  if (standalone && won && !sr.wonBefore) {
+    // Outside the series: paid on the first win, and the series is left where it is.
+    sr.wonBefore = true;
+    reward = spec.reward;
+    state.economy.money += reward;
+    state.economy.lastReward = reward;
+  }
   if (advanced) {
     sr.cleared = sr.event + 1;
     reward = spec.reward;
@@ -357,7 +370,7 @@ function endRace(sr: StreetRaceState, race: RaceState, state: GameState, events:
     advanced,
     reward,
     unlockedName,
-    allClear: sr.cleared >= streetEventCount(),
+    allClear: !standalone && sr.cleared >= streetEventCount(),
   };
   sr.results = results;
   events.push({ type: 'streetRaceEnd', results });

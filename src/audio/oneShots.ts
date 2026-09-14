@@ -1,5 +1,5 @@
 import type { AudioCore } from './core';
-import { AUDIO, NEAR_MISS, STREET_PROPS } from '../config/tuning';
+import { AUDIO, CRASH_DAMAGE, NEAR_MISS, STREET_PROPS } from '../config/tuning';
 import type { StreetPropKind } from '../core/types';
 
 export interface OneShots {
@@ -40,6 +40,13 @@ export interface OneShots {
    * not a wall of noise. No sample files: synthesised like the rest of the kit.
    */
   propHit(kind: StreetPropKind, strength: number, damaged: boolean): void;
+  /**
+   * A crash that cost money (`crashDamage`): a body thud, torn-metal crunch, two bent-panel clangs
+   * a quarter tone apart and a sagging buzz under it all. Unpleasant on purpose — it is the sound
+   * of the fine. `strength` 0..1 by severity; a heavy one adds the glass. Also drops the near-miss
+   * chime back to the bottom of its ladder, since the run it was climbing is over.
+   */
+  crash(strength: number): void;
 }
 
 /**
@@ -305,6 +312,34 @@ export function createOneShots(core: AudioCore): OneShots {
           playOsc('sine', t, t + 0.22, 1130 * pitch, 1010, 0.18 * v, 0.002);
           playNoise(t, t + 0.06, 'highpass', 2800, 2400, 0.8, 0.28 * v, 0.001);
           break;
+      }
+    },
+
+    crash(strength) {
+      const s = strength < 0 ? 0 : strength > 1 ? 1 : strength;
+      const t = ctx.currentTime;
+      const v = CRASH_DAMAGE.volume * (0.6 + 0.4 * s);
+      nearMissStep = 0;
+      lastNearMissAt = -Infinity;
+      // The body: a low thud that lands in the chest.
+      playOsc('sine', t, t + 0.3 + 0.1 * s, 120, 34, 0.95 * v, 0.003);
+      // The crunch: a sharp transient, then a wide band of noise tearing downward.
+      playNoise(t, t + 0.05, 'highpass', 2400, 2000, 0.7, 0.8 * v, 0.001);
+      playNoise(t, t + 0.24 + 0.14 * s, 'bandpass', 1500, 240, 0.8, 1.0 * v, 0.002);
+      // Bent panel: two clipped clangs a quarter tone apart, beating against each other.
+      playOsc('square', t + 0.01, t + 0.42, 236, 198, 0.3 * v, 0.003, 2000);
+      playOsc('square', t + 0.01, t + 0.42, 243, 205, 0.26 * v, 0.003, 2000);
+      // The scrape after it: a rattle of loose trim.
+      playNoise(t + 0.07, t + 0.36 + 0.2 * s, 'bandpass', 3400, 1500, 5, 0.3 * v, 0.02);
+      // The sag: a low buzzing minor second falling away — the sound of the money going.
+      playOsc('sawtooth', t + 0.14, t + 0.72, 146, 96, 0.24 * v, 0.02, 900);
+      playOsc('sawtooth', t + 0.14, t + 0.72, 155, 101, 0.2 * v, 0.02, 900);
+      if (s >= 0.9) {
+        // Glass going: three bright ticks spilling after the hit.
+        for (let i = 0; i < 3; i++) {
+          const at = t + 0.05 + i * 0.055 + Math.random() * 0.02;
+          playNoise(at, at + 0.07, 'bandpass', 6200 - i * 700, 4800, 7, 0.32 * v, 0.001);
+        }
       }
     },
 

@@ -173,6 +173,41 @@ const BUHO = `<svg ${BOX}>
 <circle cx="71.2" cy="79.4" r="1" fill="#f0b34a"/>
 </svg>`;
 
+/**
+ * Loco Mustang: a black bucket hat, a big grin under a few days of stubble, a sleeveless navy
+ * shirt with a red 99 on it, ink on both shoulders. The whitewash and turquoise of his garage
+ * door behind him.
+ */
+const MUSTANG = `<svg ${BOX}>
+<rect width="96" height="96" fill="#d9d6c9"/>
+<rect x="0" y="0" width="30" height="96" fill="#49a6b3"/>
+<path d="M4 20 q10 -8 20 2 M6 34 q8 6 16 -4" stroke="#1b1c1f" stroke-width="2.4" fill="none" stroke-linecap="round" opacity="0.7"/>
+<rect x="0" y="0" width="96" height="96" fill="#0b0c10" opacity="0.28"/>
+<!-- bare shoulders and arms, inked -->
+<path d="M6 96 Q8 70 26 66 L70 66 Q88 70 90 96 Z" fill="#c79672"/>
+<path d="M12 80 q6 -6 12 0 q-6 6 -12 0 M72 78 q6 -5 12 1 M74 86 q5 -3 10 1" stroke="#3b4a4e" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+<!-- the shirt: sleeveless, navy, a red 99 and a patch -->
+<path d="M26 96 L28 70 Q38 76 48 76 Q58 76 68 70 L70 96 Z" fill="#1d2437"/>
+<text x="31" y="92" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="12" fill="#d8262a">99</text>
+<rect x="55" y="82" width="9" height="8" fill="#2f5fb8"/>
+<rect x="58" y="84" width="3" height="4" fill="#d8262a"/>
+<!-- neck -->
+<rect x="41" y="58" width="14" height="14" rx="4" fill="#a97a58"/>
+<!-- head -->
+<path d="M31 42 Q31 24 48 24 Q65 24 65 42 L63 54 Q60 66 48 67 Q36 66 33 54 Z" fill="#c79672"/>
+<!-- stubble -->
+<path d="M34 52 Q48 72 62 52 Q60 65 48 66 Q36 65 34 52 Z" fill="#5a3f2c" opacity="0.45"/>
+<!-- the hat: crown and a drooping brim -->
+<path d="M32 36 Q32 16 48 15 Q64 16 64 36 Z" fill="#1b1c1f"/>
+<path d="M22 40 Q48 28 74 40 L70 44 Q48 36 26 44 Z" fill="#26282c"/>
+<!-- eyes, squinting with the grin -->
+<path d="M38 47 q3 -2 6 0 M52 47 q3 -2 6 0" stroke="#1b1410" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+<!-- nose -->
+<path d="M48 49 l-2 6 h4" stroke="#8a5e42" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- the grin -->
+<path d="M39 58 Q48 66 57 58 Q48 61 39 58 Z" fill="#fbf6ee" stroke="#3a2418" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>`;
+
 /** A stranger: the fallback for a portrait id the HUD does not know. Still a face. */
 const UNKNOWN = `<svg ${BOX}>
 <rect width="96" height="96" fill="#0d0f16"/>
@@ -184,7 +219,7 @@ const UNKNOWN = `<svg ${BOX}>
 <path d="M42 59 h12" stroke="#0d0f16" stroke-width="2" stroke-linecap="round"/>
 </svg>`;
 
-const PORTRAITS: Record<string, string> = { mika: MIKA, vera: VERA, nico: NICO, buho: BUHO };
+const PORTRAITS: Record<string, string> = { mika: MIKA, vera: VERA, nico: NICO, buho: BUHO, mustang: MUSTANG };
 
 /** The portrait for a catalogue id, or a stranger for one the HUD has no art for. */
 export function portraitFor(id: string): string {

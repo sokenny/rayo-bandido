@@ -320,15 +320,15 @@ describe('the series', () => {
     let p = emptyStreetRaceProgress();
     p = recordStreetRace(p, 0, 1, true);
     writeStreetRaceProgress(p);
-    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, -1, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, -1, -1, -1] });
     p = recordStreetRace(readStreetRaceProgress(), 1, 3, false);
     writeStreetRaceProgress(p);
-    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, 3, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, 3, -1, -1] });
     // A replayed loss of event 0 cannot un-win it.
     p = recordStreetRace(readStreetRaceProgress(), 0, 2, false);
-    expect(p).toEqual({ cleared: 1, best: [1, 3, -1] });
+    expect(p).toEqual({ cleared: 1, best: [1, 3, -1, -1] });
     installStorage({ 'rb.street.races': '{"cleared": 99, "best": ["x", 0]}' });
-    expect(readStreetRaceProgress()).toEqual({ cleared: 3, best: [-1, -1, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 3, best: [-1, -1, -1, -1] });
   });
 
   it('opens the rings one win at a time', () => {
@@ -376,7 +376,8 @@ describe('the rings in the street', () => {
       { ...METRO_CIRCUIT_SITE, r: TIME_ATTACK.marker.promptRadius },
       { ...INTRO.route.meetup, r: INTRO.route.meetup.radius },
     ];
-    for (const site of sites) {
+    // La Curva's ring stands on the meet's lot, not a road (`tests/curvaRace.test.ts`).
+    for (const site of sites.filter((_, i) => !STREET_RACE.events[i].standalone)) {
       expect(city.plan.isRoad(site.x, site.z, -STREET_RACE.marker.promptRadius)).toBe(true);
       expect(city.plan.isSolid(site.x, site.z, STREET_RACE.marker.promptRadius)).toBe(false);
       for (const o of others) {

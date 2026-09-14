@@ -22,6 +22,7 @@ import {
 import { buildRails, generateBlocks, hash01, onRibbonAtLevel, pathBox, pointRectDistance, railBounds, streetShoulder, type BlockOptions } from './cityGen';
 import { meetColliders } from './carMeet';
 import { clipBlocksToLots, stationColliders } from './gasStation';
+import { garageColliders, garageParts, garageSite } from './garage';
 import type { CitySpec } from './cityDef';
 import { BAY_SPEC } from './citySpec';
 import { reserveMegastructurePlots } from './cityMegastructures';
@@ -152,12 +153,15 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const meetLots = meets.map((m) => m.lot);
   // A gas station takes only a corner: the plots it touches are cut back to its edge.
   const gasStations = spec.gasStations ?? [];
-  const lots = [...meetLots, ...gasStations.map((g) => g.lot)];
+  // Loco Mustang's garage takes a corner the same way.
+  const garage = spec.garage ?? null;
+  const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : [])];
+  const lots = [...meetLots, ...cornerLots];
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   const blocks = clipBlocksToLots(
     reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
-    gasStations.map((g) => g.lot),
+    cornerLots,
   );
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
@@ -399,6 +403,8 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     colliders.push(...c.boxes);
     walls.push(...c.walls);
   }
+  // The garage: the block round its mouth and the van backed into it (`garage.ts`).
+  if (garage) colliders.push(...garageColliders(garage));
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -429,11 +435,14 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     roadNetwork: ground.map((rb) => ({ points: rb.path.samples.map((sm) => ({ x: sm.x, z: sm.z })) })),
     // Where El Búho stands. A point under the deck; the rules and the figure both read it.
     buhoSite: spec.buhoSite ? { ...spec.buhoSite } : null,
+    // The ring on the garage's apron, where Loco Mustang talks to whoever pulls up.
+    garageSite: garage ? garageSite(garage) : null,
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: quayZ !== null ? bounds.maxZ - 20 : inner.maxZ },
       // A lot reads on the map as ground you can drive, like the streets into it.
-      rects: lots.map((l) => ({ ...l })),
+      // The garage's is only its apron: the rest of its lot is the building.
+      rects: [...meetLots, ...gasStations.map((g) => g.lot), ...(garage ? [garageParts(garage).apron] : [])].map((l) => ({ ...l })),
       ribbons: ribbons.map((rb) => ({
         points: rb.path.samples.filter((_, i) => i % 2 === 0 || !rb.path.closed).map((s) => ({ x: s.x, z: s.z })),
         width: rb.path.samples.reduce((sum, s) => sum + s.halfWidth * 2, 0) / rb.path.samples.length,
@@ -503,6 +512,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     passages: megastructures.flatMap((m) => m.passages ?? []),
     ...(meets.length > 0 ? { meets: meets.map((m) => ({ ...m })) } : {}),
     ...(gasStations.length > 0 ? { gasStations: gasStations.map((g) => ({ ...g })) } : {}),
+    ...(garage ? { garage: { ...garage, streets: garage.streets.slice() } } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),

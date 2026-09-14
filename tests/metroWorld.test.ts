@@ -184,7 +184,7 @@ describe('metro layout contract', () => {
 
   it('spawns traffic on every level, on a road at its own height, and gives cruise mode a road', () => {
     expect(layout.targetSpawns.length).toBeGreaterThan(120);
-    expect(layout.targetSpawns.length).toBeLessThan(300);
+    expect(layout.targetSpawns.length).toBeLessThan(700);
     const levels = new Set<number>();
     for (let k = 0; k < layout.targetSpawns.length; k++) {
       const s = layout.targetSpawns[k];

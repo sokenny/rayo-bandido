@@ -61,6 +61,18 @@ export function stepDrift(d: DriftState, v: VehicleState, dt: number, events: Ga
   }
 }
 
+/**
+ * A charged crash (`src/sim/crashDamage.ts`): the drift under way ends and its chain goes with
+ * it, so the next slide starts a new chain from one. The car's handling is not touched — only
+ * the bookkeeping of the streak.
+ */
+export function breakDriftChain(d: DriftState, events: GameEvent[]): void {
+  if (d.active) endDrift(d, events);
+  d.candidateTime = 0;
+  d.chain = 0;
+  d.chainWindow = 0;
+}
+
 function endDrift(d: DriftState, events: GameEvent[]): void {
   events.push({ type: 'driftEnd', duration: d.duration, chain: d.chain });
   d.active = false;

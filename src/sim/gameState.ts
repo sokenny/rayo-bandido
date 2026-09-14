@@ -15,7 +15,8 @@ import { stepVehicle } from './vehicle';
 import { resolveCollisions, resolveTargetCollisions } from './collision';
 import { resolveRivalCollisions } from './rivalCollision';
 import { createStreetPropsState, resetStreetPropsState, stepStreetProps } from './streetProps';
-import { stepDrift } from './drift';
+import { breakDriftChain, stepDrift } from './drift';
+import { crashStalled, createCrashDamageState, resetCrashDamageState, stepCrashDamage, type CrashRules } from './crashDamage';
 import { stepNitro } from './nitro';
 import { stepLightning } from './lightning';
 import { createTargets, resetTargets, stepTargets } from './targets';
@@ -28,9 +29,10 @@ import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
 import { createFlairState, resetFlairState, stepFlair } from './flair';
 import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
+import { createGarageState, resetGarageState, stepGarage } from './garage';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
 import { createStreetGateState, resetStreetGateState, stepStreetGate } from './streetGate';
-import { lockOtherActivities } from './activities';
+import { introEngaged, lockOtherActivities } from './activities';
 import { createPoliceState, isPoliceEnabledForCurrentGameState, policeHoldsPlayer, resetPoliceState, stepPolice, type StepPoliceOptions } from './police';
 import { createIntroState, introHoldsPlayer, resetIntroState, stepIntro } from './intro';
 import { PASSENGERS } from '../content/passengers';
@@ -147,9 +149,12 @@ export function createInitialGameState(
     race: layout.race ? createRaceState(layout.race) : null,
     timeAttack: layout.race && options.timeAttack ? createTimeAttackState(options.timeAttackCleared ?? 0) : null,
     rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
-    flair: layout.rushSites && layout.rushSites.length > 0 ? createFlairState() : null,
+    // The crash line is said wherever a crash can be charged, rush or no rush.
+    flair: (layout.rushSites && layout.rushSites.length > 0) || layout.garageSite ? createFlairState() : null,
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
+    garage: layout.garageSite ? createGarageState() : null,
+    crash: layout.garageSite || layout.race ? createCrashDamageState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
     streetGate: layout.streetSites && layout.streetSites.length > 0 ? createStreetGateState(options.streetRaceCleared ?? 0) : null,
     police: options.police ? createPoliceState(layout) : null,
@@ -181,6 +186,8 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.flair) resetFlairState(state.flair);
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
+  if (state.garage) resetGarageState(state.garage);
+  if (state.crash) resetCrashDamageState(state.crash);
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
   if (state.streetGate) resetStreetGateState(state.streetGate);
   if (state.police) resetPoliceState(state.police);
@@ -248,6 +255,16 @@ export interface StepOptions {
 
 /** What `stepPolice` is told about the tick. One object, never reallocated. */
 const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true };
+
+/** What `stepCrashDamage` is told about the tick. One object, never reallocated. */
+const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false };
+
+/**
+ * The command a race crash stall applies (`src/sim/crashDamage.ts`): the engine is dead and the
+ * brakes are on, but the wheel still turns, so the car can be pointed back up the road while it
+ * waits. The handbrake only holds it once it has stopped — pulled at speed it would spin the car.
+ */
+const STALL: PlayerCommand = { ...HOLD, handbrake: false };
 
 /**
  * One simulation tick.
@@ -319,6 +336,15 @@ export function stepGame(
     HOLD.activate = false;
     input = HOLD;
   }
+  // A race crash stall (`src/sim/crashDamage.ts`): brakes down to walking pace, then the handbrake,
+  // the same release the intro's hold uses so a standing car never arms reverse.
+  if (crashStalled(state.crash)) {
+    const moving = state.vehicle.speed > INTRO_HOLD_BRAKE_SPEED || state.vehicle.speed < -INTRO_HOLD_BRAKE_SPEED;
+    STALL.steer = cmd.steer;
+    STALL.brake = moving ? 1 : 0;
+    STALL.handbrake = !moving;
+    input = STALL;
+  }
 
   stepNitro(state.nitro, state.vehicle, input, dt, state.events);
   stepVehicle(state.vehicle, input, state.nitro.active, dt, state.drift.active, manual);
@@ -373,14 +399,6 @@ export function stepGame(
       state.events,
     );
   }
-  // The phrases (`src/sim/flair.ts`), right behind the activity that owns them. Last of the
-  // things that watch the driving, and the most thoroughly a watcher of them all: it reads the
-  // drift, the near misses and the collisions this tick already raised, and writes nothing but
-  // its own line. `RUSH` is the only place it talks, so the run's phase is what switches it on.
-  if (state.flair) {
-    const talking = !FLAIR.duringRushOnly || (!!state.rush && state.rush.phase === 'running');
-    stepFlair(state.flair, state.drift, talking, state.time, dt, state.events, state.events.length);
-  }
   lockOtherActivities(state);
   if (passenger && layout.passengerStops && layout.passengerStops.length > 0) {
     if (options?.respawned) cancelRide(passenger, 'respawn', state.events);
@@ -418,6 +436,11 @@ export function stepGame(
     }
     stepBuho(buho, layout.buhoSite, state.vehicle, state.economy, cmd, dt, state.events);
   }
+  // Loco Mustang's garage (`src/sim/garage.ts`): not open yet, and he says so. Never holds the car.
+  lockOtherActivities(state);
+  if (state.garage && layout.garageSite) {
+    stepGarage(state.garage, layout.garageSite, state.vehicle, cmd, dt, state.events);
+  }
   // The door to the circuit missions (`src/sim/circuitGate.ts`), last of all: it is the one
   // activity that ends this world rather than happening inside it, so it is offered only once
   // everything else has had its say about whether the car is free.
@@ -440,5 +463,25 @@ export function stepGame(
     const from = state.events.length;
     stepPolice(state.police, layout, state.vehicle, state.targets, state.lightning, state.time, dt, state.events, POLICE_OPTIONS);
     applyPoliceFine(state.economy, state.police, state.events, from);
+  }
+  // Crash damage (`src/sim/crashDamage.ts`), after every pass that can put the car into something
+  // — the police's shove included — so a tick's accident is judged on all of it at once. A punished
+  // crash ends the drift chain here; the flair streak is cut right below. Never during the intro;
+  // in a race only while it is actually being raced, and there it stalls the car instead of fining it.
+  let crashed = false;
+  if (state.crash) {
+    CRASH_RULES.stall = !!race;
+    CRASH_RULES.enabled = race ? race.phase === 'racing' : !introEngaged(state.intro);
+    CRASH_RULES.atGarage = !!state.garage && state.garage.atSite;
+    crashed = stepCrashDamage(state.crash, state.economy, CRASH_RULES, state.time, dt, state.events) !== null;
+    if (crashed) breakDriftChain(state.drift, state.events);
+  }
+  // The phrases (`src/sim/flair.ts`). Last of the things that watch the driving, and the most
+  // thoroughly a watcher of them all: it reads the drift, the near misses, the collisions and the
+  // crash verdict this tick already raised, and writes nothing but its own line. `RUSH` is the only
+  // place it celebrates, so the run's phase is what switches that on; a charged crash is said anywhere.
+  if (state.flair) {
+    const talking = !FLAIR.duringRushOnly || (!!state.rush && state.rush.phase === 'running');
+    stepFlair(state.flair, state.drift, talking, state.time, dt, state.events, state.events.length, state.crash ? crashed : null);
   }
 }

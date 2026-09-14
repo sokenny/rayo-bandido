@@ -185,14 +185,14 @@ export function stepRivalAi(
 
   /* ------------------------------------------------------------ where am I */
   let path = activePath(ai, course);
-  projectOntoPath(path, v.x, v.z, ai.proj);
+  projectOntoPath(path, v.x, v.z, ai.proj, -1, 12, v.y);
   if (ai.route >= 0) {
     const sc = course.shortcuts[ai.route];
     // Off the end of the alley, or lost the alley altogether: back to the lap.
     if (ai.proj.s >= sc.path.length - 2 || ai.proj.dist > ai.proj.halfWidth + STREET_RACE.recovery.offRouteMetres * 0.5) {
       ai.route = -1;
       path = course.path;
-      projectOntoPath(path, v.x, v.z, ai.proj);
+      projectOntoPath(path, v.x, v.z, ai.proj, -1, 12, v.y);
       // The right angle back onto the street is taken at mouth speed too.
       ai.mouthHold = MOUTH_HOLD;
     }
@@ -221,7 +221,7 @@ export function stepRivalAi(
         ai.route = i;
         ai.chosen = -1;
         path = sc.path;
-        projectOntoPath(path, v.x, v.z, ai.proj);
+        projectOntoPath(path, v.x, v.z, ai.proj, -1, 12, v.y);
         ai.station = ai.proj.s;
         mouthAhead = 0;
       } else if (ai.chosen === i && ahead > 0) {

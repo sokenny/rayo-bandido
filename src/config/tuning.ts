@@ -43,6 +43,12 @@ export const VEHICLE = {
   airDrag: 0.0004,
   /** Constant rolling resistance opposing motion (m/s^2). */
   rollingResistance: 0.6,
+  /**
+   * Minimum deceleration (m/s^2) while the car is above its current top speed — e.g. the nitro
+   * just ran out at 255 km/h. Drag alone is ~4 m/s^2 up there but fades near the top speed, so
+   * this floor makes the boost's extra speed bleed away over ~4-5 s instead of vanishing.
+   */
+  overspeedBleed: 3,
   /** Extra deceleration while neither throttle nor brake is applied (m/s^2). */
   engineBrake: 1.8,
   /**
@@ -1369,6 +1375,8 @@ export const MINIMAP = {
   viewMeters: 500,
   /** Player arrow size on the corner view, relative to the full map's. */
   playerScale: 1.5,
+  /** Activity icon size on both views, relative to their drawn base size. */
+  iconScale: 1.35,
   /** Largest side of the prepainted road canvas (device px). A bigger world zooms out to fit. */
   maxBasePx: 4096,
   /** Opens and closes the full map. M is taken by the mute. */
@@ -2087,30 +2095,62 @@ export const STREET_RACE = {
   events: [
     {
       name: 'STREET RACE I',
-      difficulty: 'EASY',
-      blurb: 'ONE RIVAL, TWO LAPS OF THE QUAY CIRCUIT. HE IS LEARNING TOO.',
+      difficulty: 'FÁCIL',
+      blurb: 'UN RIVAL, DOS VUELTAS AL CIRCUITO DEL MUELLE. ÉL TAMBIÉN ESTÁ APRENDIENDO.',
       rivals: 1,
       ai: 'easy' as const,
       reward: 300,
       rivalNames: ['ROOKIE'],
+      course: 'quay' as const,
+      circuit: 'CIRCUITO DEL MUELLE',
+      laps: 2,
+      standalone: false,
     },
     {
       name: 'STREET RACE II',
-      difficulty: 'MEDIUM',
-      blurb: 'TWO RIVALS WHO KNOW THE ALLEYS. KEEP IT TIDY AND TAKE THE CUTS.',
+      difficulty: 'MEDIA',
+      blurb: 'DOS RIVALES QUE CONOCEN LOS CALLEJONES. MANEJÁ LIMPIO Y TOMÁ LOS ATAJOS.',
       rivals: 2,
       ai: 'medium' as const,
       reward: 700,
       rivalNames: ['SHIN', 'ORO'],
+      course: 'quay' as const,
+      circuit: 'CIRCUITO DEL MUELLE',
+      laps: 2,
+      standalone: false,
     },
     {
       name: 'STREET RACE III',
-      difficulty: 'HARD',
-      blurb: 'THREE OF THE FAST ONES. NO ROOM, NO MERCY, NO SECOND CHANCES.',
+      difficulty: 'DIFÍCIL',
+      blurb: 'TRES DE LOS RÁPIDOS. SIN LUGAR, SIN PIEDAD, SIN SEGUNDAS OPORTUNIDADES.',
       rivals: 3,
       ai: 'hard' as const,
       reward: 1500,
       rivalNames: ['KAITO', 'VELVET', 'GHOST'],
+      course: 'quay' as const,
+      circuit: 'CIRCUITO DEL MUELLE',
+      laps: 2,
+      standalone: false,
+    },
+    /**
+     * LA CURVA (`src/world/curvaSpec.ts`): not part of the series. Met at the car meet, open
+     * from the start, run on Bandido Metro through The Stack with three alternative routes.
+     * `standalone` keeps it out of `cleared`: its reward is paid on its own first win.
+     * Measured against itself only (the hard tier drives its one lap in ~145 s).
+     */
+    {
+      name: 'LA CURVA',
+      difficulty: 'DIFÍCIL',
+      blurb: 'TRES RIVALES. ARRIBA DE LA AUTOPISTA SOBRE EL CAR MEET, POR EL DECK DE THE STACK Y SU HORQUILLA, Y DE VUELTA.',
+      rivals: 3,
+      ai: 'hard' as const,
+      reward: 1200,
+      rivalNames: ['LOBO', 'NEÓN', 'LA VIUDA'],
+      course: 'curva' as const,
+      circuit: 'CIRCUITO LA CURVA',
+      // One lap: ~3.8 km, two highways, ~145 s for the hard tier (`curvaSpec.ts`, CURVA_LAPS).
+      laps: 1,
+      standalone: true,
     },
   ],
   /**
@@ -2243,6 +2283,74 @@ export const FLAIR = {
     candidateSeconds: 1.5,
     /** Minimum seconds before the same phrase may be said again. The crash line has its own. */
     repeatSeconds: 10,
+  },
+};
+
+/**
+ * CRASH DAMAGE: what a real crash costs in the open world (`src/sim/crashDamage.ts`).
+ *
+ * The game pays for driving fast with style; this is the other half — driving into things
+ * costs money, the AURA line and a marked-up car until the garage. In the open world it never
+ * costs speed, grip or steering; in a race it costs time instead (`race`, below). Every number
+ * here is a "play it and see" number.
+ *
+ * WHAT IS JUDGED. The speed the collision passes already measured: speed into the wall, the
+ * closing speed on another car (traffic and police are judged on the difference between the two
+ * cars, so running up the back of a car doing nearly the same speed is the tap it looks like).
+ * Scraping along a barrier reports ~1-4 m/s and costs nothing; under `tiers.light.impact` any
+ * contact is a touch.
+ */
+export const CRASH_DAMAGE = {
+  /** Off switch for the whole rule. The intro never charges, whatever this says. */
+  enabled: true,
+  /** The Aura a charged crash costs: said as "−1000 DE AURA" (`src/sim/flair.ts`). Talk, not a stat. */
+  aura: 1000,
+  /**
+   * Severity by speed (m/s) at or above `impact`, the fine it costs, and how many marks it leaves
+   * on the body. 7 m/s is 25 km/h into a wall, 12 is 43 km/h, 18 is 65 km/h.
+   */
+  tiers: {
+    light: { impact: 7, fine: 50, marks: 1 },
+    medium: { impact: 12, fine: 150, marks: 2 },
+    heavy: { impact: 18, fine: 300, marks: 3 },
+  },
+  /** Seconds after a charged crash in which nothing else is charged: the bounce is the same accident. */
+  cooldownSeconds: 1.5,
+  /** Seconds clear of every surface after which the car has come off the thing it hit. */
+  separationSeconds: 0.4,
+  /**
+   * Until it has come off (still grinding the wall it hit), only a hit at least this hard is a new
+   * crash. A car left against a wall is one crash, not sixty.
+   */
+  stillTouchingImpact: 12,
+  /** Seconds the AURA line and the fine under it stay up: long enough to read two lines. */
+  cardSeconds: 4.4,
+  /** Master gain of the crash sound (`src/audio/oneShots.ts`). */
+  volume: 1.2,
+  /**
+   * RACES (the circuit, the street races, a match): no fine, no marks, no AURA. A light crash does
+   * nothing; a medium or heavy one stalls the car — engine cut, brakes on, steering left alone —
+   * and it blinks the way a respawned car does, Daytona-style. The heavy stall grows with the hit.
+   */
+  race: {
+    /** Seconds a medium crash stalls the car. */
+    mediumStall: 2,
+    /** A heavy crash stalls for `heavyStall[0]` at the heavy threshold, up to `[1]` at `heavyStallImpact` m/s. */
+    heavyStall: [3, 5] as [number, number],
+    heavyStallImpact: 30,
+    /** Seconds after a stall ends before another can start: the car pulling away is not a new crash. */
+    graceSeconds: 1,
+    /** Blinks per second while stalled (on + off is one). */
+    blinkHz: 6,
+  },
+  /** The marked-up car (`src/render/scene/vehicles/damage.ts`). Cosmetic only. */
+  visual: {
+    /** Most marks the body carries; the decals past this are never shown. */
+    maxMarks: 10,
+    /** How much darker the paint reads at `maxMarks` (0..1): grime under the scratches. */
+    grime: 0.16,
+    /** Hood smoke after a heavy crash: puffs/s for `thickSeconds`, then a thin wisp until repaired. */
+    smoke: { thickRate: 10, thickSeconds: 4, wispRate: 1.4 },
   },
 };
 

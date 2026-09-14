@@ -95,6 +95,33 @@ export const STREET_GATES: Array<{ x: number; z: number; alt?: { shortcut: numbe
 export const STREET_LAPS = 2;
 
 /**
+ * A Street Race course as data: everything `streetWorld.ts` lays over a city. The Quay Circuit
+ * below is one; La Curva (`curvaSpec.ts`) is the other.
+ */
+export interface StreetCourseSpec {
+  spec: TrackSpec;
+  shortcuts: TrackSpec[];
+  /** Which side of the lap each shortcut leaves and rejoins on (-1 left, +1 right): where the barrier opens. */
+  mouths: Array<{ in: -1 | 1; out: -1 | 1 }>;
+  /** `y` is the height of the road the gate stands on, where the course is elevated (a deck, a ramp). */
+  gates: Array<{ x: number; z: number; y?: number; alt?: { shortcut: number; x: number; z: number; y?: number } }>;
+  barriers: {
+    corners: { lead: number };
+    spans: Array<{ a: { x: number; z: number }; b: { x: number; z: number }; side: -1 | 1 }>;
+  };
+  laps: number;
+  /**
+   * `corners` (the Quay): the barrier stands at corners and named spans only. `full`: both edges
+   * of the lap and every branch are fenced end to end, open only where a branch leaves or joins.
+   */
+  fence?: 'corners' | 'full';
+  /** False to take the city's elevated traffic off too, for a course that races on the decks. */
+  keepDeckTraffic?: boolean;
+  /** Electric cars patrolling the lap; `STREET_RACE.trafficCount` when omitted. */
+  traffic?: number;
+}
+
+/**
  * The barrier plan. The versus circuit is fenced on both sides for the whole lap; this one is a
  * street race in an open city, so the barrier stands only where it says something:
  *
@@ -139,6 +166,16 @@ export const STREET_BARRIERS: {
     { a: { x: -56, z: 8 }, b: { x: -84, z: 34 }, side: -1 },
     { a: { x: -56, z: 8 }, b: { x: -84, z: 34 }, side: 1 },
   ],
+};
+
+/** The Quay Circuit as one course. Both alleys leave and rejoin on the left. */
+export const QUAY_COURSE: StreetCourseSpec = {
+  spec: STREET_SPEC,
+  shortcuts: STREET_SHORTCUTS,
+  mouths: STREET_SHORTCUTS.map(() => ({ in: -1, out: -1 })),
+  gates: STREET_GATES,
+  barriers: STREET_BARRIERS,
+  laps: STREET_LAPS,
 };
 
 /**

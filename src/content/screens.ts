@@ -95,7 +95,7 @@ export const SCREEN_CHANNELS: ScreenChannel[] = [
   { id: 'volt', shape: 'tall', motion: 'still', seconds: 5, frames: [{ design: 'volt', page: 0 }, { design: 'volt', page: 1 }], glow: 0xffd23f },
   { id: 'aiko-live', shape: 'tall', motion: 'still', seconds: 6, frames: [{ design: 'idol', page: 0 }, { design: 'idol', page: 1 }], glow: 0xff5a4a },
   { id: 'denno-gai', shape: 'tall', motion: 'still', seconds: 4.5, frames: [{ design: 'kanji', page: 0 }, { design: 'kanji', page: 1 }], glow: 0x3ff0e8 },
-  { id: 'calmex', shape: 'tall', motion: 'still', seconds: 7, frames: [{ design: 'pills', page: 0 }, { design: 'pills', page: 1 }], glow: 0x9fe8d0 },
+  { id: 'rescatinol', shape: 'tall', motion: 'still', seconds: 7, frames: [{ design: 'pills', page: 0 }, { design: 'pills', page: 1 }], glow: 0x9fe8d0 },
 
   // Tickers.
   { id: 'ticker-metro', shape: 'strip', motion: 'ticker', seconds: 60, frames: [{ design: 'ticker' }], glow: 0xffb347 },

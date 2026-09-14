@@ -9,6 +9,7 @@ import { createRushOverlay, type RushOverlay } from './rushOverlay';
 import { createFlairOverlay, type FlairOverlay } from './flairOverlay';
 import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
 import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
+import { createGarageOverlay, type GarageOverlay } from './garageOverlay';
 import { NEAR_MISS } from '../config/tuning';
 import { createGateOverlay, type GateOverlay } from './gateOverlay';
 import { createPoliceOverlay, type PoliceOverlay } from './policeOverlay';
@@ -54,6 +55,8 @@ export interface HudOptions {
   passengers?: boolean;
   /** El Búho's bay. Defaults to off: only the world that has him asks for it. */
   buho?: boolean;
+  /** Loco Mustang's garage. Defaults to off, the same way. */
+  garage?: boolean;
   /**
    * The start line the circuit missions are entered on. Defaults to off: only the open world
    * carries the door, and the circuit itself must never offer a way into the circuit.
@@ -63,6 +66,8 @@ export interface HudOptions {
   police?: boolean;
   /** The STREET RACE rings' sign (`src/ui/streetOverlay.ts`). The open world only. */
   streetGate?: boolean;
+  /** Crash damage (`src/sim/crashDamage.ts`): its AURA line needs the flair overlay even without a rush. */
+  crashDamage?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -85,33 +90,33 @@ const NEAR_MISS_HOLD = 2;
  * follows NFS Underground 2's default layout, which is the mapping the pad uses.
  */
 export const PAD_CONTROLS = [
-  ['RT/LT', 'drive'],
-  ['STICK', 'steer'],
-  ['A', 'handbrake'],
+  ['RT/LT', 'manejar'],
+  ['STICK', 'doblar'],
+  ['A', 'freno de mano'],
   ['B', 'nitro'],
-  ['X', 'hold: aim'],
-  ['Y', 'camera'],
-  ['VIEW', 'cruise'],
-  ['START', 'restart'],
-  ['RB/LB', 'shift'],
-  ['R3', 'activity'],
+  ['X', 'mantener: apuntar'],
+  ['Y', 'cámara'],
+  ['VIEW', 'crucero'],
+  ['START', 'reiniciar'],
+  ['RB/LB', 'cambios'],
+  ['R3', 'actividad'],
 ];
 
 export const CONTROLS = [
-  ['WASD', 'drive'],
-  ['SPACE or /', 'handbrake'],
+  ['WASD', 'manejar'],
+  ['ESPACIO o /', 'freno de mano'],
   ['SHIFT', 'nitro'],
-  ['E', 'hold: aim'],
-  ['R', 'restart'],
-  ['C', 'cruise'],
-  ['P', 'camera'],
-  ['T', 'auto/manual'],
-  ['F', 'activity'],
-  ['N', 'map'],
-  ['X/Z', 'shift'],
-  ['ESC', 'menu'],
+  ['E', 'mantener: apuntar'],
+  ['R', 'reiniciar'],
+  ['C', 'crucero'],
+  ['P', 'cámara'],
+  ['T', 'automática/manual'],
+  ['F', 'actividad'],
+  ['N', 'mapa'],
+  ['X/Z', 'cambios'],
+  ['ESC', 'menú'],
   ['F3', 'debug'],
-  ['F4', 'coords'],
+  ['F4', 'coordenadas'],
 ];
 
 /** `83.456` -> `1:23.45`. Allocates a short string; only called when the shown value changes. */
@@ -155,7 +160,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   // puts the car back on the road at the last gate instead, with the clock still running.
   function controlsFor(source: string[][]): string {
     const rows = multiplayer
-      ? source.map(([key, action]) => (action === 'restart' ? [key, 'rescue'] : [key, action]))
+      ? source.map(([key, action]) => (action === 'reiniciar' ? [key, 'rescate'] : [key, action]))
       : source;
     return rows.map(([key, action]) => `<span><b>${key}</b> ${action}</span>`).join('');
   }
@@ -179,32 +184,32 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-aim__bar"><span class="rb-aim__fill"></span></div></div>` +
     `<div class="rb-cruise"><span class="rb-cruise__dot"></span>CRUISE</div>` +
     `<div class="rb-race">` +
-    `<div class="rb-race__lap"><span class="rb-race__lap-label">LAP</span><span class="rb-race__lap-value">1/2</span>` +
+    `<div class="rb-race__lap"><span class="rb-race__lap-label">VUELTA</span><span class="rb-race__lap-value">1/2</span>` +
     // The Street Race's position, on the lap line: `P2 / 3`. Off everywhere else.
     `<span class="rb-race__pos"><span class="rb-race__pos-value">P1</span><span class="rb-race__pos-field">/ 2</span></span></div>` +
     `<div class="rb-race__time">0:00.00</div>` +
-    `<div class="rb-race__laps"><span class="rb-race__last">LAST --:--.--</span><span class="rb-race__best">BEST --:--.--</span></div>` +
+    `<div class="rb-race__laps"><span class="rb-race__last">ÚLTIMA --:--.--</span><span class="rb-race__best">MEJOR --:--.--</span></div>` +
     `<div class="rb-race__split"></div>` +
     `</div>` +
     // The circuit mission, under the race readout: what this run has to beat, and what it has
     // spent so far. Hidden outside the solo circuit, where there is no mission to report.
     `<div class="rb-mission">` +
-    `<div class="rb-mission__head"><span class="rb-mission__level">MISSION 1/3</span>` +
+    `<div class="rb-mission__head"><span class="rb-mission__level">MISIÓN 1/3</span>` +
     `<span class="rb-mission__name">SHAKEDOWN</span></div>` +
-    `<div class="rb-mission__rules"><span class="rb-mission__target">TARGET --:--.--</span>` +
-    `<span class="rb-mission__crashes">CRASHES 0/0</span></div>` +
+    `<div class="rb-mission__rules"><span class="rb-mission__target">OBJETIVO --:--.--</span>` +
+    `<span class="rb-mission__crashes">CHOQUES 0/0</span></div>` +
     `</div>` +
     `<div class="rb-countdown"></div>` +
-    `<div class="rb-wrongway">WRONG WAY</div>` +
+    `<div class="rb-wrongway">CONTRAMANO</div>` +
     `<div class="rb-results">` +
-    `<div class="rb-results__title">FINISH</div>` +
+    `<div class="rb-results__title">LLEGADA</div>` +
     `<div class="rb-results__time">0:00.00</div>` +
     `<div class="rb-results__meta"></div>` +
     `<div class="rb-results__verdict"></div>` +
     `<div class="rb-results__mission"></div>` +
     (mode === 'street'
-      ? `<div class="rb-results__keys"><span class="rb-key">R</span> retry <span class="rb-key">ESC</span> free roam</div>`
-      : `<div class="rb-results__keys"><span class="rb-key">R</span> race again <span class="rb-key">ESC</span> menu</div>`) +
+      ? `<div class="rb-results__keys"><span class="rb-key">R</span> reintentar <span class="rb-key">ESC</span> modo libre</div>`
+      : `<div class="rb-results__keys"><span class="rb-key">R</span> correr de nuevo <span class="rb-key">ESC</span> menú</div>`) +
     `</div>` +
     `<div class="rb-stack rb-stack--left">` +
     `<div class="rb-driftline">` +
@@ -255,6 +260,9 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   /** El Búho's, the same way. */
   const buho: BuhoOverlay | null = options.onActivate && options.buho ? createBuhoOverlay({ onActivate: options.onActivate }) : null;
   if (buho) hud.appendChild(buho.root);
+  /** Loco Mustang's, the same way. */
+  const garage: GarageOverlay | null = options.onActivate && options.garage ? createGarageOverlay({ onActivate: options.onActivate }) : null;
+  if (garage) hud.appendChild(garage.root);
   /** And the circuit missions' sign, which is one prompt and nothing else. */
   const gate: GateOverlay | null =
     options.onActivate && options.circuitGate ? createGateOverlay({ onActivate: options.onActivate }) : null;
@@ -264,9 +272,11 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   if (police) hud.appendChild(police.root);
   /**
    * The reactive phrases (`src/ui/flairOverlay.ts`). Built wherever RAYO RUSH is, because that
-   * is the only place the rules say anything — one flag, the same one the overlay is.
+   * is the only place the rules celebrate — one flag, the same one the overlay is — and wherever
+   * a crash can be charged, because the charge is said on it.
    */
-  const flair: FlairOverlay | null = options.onActivate && options.rush !== false ? createFlairOverlay() : null;
+  const flair: FlairOverlay | null =
+    (options.onActivate && options.rush !== false) || options.crashDamage ? createFlairOverlay() : null;
   if (flair) hud.appendChild(flair.root);
   /** The Street Race rings' sign, the same way as the circuit's. */
   const street: StreetOverlay | null =
@@ -481,8 +491,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
    * fraction of zero, so the last mission says what it wants and then what it got.
    */
   function crashText(crashes: number, limit: number): string {
-    if (limit > 0) return `CRASHES ${crashes}/${limit}`;
-    return crashes > 0 ? `CONTACT ×${crashes}` : 'NO CONTACT';
+    if (limit > 0) return `CHOQUES ${crashes}/${limit}`;
+    return crashes > 0 ? `CONTACTO ×${crashes}` : 'SIN CONTACTO';
   }
 
   /**
@@ -499,10 +509,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     if (t.level !== shownMissionLevel) {
       shownMissionLevel = t.level;
       missionLevelEl.textContent = t.allClear
-        ? `MISSION ${t.level + 1}/${t.levelCount} · ALL CLEAR`
-        : `MISSION ${t.level + 1}/${t.levelCount}`;
+        ? `MISIÓN ${t.level + 1}/${t.levelCount} · TODAS COMPLETAS`
+        : `MISIÓN ${t.level + 1}/${t.levelCount}`;
       missionNameEl.textContent = t.levelName;
-      missionTargetEl.textContent = `TARGET ${formatTarget(t.targetTime)}`;
+      missionTargetEl.textContent = `OBJETIVO ${formatTarget(t.targetTime)}`;
     }
     // The allowance changes with the mission, and the count does not have to change with it:
     // clearing one with a clean run leaves 0 crashes against a smaller limit.
@@ -532,16 +542,16 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       return;
     }
     resultsVerdictEl.textContent = r.advanced
-      ? `MISSION ${r.level + 1} CLEARED · NEXT ONE UNLOCKED`
+      ? `MISIÓN ${r.level + 1} SUPERADA · SIGUIENTE DESBLOQUEADA`
       : r.cleared
-        ? `MISSION ${r.level + 1} CLEARED`
+        ? `MISIÓN ${r.level + 1} SUPERADA`
         : !r.withinCrashes
-          ? `MISSION FAILED · ${r.crashLimit > 0 ? 'TOO MANY CRASHES' : 'CONTACT'}`
-          : 'MISSION FAILED · TOO SLOW';
+          ? `MISIÓN FALLIDA · ${r.crashLimit > 0 ? 'DEMASIADOS CHOQUES' : 'CONTACTO'}`
+          : 'MISIÓN FALLIDA · MUY LENTO';
     const delta = formatDelta(r.time - r.targetTime);
-    const best = t && t.newBest ? ' · NEW BEST' : '';
+    const best = t && t.newBest ? ' · NUEVO RÉCORD' : '';
     resultsMissionEl.textContent =
-      `${r.levelName} · TARGET ${formatTarget(r.targetTime)} (${delta}) · ${crashText(r.crashes, r.crashLimit)}${best}`;
+      `${r.levelName} · OBJETIVO ${formatTarget(r.targetTime)} (${delta}) · ${crashText(r.crashes, r.crashLimit)}${best}`;
   }
 
   /**
@@ -553,18 +563,18 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     if (!r) return;
     resultsEl.classList.toggle('is-cleared', r.won);
     resultsEl.classList.toggle('is-failed', !r.won);
-    const place = `P${r.placement} OF ${r.field}`;
+    const place = `P${r.placement} DE ${r.field}`;
     resultsVerdictEl.textContent = r.won
       ? r.unlockedName
-        ? `WINNER · ${r.unlockedName} UNLOCKED`
+        ? `GANADOR · ${r.unlockedName} DESBLOQUEADO`
         : r.allClear && r.advanced
-          ? 'WINNER · SERIES COMPLETE'
-          : 'WINNER'
-      : `${place} · BEATEN`;
+          ? 'GANADOR · SERIE COMPLETA'
+          : 'GANADOR'
+      : `${place} · DERROTA`;
     const reward = r.reward > 0 ? ` · +¥${r.reward}` : '';
     resultsMissionEl.textContent = r.won
-      ? `${r.eventName} · ${place}${reward}${r.unlockedName ? ' · A NEW RIVAL WAITS IN THE CITY' : ''}`
-      : `${r.eventName} · RETRY, OR HEAD BACK TO FREE ROAM`;
+      ? `${r.eventName} · ${place}${reward}${r.unlockedName ? ' · UN NUEVO RIVAL TE ESPERA EN LA CIUDAD' : ''}`
+      : `${r.eventName} · REINTENTÁ O VOLVÉ AL MODO LIBRE`;
   }
 
   /** The live position on the lap line, Street Race only. */
@@ -597,11 +607,11 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     }
     if (r.lastLap !== shownLastLap) {
       shownLastLap = r.lastLap;
-      raceLastEl.textContent = `LAST ${formatRaceTime(r.lastLap)}`;
+      raceLastEl.textContent = `ÚLTIMA ${formatRaceTime(r.lastLap)}`;
     }
     if (r.bestLap !== shownBestLap) {
       shownBestLap = r.bestLap;
-      raceBestEl.textContent = `BEST ${formatRaceTime(r.bestLap)}`;
+      raceBestEl.textContent = `MEJOR ${formatRaceTime(r.bestLap)}`;
     }
     if (r.wrongWay !== wrongWay) {
       wrongWay = r.wrongWay;
@@ -616,7 +626,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (r.phase !== 'finished') fillMissionResult(null);
       if (r.phase === 'finished') {
         resultsTimeEl.textContent = formatRaceTime(r.finishTime);
-        resultsMetaEl.textContent = `${r.laps} ${r.laps === 1 ? 'LAP' : 'LAPS'} · BEST LAP ${formatRaceTime(r.bestLap)}`;
+        resultsMetaEl.textContent = `${r.laps} ${r.laps === 1 ? 'VUELTA' : 'VUELTAS'} · MEJOR VUELTA ${formatRaceTime(r.bestLap)}`;
         fillMissionResult(t);
         fillStreetResult(sr);
         play(
@@ -657,6 +667,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (rush && s.rush) rush.update(s.rush);
       if (passengers && s.passenger) passengers.update(s.passenger);
       if (buho && s.buho) buho.update(s.buho);
+      if (garage && s.garage) garage.update(s.garage);
       if (gate && s.circuitGate) gate.update(s.circuitGate);
       if (street && s.streetGate) street.update(s.streetGate);
       if (police && s.police) police.update(s.police);
@@ -669,7 +680,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         root.classList.toggle('is-cruise-clean', s.cruising);
         if (s.cruising) {
           message.show('CRUISE', {
-            sub: `Use ${padActive ? 'Y' : 'P'} to switch camera POVs`,
+            sub: `Usá ${padActive ? 'Y' : 'P'} para cambiar la cámara`,
             tone: 'calm',
             duration: 3600,
           });
@@ -744,7 +755,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (s.nitro <= 0.005 && !s.nitroRecharging && !s.nitroActive && s.speedKmh < 1) {
         if (s.time - lastDriveHint >= DRIVE_HINT_EVERY) {
           lastDriveHint = s.time;
-          showNote(nitroNoteEl, 'DRIVE TO RECHARGE');
+          showNote(nitroNoteEl, 'MANEJÁ PARA RECARGAR');
         }
       }
 
@@ -834,9 +845,29 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       flair?.onEvent(e);
       passengers?.onEvent(e);
       buho?.onEvent(e);
+      garage?.onEvent(e);
       police?.onEvent(e);
       if (e.type === 'nearMiss') {
         showNearMiss(e.points);
+      } else if (e.type === 'crashDamage') {
+        // The run of passes is over: its tally leaves the glass with it. The fine itself is said
+        // under the AURA line (`flairOverlay.ts`); the counter only flinches.
+        clearNearMiss();
+        play(
+          moneyValueEl,
+          [
+            { transform: 'translateX(0)' },
+            { transform: 'translateX(-7px)', offset: 0.15 },
+            { transform: 'translateX(5px)', offset: 0.35 },
+            { transform: 'translateX(-3px)', offset: 0.6 },
+            { transform: 'translateX(0)' },
+          ],
+          380,
+        );
+      } else if (e.type === 'crashStall') {
+        // A race crash: the car is dead for a few seconds, and the player has to know why.
+        clearNearMiss();
+        message.show('MOTOR CALADO', { sub: `CHOQUE · ${Math.round(e.seconds)} S`, duration: e.seconds * 1000 });
       } else if (e.type === 'targetDestroyed') {
         const el = rewardEls[rewardIndex % rewardEls.length];
         rewardIndex++;
@@ -864,16 +895,16 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         );
       } else if (e.type === 'lightningFired') {
         // A miss costs the same charge as a hit: say so, or the shot looks like a bug.
-        if (e.targetId < 0) showNote(noteEl, 'MISS');
+        if (e.targetId < 0) showNote(noteEl, 'FALLASTE');
       } else if (e.type === 'lightningDenied') {
-        if (e.reason === 'noCharge') showNote(noteEl, 'DRIFT TO CHARGE');
-        else if (e.reason === 'noTarget') showNote(noteEl, 'NO TARGET');
-        else if (e.reason === 'short') showNote(noteEl, 'HOLD E TO AIM');
-        else showNote(noteEl, 'RECHARGING');
+        if (e.reason === 'noCharge') showNote(noteEl, 'DERRAPÁ PARA CARGAR');
+        else if (e.reason === 'noTarget') showNote(noteEl, 'SIN OBJETIVO');
+        else if (e.reason === 'short') showNote(noteEl, 'MANTENÉ E PARA APUNTAR');
+        else showNote(noteEl, 'RECARGANDO');
       } else if (e.type === 'raceCountdown') {
         showCountdown(String(e.seconds), false);
       } else if (e.type === 'raceStart') {
-        showCountdown('GO', true);
+        showCountdown('¡YA!', true);
       } else if (e.type === 'rushCountdown') {
         // The same big centred number a race grid counts down on, reused: `3 - 2 - 1` and then
         // the name of the thing, in the hot GO treatment.
@@ -886,17 +917,17 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
           raceSplitEl,
           e.fatal
             ? e.allowance > 0
-              ? 'MISSION FAILED · CRASHES SPENT'
-              : 'MISSION FAILED · CONTACT'
+              ? 'MISIÓN FALLIDA · SIN CHOQUES RESTANTES'
+              : 'MISIÓN FALLIDA · CONTACTO'
             : crashText(e.crashes, e.allowance),
         );
       } else if (e.type === 'streetRaceShortcut') {
         // Said where the splits are said: a fact about the lap, in the player's glance.
-        if (e.shortcut >= 0) showNote(raceSplitEl, 'SHORTCUT');
+        if (e.shortcut >= 0) showNote(raceSplitEl, 'ATAJO');
       } else if (e.type === 'checkpoint') {
-        showNote(raceSplitEl, `CHECKPOINT ${e.index} · ${formatRaceTime(e.split)}`);
+        showNote(raceSplitEl, `PUNTO DE CONTROL ${e.index} · ${formatRaceTime(e.split)}`);
       } else if (e.type === 'lapComplete') {
-        showNote(raceSplitEl, `${e.best ? 'BEST LAP' : 'LAP'} ${formatRaceTime(e.time)}`);
+        showNote(raceSplitEl, `${e.best ? 'MEJOR VUELTA' : 'VUELTA'} ${formatRaceTime(e.time)}`);
         play(
           raceTimeEl,
           [
@@ -907,8 +938,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
           480,
         );
       } else if (e.type === 'transmission') {
-        message.show(e.mode === 'manual' ? 'MANUAL' : 'AUTOMATIC', {
-          sub: e.mode === 'manual' ? (padActive ? 'RB / LB TO SHIFT' : 'X / Z TO SHIFT') : 'THE BOX SHIFTS FOR YOU',
+        message.show(e.mode === 'manual' ? 'MANUAL' : 'AUTOMÁTICA', {
+          sub: e.mode === 'manual' ? (padActive ? 'RB / LB PARA CAMBIAR' : 'X / Z PARA CAMBIAR') : 'LA CAJA CAMBIA SOLA',
           tone: 'calm',
           duration: 1800,
         });
@@ -922,7 +953,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
         tacho.reset(0);
         shownPhase = '';
         resultsEl.classList.remove('is-on');
-        message.show('RESTART', { duration: 900 });
+        message.show('REINICIO', { duration: 900 });
       }
     },
 
@@ -932,6 +963,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       flair?.dispose();
       passengers?.dispose();
       buho?.dispose();
+      garage?.dispose();
       gate?.dispose();
       street?.dispose();
       root.classList.remove('is-cruise-clean');

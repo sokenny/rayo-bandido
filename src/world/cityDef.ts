@@ -1,5 +1,6 @@
 import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
+import type { GarageSpec } from './garage';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TrackSpec } from './track';
@@ -113,6 +114,11 @@ export interface CitySpec {
    * plots it touches back to its edge. Missing: none.
    */
   gasStations?: GasStationSpec[];
+  /**
+   * Loco Mustang's garage (`garage.ts`): a corner of a block given up for a workshop, with its
+   * owner out front. Cuts the plots it touches back to its edge, like a station. Missing: none.
+   */
+  garage?: GarageSpec;
   /** Exponential haze density. Missing: `HAZE.cityDensity`. */
   fogDensity?: number;
   /** Column spacing under the elevated roads (m). Missing: 12, the Bay's. */

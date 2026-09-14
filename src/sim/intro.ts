@@ -418,6 +418,7 @@ export function stepIntro(intro: IntroState, cfg: IntroConfig, state: GameState,
         say(intro, 'e4');
         say(intro, 'e5');
         say(intro, 'e6');
+        say(intro, 'e6b');
         say(intro, 'e7');
       }
       // The call ends when she has finished talking — the silence after the last line included.

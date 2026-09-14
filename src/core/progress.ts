@@ -273,7 +273,8 @@ export function emptyStreetRaceProgress(): StreetRaceProgress {
 function clampStreetClearedCount(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(STREET_RACE.events.length, Math.floor(n));
+  // The series only: a standalone event (La Curva) is remembered in `best`, never in `cleared`.
+  return Math.min(STREET_RACE.events.filter((e) => !e.standalone).length, Math.floor(n));
 }
 
 /** A stored placement made safe: a whole number of at least 1, or -1 for "never finished". */

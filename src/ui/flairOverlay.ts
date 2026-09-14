@@ -58,11 +58,21 @@ const TIER_CLASS: Record<FlairTier, string> = {
   crash: 'rb-flair--crash',
 };
 
+/** `1200` -> `1,200`, never negative. */
+function money(value: number): string {
+  return Math.max(0, Math.round(value)).toLocaleString('en-US');
+}
+
 export function createFlairOverlay(): FlairOverlay {
   const root = document.createElement('div');
   root.className = 'rb-flair';
-  root.innerHTML = `<div class="rb-flair__text"></div>`;
+  root.innerHTML = `<div class="rb-flair__text"></div><div class="rb-flair__detail"></div>`;
   const textEl = root.querySelector('.rb-flair__text') as HTMLElement;
+  // The receipt under a charged crash's AURA line (`crashDamage`): what it cost, and the balance
+  // when the counter ran dry. Written when the charge arrives; shown only by the crash line that
+  // follows it on the same tick, and cleared by any other line.
+  const detailEl = root.querySelector('.rb-flair__detail') as HTMLElement;
+  let detailArmed = false;
 
   let animation: Animation | null = null;
   let tierClass = '';
@@ -82,8 +92,17 @@ export function createFlairOverlay(): FlairOverlay {
         clear();
         return;
       }
+      if (e.type === 'crashDamage') {
+        const cost = `<span class="rb-flair__line">CRASH DAMAGE: <b>−¥${money(e.charged)}</b></span>`;
+        const broke = e.balance <= 0 ? `<span class="rb-flair__line">BALANCE: <b>¥0</b></span>` : '';
+        detailEl.innerHTML = cost + broke;
+        detailArmed = true;
+        return;
+      }
       if (e.type !== 'flair') return;
 
+      if (!(e.tier === 'crash' && detailArmed)) detailEl.textContent = '';
+      detailArmed = false;
       textEl.textContent = e.text;
       const next = TIER_CLASS[e.tier];
       if (next !== tierClass) {

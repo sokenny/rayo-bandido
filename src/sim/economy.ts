@@ -57,6 +57,16 @@ export function spendMoney(e: EconomyState, amount: number): boolean {
 }
 
 /**
+ * A crash's fine (`src/sim/crashDamage.ts`). Taken from the counter, never below zero — like the
+ * arrest's, it is a penalty and not a debt. Returns what was actually taken.
+ */
+export function chargeCrashFine(e: EconomyState, fine: number): number {
+  const charged = Math.max(0, Math.min(e.money, fine));
+  e.money -= charged;
+  return charged;
+}
+
+/**
  * The fine of an arrest (`policeBusted`, raised by `src/sim/police.ts`). Taken from the
  * counter, never below zero — the fine is a penalty, not a debt — and what was actually taken
  * is written back onto the event (`charged`) and the police state, so the card and the counters

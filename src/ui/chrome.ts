@@ -9,9 +9,18 @@
 
 export const TITLE = 'RAYO BANDIDO';
 
+/**
+ * The release stage, stuck on the wordmark. The game is played by the public while it is still
+ * being built, and every menu should say so before anyone mistakes it for the finished edition.
+ */
+export const RELEASE_STAGE = 'OPEN BETA';
+
 /** The wordmark. `data-text` feeds the misregistered red/cyan layers drawn by CSS. */
 export function wordmark(): string {
-  return `<h1 class="rb-title" data-text="${TITLE}"><span class="rb-title__txt">${TITLE}</span></h1>`;
+  return (
+    `<h1 class="rb-title" data-text="${TITLE}"><span class="rb-title__txt">${TITLE}</span>` +
+    `<span class="rb-beta" title="Work in progress: not the definitive edition">${RELEASE_STAGE}</span></h1>`
+  );
 }
 
 /**
@@ -39,7 +48,7 @@ export function frameDecor(screen: string): string {
     `<span class="rb-frame__corner rb-frame__corner--tr"></span>` +
     `<span class="rb-frame__corner rb-frame__corner--bl"></span>` +
     `<span class="rb-frame__corner rb-frame__corner--br"></span>` +
-    `<span class="rb-frame__read rb-frame__read--tl">RB//OS 0.9 · NIGHT BUILD · ${screen}</span>` +
+    `<span class="rb-frame__read rb-frame__read--tl">RB//OS 0.9 · ${RELEASE_STAGE} · ${screen}</span>` +
     `<span class="rb-frame__read rb-frame__read--tr"><i class="rb-blink"></i>SYS LINK</span>` +
     `<span class="rb-frame__read rb-frame__read--bl">0x4F52 · 0xB1D0 · JDM/CYB 50:50</span>` +
     `<span class="rb-frame__read rb-frame__read--br">NO ACCOUNTS · NO COPS · NO MERCY</span>` +

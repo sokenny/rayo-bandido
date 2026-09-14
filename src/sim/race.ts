@@ -145,8 +145,9 @@ export function stepRace(race: RaceState, course: RaceCourse, v: VehicleState, t
   let tz = 0;
   for (let i = 0; i < course.shortcuts.length; i++) {
     const sc = course.shortcuts[i];
-    projectOntoPath(sc.path, v.x, v.z, proj);
-    if (proj.dist <= proj.halfWidth + RACE.shortcutPad) {
+    projectOntoPath(sc.path, v.x, v.z, proj, -1, 12, v.y);
+    // On it in plan AND at its height: a deck of the same lap can pass over a branch.
+    if (proj.dist <= proj.halfWidth + RACE.shortcutPad && Math.abs(proj.y - v.y) < 4) {
       onShortcut = i;
       const f = sc.path.length > 0 ? proj.s / sc.path.length : 0;
       let span = sc.sOut - sc.sIn;
@@ -158,7 +159,7 @@ export function stepRace(race: RaceState, course: RaceCourse, v: VehicleState, t
     }
   }
   if (onShortcut < 0) {
-    projectOntoPath(path, v.x, v.z, proj);
+    projectOntoPath(path, v.x, v.z, proj, -1, 12, v.y);
     race.station = proj.s;
     tx = proj.tx;
     tz = proj.tz;

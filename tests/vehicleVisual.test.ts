@@ -45,8 +45,9 @@ describe('player car visual', () => {
       const budget = measure(car.root);
       expect(budget.triangles).toBeLessThan(8000);
       // body, glass, heads, tails, reverse, exhaust glow, ground pool, rocker glow, wheels,
-      // plus the cabin's trim, light strips, spectrum bars and turning steering wheel.
-      expect(budget.drawCalls).toBeLessThanOrEqual(14);
+      // plus the cabin's trim, light strips, spectrum bars and turning steering wheel, plus the
+      // crash damage decals — hidden on a clean car, so fourteen is what a clean one draws.
+      expect(budget.drawCalls).toBeLessThanOrEqual(15);
     } finally {
       car.dispose();
     }

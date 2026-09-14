@@ -5,6 +5,7 @@ import { createCityWorld } from './world/cityWorld';
 import { STACK_SPEC } from './world/stackSpec';
 import { createOpenWorld } from './world/openWorld';
 import { createStreetWorld } from './world/streetWorld';
+import { createCurvaWorld } from './world/curvaWorld';
 import { spawnForSlot } from './world/arrivals';
 import { createCircuitWorld } from './world/circuitWorld';
 import { createRaceWorld } from './world/raceWorld';
@@ -12,6 +13,7 @@ import type {
   ActivityMarkKind,
   ActivitySite,
   BuhoHudSnapshot,
+  GarageHudSnapshot,
   GameEvent,
   GameMode,
   GameState,
@@ -27,7 +29,7 @@ import type {
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -68,7 +70,7 @@ import {
   timeAttackLevelIndex,
 } from './sim/timeAttack';
 import { canEnterCircuit } from './sim/circuitGate';
-import { canEnterStreetRace, streetEventOpen, streetNewestEvent } from './sim/streetGate';
+import { canEnterStreetRace, streetEventOpen, streetEventStandalone, streetNewestEvent } from './sim/streetGate';
 import {
   createStreetRaceState,
   interpolateStreetRivals,
@@ -100,6 +102,10 @@ import type { RoadGraph, RouteField } from './world/roadGraph';
 import { canBuyMoogul, endMoogul, grantMoogul, moogulIntensity } from './sim/buho';
 import { BUHO } from './content/buho';
 import { createBuhoFigure } from './render/scene/env/buhoFigure';
+import { createGarageFigure } from './render/scene/env/garageFigure';
+import { GARAGE } from './world/garage';
+import { LOCO_MUSTANG } from './content/garage';
+import { garageOpenToTalk } from './sim/garage';
 import { createMoogulTrip } from './render/scene/moogulTrip';
 import { createLeaderboard } from './net/leaderboard';
 import { shiftKickStrength } from './sim/drivetrain';
@@ -216,8 +222,11 @@ export function createGame(
       : mode === 'circuit'
         ? createCircuitWorld(options.net?.match?.raceId)
         : mode === 'street'
-          ? // The Street Race's own instance of the city (`src/world/streetWorld.ts`).
-            createStreetWorld()
+          ? // The Street Race's own instance of the city: the Bay's Quay Circuit
+            // (`src/world/streetWorld.ts`), or La Curva on the metro (`src/world/curvaWorld.ts`).
+            streetEvent(Number(params.get('event') ?? 0)).course === 'curva'
+            ? createCurvaWorld()
+            : createStreetWorld()
         : mode === 'city'
           ? // The open world: Bandido Metro, with the doors to the races painted on it. Layers
             // over the city rather than parts of it (`src/world/openWorld.ts`), for the same
@@ -311,9 +320,13 @@ export function createGame(
     // whether they exist at all is this one.
     police: mode === 'city' || mode === 'bay',
   });
-  // The field: built from the grid, clamped to the events this browser has unlocked.
+  // The field: built from the grid, clamped to the events this browser has unlocked. A
+  // standalone event (La Curva) also carries whether it has been won here before, for its reward.
+  const streetEventAsked = Number(params.get('event') ?? 0);
   const streetRace: StreetRaceState | null =
-    hasStreetRace && layout.race ? createStreetRaceState(layout.race, Number(params.get('event') ?? 0), streetProgress?.cleared ?? 0) : null;
+    hasStreetRace && layout.race
+      ? createStreetRaceState(layout.race, streetEventAsked, streetProgress?.cleared ?? 0, streetProgress?.best[streetEventAsked] === 1)
+      : null;
   const command: PlayerCommand = createPlayerCommand();
   // On a phone the picture is turned sideways for as long as this game lives, so the renderer
   // below is sized for the landscape layer rather than for the portrait window.
@@ -559,6 +572,11 @@ export function createGame(
   const hasStreetGate = !!(streetSites && streetSites.length > 0 && state.streetGate);
   const buhoFigure = hasBuho && buhoSite ? createBuhoFigure(buhoSite) : null;
   if (buhoFigure) scene.add(buhoFigure.group);
+  /** Loco Mustang's garage, in the world that has it: the man and the ring out front (`src/sim/garage.ts`). */
+  const garageSite: ActivitySite | null = layout.garageSite ?? null;
+  const hasGarage = !!(garageSite && state.garage && world.plan.garage);
+  const garageFigure = hasGarage && world.plan.garage ? createGarageFigure(world.plan.garage) : null;
+  if (garageFigure) scene.add(garageFigure.group);
   const moogul = hasBuho
     ? createMoogulTrip({
         scene,
@@ -573,7 +591,7 @@ export function createGame(
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
     onActivate:
-      hasRush || hasPassengers || hasBuho || hasCircuitGate || hasStreetGate
+      hasRush || hasPassengers || hasBuho || hasGarage || hasCircuitGate || hasStreetGate
         ? () => {
             activateQueued = true;
           }
@@ -581,9 +599,12 @@ export function createGame(
     rush: hasRush,
     passengers: hasPassengers,
     buho: hasBuho,
+    garage: hasGarage,
     circuitGate: hasCircuitGate,
     streetGate: hasStreetGate,
     police: !!state.police,
+    // The fine's AURA line is the open world's; a race stall is said by the HUD's own message.
+    crashDamage: !!state.crash && !state.race,
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -763,9 +784,13 @@ export function createGame(
     }
     // Every open Street Race ring: won events stay on the map, the newest one with them.
     if (!activitySuppressed(engaged, 'street') && streetSites && state.streetGate) {
-      const open = streetNewestEvent(state.streetGate.cleared);
-      for (let i = 0; i <= open && i < streetSites.length; i++) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street', label: STREET_RACE.events[i]?.name });
+      const cleared = state.streetGate.cleared;
+      for (let i = 0; i < streetSites.length; i++) if (streetEventOpen(cleared, i)) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street', label: STREET_RACE.events[i]?.name });
     }
+    // El Búho is never "engaged" himself, so he goes quiet whenever anything else has the car.
+    if (engaged === null && hasBuho && buhoSite) mapMarks.push({ x: buhoSite.x, z: buhoSite.z, kind: 'buho' });
+    // The garage is a place more than an offer, so it stays on the map unless something has the car.
+    if (engaged === null && hasGarage && garageSite) mapMarks.push({ x: garageSite.x, z: garageSite.z, kind: 'garage' });
     const p = state.passenger;
     if (p && p.trip && passengerStops && !activitySuppressed(engaged, 'passenger')) {
       if (p.phase === 'offered') {
@@ -940,11 +965,22 @@ export function createGame(
     timeAttack: null,
     passenger: null,
     buho: null,
+    garage: null,
     circuitGate: null,
     streetGate: null,
     streetRace: null,
     police: null,
   };
+  const garageSnapshot: GarageHudSnapshot = {
+    name: LOCO_MUSTANG.name,
+    tagline: LOCO_MUSTANG.tagline,
+    portrait: LOCO_MUSTANG.portrait,
+    atSite: false,
+    open: false,
+    line: '',
+    lineId: 0,
+  };
+  if (hasGarage) snapshot.garage = garageSnapshot;
   const buhoSnapshot: BuhoHudSnapshot = {
     name: BUHO.name,
     tagline: BUHO.tagline,
@@ -1084,6 +1120,8 @@ export function createGame(
     eventName: '',
     difficulty: '',
     blurb: '',
+    circuit: '',
+    laps: 0,
     rivals: 1,
     completed: false,
     placeLabel: '',
@@ -1123,6 +1161,8 @@ export function createGame(
    * simulation may run several ticks between frames — comparing the gear the body knows about
    * with the one the car is in catches the change whatever the frame rate is doing. */
   let bodyGear = state.vehicle.gear;
+  /** `CrashDamageState.version` the car's bodywork was last painted for; -1 before the first frame. */
+  let shownDamageVersion = -1;
   /**
    * Which activity had the car on the last frame that looked. `undefined` until the first one,
    * so the opening frame always writes — `null` is a real answer here ("nobody"), and a
@@ -1692,6 +1732,19 @@ export function createGame(
     car.setCharge(state.lightning.charge / LIGHTNING.capacity);
     car.setBrakeLights(v.brakeApplied > 0 && v.speed > 0.5);
     car.setReverseLights(v.speed < -0.5);
+    // Crash damage (`src/sim/crashDamage.ts`): the marks repainted only when they change, and the
+    // bonnet smoking — thick at first, then a wisp — for as long as a heavy crash is carried.
+    const crash = state.crash;
+    if (crash) {
+      if (crash.version !== shownDamageVersion) {
+        shownDamageVersion = crash.version;
+        car.setDamage(crash.marks);
+      }
+      const smoke = CRASH_DAMAGE.visual.smoke;
+      effects.setDamageSmoke(crash.heavy ? (simTime - crash.heavyAt < smoke.thickSeconds ? smoke.thickRate : smoke.wispRate) : 0);
+      // A race stall blinks the car like a respawn, on the sim clock so a paused game holds still.
+      car.root.visible = crash.stall <= 0 || Math.floor((crash.stallSeconds - crash.stall) * CRASH_DAMAGE.race.blinkHz * 2) % 2 === 1;
+    }
     car.setBodyAccel(v.latAccel, v.longAccel);
     // The cabin's spectrum display. `theme.spectrum` is one array mutated in place, so this
     // is a reference hand-off, not a copy, and it stays live for every later frame.
@@ -1747,6 +1800,13 @@ export function createGame(
       // answering, because it is the part of him that is an offer, and the offer is not open.
       buhoFigure.setProximity(activitySuppressed(engagedActivity(state), 'moogul') ? 0 : near * near);
       buhoFigure.update(simTime, crowdSubject);
+    }
+    if (garageFigure && garageSite) {
+      const dx = pose.x - garageSite.x;
+      const dz = pose.z - garageSite.z;
+      const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / (GARAGE.marker.promptRadius * 4));
+      garageFigure.setProximity(engagedActivity(state) !== null ? 0 : near * near);
+      garageFigure.update(simTime, crowdSubject);
     }
     chase.update(cameraPose, frameDt);
     audio.update(
@@ -1903,8 +1963,10 @@ export function createGame(
         streetGateSnapshot.eventName = spec.name;
         streetGateSnapshot.difficulty = spec.difficulty;
         streetGateSnapshot.blurb = spec.blurb;
+        streetGateSnapshot.circuit = spec.circuit;
+        streetGateSnapshot.laps = spec.laps;
         streetGateSnapshot.rivals = spec.rivals;
-        streetGateSnapshot.completed = shown < sgate.cleared;
+        streetGateSnapshot.completed = streetEventStandalone(shown) ? streetProgress?.best[shown] === 1 : shown < sgate.cleared;
         streetGateSnapshot.placeLabel = streetSites[shown]?.label ?? '';
       }
       const markers = environment.streetMarkers;
@@ -1919,7 +1981,7 @@ export function createGame(
         const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
         marker.setProximity(near * near);
         // Won events stay open but go quiet; the newest one is the loud one.
-        marker.setRunning(i < newest);
+        marker.setRunning(streetEventStandalone(i) ? streetProgress?.best[i] === 1 : i < newest);
         marker.setHidden(!streetEventOpen(sgate.cleared, i) || activitySuppressed(engaged, 'street'));
       }
     }
@@ -1986,6 +2048,13 @@ export function createGame(
       buhoSnapshot.intensity = moogul ? moogul.shown : 0;
       buhoSnapshot.line = buho.line;
       buhoSnapshot.lineId = buho.lineId;
+    }
+    const garage = state.garage;
+    if (garage && hasGarage) {
+      garageSnapshot.atSite = garage.atSite;
+      garageSnapshot.open = garageOpenToTalk(garage);
+      garageSnapshot.line = garage.line;
+      garageSnapshot.lineId = garage.lineId;
     }
     const race = state.race;
     if (race) {
@@ -2287,6 +2356,10 @@ export function createGame(
       if (buhoFigure) {
         scene.remove(buhoFigure.group);
         buhoFigure.dispose();
+      }
+      if (garageFigure) {
+        scene.remove(garageFigure.group);
+        garageFigure.dispose();
       }
       environment.dispose();
       if (pickupMarker) {
@@ -2775,6 +2848,24 @@ export function createGame(
               .filter((u) => u.status === 'active')
               .map((u) => ({ id: u.id, role: u.role, x: u.x, z: u.z, heading: u.heading, speed: u.speed, lights: u.lights, sight: u.sight })),
           stats: () => ({ ...state.police!.stats, starsReached: [...state.police!.stats.starsReached] }),
+        }
+      : null,
+
+    /**
+     * CRASH DAMAGE, for automation. Null in worlds without it.
+     *
+     *   __rb.crash.state             // the live `CrashDamageState`
+     *   __rb.crash.status()          // { marks, heavy, latched, cooldown, stall, money, stats }
+     */
+    crash: state.crash
+      ? {
+          get state() {
+            return state.crash;
+          },
+          status: () => {
+            const c = state.crash!;
+            return { marks: c.marks, heavy: c.heavy, latched: c.latched, cooldown: c.cooldown, stall: c.stall, money: state.economy.money, stats: { ...c.stats } };
+          },
         }
       : null,
 

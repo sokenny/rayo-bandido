@@ -207,7 +207,7 @@ describe('the places', () => {
   });
 
   it('names every line a trigger refers to, with a sane subtitle timing', () => {
-    for (const id of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2', 'c3', 'c-hint', 'd1', 'd2', 'd3', 'd4', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7']) {
+    for (const id of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2', 'c3', 'c-hint', 'd1', 'd2', 'd3', 'd4', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e6b', 'e7']) {
       const l = introLine(INTRO, id);
       const s = introLineSeconds(INTRO, l);
       expect(s).toBeGreaterThanOrEqual(INTRO.timing.minSeconds);
@@ -443,7 +443,7 @@ describe('the stages', () => {
     expect(introHoldsPlayer(r.intro)).toBe(false);
     const events = [...released, ...drain(r)];
     const lines = events.filter((e) => e.type === 'introLine').map((e) => (e as { id: string }).id);
-    expect(lines).toEqual(['e2', 'e3', 'e4', 'e5', 'e6', 'e7']);
+    expect(lines).toEqual(['e2', 'e3', 'e4', 'e5', 'e6', 'e6b', 'e7']);
     const tail = r.tick(seconds(introLine(INTRO, 'e7').gap ?? INTRO.timing.gap) + 3);
     const all = [...events, ...tail];
     expect(all.filter((e) => e.type === 'introDone')).toHaveLength(1);

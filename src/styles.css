@@ -587,6 +587,49 @@ body {
   animation: rb-glitch-b 3.4s steps(1) infinite;
 }
 
+/* The OPEN BETA sticker, slapped over the wordmark's top-right corner. Cyan on black so it reads
+   as a different hand from the yellow stamp below; mono and fixed-size so it stays a label. */
+.rb-beta {
+  position: absolute;
+  z-index: 3;
+  bottom: 100%;
+  left: 100%;
+  margin: 0 0 -6px -110px;
+  padding: 7px 14px 6px;
+  border: 2px solid var(--rb-cyan);
+  background: #05060a;
+  color: var(--rb-cyan);
+  font-family: var(--rb-mono);
+  font-size: clamp(12px, 1.5vw, 18px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  white-space: nowrap;
+  transform: skewX(7deg) rotate(6deg);
+  box-shadow: 0 0 14px rgba(79, 243, 255, 0.4), 2px 2px 0 rgba(255, 61, 240, 0.6);
+  animation: rb-beta-pulse 2.6s ease-in-out infinite;
+}
+
+/* On a phone the wordmark shrinks under the sticker; stand it above the title instead. */
+@media (max-width: 640px) {
+  .rb-beta {
+    left: 50%;
+    margin: 0 0 10px;
+    transform: translateX(-50%) skewX(7deg) rotate(-2deg);
+  }
+}
+
+@keyframes rb-beta-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 14px rgba(79, 243, 255, 0.4), 2px 2px 0 rgba(255, 61, 240, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(79, 243, 255, 0.75), 2px 2px 0 rgba(255, 61, 240, 0.6);
+  }
+}
+
 /* Short, rare tears rather than a permanent shake: the wordmark has to stay readable. */
 @keyframes rb-glitch-a {
   0%,
@@ -1570,7 +1613,8 @@ body {
 }
 
 /* The punchline. Small, dry, in the machine's face rather than the shouted one: it is the
-   game being sarcastic about a crash, not announcing a penalty — and there is no penalty. */
+   game being sarcastic about a crash. Where crash damage exists (src/sim/crashDamage.ts) the
+   receipt sits under it in the same face — see .rb-flair__detail. */
 .rb-flair--crash .rb-flair__text {
   font-family: var(--rb-mono);
   font-size: 19px;
@@ -1582,6 +1626,30 @@ body {
   text-shadow:
     0 2px 5px rgba(4, 8, 16, 0.95),
     0 0 16px rgba(255, 43, 61, 0.5);
+}
+
+/* What the crash cost, under −1000 DE AURA: one line, two when the counter ran dry. Empty for
+   every other phrase, so it takes no room there. */
+.rb-flair__detail {
+  margin-top: 8px;
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--rb-text);
+  text-shadow: 0 1px 4px rgba(4, 8, 16, 0.95);
+}
+
+.rb-flair__line {
+  display: block;
+  line-height: 1.7;
+}
+
+.rb-flair__line b {
+  color: var(--rb-red);
+  text-shadow:
+    0 1px 4px rgba(4, 8, 16, 0.95),
+    0 0 12px rgba(255, 43, 61, 0.45);
 }
 
 /* ------------------------------------------------ centre: the aim/charge meter */
@@ -2680,7 +2748,7 @@ body.rb-touch-pad .rb-minimap__key {
   letter-spacing: 0.12em;
   line-height: 1;
   pointer-events: none;
-  margin: -6px 0 0 13px;
+  margin: -6px 0 0 17px;
   padding: 2px 5px;
   background: rgba(5, 7, 13, 0.82);
 }
@@ -2700,6 +2768,14 @@ body.rb-touch-pad .rb-minimap__key {
 
 .rb-bigmap__label--street {
   color: #ff8a2a;
+}
+
+.rb-bigmap__label--buho {
+  color: #7dff6a;
+}
+
+.rb-bigmap__label--garage {
+  color: #ff5a3c;
 }
 
 .rb-bigmap__label--you,
@@ -3248,6 +3324,7 @@ body.rb-touch-pad .rb-minimap__key {
   .rb-wrongway.is-on,
   .rb-title::before,
   .rb-title::after,
+  .rb-beta,
   .rb-menu::after,
   .rb-blink,
   .rb-status.is-bad {
@@ -4564,6 +4641,15 @@ body.rb-touch-pad .rb-minimap {
   }
 }
 
+/* ================================================================== loco mustang's garage */
+
+/* El Búho's furniture again (`garageOverlay.ts`), in the red of the 99 on Loco Mustang's shirt. */
+.rb-garage {
+  --rb-pax: #ff5a3c;
+  --rb-pax-deep: #c7321c;
+  --rb-pax-hairline: rgba(255, 90, 60, 0.3);
+}
+
 /* ------------------------------------------------------------- the police */
 /*
  * The wanted level (`src/ui/policeOverlay.ts`). Top centre, the one spot Free Roam leaves
@@ -5508,5 +5594,11 @@ body.rb-touch-pad .rb-minimap {
   .rb-flair--crash .rb-flair__text {
     font-size: 15px;
     letter-spacing: 0.2em;
+  }
+
+  .rb-flair__detail {
+    margin-top: 5px;
+    font-size: 10px;
+    letter-spacing: 0.16em;
   }
 }

@@ -368,6 +368,9 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
     // Only transfer momentum when the player is actually driving into the car.
     const approach = v.vx * nx + v.vz * nz;
     if (approach <= 0) continue;
+    // The car's own speed along the contact, read before the knock lands on it: what the crash
+    // rules judge is how fast the two closed, not how fast the player was going.
+    const carAlong = (forwardX(t.heading) * t.speed + t.vx) * nx + (forwardZ(t.heading) * t.speed + t.vz) * nz;
 
     // Fling the target along the contact normal, a bit harder than pure momentum.
     const knockX = nx * approach * k.transfer;
@@ -383,7 +386,8 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
     if (approach > k.minImpact) {
       bumped = true;
       // The event names the car and the knock, so a multiplayer client can tell the host.
-      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, y: v.y, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ });
+      const closing = Math.max(0, approach - carAlong);
+      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, y: v.y, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ, closing });
     }
   }
 

@@ -5,7 +5,7 @@ import { STREET_RACE } from '../config/tuning';
  * THE STREET RACE RINGS, as places in the city: how the three events are found.
  *
  * The same door `src/sim/circuitGate.ts` is, with one difference: there are up to three of
- * them open at once. Event N's ring is open once N events have been won — so a fresh player
+ * them open at once. Event N's ring is open once N events have been won (a standalone event's always is) — so a fresh player
  * sees one ring, and every event already won stays open to be driven again. Which ring the car
  * is on is `atSite`; the key takes the player to THAT event, on the other side of a page load.
  *
@@ -13,25 +13,36 @@ import { STREET_RACE } from '../config/tuning';
  * and to open. Pure data in, pure data out; no allocation per tick.
  */
 
-/** How many events there are. */
+/**
+ * How many events make up THE SERIES: the ones `cleared` counts. They come first in
+ * `STREET_RACE.events`; a `standalone` event after them (La Curva) is always open, never counted.
+ */
 export function streetEventCount(): number {
-  return STREET_RACE.events.length;
+  let n = 0;
+  while (n < STREET_RACE.events.length && !STREET_RACE.events[n].standalone) n++;
+  return n;
+}
+
+/** Whether `event` is a standalone race rather than a step of the series. */
+export function streetEventStandalone(event: number): boolean {
+  return event >= 0 && event < STREET_RACE.events.length && STREET_RACE.events[event].standalone;
 }
 
 /** A stored count made safe: a whole number between 0 and the length of the series. */
 export function clampStreetCleared(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.min(STREET_RACE.events.length, Math.floor(value));
+  return Math.min(streetEventCount(), Math.floor(value));
 }
 
-/** Index of the newest open event: the one on offer to a player with `cleared` wins. */
+/** Index of the newest open event OF THE SERIES: the one on offer to a player with `cleared` wins. */
 export function streetNewestEvent(cleared: number): number {
-  return Math.min(STREET_RACE.events.length - 1, clampStreetCleared(cleared));
+  return Math.min(streetEventCount() - 1, clampStreetCleared(cleared));
 }
 
-/** Whether event `event` may be driven by a player with `cleared` wins. */
+/** Whether event `event` may be driven by a player with `cleared` wins. A standalone event always may. */
 export function streetEventOpen(cleared: number, event: number): boolean {
-  return event >= 0 && event < STREET_RACE.events.length && event <= clampStreetCleared(cleared);
+  if (streetEventStandalone(event)) return true;
+  return event >= 0 && event < streetEventCount() && event <= clampStreetCleared(cleared);
 }
 
 export function createStreetGateState(cleared = 0): StreetGateState {
@@ -64,12 +75,12 @@ export function stepStreetGate(
   const wasOffering = canEnterStreetRace(s);
   const wasAt = s.atSite;
   const m = STREET_RACE.marker;
-  const open = Math.min(sites.length - 1, streetNewestEvent(s.cleared));
 
   // Wider to leave than to enter, so a car parked exactly on a ring cannot flicker the sign.
   let at = -1;
   let nearest2 = Infinity;
-  for (let i = 0; i <= open; i++) {
+  for (let i = 0; i < sites.length; i++) {
+    if (!streetEventOpen(s.cleared, i)) continue;
     const site = sites[i];
     const dx = v.x - site.x;
     const dz = v.z - site.z;
@@ -84,7 +95,8 @@ export function stepStreetGate(
   if (!s.rearmed) {
     // Rearm once the car is clear of EVERY ring, not only the one it left through.
     let clear = true;
-    for (let i = 0; i <= open; i++) {
+    for (let i = 0; i < sites.length; i++) {
+      if (!streetEventOpen(s.cleared, i)) continue;
       const dx = v.x - sites[i].x;
       const dz = v.z - sites[i].z;
       if (dx * dx + dz * dz <= m.rearmRadius * m.rearmRadius) clear = false;

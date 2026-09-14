@@ -48,9 +48,9 @@ export function formatTargetTime(seconds: number): string {
  * actually means, which is that touching anything ends it.
  */
 export function ruleLine(targetTime: number, crashLimit: number): string {
-  const time = `FINISH INSIDE ${formatTargetTime(targetTime)}`;
-  if (crashLimit <= 0) return `${time} · WITHOUT TOUCHING A THING`;
-  return `${time} · ${crashLimit} CRASH${crashLimit === 1 ? '' : 'ES'} ALLOWED`;
+  const time = `TERMINÁ EN MENOS DE ${formatTargetTime(targetTime)}`;
+  if (crashLimit <= 0) return `${time} · SIN TOCAR NADA`;
+  return `${time} · ${crashLimit} ${crashLimit === 1 ? 'CHOQUE PERMITIDO' : 'CHOQUES PERMITIDOS'}`;
 }
 
 function pick<T extends Element>(root: ParentNode, selector: string): T {
@@ -69,10 +69,10 @@ export function createGateOverlay(options: GateOverlayOptions): GateOverlay {
     `<span class="rb-rush__prompt-title">TIME ATTACK</span>` +
     `<span class="rb-rush__prompt-mission"></span>` +
     `<span class="rb-rush__prompt-lines">` +
-    `<span>TWO LAPS OF THE BANDIDO GRID, ALONE, AGAINST THE CLOCK</span>` +
+    `<span>DOS VUELTAS AL BANDIDO GRID, SOLO, CONTRA RELOJ</span>` +
     `<span class="rb-rush__prompt-target"></span>` +
     `</span>` +
-    `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> ENTER</span>` +
+    `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> ENTRAR</span>` +
     `</button>`;
 
   const promptEl = pick<HTMLButtonElement>(root, '.rb-rush__prompt');
@@ -106,7 +106,7 @@ export function createGateOverlay(options: GateOverlayOptions): GateOverlay {
         missionEl.textContent = missionLabel(gate.level, gate.levelCount, gate.levelName, gate.allClear);
         missionEl.classList.toggle('is-clear', gate.allClear);
         targetEl.textContent = gate.allClear
-          ? 'EVERY MISSION CLEAR · DRIVE IT FOR THE TIME'
+          ? 'TODAS LAS MISIONES COMPLETAS · CORRÉ POR EL TIEMPO'
           : ruleLine(gate.targetTime, gate.crashLimit);
       }
     },

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { VEHICLE } from '../../config/tuning';
+import { CRASH_DAMAGE, VEHICLE } from '../../config/tuning';
 import { applyLengthwiseUVs, box, glowPool, loft, mergeParts, part, partRGBA, wheelArch } from './vehicles/geometryKit';
+import { createCarDamage } from './vehicles/damage';
 import { createBodyAttitude } from './bodyAttitude';
 import { createLiveryTexture } from './vehicles/livery';
 import { slotColor, slotCss } from '../../core/playerColors';
@@ -30,7 +31,8 @@ import { createCabinInterior } from './vehicles/interior';
  * - Fourteen draw calls: body, glass, head lights, tail lights, reverse lights, exhaust glow,
  *   ground light pool, underglow, wheels, and the cabin's five (trim, light strips, spectrum
  *   bars and the two that make up the turning steering wheel — see `vehicles/interior.ts`).
- *   The chassis group costs nothing extra.
+ *   The chassis group costs nothing extra. A fifteenth, the crash damage decals
+ *   (`vehicles/damage.ts`), is drawn only while the car carries any.
  */
 export interface CarVisualOptions {
   /**
@@ -74,6 +76,11 @@ export interface CarVisual {
   resetBody(): void;
   setBrakeLights(on: boolean): void;
   setReverseLights(on: boolean): void;
+  /**
+   * Crash damage (`CrashDamageState.marks`): that many scrapes and dents on the body, and the paint
+   * a little grimier with each. 0 is the clean car the garage hands back. Call on change only.
+   */
+  setDamage(marks: number): void;
   /** Per-frame animation hook (flicker, arcs). */
   update(frameDt: number, time: number): void;
   dispose(): void;
@@ -381,6 +388,13 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   body.name = 'player-car-body';
   chassis.add(body);
   disposables.push(bodyGeo, bodyMat);
+  /** The paint as built, so grime is always taken from the clean colour and never compounds. */
+  const cleanPaint = bodyMat.color.clone();
+
+  /* --------------------------------------------------------------- damage */
+  const damage = createCarDamage();
+  chassis.add(damage.mesh);
+  disposables.push(damage);
 
   /* --------------------------------------------------------------- marker */
   if (slotTint) {
@@ -658,6 +672,11 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
     setReverseLights(on) {
       reversing = on;
       refreshLights();
+    },
+    setDamage(marks) {
+      damage.setMarks(marks);
+      const worn = Math.max(0, Math.min(1, marks / CRASH_DAMAGE.visual.maxMarks));
+      bodyMat.color.copy(cleanPaint).multiplyScalar(1 - CRASH_DAMAGE.visual.grime * worn);
     },
     update(frameDt, time) {
       attitude.update(frameDt);

@@ -135,5 +135,7 @@ export function lockOtherActivities(state: GameState): ActivityKind | null {
   // is the same sentence as `activitySuppressed(engaged, 'moogul')` and is written out here
   // because "he is never engaged" is the fact worth reading at the point it is relied on.
   if (state.buho) state.buho.locked = engaged !== null;
+  // Loco Mustang is the same: he talks to whoever pulls up, as long as nothing else has the car.
+  if (state.garage) state.garage.locked = engaged !== null;
   return engaged;
 }

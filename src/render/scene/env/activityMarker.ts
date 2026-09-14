@@ -215,9 +215,22 @@ function hex(c: number): string {
   return `#${c.toString(16).padStart(6, '0')}`;
 }
 
+/**
+ * Height of the asphalt actually drawn under a marker (m), given where it stands and how far its
+ * paint reaches. A site's `y` is the road's LEVEL, not its surface: every at-grade ribbon is drawn
+ * a few millimetres to a few centimetres above it (`RibbonDef.lift`), and the paint has to sit on
+ * the slab that is really there or the tarmac swallows it.
+ */
+export type MarkerGround = (x: number, z: number, y: number, reach: number) => number;
+
 /** A site onto a group's transform. The one place a heading is converted to Three's yaw. */
-function placeAt(group: THREE.Group, site: { x: number; z: number; y: number; heading: number }): void {
-  group.position.set(site.x, site.y, site.z);
+function placeAt(
+  group: THREE.Group,
+  site: { x: number; z: number; y: number; heading: number },
+  ground: MarkerGround | null,
+  reach: number,
+): void {
+  group.position.set(site.x, ground ? ground(site.x, site.z, site.y, reach) : site.y, site.z);
   group.rotation.y = -site.heading;
 }
 
@@ -427,17 +440,20 @@ function buildChevron(): THREE.BufferGeometry {
 export function createActivityMarker(
   site: { x: number; z: number; y: number; heading: number },
   spec: ActivityMarkerSpec,
+  ground: MarkerGround | null = null,
 ): ActivityMarkerVisual {
   const ringOuter = spec.radius;
   const ringInner = ringOuter - RING_BAND;
   const chevronOffset = ringOuter + CHEVRON_CLEARANCE;
+  // Everything painted on the road lies inside this: the far edge of a chevron.
+  const paintReach = chevronOffset + CHEVRON_DEPTH + CHEVRON_THICK;
 
   const group = new THREE.Group();
   group.name = spec.name;
   // Same mapping the rest of the game uses: a heading is a clockwise yaw, Three's is not.
   // Placed through the same call the mission chain will use later, so there is one line in
   // this file that knows how a site becomes a transform.
-  placeAt(group, site);
+  placeAt(group, site, ground, paintReach);
 
   /* ------------------------------------------------------------------ paint */
 
@@ -575,7 +591,7 @@ export function createActivityMarker(
     group,
 
     moveTo(next) {
-      placeAt(group, next);
+      placeAt(group, next, ground, paintReach);
     },
 
     setProximity(value) {

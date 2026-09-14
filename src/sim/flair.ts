@@ -1,5 +1,5 @@
 import type { DriftState, FlairMessageId, FlairState, FlairTier, GameEvent } from '../core/types';
-import { FLAIR } from '../config/tuning';
+import { CRASH_DAMAGE, FLAIR } from '../config/tuning';
 
 /**
  * FLAIR: the game shouting at the player when the driving earns it.
@@ -29,8 +29,10 @@ import { FLAIR } from '../config/tuning';
  * crash line sits at the top of that order, which is what makes it interrupt a celebration
  * without needing a rule of its own.
  *
- * THE AURA LINES ARE TALK. "AURA +1000" and "−1000 DE AURA" move no money, no points and no
- * progress; nothing in this file touches `src/sim/economy.ts` or the run's score.
+ * THE AURA LINES ARE TALK. "AURA +1000" and "AURA −1000" move no money, no points and no
+ * progress; nothing in this file touches `src/sim/economy.ts` or the run's score. Where crash
+ * damage exists (`src/sim/crashDamage.ts`) the crash line is the receipt for a fine that module
+ * charged, and it is that module, not this one, that decides a crash happened.
  *
  * TIME. Simulation time throughout (`GameState.time`), so every timer here stops dead when the
  * game does — the loop simply stops stepping, and nothing has a clock of its own to run on.
@@ -46,13 +48,20 @@ export interface FlairMessage {
 }
 
 /**
- * The eleven phrases, LOWEST PRIORITY FIRST. The order is the priority table from the brief,
- * read upside down, and the index is used directly as the priority — see the module note.
- * `finito` and `conPermiso` share a rung; only one of them is ever a candidate.
+ * The phrases, LOWEST PRIORITY FIRST. The order is the priority table from the brief, read
+ * upside down, and the index is used directly as the priority — see the module note. The
+ * openers (`finito` through `todoCalculado`) share a rung; only one of them is ever a candidate.
  */
 export const MESSAGES: readonly FlairMessage[] = [
   { id: 'finito', text: 'FINITO', tier: 'common' },
   { id: 'conPermiso', text: 'CON PERMISO', tier: 'common' },
+  { id: 'finoli', text: 'FINOLI', tier: 'common' },
+  { id: 'uffPapa', text: 'UFFF, PAPÁ', tier: 'common' },
+  { id: 'queMuneca', text: 'QUÉ MUÑECA', tier: 'common' },
+  { id: 'sobraPiloto', text: 'SOBRA PILOTO', tier: 'common' },
+  { id: 'finoComoCeja', text: 'FINO COMO CEJA DE TURRO', tier: 'common' },
+  { id: 'acaNoPasoNada', text: 'ACÁ NO PASÓ NADA', tier: 'common' },
+  { id: 'todoCalculado', text: 'TODO CALCULADO', tier: 'common' },
   { id: 'deCostado', text: 'DE COSTADO', tier: 'common' },
   { id: 'conEstilo', text: 'CON ESTILO', tier: 'common' },
   { id: 'puraSeda', text: 'PURA SEDA', tier: 'special' },
@@ -62,8 +71,8 @@ export const MESSAGES: readonly FlairMessage[] = [
   { id: 'aPuroBandidaje', text: 'A PURO BANDIDAJE', tier: 'special' },
   { id: 'auraInfinita', text: 'AURA INFINITA', tier: 'peak' },
   // The minus is U+2212, not a hyphen: it is a number being taken away, and it is set in the
-  // display face beside "+1000".
-  { id: 'auraMenos', text: '−1000 DE AURA', tier: 'crash' },
+  // display face beside "+1000". The number is the crash rules' (`CRASH_DAMAGE.aura`).
+  { id: 'auraMenos', text: `−${CRASH_DAMAGE.aura} DE AURA`, tier: 'crash' },
 ];
 
 /** Index of a phrase in `MESSAGES`, which is also its priority. -1 for an unknown id. */
@@ -72,8 +81,10 @@ export function flairIndex(id: FlairMessageId): number {
   return -1;
 }
 
-const FINITO = flairIndex('finito');
-const CON_PERMISO = flairIndex('conPermiso');
+/** The first near miss of a streak says one of these, taking them in turn. */
+const OPENERS: readonly number[] = (
+  ['finito', 'conPermiso', 'finoli', 'uffPapa', 'queMuneca', 'sobraPiloto', 'finoComoCeja', 'acaNoPasoNada', 'todoCalculado'] as const
+).map(flairIndex);
 const AURA_PLUS = flairIndex('auraPlus');
 const FALTANDO = flairIndex('faltandoElRespeto');
 const BANDIDAJE = flairIndex('aPuroBandidaje');
@@ -167,13 +178,13 @@ function openStreak(f: FlairState): void {
 }
 
 /** Put a phrase on the glass now. The only place a `flair` event is raised. */
-function say(f: FlairState, index: number, time: number, events: GameEvent[]): void {
+function say(f: FlairState, index: number, time: number, events: GameEvent[], seconds = flairSeconds(MESSAGES[index].tier)): void {
   const m = MESSAGES[index];
   f.lastSaid[index] = time;
   f.shownAt = time;
   dropCandidate(f);
   if (FLAIR.debug) console.info(`[flair] ${m.text} @${time.toFixed(2)}`);
-  events.push({ type: 'flair', id: m.id, text: m.text, tier: m.tier, seconds: flairSeconds(m.tier) });
+  events.push({ type: 'flair', id: m.id, text: m.text, tier: m.tier, seconds });
 }
 
 /**
@@ -205,6 +216,10 @@ function offer(f: FlairState, index: number, time: number, events: GameEvent[]):
  *
  * `eventCount` is the length of `events` BEFORE this call, so the near misses and collisions
  * this tick raised are read and the flair raised here is never read back.
+ *
+ * `crash` is the crash rules' verdict on this tick (`src/sim/crashDamage.ts`) in the worlds that
+ * have them: true cuts the streak and says the crash line whether or not a run is on, since it
+ * goes with a fine. Null — a world without them — leaves the crash to the impact test below.
  */
 export function stepFlair(
   f: FlairState,
@@ -214,7 +229,15 @@ export function stepFlair(
   dt: number,
   events: GameEvent[],
   eventCount: number,
+  crash: boolean | null = null,
 ): void {
+  if (crash) {
+    // Over everything, straight away, and held long enough for the fine under it to be read.
+    endStreak(f);
+    f.crashAt = time;
+    say(f, CRASH, time, events, CRASH_DAMAGE.cardSeconds);
+  }
+
   if (!active) {
     // Nothing said, nothing held, nothing counting. The anti-repeat memory survives: it is
     // about the player's ears, not about the run.
@@ -234,7 +257,7 @@ export function stepFlair(
     // lateral scrape reports a fraction of a metre per second and is not a crash; driving into
     // a barrier reports the speed it was done at.
     if (ev.type === 'collision') {
-      if (ev.impact >= FLAIR.crash.impactSpeed) crashed = true;
+      if (crash === null && ev.impact >= FLAIR.crash.impactSpeed) crashed = true;
     } else if (ev.type === 'nearMiss') {
       nearMisses++;
     }
@@ -312,8 +335,8 @@ export function stepFlair(
       }
     }
     if (opened) {
-      // The two openers alternate, so a run of short streaks does not say one word all night.
-      const opener = f.lastOpener === FINITO ? CON_PERMISO : FINITO;
+      // The openers go round in turn, so a run of short streaks does not say one word all night.
+      const opener = OPENERS[(OPENERS.indexOf(f.lastOpener) + 1) % OPENERS.length];
       f.lastOpener = opener;
       qualified |= 1 << opener;
     }

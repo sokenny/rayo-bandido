@@ -43,8 +43,8 @@ export type HumanPose =
   /** Flagging a car down. */
   | 'hail';
 
-/** What is on the head. `crop` is hair alone; the rest add to it. */
-export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'hood';
+/** What is on the head. `crop` is hair alone; the rest add to it. `bucket` is a bucket hat, brim all round. */
+export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'hood' | 'bucket';
 
 /** The one thing about a face that is visible at night, if anything is. */
 export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
@@ -73,6 +73,13 @@ export interface HumanLook {
   coatLength?: number;
   legs: number;
   boots: number;
+  /** A sleeveless shirt: the arms are bare from the shoulder, in `skin`. */
+  sleeveless?: boolean;
+  /** Ink on bare arms, in this colour: a sleeve of it down each upper arm and forearm. */
+  tattoo?: number;
+  /** A big number printed on the chest (two digits, drawn in blocks), in `print`. Loco Mustang's 99. */
+  chestNumber?: string;
+  print?: number;
   pose?: HumanPose;
   /**
    * How far to lean the body's normals towards the sky, 0..1. Defaults to `SKY_BIAS`.
@@ -292,6 +299,36 @@ class Body {
 
 /* ================================================================== the parts */
 
+/**
+ * Digits in blocks, for a number printed on a shirt: each cell of a 3 x 5 grid that is ink.
+ * Only what is printed on anybody so far.
+ */
+const PRINT_DIGITS: Record<string, readonly string[]> = {
+  '9': ['###', '#.#', '###', '..#', '###'],
+};
+
+/** A number on the chest, over their right breast (the viewer's left), in blocks just proud of the shirt. */
+function buildPrint(f: Body, look: HumanLook, d: number): void {
+  const text = look.chestNumber;
+  if (!text || look.print === undefined) return;
+  f.bone(BONE.spine);
+  f.color(look.print, 1);
+  const cell = 0.034;
+  const z = -d / 2 - 0.006;
+  const top = 1.43;
+  // Facing -z, their right is +x, and someone reading it from in front reads toward -x.
+  let pen = 0.14 + ((text.length * 4 - 1) * cell) / 2;
+  for (const ch of text) {
+    const rows = PRINT_DIGITS[ch];
+    rows?.forEach((row, r) => {
+      for (let c = 0; c < 3; c++) {
+        if (row[c] === '#') f.box(pen - (c + 0.5) * cell, top - (r + 0.5) * cell, z, cell * 1.02, cell * 1.02, 0.012);
+      }
+    });
+    pen -= 4 * cell;
+  }
+}
+
 /** Boots and legs. Two of everything; the boot is a little longer, so there is a toe. */
 function buildLegs(f: Body, look: HumanLook): void {
   for (const side of [-1, 1]) {
@@ -314,7 +351,7 @@ function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
   // between a person and a slab — at distance the eye reads the notch under the head, not the
   // face it cannot see yet.
   f.color(look.coat, 0.8);
-  f.box(0, SHOULDER - 0.05, 0, w + 0.16, 0.12, d + 0.06);
+  f.box(0, SHOULDER - 0.05, 0, look.sleeveless ? w + 0.02 : w + 0.16, 0.12, d + 0.06);
   // A stub of a neck, so the head is not sitting straight on the collar.
   f.color(look.skin, 0.9);
   f.box(0, (SHOULDER + NECK_TOP) / 2, 0, 0.16, NECK_TOP - SHOULDER, 0.16);
@@ -327,12 +364,22 @@ function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
 function buildArms(f: Body, look: HumanLook, armX: number): void {
   for (const side of [-1, 1]) {
     const x = side * armX;
+    const sleeve = look.sleeveless ? look.skin : look.coat;
     f.bone(side < 0 ? BONE.upperArmL : BONE.upperArmR);
-    f.color(look.coat, 1);
-    f.box(x, (ELBOW_JOINT + 1.56) / 2, 0, 0.17, 1.56 - ELBOW_JOINT, 0.2);
+    f.color(sleeve, 1);
+    f.box(x, (ELBOW_JOINT + 1.56) / 2, 0, look.sleeveless ? 0.14 : 0.17, 1.56 - ELBOW_JOINT, look.sleeveless ? 0.16 : 0.2);
+    if (look.sleeveless && look.tattoo !== undefined) {
+      // A band of ink round the upper arm, a shade proud of the skin so it never z-fights it.
+      f.color(look.tattoo, 1);
+      f.box(x, 1.34, 0, 0.15, 0.16, 0.17);
+    }
     f.bone(side < 0 ? BONE.foreArmL : BONE.foreArmR);
-    f.color(look.coat, 0.94);
-    f.box(x, (WRIST + ELBOW_JOINT + 0.05) / 2, 0, 0.155, ELBOW_JOINT + 0.05 - WRIST, 0.185);
+    f.color(sleeve, look.sleeveless ? 1 : 0.94);
+    f.box(x, (WRIST + ELBOW_JOINT + 0.05) / 2, 0, look.sleeveless ? 0.125 : 0.155, ELBOW_JOINT + 0.05 - WRIST, look.sleeveless ? 0.15 : 0.185);
+    if (look.sleeveless && look.tattoo !== undefined) {
+      f.color(look.tattoo, 1);
+      f.box(x, 1.06, 0, 0.135, 0.18, 0.16);
+    }
     f.color(look.skin, 1);
     f.box(x, WRIST - 0.065, 0, 0.12, 0.13, 0.14);
   }
@@ -377,6 +424,13 @@ function buildHead(f: Body, look: HumanLook): void {
       f.color(headwear, 1.05);
       f.box(0, HEAD_Y + 0.19, 0.02, 0.33, 0.12, 0.33);
       f.box(0, HEAD_Y + 0.13, -0.19, 0.3, 0.05, 0.14);
+      break;
+    case 'bucket':
+      // A soft crown and a brim that droops all the way round: Loco Mustang's hat.
+      f.color(headwear, 1);
+      f.box(0, HEAD_Y + 0.17, 0.01, 0.35, 0.17, 0.35);
+      f.color(headwear, 0.85);
+      f.box(0, HEAD_Y + 0.08, 0.01, 0.5, 0.04, 0.5);
       break;
     case 'hood':
       // Up, and open at the front: the shape El Búho is known by.
@@ -548,6 +602,7 @@ export function buildHumanParts(look: HumanLook): HumanParts {
   buildLegs(body, look);
   buildTorso(body, look, w, d);
   buildArms(body, look, armX);
+  buildPrint(body, look, d);
   buildHead(body, look);
   buildHeld(body, look, armX);
 

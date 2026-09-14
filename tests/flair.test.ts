@@ -79,6 +79,13 @@ describe('the flair phrases', () => {
     expect(ids).toEqual([
       'finito',
       'conPermiso',
+      'finoli',
+      'uffPapa',
+      'queMuneca',
+      'sobraPiloto',
+      'finoComoCeja',
+      'acaNoPasoNada',
+      'todoCalculado',
       'deCostado',
       'conEstilo',
       'puraSeda',
@@ -89,10 +96,17 @@ describe('the flair phrases', () => {
       'auraInfinita',
       'auraMenos',
     ]);
-    // The exact eleven strings, and nothing else: these are the only words the game may say.
+    // The exact strings, and nothing else: these are the only words the game may say.
     expect(MESSAGES.map((m) => m.text)).toEqual([
       'FINITO',
       'CON PERMISO',
+      'FINOLI',
+      'UFFF, PAPÁ',
+      'QUÉ MUÑECA',
+      'SOBRA PILOTO',
+      'FINO COMO CEJA DE TURRO',
+      'ACÁ NO PASÓ NADA',
+      'TODO CALCULADO',
       'DE COSTADO',
       'CON ESTILO',
       'PURA SEDA',
@@ -162,14 +176,16 @@ describe('drift milestones', () => {
 });
 
 describe('the streak', () => {
-  it('opens on the first near miss with one of the two openers, and alternates them', () => {
+  it('opens on the first near miss with an opener, taking them in turn', () => {
+    const openers = ['finito', 'conPermiso', 'finoli', 'uffPapa', 'queMuneca', 'sobraPiloto', 'finoComoCeja', 'acaNoPasoNada', 'todoCalculado'];
     const r = rig();
-    r.run(0.5, [nearMiss()]);
-    expect(r.ids()).toEqual(['finito']);
-    // Let the streak lapse, then do it again: the other opener.
-    r.run(FLAIR.streak.idleSeconds + 1);
-    r.run(0.5, [nearMiss()]);
-    expect(r.ids()).toEqual(['finito', 'conPermiso']);
+    // Each streak lapses before the next near miss, so each one opens a new streak. Once round
+    // and back to the first.
+    for (let i = 0; i <= openers.length; i++) {
+      r.run(0.5, [nearMiss()]);
+      r.run(FLAIR.show.repeatSeconds + 1);
+    }
+    expect(r.ids()).toEqual([...openers, 'finito']);
   });
 
   it('says AURA +1000 at the third near miss of a streak, and only once', () => {
@@ -308,8 +324,7 @@ describe('arbitration', () => {
     const ids = r.ids();
     expect(ids[0]).toBe('auraPlus');
     // The opener that qualified alongside it was consumed, not deferred.
-    expect(ids).not.toContain('finito');
-    expect(ids).not.toContain('conPermiso');
+    expect(ids).toEqual(['auraPlus']);
   });
 
   it('never holds more than one candidate, and drops a stale one', () => {

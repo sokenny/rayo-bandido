@@ -307,7 +307,7 @@ export const INTRO = {
     line('c1', 'Probemos si todavía te acordás. Tomá velocidad, doblá y apretá la barra espaciadora: es el freno de mano. Soltá la cola.', {
       instructional: 'drift',
     }),
-    line('c2', 'Ahí está. De costado todavía te entiendo.', { gap: 1.2 }),
+    line('c2', 'Ahí está. De costado todavía nos entendemos.', { gap: 1.2 }),
     line('c3', 'Ah, y no te olvides del nitro: es shift. Guardalo para cuando tengas que salir rápido de algún lado.', { gap: 1.2 }),
     line('c-hint', 'Entrá con un poco de velocidad, doblá y mantené la barra espaciadora un momento. No hace falta dar la vuelta entera.', {
       instructional: 'drift',
@@ -326,8 +326,11 @@ export const INTRO = {
     line('e3', 'Si querés hacer ruido, buscá Rayo Rush.', { requires: 'rush' }),
     line('e4', 'Si querés bajar tiempos, Time Attack.', { requires: 'circuit' }),
     line('e5', 'Y si querés medirte con otros corredores, Street Race.', { requires: 'street' }),
-    line('e6', 'Elegí vos. Yo ya sé que volviste.', { gap: 1.6 }),
-    line('e7', 'Bienvenido a casa, Rayito.', { gap: 0.6 }),
+    // The crash rules (`src/sim/crashDamage.ts`), said before the player is let loose: the intro
+    // itself never charges a crash, so the first one that costs anything comes after this.
+    line('e6', 'Una cosa más: en Bandido Bay no gana el que va más rápido, gana el que maneja con estilo.', { gap: 0.9 }),
+    line('e6b', 'Cada vez que la ponés contra algo, perdés plata. Y perdés aura.', { gap: 1.6 }),
+    line('e7', 'Bienvenido de vuelta, Rayo.', { gap: 0.6 }),
   ] as IntroLine[],
 
   objectives: {

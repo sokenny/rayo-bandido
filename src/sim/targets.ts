@@ -79,6 +79,36 @@ function respawnTarget(t: TargetState, layout: ArenaLayout): void {
 let throttle = new Float64Array(0);
 
 /**
+ * Car ids sorted west to east, for both passes below. The open world carries several hundred
+ * cars, and every pair of them is a hundred thousand-odd pairs a tick; swept along x, a car
+ * only looks at the handful whose x is within reach. The fleet barely moves between ticks, so
+ * the insertion sort that keeps this in order is linear in practice. Ties keep their order,
+ * so the sweep is the same on every machine.
+ */
+let order = new Int32Array(0);
+
+function sortByX(targets: readonly TargetState[]): void {
+  const n = targets.length;
+  if (order.length !== n) {
+    order = new Int32Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+  }
+  for (let i = 1; i < n; i++) {
+    const k = order[i];
+    const x = targets[k].x;
+    let j = i - 1;
+    while (j >= 0 && targets[order[j]].x > x) {
+      order[j + 1] = order[j];
+      j--;
+    }
+    order[j + 1] = k;
+  }
+}
+
+/** Cars further apart than this vertically are on different levels (a deck over a street). */
+const LEVEL_GAP = 3;
+
+/**
  * Is `other` (offset `dx`,`dz`) inside the lane-shaped cone in front of `t`? Returns the
  * clear distance along the lane, or -1 when there is nothing in the way.
  */
@@ -107,17 +137,24 @@ function yieldToTraffic(targets: readonly TargetState[]): void {
   for (let i = 0; i < n; i++) throttle[i] = 1;
   const { lookahead, stopGap } = TARGETS.traffic;
   const span = lookahead - stopGap;
-  for (let i = 0; i < n; i++) {
-    const a = targets[i];
-    if (a.status !== 'active') continue;
-    for (let j = i + 1; j < n; j++) {
+  sortByX(targets);
+  for (let s = 0; s < n; s++) {
+    const first = targets[order[s]];
+    if (first.status !== 'active') continue;
+    for (let u = s + 1; u < n; u++) {
+      const second = targets[order[u]];
+      // Sorted by x: everything from here on is further east than a car can see.
+      if (second.x - first.x > lookahead) break;
+      if (second.status !== 'active') continue;
+      // The pair is judged in id order, whichever of the two the sweep met first.
+      const i = first.id < second.id ? first.id : second.id;
+      const j = first.id < second.id ? second.id : first.id;
+      const a = targets[i];
       const b = targets[j];
-      if (b.status !== 'active') continue;
       const dx = b.x - a.x;
       const dz = b.z - a.z;
-      // A hundred-odd cars is several thousand pairs a tick, so the pair that is nowhere
-      // near is rejected on two comparisons before anything is multiplied.
-      if (dx > lookahead || dx < -lookahead || dz > lookahead || dz < -lookahead) continue;
+      if (dz > lookahead || dz < -lookahead) continue;
+      if (b.y - a.y > LEVEL_GAP || a.y - b.y > LEVEL_GAP) continue;
       if (dx * dx + dz * dz > lookahead * lookahead) continue;
       const aGap = gapAhead(a, dx, dz);
       const bGap = gapAhead(b, -dx, -dz);
@@ -136,14 +173,23 @@ function yieldToTraffic(targets: readonly TargetState[]): void {
  */
 function separateTraffic(targets: TargetState[], dt: number): void {
   const { contactDistance, bounce, maxBounce } = TARGETS.traffic;
-  for (let i = 0; i < targets.length; i++) {
-    const a = targets[i];
-    if (a.status !== 'active') continue;
-    for (let j = i + 1; j < targets.length; j++) {
-      const b = targets[j];
-      if (b.status !== 'active') continue;
+  const n = targets.length;
+  sortByX(targets);
+  // The pushes below move cars while the sweep is under way, so it reaches a little past
+  // contact rather than trusting an order the last push may have nudged.
+  const reach = contactDistance * 2;
+  for (let s = 0; s < n; s++) {
+    const first = targets[order[s]];
+    if (first.status !== 'active') continue;
+    for (let u = s + 1; u < n; u++) {
+      const second = targets[order[u]];
+      if (second.x - first.x > reach) break;
+      if (second.status !== 'active') continue;
+      const a = first.id < second.id ? first : second;
+      const b = first.id < second.id ? second : first;
       let dx = b.x - a.x;
       let dz = b.z - a.z;
+      if (b.y - a.y > LEVEL_GAP || a.y - b.y > LEVEL_GAP) continue;
       if (dx > contactDistance || dx < -contactDistance || dz > contactDistance || dz < -contactDistance) continue;
       const distSq = dx * dx + dz * dz;
       if (distSq >= contactDistance * contactDistance) continue;

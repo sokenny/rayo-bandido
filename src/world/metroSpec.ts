@@ -1,11 +1,13 @@
 import type { CarMeetSpec } from './carMeet';
 import type { CityRoadSpec, CitySpec, ElevatedRoadSpec, PassengerStopSpec } from './cityDef';
 import type { GasStationSpec } from './gasStation';
+import type { GarageSpec } from './garage';
 import type { BlockOptions } from './cityGen';
 import type { Rect, ZoneId } from './cityPlan';
 // Value imports spelt with their extension, so `scripts/metro-preview.mjs` can load this spec
 // under plain Node the way `scripts/stack-preview.mjs` loads the Stack's (see `stackSpec.ts`).
 import { inRect } from './cityPlan.ts';
+import { CURVA_SITE } from './curvaSpec.ts';
 import { PAL } from '../render/scene/env/palette.ts';
 import { planStackMassing } from './stackMassing.ts';
 import {
@@ -523,6 +525,28 @@ export const METRO_GAS_STATIONS: GasStationSpec[] = [
   },
 ];
 
+/* ------------------------------------------------------------------ the garage */
+
+/**
+ * LOCO MUSTANG'S GARAGE (`garage.ts`), not open yet (2026-09-14): where the car will be tuned
+ * and modded. On the corner of blvd-ring-s and st-w3, directly across st-w3 from the car meet,
+ * because that is where anybody who cares about their car already is: the introduction ends at
+ * the meet, the ring boulevard is the bus loop everybody drives, and El Búho and the start line
+ * are a couple of blocks south-east. The mouth faces the boulevard, the apron is open to both
+ * streets, and the viaduct's deck passes behind it.
+ *
+ * The lot runs from the back of the pavement on its two street sides; the plot behind it is cut
+ * back to its edge and keeps the rest of the block (`tests/garage.test.ts`).
+ */
+export const METRO_GARAGE: GarageSpec = {
+  tag: 'garage-loco-mustang',
+  label: "LOCO MUSTANG'S GARAGE",
+  lot: { minX: -480 + 6.5 + BAY_SHOULDER.corporate, maxX: -444.5, minZ: RING.south + 10 + BAY_SHOULDER.corporate, maxZ: 279.4 },
+  front: 'n',
+  corner: 'w',
+  streets: ['n', 'w'],
+};
+
 /* ------------------------------------------------------------------ traffic */
 
 const loop =(minX: number, maxX: number, minZ: number, maxZ: number, cars: number): { rect: Rect; cars: number } => ({ rect: { minX, maxX, minZ, maxZ }, cars });
@@ -532,35 +556,89 @@ const loop =(minX: number, maxX: number, minZ: number, maxZ: number, cars: numbe
  * every corner a real crossing of two straight roads. Two blocks a side in the outer city,
  * three cars each (four round the ring):
  * the cars are where the player is likely to be, round downtown and along the boulevards.
- * Raised 2026-09-14 (about 1.5x); the Stack's own loops get two more cars each (one per direction) here only,
- * so the standalone Stack keeps its halved fleet.
+ * Raised 2026-09-14 twice (about 1.5x, then to six a loop); the Stack's own loops get four more cars each
+ * (two per direction) here only, so the standalone Stack keeps its halved fleet.
  */
 export const METRO_TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
-  ...STACK_TRAFFIC_LOOPS.map((l) => ({ rect: shift(l.rect), cars: l.cars + 2 })),
+  ...STACK_TRAFFIC_LOOPS.map((l) => ({ rect: shift(l.rect), cars: l.cars + 4 })),
   // The ring's quadrants: the ring and the Stack's own edge streets.
-  loop(RING.west, -252, RING.north, -320, 4),
-  loop(250, RING.east, RING.north, -320, 4),
-  loop(RING.west, -252, 10, RING.south, 4),
-  loop(250, RING.east, 10, RING.south, 4),
-  loop(-252, -60, RING.north, -320, 4),
-  loop(30, 250, RING.north, -320, 4),
-  loop(-252, -60, 132, RING.south, 4),
+  loop(RING.west, -252, RING.north, -320, 6),
+  loop(250, RING.east, RING.north, -320, 6),
+  loop(RING.west, -252, 10, RING.south, 6),
+  loop(250, RING.east, 10, RING.south, 6),
+  loop(-252, -60, RING.north, -320, 6),
+  loop(30, 250, RING.north, -320, 6),
+  loop(-252, -60, 132, RING.south, 6),
   // North of the ring, and the flanks.
-  loop(-620, -340, -600, RING.north, 3),
-  loop(340, 620, -600, RING.north, 3),
-  loop(-620, -340, -320, 10, 3),
-  loop(340, 620, -320, 10, 3),
+  loop(-620, -340, -600, RING.north, 6),
+  loop(340, 620, -600, RING.north, 6),
+  loop(-620, -340, -320, 10, 6),
+  loop(340, 620, -320, 10, 6),
   // South: the viaduct district down to the water.
-  loop(-620, -340, RING.south, 500, 3),
-  loop(340, 620, RING.south, 500, 3),
-  loop(-620, -340, 500, 780, 3),
-  loop(-340, -60, 500, 780, 3),
-  loop(30, 340, 500, 780, 3),
-  loop(340, 620, 500, 780, 3),
-  loop(-620, -340, 780, 1060, 3),
-  loop(-60, 250, 780, 1060, 3),
-  loop(340, 620, 780, 1060, 3),
+  loop(-620, -340, RING.south, 500, 6),
+  loop(340, 620, RING.south, 500, 6),
+  loop(-620, -340, 500, 780, 6),
+  loop(-340, -60, 500, 780, 6),
+  loop(30, 340, 500, 780, 6),
+  loop(340, 620, 500, 780, 6),
+  loop(-620, -340, 780, 1060, 6),
+  loop(-60, 250, 780, 1060, 6),
+  loop(340, 620, 780, 1060, 6),
+  ...fillLoops(),
 ];
+
+/**
+ * The fill (2026-09-14, "the open world feels empty"): the loops above left whole streets
+ * without a car — the waterfront, st-s3/s4/s5, st-w3/e3, the downtown avenues north of the
+ * ring. One-block rectangles so every street segment in the outer city carries traffic, the
+ * counts below doubled by `FILL_DENSITY` (a car each way was still too few to see through the
+ * haze). Every rectangle was checked lane-by-lane against the built roads and colliders; the
+ * east side has no road at z 132, so its cells there run 10 to the ring.
+ */
+function fillLoops(): Array<{ rect: Rect; cars: number }> {
+  // Here, not at module level: `METRO_TRAFFIC_LOOPS` calls this before a later const would exist.
+  const FILL_DENSITY = 2;
+  const fill: Array<{ rect: Rect; cars: number }> = [
+    // North of the ring, from wall to wall.
+    loop(-480, -340, -600, RING.north, 2),
+    loop(-340, -252, -600, RING.north, 2),
+    loop(-252, -60, -600, RING.north, 3),
+    loop(-60, 30, -600, RING.north, 2),
+    loop(30, 250, -600, RING.north, 3),
+    loop(250, 340, -600, RING.north, 2),
+    loop(340, 480, -600, RING.north, 2),
+    loop(-60, 30, RING.north, -320, 2),
+    // The flanks: st-w3 and st-e3 down to the ring, and the Stack's rows run out to them.
+    loop(-480, -340, RING.north, -320, 2),
+    loop(-480, -340, -320, -180, 2),
+    loop(-480, -340, -180, 10, 2),
+    loop(-480, -340, 10, 132, 2),
+    loop(-480, -340, 132, RING.south, 2),
+    loop(-620, -480, -180, 10, 2),
+    loop(-620, -480, 10, RING.south, 2),
+    loop(-340, -252, -320, -180, 2),
+    loop(-340, -252, -180, 10, 2),
+    loop(340, 480, RING.north, -320, 2),
+    loop(340, 480, -320, -180, 2),
+    loop(340, 480, -180, 10, 2),
+    loop(340, 480, 10, RING.south, 2),
+    loop(480, 620, -180, 10, 2),
+    loop(480, 620, 10, RING.south, 2),
+    loop(250, 340, -320, -180, 2),
+    loop(250, 340, -180, 10, 2),
+  ];
+  // South of the ring to the waterfront: a staggered checkerboard of one-block cells, so
+  // alternate bands take alternate columns and every north-south street is driven in each.
+  const bands = [RING.south, 360, 500, 640, 780, 920, 1060, METRO_QUAY_Z - 14];
+  const even: Array<[number, number, number]> = [[-620, -480, 2], [-340, -252, 2], [-60, 30, 2], [160, 250, 2], [340, 480, 2]];
+  const odd: Array<[number, number, number]> = [[-480, -340, 2], [-252, -60, 3], [30, 160, 2], [250, 340, 2], [480, 620, 2]];
+  for (let b = 0; b < bands.length - 1; b++) {
+    for (const [minX, maxX, cars] of b % 2 === 0 ? even : odd) fill.push(loop(minX, maxX, bands[b], bands[b + 1], cars));
+  }
+  // The waterfront end to end, so the drive along the quay is never an empty one.
+  fill.push(loop(-620, 620, 1060, METRO_QUAY_Z - 14, 8));
+  return fill.map((l) => ({ rect: l.rect, cars: l.cars * FILL_DENSITY }));
+}
 
 /** Cars lapping the viaduct: the Bay's density scaled by length, then halved as the Stack's were; raised 2026-09-14. Multiple of its four lane files. */
 export const METRO_VIADUCT_CARS = 60;
@@ -633,6 +711,9 @@ export const METRO_STREET_SITES = [
   { x: 140, z: RING.south, y: 0, heading: Math.PI / 2, label: 'RING SOUTH · THE CROSSING' },
   { x: 140, z: RING.north, y: 0, heading: Math.PI / 2, label: 'RING NORTH · DOWNTOWN' },
   { x: 410, z: METRO_QUAY_Z - 14, y: 0, heading: Math.PI / 2, label: 'THE EAST QUAY' },
+  // LA CURVA, the standalone fourth event: on the meet's lot, and run here on the metro
+  // rather than on the Bay (`curvaSpec.ts`, `curvaWorld.ts`).
+  CURVA_SITE,
 ];
 
 /* ------------------------------------------------------------------ the spec */
@@ -717,6 +798,7 @@ export const METRO_SPEC: CitySpec = {
   buhoSite: METRO_BUHO_SITE,
   meets: [METRO_MEET],
   gasStations: METRO_GAS_STATIONS,
+  garage: METRO_GARAGE,
   // Drawn in chunks: a map this size cannot be one mesh per material. Beyond the cull the
   // Bay's haze (`HAZE.cityDensity`) has taken everything but the brightest windows.
   render: { chunk: 325, cullDistance: 850 },

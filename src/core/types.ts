@@ -299,13 +299,20 @@ export interface NearMissState {
 }
 
 /**
- * The eleven things the game is allowed to shout (`src/sim/flair.ts`). Ordered low priority to
- * high: the index IS the priority, so arbitration is a comparison and nothing else. `finito`
- * and `conPermiso` are the same rung — only ever one of them is a candidate at a time.
+ * The things the game is allowed to shout (`src/sim/flair.ts`). Ordered low priority to high:
+ * the index IS the priority, so arbitration is a comparison and nothing else. The openers
+ * (`finito` through `todoCalculado`) are one rung — only ever one of them is a candidate at a time.
  */
 export type FlairMessageId =
   | 'finito'
   | 'conPermiso'
+  | 'finoli'
+  | 'uffPapa'
+  | 'queMuneca'
+  | 'sobraPiloto'
+  | 'finoComoCeja'
+  | 'acaNoPasoNada'
+  | 'todoCalculado'
   | 'deCostado'
   | 'conEstilo'
   | 'puraSeda'
@@ -318,6 +325,36 @@ export type FlairMessageId =
 
 /** How loudly a phrase is drawn. `peak` is AURA INFINITA alone; `crash` is the punchline. */
 export type FlairTier = 'common' | 'special' | 'peak' | 'crash';
+
+/** How bad a charged crash was (`CRASH_DAMAGE.tiers`). Under `light` a contact is a touch. */
+export type CrashSeverity = 'light' | 'medium' | 'heavy';
+
+/**
+ * Crash damage in the open world (`src/sim/crashDamage.ts`): the one-accident-one-charge latch,
+ * and the marks the car carries until the garage.
+ */
+export interface CrashDamageState {
+  /** Seconds before another crash may be charged. */
+  cooldown: number;
+  /** Seconds since the car last touched anything (any `collision` event). */
+  sinceContact: number;
+  /** True from a charged crash until the car has been clear for `separationSeconds`. */
+  latched: boolean;
+  /** Marks on the body, 0 for a clean car. Capped at `CRASH_DAMAGE.visual.maxMarks`. */
+  marks: number;
+  /** True once a heavy crash is carried: the bonnet smokes until the garage. */
+  heavy: boolean;
+  /** Simulation time of the last heavy crash (`-Infinity` for none): the smoke is thick at first. */
+  heavyAt: number;
+  /** Bumped whenever `marks` or `heavy` change, so the car is redrawn only then. */
+  version: number;
+  /** Race worlds: seconds the car stays stalled (engine cut, blinking). 0 when driving. */
+  stall: number;
+  /** Race worlds: the length of the stall under way (s), for the blink and the HUD. */
+  stallSeconds: number;
+  /** This session's counters. */
+  stats: { crashes: number; charged: number; repairs: number; stalls: number };
+}
 
 /**
  * The flair streak and the arbitration that decides which phrase gets the screen
@@ -361,7 +398,7 @@ export interface FlairState {
   pendingSerial: number;
   /** True while the held candidate is a drift milestone, which stops making sense off the drift. */
   pendingDrift: boolean;
-  /** Which opener was used last, so the next streak picks the other one. -1 before the first. */
+  /** Which opener was used last, so the next streak picks the next one round. -1 before the first. */
   lastOpener: number;
 }
 
@@ -716,7 +753,36 @@ export type GameEvent =
       targetId?: number;
       knockX?: number;
       knockZ?: number;
+      /**
+       * Set when the other party was a moving car (traffic, police): the speed the two closed at,
+       * which is `impact` less that car's own speed along the contact. What a crash is judged by.
+       */
+      closing?: number;
     }
+  /**
+   * A crash was charged (`src/sim/crashDamage.ts`): `fine` is what the tier costs, `charged` what
+   * the counter could actually give (never below zero), `balance` the counter afterwards.
+   * `speed` is what it was judged on. Raised at most once per tick.
+   */
+  | {
+      type: 'crashDamage';
+      severity: CrashSeverity;
+      speed: number;
+      fine: number;
+      charged: number;
+      balance: number;
+      aura: number;
+      x: number;
+      y: number;
+      z: number;
+    }
+  /** The garage washed the crash damage off the car. Free. */
+  | { type: 'crashRepaired' }
+  /**
+   * A race crash of medium severity or worse stalled the car (`src/sim/crashDamage.ts`) for
+   * `seconds`. Raised at most once per tick, and never while a stall is already under way.
+   */
+  | { type: 'crashStall'; severity: CrashSeverity; speed: number; seconds: number; x: number; y: number; z: number }
   /**
    * The car met a crashable street prop (`src/sim/streetProps.ts`). Presentation only — dust,
    * sparks and a knock by ear. A charger hit hard enough to break also raises `collision`,
@@ -836,6 +902,13 @@ export type GameEvent =
   | { type: 'buhoDenied'; reason: 'funds' | 'active' }
   /** The Moogul wore off, or something else took the player before it could. */
   | { type: 'moogulEnd'; reason: MoogulEndReason }
+
+  /* ---------------------------------------------------------------- loco mustang's garage */
+
+  /** The car rolled onto / off the ring in front of the garage. */
+  | { type: 'garagePrompt'; on: boolean }
+  /** Loco Mustang said something. The subtitle strip shows it for `lineSeconds`. */
+  | { type: 'garageLine'; text: string; kind: GarageLineKind }
   /* ---------------------------------------------------------------- the police */
   /** A civilian electric car was neutralised in Free Roam. `category` is the range band the heat came from. */
   | { type: 'policeOffense'; distance: number; category: PoliceOffenseCategory; heat: number; witnessed: boolean }
@@ -992,6 +1065,30 @@ export interface PoliceNav {
   /** Road distances to the player, refreshed every `POLICE.pursuit.routeInterval`. */
   field: RouteField | null;
   aim: RouteAim;
+}
+
+/** What one of Loco Mustang's lines is for: hello as the car pulls up, or an answer to the key. */
+export type GarageLineKind = 'greeting' | 'soon';
+
+/**
+ * Loco Mustang's garage (`src/sim/garage.ts`). Not open yet: the whole of its state is whether
+ * the car is on the apron and what he is saying about it.
+ */
+export interface GarageState {
+  /** True while the car is inside the ring on the apron. */
+  atSite: boolean;
+  /** Which activity has the car. See `RushState.locked`; written by the orchestrator. */
+  locked: boolean;
+  /** Whether he has said hello this visit. Reset on leaving the ring. */
+  greeted: boolean;
+  /** The subtitle on screen and how long it has left. `lineId` increments per line. */
+  line: string;
+  lineKind: GarageLineKind;
+  lineId: number;
+  lineTimeLeft: number;
+  lastText: string;
+  /** Deterministic pick state for line variants. */
+  seed: number;
 }
 
 /** What one of El Búho's lines is for. */
@@ -1272,6 +1369,13 @@ export interface GameState {
   passenger: PassengerState | null;
   /** El Búho and the Moogul. Present in the world that has his bay (`ArenaLayout.buhoSite`). */
   buho: BuhoState | null;
+  /** Loco Mustang's garage. Present in the world that has it (`ArenaLayout.garageSite`). */
+  garage: GarageState | null;
+  /**
+   * Crash damage (`src/sim/crashDamage.ts`). Present where the garage is, because the garage is
+   * where the marks come off, and in the race worlds, where a hard crash stalls the car instead.
+   */
+  crash: CrashDamageState | null;
   /**
    * The circuit chain's marker in the street. Present in worlds that carry the site
    * (`ArenaLayout.circuitSite`) — the open-world city, and nothing else: the circuit is not
@@ -1285,7 +1389,8 @@ export interface GameState {
   streetGate: StreetGateState | null;
   /**
    * The reactive phrases (`src/sim/flair.ts`). Present wherever RAYO RUSH is, because that is
-   * the only place they are said; it watches the drift and near-miss rules and changes nothing.
+   * the only place they are said, and wherever crash damage is, because a charged crash says
+   * its AURA line; it watches the drift and near-miss rules and changes nothing.
    */
   flair: FlairState | null;
   /** The police (`src/sim/police.ts`). Only the open world has any. */
@@ -1463,7 +1568,7 @@ export interface MinimapData {
  * What a mark on the minimap stands for: the RAYO RUSH circle, a waiting passenger, where they
  * are going, or the start line the circuit missions are entered on.
  */
-export type ActivityMarkKind = 'rush' | 'passenger' | 'destination' | 'circuit' | 'street';
+export type ActivityMarkKind = 'rush' | 'passenger' | 'destination' | 'circuit' | 'street' | 'buho' | 'garage';
 
 /** Static arena data consumed by both the simulation (collision, spawns) and the renderer. */
 export interface ArenaLayout {
@@ -1520,6 +1625,11 @@ export interface ArenaLayout {
    * event of `STREET_RACE.events` and in that order. Null or missing in every other world.
    */
   streetSites?: ActivitySite[] | null;
+  /**
+   * The ring in front of Loco Mustang's garage (`src/sim/garage.ts`, `src/world/garage.ts`), in
+   * the world that has it. Null or missing everywhere else, the races included.
+   */
+  garageSite?: ActivitySite | null;
   /** Bus routes, when the world runs buses. Empty or missing everywhere but the city. */
   busRoutes?: BusRoute[];
   /**
@@ -1611,6 +1721,8 @@ export interface HudSnapshot {
   circuitGate: CircuitGateHudSnapshot | null;
   /** The STREET RACE rings' sign; null in a world that does not carry the sites. */
   streetGate: StreetGateHudSnapshot | null;
+  /** Loco Mustang's garage; null in a world without it. */
+  garage: GarageHudSnapshot | null;
   /** The STREET RACE readout; null outside a Street Race. */
   streetRace: StreetRaceHudSnapshot | null;
   police: PoliceHudSnapshot | null;
@@ -1672,6 +1784,9 @@ export interface StreetGateHudSnapshot {
   eventName: string;
   difficulty: string;
   blurb: string;
+  /** The circuit the event is run on, for the sign ("CIRCUITO LA CURVA"), and its laps. */
+  circuit: string;
+  laps: number;
   rivals: number;
   /** True when this event has already been won. */
   completed: boolean;
@@ -1715,6 +1830,19 @@ export interface CircuitGateHudSnapshot {
   allClear: boolean;
   /** What the world calls this place, from the site itself. */
   placeLabel: string;
+}
+
+/** What the garage's overlay needs: a flattened read-only view of `GarageState` plus the names it cannot know. */
+export interface GarageHudSnapshot {
+  name: string;
+  tagline: string;
+  portrait: string;
+  /** True while the car is on the apron's ring. */
+  atSite: boolean;
+  /** False while another activity has the car: the sign stays down. */
+  open: boolean;
+  line: string;
+  lineId: number;
 }
 
 /** What El Búho's overlay needs: a flattened read-only view of `BuhoState` plus the names it cannot know. */

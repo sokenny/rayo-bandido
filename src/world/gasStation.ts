@@ -126,6 +126,14 @@ function outward(side: MeetSide): { x: number; z: number } {
 }
 
 export function stationFrame(s: GasStationSpec): GasFrame {
+  return lotFrame(s);
+}
+
+/**
+ * The frame of any corner lot with a front street and a corner street across it: a station's,
+ * and the garage's (`garage.ts`), which is laid out the same way.
+ */
+export function lotFrame(s: { tag: string; lot: Rect; front: MeetSide; corner: MeetSide }): GasFrame {
   const { lot } = s;
   const n = outward(s.front);
   const a = outward(s.corner);

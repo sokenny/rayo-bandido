@@ -36,6 +36,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       'The destination arrow now points straight at where you are going, instead of swinging at the last turn.',
       'The introduction now walks you through the drift and the lightning shot with an on-screen step card.',
       'More traffic on the streets, the ring and the viaduct.',
+      'Crashing now costs you: fines and a wrecked-up body in the open world, a stall on the clock in a race.',
+      'La Curva: a fourth street race over the viaduct and The Stack\'s deck, met at the car meet under the viaduct.',
+      'Loco Mustang\'s garage is up across from the car meet — tuning and mods coming soon.',
     ],
   },
   {

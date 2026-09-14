@@ -81,6 +81,11 @@ export interface EffectsSystem {
    * per fraction of a second, whatever the car ploughs through.
    */
   propImpact(kind: StreetPropKind, x: number, y: number, z: number, impact: number, damaged: boolean): void;
+  /**
+   * Smoke from under the bonnet of a car carrying a heavy crash, in puffs per second (0 for none).
+   * Held until changed; emitted from the pose `setCarPose` last saw, out of the tire smoke's pool.
+   */
+  setDamageSmoke(rate: number): void;
   update(frameDt: number, time: number): void;
   reset(): void;
   dispose(): void;
@@ -141,6 +146,9 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
   let tipRightZ = 0;
   let tipY = EXHAUST_LOCAL_Y;
   let propFxBudget = PROP_FX_BURST;
+  // The damage smoke out of the bonnet: puffs per second, and the fraction of one owed.
+  let damageSmokeRate = 0;
+  let damageSmokeDue = 0;
 
   return {
     setCarPose(pose, vehicle, drifting, nitro, frameDt) {
@@ -177,6 +185,19 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       smoke.emit(frameDt, intensity, pose.y, leftX, leftZ, rightWheelX, rightWheelZ, vehicle.vx, vehicle.vz);
       skid.track(sliding, pose.y, leftX, leftZ, rightWheelX, rightWheelZ);
       skid.flush();
+
+      if (damageSmokeRate > 0) {
+        // The bonnet, a metre and a half ahead of the wheelbase centre, just over the panel.
+        const hoodX = pose.x + fx * 1.4;
+        const hoodY = pose.y + 0.95;
+        const hoodZ = pose.z + fz * 1.4;
+        damageSmokeDue = Math.min(3, damageSmokeDue + damageSmokeRate * frameDt);
+        while (damageSmokeDue >= 1) {
+          damageSmokeDue -= 1;
+          // Small, grey and short-lived: a wisp over the car, not a fire.
+          smoke.puff(hoodX + (Math.random() - 0.5) * 0.5, hoodY, hoodZ + (Math.random() - 0.5) * 0.5, 0.55 + Math.random() * 0.35, 0.8 + Math.random() * 0.5, 0.32);
+        }
+      }
 
       // Exhaust tips: car-local (+-x, y, +z is behind the nose).
       const tipZOffsetX = fx * EXHAUST_LOCAL_Z;
@@ -273,6 +294,11 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       } else if (kind === 'sign' || kind === 'barrier' || kind === 'charger' || kind === 'dumpster') {
         sparkFx.burst(x, y + 0.2, z, 3 + Math.round(strength * 5), 2.5 + strength * 3, 0.3, 0.1, 1, 0.66, 0.32);
       }
+    },
+
+    setDamageSmoke(rate) {
+      damageSmokeRate = rate > 0 ? rate : 0;
+      if (damageSmokeRate === 0) damageSmokeDue = 0;
     },
 
     update(frameDt, time) {
