@@ -1292,6 +1292,50 @@ export const AUDIO = {
   scannerVolume: 0.32,
   bustedVolume: 0.5,
   shieldVolume: 0.3,
+  /**
+   * The chasers' radio barks (`audio/policeRadio.ts`, copy in `content/policeRadio.ts`): the sound
+   * and the moments that make a line eligible. Whether an eligible line is actually said is
+   * `POLICE_RADIO_CONFIG`.
+   */
+  policeRadio: {
+    voiceVolume: 0.9,
+    /** Static bed and hiss under the voice while the channel is open. */
+    staticVolume: 0.045,
+    /** Music level while a bark plays (1 = untouched). */
+    musicDuck: 0.6,
+    /** A bolt this recent (s) when the pursuit starts still counts: it is usually what started it. */
+    shotStartsPursuit: 1.2,
+    /** Seconds of continuous drift before the drift line. */
+    driftHold: 1.0,
+    /** m/s held for `highSpeedHold` seconds: the avenue line. The car tops out at 57. */
+    highSpeed: 44,
+    highSpeedHold: 1.5,
+    /** A chaser that can see the car, behind it and inside this many metres, is on its bumper. */
+    closeDistance: 16,
+    /** Crashes inside `repeatedWindow` seconds that make it "choca todo". */
+    repeatedCount: 3,
+    repeatedWindow: 12,
+    /** A police bump below this impact (m/s) is pushing, not a crash. */
+    hitPoliceImpact: 5,
+  },
+};
+
+/**
+ * When an eligible police-radio moment is actually said (`audio/policeRadio.ts`). A moment only
+ * gets a roll of `eventProbability`; a line accepted starts a random global quiet and its own
+ * category's cooldown at once (before the voice is even fetched). Nothing queues. While a pursuit
+ * lasts, one "seguimos atrás" check every `activePursuitInterval…` under the same rules.
+ */
+export const POLICE_RADIO_CONFIG = {
+  eventProbability: 0.25,
+  globalCooldownMinMs: 10_000,
+  globalCooldownMaxMs: 16_000,
+  categoryCooldownMs: 25_000,
+  activePursuitIntervalMinMs: 25_000,
+  activePursuitIntervalMaxMs: 40_000,
+  /** Repeats of one category's moment inside this window are the same moment (a police car
+   *  shoved for several frames), so they get one roll, not one per frame. */
+  sameMomentMs: 1_500,
 };
 
 /**

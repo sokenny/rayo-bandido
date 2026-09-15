@@ -1069,7 +1069,7 @@ export function stepPolice(
   resolveTargetCollisions(v, p.units, SCRATCH_EVENTS);
   for (let i = 0; i < SCRATCH_EVENTS.length; i++) {
     const ev = SCRATCH_EVENTS[i];
-    if (ev.type === 'collision') events.push({ type: 'collision', x: ev.x, y: ev.y, z: ev.z, impact: ev.impact, closing: ev.closing });
+    if (ev.type === 'collision') events.push({ type: 'collision', x: ev.x, y: ev.y, z: ev.z, impact: ev.impact, closing: ev.closing, police: true });
   }
   SCRATCH_EVENTS.length = 0;
 

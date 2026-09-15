@@ -9,7 +9,7 @@
  */
 
 /** Mirrors the keys of `CHARACTER_VOICES` in `server/dialogue/voices.mjs`. */
-export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito';
+export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito' | 'policia';
 
 export interface SpeakDialogueOptions {
   characterId: DialogueCharacterId;
@@ -175,6 +175,23 @@ const shared = createDialogueVoice({
 /** Tie the voice to the game's mute and music (`src/game.ts`). */
 export function configureDialogueVoice(next: typeof hooks): void {
   hooks = next;
+}
+
+/** The game's mute and music duck, for voices that play through Web Audio (`audio/policeRadio.ts`). */
+export function dialogueHooks(): Pick<DialogueVoiceDeps, 'isMuted' | 'duckMusic'> {
+  return hooks;
+}
+
+/** The URL of `text` in `characterId`'s voice, generated first if the server has not cached it. */
+export async function requestSpeech(characterId: DialogueCharacterId, text: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch('/api/dialogue/speech', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ characterId, text }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`speech ${res.status}`);
+  return ((await res.json()) as { audioUrl: string }).audioUrl;
 }
 
 export function speakDialogue(options: SpeakDialogueOptions): Promise<VoiceClip | null> {

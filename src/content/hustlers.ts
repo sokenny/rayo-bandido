@@ -154,7 +154,8 @@ export const WASHER_LINES: WasherLines = {
 };
 
 /** What the regulars get called once they have worked your car a few times. One each, in spot order. */
-export const HUSTLER_NICKNAMES: readonly string[] = ['El Chino', 'Pity', 'El Tucu', 'Rulo', 'Cabeza', 'Toto', 'Nacho', 'El Pelado', 'Chiqui', 'El Flaco', 'Kevin', 'Brian'];
+export const HUSTLER_NICKNAMES: readonly string[] = ['El Chino', 'Pity', 'El Tucu', 'Rulo', 'Cabeza', 'Toto', 'Nacho', 'El Pelado', 'Chiqui', 'El Flaco', 'Kevin', 'Brian',
+  'Pocho', 'Lucho', 'El Colo', 'Tincho', 'Fede', 'El Rata', 'Jonathan', 'Maxi', 'Beto', 'El Mono', 'Pipa', 'Cacho', 'Dylan', 'El Topo', 'Chaca', 'Tito', 'Mati', 'El Oso'];
 
 /** What the subtitle calls one before he has a name. */
 export const HUSTLER_TRADE: Record<HustlerKind, string> = { trapito: 'Trapito', washer: 'Limpiavidrios' };

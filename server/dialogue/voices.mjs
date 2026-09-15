@@ -26,9 +26,30 @@ const voice = (voiceId) => ({
   version: 1,
 });
 
+/**
+ * The police radio (`src/audio/policeRadio.ts`). The clone is CLEAN on purpose — no radio baked
+ * in — so the walkie-talkie is the client's FX chain, and these settings only make the delivery
+ * exaltada: multilingual v2 because v3's stability is locked to 0 / 0.5 / 1, low stability for an
+ * agitated, variable read, high style for expression.
+ */
+const radioVoice = (voiceId) => ({
+  voiceId,
+  modelId: 'eleven_multilingual_v2',
+  outputFormat: 'mp3_44100_128',
+  voiceSettings: {
+    stability: 0.3,
+    similarityBoost: 0.8,
+    style: 0.75,
+    useSpeakerBoost: true,
+    speed: 1.0,
+  },
+  version: 1,
+});
+
 export const CHARACTER_VOICES = {
   badkala: voice('iHaDFejiMLsI0XjCnQVt'),
   buho: voice('bew2VwXQAJqJ81jujT8j'),
   'loco-mustang': voice('tRJ3Kfo9sezJtxC5JySt'),
   trapito: voice('vJzdJ8zgnM2pmrSLXSPG'),
+  policia: radioVoice('mZTof7eSbESeUWP6fuMw'),
 };

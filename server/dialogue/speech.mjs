@@ -130,7 +130,7 @@ export function createDialogueSpeech({
   };
 
   async function generate(characterId, voice, text, key) {
-    const apiKey = env.ELEVENLABS_API_KEY;
+    const apiKey = env.ELEVENLABS_API_KEY || env.XI_API_KEY;
     if (!apiKey || !voice.voiceId) throw new SpeechError(503, 'speech is not configured');
     const started = now();
     let res;

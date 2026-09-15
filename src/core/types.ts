@@ -767,6 +767,8 @@ export type GameEvent =
        * which is `impact` less that car's own speed along the contact. What a crash is judged by.
        */
       closing?: number;
+      /** The other party was a police car (`src/sim/police.ts`). Heard on the police radio. */
+      police?: boolean;
     }
   /**
    * A crash was charged (`src/sim/crashDamage.ts`): `fine` is what the tier costs, `charged` what

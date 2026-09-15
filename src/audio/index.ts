@@ -5,6 +5,7 @@ import { createElectricHums, type Listener } from './electricHum';
 import { createTireScreech } from './tireScreech';
 import { createOneShots } from './oneShots';
 import { createPoliceAudio } from './police';
+import { createPoliceRadio, type PoliceRadioFrame } from './policeRadio';
 import { createRainAudio } from './rain';
 import { createNitroBoostAudio } from './nitroBoost';
 import { createLightningChargeAudio } from './lightningCharge';
@@ -102,6 +103,9 @@ export function createAudio(targetCount: number): AudioSystem {
   const evDown = createEvDisabledAudio(core);
   const wind = createWindGusts(core);
   const horns = createHorns(core, targetCount);
+  // The chasers' radio barks (`audio/policeRadio.ts`), fed from what `update` already reads.
+  const radio = createPoliceRadio(core);
+  const radioFrame: PoliceRadioFrame = { listener: null!, speed: 0, drifting: false, units: [] };
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
   // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
@@ -122,10 +126,18 @@ export function createAudio(targetCount: number): AudioSystem {
       horns.update(dt, listener, targets);
       evDown.update(dt, listener, targets);
       rain.update(dt, Math.hypot(skid.speed, skid.lateralSpeed));
-      if (policeInput) police.update(dt, listener, policeInput.units, policeInput.siren);
+      if (policeInput) {
+        police.update(dt, listener, policeInput.units, policeInput.siren);
+        radioFrame.listener = listener;
+        radioFrame.speed = Math.hypot(skid.speed, skid.lateralSpeed);
+        radioFrame.drifting = skid.drifting;
+        radioFrame.units = policeInput.units;
+        radio.update(dt, radioFrame);
+      }
     },
 
     onEvent(ev) {
+      radio.onEvent(ev);
       switch (ev.type) {
         case 'lightningFired':
           // The recording (`audio/lightningCharge.ts`); the synthesized zap only until it has loaded.
@@ -246,6 +258,7 @@ export function createAudio(targetCount: number): AudioSystem {
       nitro.reset();
       rayo.reset();
       evDown.reset();
+      radio.reset();
     },
 
     setMuted(muted) {
@@ -264,6 +277,7 @@ export function createAudio(targetCount: number): AudioSystem {
       hums.dispose();
       horns.dispose();
       police.dispose();
+      radio.dispose();
       rain.dispose();
       nitro.dispose();
       rayo.dispose();

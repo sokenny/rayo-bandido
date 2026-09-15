@@ -147,6 +147,12 @@
       "port": 8080
     },
     {
+      "name": "rayo-bandido-api-win",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["server/index.mjs", "--port", "8080"],
+      "port": 8080
+    },
+    {
       "name": "rayo-bandido-dev-5190",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5190", "--strictPort"],

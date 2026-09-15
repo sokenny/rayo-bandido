@@ -314,6 +314,12 @@ describe('the open world', () => {
       expect(solidAt(h.x, h.z, 0.4), `${h.id} stands in something`).toBeNull();
       if (h.kind === 'trapito') {
         expect(h.space, `${h.id} has no space to point at`).toBeTruthy();
+        // Every trapito has a light of his own, on the pavement beside him.
+        const s = h.signal!;
+        expect(s, `${h.id} has no light`).toBeTruthy();
+        expect(plan.isRoad(s.x, s.z, 0), `${h.id}'s light stands in the road`).toBe(false);
+        expect(solidAt(s.x, s.z, 0.2), `${h.id}'s light stands in something`).toBeNull();
+        expect(Math.hypot(h.x - s.x, h.z - s.z)).toBeLessThan(7);
       } else {
         const a = h.approach!;
         const s = h.signal!;

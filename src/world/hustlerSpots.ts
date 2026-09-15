@@ -5,10 +5,9 @@ import type { World } from './arenaWorld';
  * WHERE THE STREET HUSTLERS WORK (`src/sim/hustlers.ts`), as a LAYER over the open world — the same
  * one-way dependency as the race doors (`cityStreetSites.ts`): the city does not know they exist.
  *
- * Few, and on purpose. They make particular places memorable rather than standing on every
- * corner, so each spot is somewhere a player already goes:
- *
- *   TRAPITOS, each pointing at a space at the kerb nobody is going to park in —
+ * TRAPITOS, each pointing at a space at the kerb nobody is going to park in, and each beside a
+ * traffic light of his own (the washers' kind, but only scenery: nothing stops for it). Nine stand
+ * at places a player already goes —
  *     - outside Loco Mustang's garage, on the boulevard end of its frontage,
  *     - at the car meet's main gate off blvd-ring-s, under the viaduct's curve (La Curva's door),
  *     - on the NEOGAS forecourt's pavement where the two ring boulevards cross,
@@ -18,6 +17,9 @@ import type { World } from './arenaWorld';
  *     - on av-s1's south kerb at the market, across from its bus stop,
  *     - on the MAREA forecourt's pavement along the quay's waterfront boulevard,
  *     - on blvd-ring-n's north kerb just east of blvd-ring-e, the far north-east corner of the ring.
+ *   — and eighteen more work street corners spread over the whole grid, at least ~120 m from any
+ *   other hustler: each stands a few steps back from the corner on the kerb of the one approach
+ *   whose near-right corner it is (right-hand traffic), with his light on the corner facing it.
  *
  *   WASHERS, each working the one approach whose kerb corner he stands on, at his own light —
  *     - av-s1 eastbound at st-w3, under the viaduct's west ramp, a block from the VOLTA station
@@ -37,7 +39,7 @@ const E = Math.PI / 2;
 const S = Math.PI;
 const W = -Math.PI / 2;
 
-/** Seeds were chosen so the twelve of them dress differently: hoods, bucket hats, caps, messy hair, shorts, every shirt. */
+/** Seeds were chosen so the first twelve dress differently: hoods, bucket hats, caps, messy hair, shorts, every shirt. */
 export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
   {
     id: 'trapito-garage',
@@ -48,6 +50,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: N,
     seed: 1,
     space: { x: -452.5, z: 227.8 },
+    signal: { x: -449.5, z: 230.8, heading: W, offset: 11 },
   },
   {
     id: 'trapito-meet-gate',
@@ -58,6 +61,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: N,
     seed: 13,
     space: { x: -575, z: 239 },
+    signal: { x: -566.2, z: 230.8, heading: W, offset: 26 },
   },
   {
     id: 'trapito-neogas',
@@ -68,6 +72,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 42,
     space: { x: -391.5, z: -467.8 },
+    signal: { x: -395, z: -470.8, heading: E, offset: 33 },
   },
   {
     id: 'trapito-chargers',
@@ -78,6 +83,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 178,
     space: { x: -410.5, z: 773.2 },
+    signal: { x: -400.2, z: 770.2, heading: E, offset: 8 },
   },
   {
     id: 'trapito-grid',
@@ -88,6 +94,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 92,
     space: { x: -132.5, z: 494.2 },
+    signal: { x: -123, z: 490.2, heading: E, offset: 37 },
   },
   {
     id: 'trapito-rush',
@@ -98,6 +105,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: N,
     seed: 15,
     space: { x: -201.5, z: 227.8 },
+    signal: { x: -198, z: 230.8, heading: W, offset: 9 },
   },
   {
     id: 'trapito-market',
@@ -108,6 +116,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: N,
     seed: 35,
     space: { x: 221.5, z: 506.2 },
+    signal: { x: 225, z: 509.8, heading: W, offset: 34 },
   },
   {
     id: 'trapito-marea',
@@ -118,6 +127,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 71,
     space: { x: 191.5, z: 1180.8 },
+    signal: { x: 188, z: 1177.2, heading: E, offset: 1 },
   },
   {
     id: 'trapito-ring-ne',
@@ -128,6 +138,7 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 67,
     space: { x: 386.5, z: -467.8 },
+    signal: { x: 383, z: -470.8, heading: E, offset: 35 },
   },
   {
     id: 'washer-volta',
@@ -161,6 +172,204 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     seed: 5,
     approach: { x: 614.5, z: -1, heading: S },
     signal: { x: 610.2, z: 3, heading: N, offset: 26 },
+  },
+  {
+    id: 'trapito-centre-n3',
+    kind: 'trapito',
+    label: 'ST CENTRE × ST N3',
+    x: 38.7,
+    z: -587,
+    heading: W,
+    seed: 104,
+    space: { x: 34.2, z: -581.5 },
+    signal: { x: 37.3, z: -592.7, heading: S, offset: 26 },
+  },
+  {
+    id: 'trapito-ring-w-water',
+    kind: 'trapito',
+    label: 'RING W × THE QUAY',
+    x: -352.2,
+    z: 1171.5,
+    heading: E,
+    seed: 23,
+    space: { x: -347.7, z: 1166 },
+    signal: { x: -350.8, z: 1177.2, heading: N, offset: 5 },
+  },
+  {
+    id: 'trapito-w3-gran-via',
+    kind: 'trapito',
+    label: 'ST W3 × GRAN VÍA',
+    x: -493,
+    z: -167.8,
+    heading: N,
+    seed: 88,
+    space: { x: -498.5, z: -172.3 },
+    signal: { x: -487.3, z: -169.2, heading: W, offset: 31 },
+  },
+  {
+    id: 'trapito-w1-s5',
+    kind: 'trapito',
+    label: 'AV W1 × ST S5',
+    x: -631.2,
+    z: 907,
+    heading: E,
+    seed: 131,
+    space: { x: -626.7, z: 901.5 },
+    signal: { x: -629.8, z: 912.7, heading: N, offset: 20 },
+  },
+  {
+    id: 'trapito-oldtown-s5',
+    kind: 'trapito',
+    label: 'ST OLDTOWN × ST S5',
+    x: 147.5,
+    z: 928.7,
+    heading: N,
+    seed: 57,
+    space: { x: 142, z: 924.2 },
+    signal: { x: 153.2, z: 927.3, heading: W, offset: 9 },
+  },
+  {
+    id: 'trapito-centre-s4',
+    kind: 'trapito',
+    label: 'ST CENTRE × ST S4',
+    x: 43,
+    z: 631.3,
+    heading: S,
+    seed: 9,
+    space: { x: 48.5, z: 635.8 },
+    signal: { x: 37.3, z: 632.7, heading: E, offset: 24 },
+  },
+  {
+    id: 'trapito-ring-e-gran-via',
+    kind: 'trapito',
+    label: 'RING E × GRAN VÍA',
+    x: 356.5,
+    z: -192.2,
+    heading: S,
+    seed: 146,
+    space: { x: 362, z: -187.7 },
+    signal: { x: 350.8, z: -190.8, heading: E, offset: 8 },
+  },
+  {
+    id: 'trapito-ring-e-s6',
+    kind: 'trapito',
+    label: 'RING E × ST S6',
+    x: 327.8,
+    z: 1047,
+    heading: E,
+    seed: 61,
+    space: { x: 332.3, z: 1041.5 },
+    signal: { x: 329.2, z: 1052.7, heading: N, offset: 37 },
+  },
+  {
+    id: 'trapito-e3-s3',
+    kind: 'trapito',
+    label: 'ST E3 × ST S3',
+    x: 471.3,
+    z: 347,
+    heading: E,
+    seed: 112,
+    space: { x: 475.8, z: 341.5 },
+    signal: { x: 472.7, z: 352.7, heading: N, offset: 4 },
+  },
+  {
+    id: 'trapito-w1-n3',
+    kind: 'trapito',
+    label: 'AV W1 × ST N3',
+    x: -635.5,
+    z: -591.3,
+    heading: N,
+    seed: 29,
+    space: { x: -641, z: -595.8 },
+    signal: { x: -629.8, z: -592.7, heading: W, offset: 8 },
+  },
+  {
+    id: 'trapito-west-south',
+    kind: 'trapito',
+    label: 'ST WEST × ST SOUTH',
+    x: -265,
+    z: 18.7,
+    heading: N,
+    seed: 77,
+    space: { x: -270.5, z: 14.2 },
+    signal: { x: -259.3, z: 17.3, heading: W, offset: 32 },
+  },
+  {
+    id: 'trapito-e3-s2',
+    kind: 'trapito',
+    label: 'ST E3 × AV S2',
+    x: 467,
+    z: 791.2,
+    heading: N,
+    seed: 160,
+    space: { x: 461.5, z: 786.7 },
+    signal: { x: 472.7, z: 789.8, heading: W, offset: 28 },
+  },
+  {
+    id: 'trapito-centre-mid',
+    kind: 'trapito',
+    label: 'ST CENTRE × ST MID',
+    x: 21.3,
+    z: -93,
+    heading: E,
+    seed: 44,
+    space: { x: 25.8, z: -98.5 },
+    signal: { x: 22.7, z: -87.3, heading: N, offset: 35 },
+  },
+  {
+    id: 'trapito-e1-water',
+    kind: 'trapito',
+    label: 'AV E1 × THE QUAY',
+    x: 635.5,
+    z: 1175.8,
+    heading: S,
+    seed: 95,
+    space: { x: 641, z: 1180.3 },
+    signal: { x: 629.8, z: 1177.2, heading: E, offset: 2 },
+  },
+  {
+    id: 'trapito-east-ring-s',
+    kind: 'trapito',
+    label: 'ST EAST × RING S',
+    x: 258.7,
+    z: 236.5,
+    heading: W,
+    seed: 123,
+    space: { x: 254.2, z: 242 },
+    signal: { x: 257.3, z: 230.8, heading: S, offset: 3 },
+  },
+  {
+    id: 'trapito-west-gran-via',
+    kind: 'trapito',
+    label: 'ST WEST × GRAN VÍA',
+    x: -260.7,
+    z: -196.5,
+    heading: E,
+    seed: 18,
+    space: { x: -256.2, z: -202 },
+    signal: { x: -259.3, z: -190.8, heading: N, offset: 9 },
+  },
+  {
+    id: 'trapito-e1-s4',
+    kind: 'trapito',
+    label: 'AV E1 × ST S4',
+    x: 608.8,
+    z: 627,
+    heading: E,
+    seed: 139,
+    space: { x: 613.3, z: 621.5 },
+    signal: { x: 610.2, z: 632.7, heading: N, offset: 37 },
+  },
+  {
+    id: 'trapito-oldtown-south',
+    kind: 'trapito',
+    label: 'ST OLDTOWN × ST SOUTH',
+    x: 168.2,
+    z: 23,
+    heading: W,
+    seed: 83,
+    space: { x: 163.7, z: 28.5 },
+    signal: { x: 166.8, z: 17.3, heading: S, offset: 35 },
   },
 ];
 

@@ -34,6 +34,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Hovercars and drones now drift through the sky over the avenues and pavements.',
       'El Búho, Loco Mustang and Trapito now speak too, not just BadKala.',
       'More trapitos working the ring, the market and the quay.',
+      'Police chatter over the radio during a chase: your shots, your drifts and your crashes get called in.',
+      'Trapitos now work street corners all over the city, not just the landmarks.',
     ],
   },
   {
