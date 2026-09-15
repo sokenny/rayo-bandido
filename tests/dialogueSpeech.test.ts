@@ -35,7 +35,7 @@ function memoryCache() {
   };
 }
 
-const env = { ELEVENLABS_API_KEY: 'test-key', ELEVENLABS_BADKALA_VOICE_ID: 'voice-bk', NODE_ENV: 'test' };
+const env = { ELEVENLABS_API_KEY: 'test-key', NODE_ENV: 'test' };
 const audioResponse = () => new Response(new Uint8Array([1, 2, 3]), { status: 200 });
 
 describe('speech cache key', () => {
@@ -63,7 +63,8 @@ describe('dialogue speech service', () => {
     expect(first.cached).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toContain('/voice-bk?output_format=mp3_44100_128');
+    expect(url).toContain('/iHaDFejiMLsI0XjCnQVt?output_format=mp3_44100_128');
+    expect(JSON.parse(init.body as string)).toMatchObject({ model_id: 'eleven_v3', language_code: 'es' });
     expect((init.headers as Record<string, string>)['xi-api-key']).toBe('test-key');
 
     const second = await speech.synthesize('badkala', ' Mirá quién decidió  volver al radar.');
@@ -114,6 +115,22 @@ describe('dialogue voice (client)', () => {
     resolvers.get('old')!({ audioUrl: '/old.mp3', cached: false });
     expect(await old).toBeNull();
     expect(played).toEqual(['/new.mp3']);
+  });
+
+  it("stopping one character leaves another's line playing", async () => {
+    const paused: string[] = [];
+    const voiceOut = createDialogueVoice({
+      request: async (_c, text) => ({ audioUrl: `/${text}.mp3`, cached: true }),
+      createClip: (src): VoiceClip => ({ play: () => {}, pause: () => void paused.push(src), addEventListener: () => {} }),
+      isMuted: () => false,
+      duckMusic: () => {},
+      duckLevel: 0.5,
+    });
+    expect(await voiceOut.speak({ characterId: 'trapito', text: 'pa' })).not.toBeNull();
+    voiceOut.stop('buho');
+    expect(paused).toEqual([]);
+    voiceOut.stop('trapito');
+    expect(paused).toEqual(['/pa.mp3']);
   });
 
   it('stays silent when muted or stopped before the clip is ready', async () => {

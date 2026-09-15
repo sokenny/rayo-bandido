@@ -1,5 +1,6 @@
 import type { GameEvent, GarageHudSnapshot } from '../core/types';
 import { LOCO_MUSTANG } from '../content/garage';
+import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 import { portraitFor } from './portraits';
 
 /**
@@ -61,6 +62,8 @@ export function createGarageOverlay(options: GarageOverlayOptions): GarageOverla
     options.onActivate();
   };
   promptEl.addEventListener('click', onClick);
+  // Everything he can say, voiced ahead of time (`src/audio/dialogueVoice.ts`).
+  void prepareDialogue('loco-mustang', [...LOCO_MUSTANG.greetings, ...LOCO_MUSTANG.soon]);
 
   let shownWho = '';
   let shownPrompt = false;
@@ -122,6 +125,8 @@ export function createGarageOverlay(options: GarageOverlayOptions): GarageOverla
         const on = g.line !== '';
         if (on) {
           textEl.textContent = g.line;
+          // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence.
+          void speakDialogue({ characterId: 'loco-mustang', text: g.line, interrupt: true });
           play(
             subtitleEl,
             [
@@ -138,10 +143,14 @@ export function createGarageOverlay(options: GarageOverlayOptions): GarageOverla
     },
 
     onEvent(event) {
-      if (event.type === 'restart') clear();
+      if (event.type === 'restart') {
+        clear();
+        stopDialogue('loco-mustang');
+      }
     },
 
     dispose() {
+      stopDialogue('loco-mustang');
       promptEl.removeEventListener('click', onClick);
       for (const animation of animations.values()) animation.cancel();
       animations.clear();

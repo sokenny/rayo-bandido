@@ -1,6 +1,8 @@
 import type { BuhoHudSnapshot, GameEvent } from '../core/types';
 import { formatYen } from './passengerOverlay';
 import { portraitFor } from './portraits';
+import { BUHO } from '../content/buho';
+import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 
 /**
  * El Búho's screen furniture: the prompt over his ring (the item, the price, the key, and
@@ -69,6 +71,8 @@ export function createBuhoOverlay(options: BuhoOverlayOptions): BuhoOverlay {
     options.onActivate();
   };
   promptEl.addEventListener('click', onClick);
+  // Everything he can say, voiced ahead of time (`src/audio/dialogueVoice.ts`).
+  void prepareDialogue('buho', [...BUHO.greetings, ...BUHO.remarks, ...BUHO.broke, ...BUHO.busy]);
 
   let shownWho = '';
   let shownPrompt: PromptState = 'none';
@@ -168,6 +172,8 @@ export function createBuhoOverlay(options: BuhoOverlayOptions): BuhoOverlay {
         const on = b.line !== '';
         if (on) {
           textEl.textContent = b.line;
+          // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence.
+          void speakDialogue({ characterId: 'buho', text: b.line, interrupt: true });
           play(
             subtitleEl,
             [
@@ -185,10 +191,14 @@ export function createBuhoOverlay(options: BuhoOverlayOptions): BuhoOverlay {
     },
 
     onEvent(event) {
-      if (event.type === 'restart') clear();
+      if (event.type === 'restart') {
+        clear();
+        stopDialogue('buho');
+      }
     },
 
     dispose() {
+      stopDialogue('buho');
       promptEl.removeEventListener('click', onClick);
       for (const animation of animations.values()) animation.cancel();
       animations.clear();

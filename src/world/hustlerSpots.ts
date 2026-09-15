@@ -13,7 +13,11 @@ import type { World } from './arenaWorld';
  *     - at the car meet's main gate off blvd-ring-s, under the viaduct's curve (La Curva's door),
  *     - on the NEOGAS forecourt's pavement where the two ring boulevards cross,
  *     - beside the EV chargers on av-s2 in the south-west neon district,
- *     - on the wide pavement beside the Bandido Grid start line on av-s1.
+ *     - on the wide pavement beside the Bandido Grid start line on av-s1,
+ *     - down the ring boulevard from the Rayo Rush door, on blvd-ring-s's south kerb,
+ *     - on av-s1's south kerb at the market, across from its bus stop,
+ *     - on the MAREA forecourt's pavement along the quay's waterfront boulevard,
+ *     - on blvd-ring-n's north kerb just east of blvd-ring-e, the far north-east corner of the ring.
  *
  *   WASHERS, each working the one approach whose kerb corner he stands on, at his own light —
  *     - av-s1 eastbound at st-w3, under the viaduct's west ramp, a block from the VOLTA station
@@ -33,7 +37,7 @@ const E = Math.PI / 2;
 const S = Math.PI;
 const W = -Math.PI / 2;
 
-/** Seeds were chosen so the eight of them dress differently: a hood, a bucket hat, messy hair, shorts, six shirts. */
+/** Seeds were chosen so the twelve of them dress differently: hoods, bucket hats, caps, messy hair, shorts, every shirt. */
 export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
   {
     id: 'trapito-garage',
@@ -84,6 +88,46 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: S,
     seed: 92,
     space: { x: -132.5, z: 494.2 },
+  },
+  {
+    id: 'trapito-rush',
+    kind: 'trapito',
+    label: 'RAYO RUSH · RING SOUTH',
+    x: -195,
+    z: 232.5,
+    heading: N,
+    seed: 15,
+    space: { x: -201.5, z: 227.8 },
+  },
+  {
+    id: 'trapito-market',
+    kind: 'trapito',
+    label: 'AV SOUTH · THE MARKET',
+    x: 228,
+    z: 510.6,
+    heading: N,
+    seed: 35,
+    space: { x: 221.5, z: 506.2 },
+  },
+  {
+    id: 'trapito-marea',
+    kind: 'trapito',
+    label: 'MAREA · THE QUAY',
+    x: 185,
+    z: 1176.7,
+    heading: S,
+    seed: 71,
+    space: { x: 191.5, z: 1180.8 },
+  },
+  {
+    id: 'trapito-ring-ne',
+    kind: 'trapito',
+    label: 'RING NORTH × RING EAST',
+    x: 380,
+    z: -472.6,
+    heading: S,
+    seed: 67,
+    space: { x: 386.5, z: -467.8 },
   },
   {
     id: 'washer-volta',

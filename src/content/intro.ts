@@ -181,6 +181,8 @@ export const INTRO = {
     portrait: { src: '/badkala.webp', initials: 'BK' },
     /** Music level while a voice clip plays, as a fraction of the theme's own volume. */
     duck: 0.45,
+    /** BadKala's voice loudness (`speakDialogue`'s `gain`): well over the rest of the cast's. */
+    voiceGain: 2.5,
   },
 
   /* ------------------------------------------------------------- the route */

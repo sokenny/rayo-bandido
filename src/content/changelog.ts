@@ -32,6 +32,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Wet roads now really mirror the city\'s neon, signs and lit windows, not just a generic sheen.',
       'BadKala now speaks her intro lines out loud, not just in subtitles.',
       'Hovercars and drones now drift through the sky over the avenues and pavements.',
+      'El Búho, Loco Mustang and Trapito now speak too, not just BadKala.',
+      'More trapitos working the ring, the market and the quay.',
     ],
   },
   {

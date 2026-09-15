@@ -428,7 +428,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
   function end(reason: 'completed' | 'skipped'): void {
     over = true;
     stopVoice();
-    stopDialogue();
+    stopDialogue('badkala');
     highlightCharge(false);
     finishPresentation();
     options.hudRoot.classList.remove('rb-intro-running');
@@ -500,12 +500,12 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           flash(subtitleEl);
           if (ev.voice) playVoice(ev.voice);
           // Not awaited: the subtitle is already up, and the voice joins it whenever it is ready.
-          else if (ev.tts) void speakDialogue({ characterId: 'badkala', text: ev.text, interrupt: true });
+          else if (ev.tts) void speakDialogue({ characterId: 'badkala', text: ev.text, interrupt: true, gain: cfg.call.voiceGain });
           break;
         case 'introLineEnd':
           subtitleEl.classList.remove('is-on');
           stopVoice();
-          stopDialogue();
+          stopDialogue('badkala');
           break;
         case 'introStage':
           // Pulling into the meet: the clip, over the car standing among the others.

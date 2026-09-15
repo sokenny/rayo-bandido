@@ -1,5 +1,6 @@
 import type { GameEvent, HustlerHudSnapshot } from '../core/types';
-import { WASHER_CHOICES, streetPrice } from '../content/hustlers';
+import { TRAPITO_LINES, WASHER_CHOICES, streetPrice } from '../content/hustlers';
+import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 
 /**
  * The street hustlers' screen furniture (`src/sim/hustlers.ts`): the subtitle strip their lines go
@@ -59,6 +60,8 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
   };
   yesEl.addEventListener('click', onYes);
   noEl.addEventListener('click', onNo);
+  // The trapitos are voiced (every one of them with the same voice); the washers are still subtitle-only.
+  void prepareDialogue('trapito', Object.values(TRAPITO_LINES).flat());
 
   let shownLineId = -1;
   let shownTalking = false;
@@ -110,6 +113,8 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         if (on) {
           speakerEl.textContent = h.speaker.toUpperCase();
           textEl.textContent = h.line;
+          // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence.
+          if (h.kind === 'trapito') void speakDialogue({ characterId: 'trapito', text: h.line, interrupt: true });
           play(
             subtitleEl,
             [
@@ -130,10 +135,12 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         setTalking(false);
         setOffer(false);
         shownLineId = -1;
+        stopDialogue('trapito');
       }
     },
 
     dispose() {
+      stopDialogue('trapito');
       yesEl.removeEventListener('click', onYes);
       noEl.removeEventListener('click', onNo);
       for (const animation of animations.values()) animation.cancel();

@@ -490,8 +490,14 @@ export function createGame(
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
   theme.arm(window);
+  // No music while the intro runs: BadKala's call has the room to itself. Held here rather than by
+  // each caller, so a line ending (which restores the duck) cannot bring it back early; `endIntro`
+  // lets go. Not the player's mute (M): that one would silence the voice too.
+  let introHoldsMusic = !!state.intro;
+  const duckMusic = (level: number): void => theme.duck(introHoldsMusic ? 0 : level);
+  duckMusic(1);
   // Spoken dialogue follows the game's mute (M) and sits over the music the way a call does.
-  configureDialogueVoice({ isMuted: () => theme.isMuted(), duckMusic: (level) => theme.duck(level), duckLevel: INTRO.call.duck });
+  configureDialogueVoice({ isMuted: () => theme.isMuted(), duckMusic, duckLevel: INTRO.call.duck });
   end();
 
   /* --------------------------------------------------------------- rayo rush */
@@ -720,7 +726,7 @@ export function createGame(
         onSkipIntro: () => {
           if (state.intro) skipIntro(state.intro);
         },
-        duckMusic: (level) => theme.duck(level),
+        duckMusic,
       })
     : null;
   if (introOverlay) hudRoot.appendChild(introOverlay.root);
@@ -808,6 +814,7 @@ export function createGame(
       state.economy.money += INTRO.completionReward;
     }
     layout.playerSpawn = { ...cityArrival };
+    introHoldsMusic = false;
     theme.duck(1);
     placeIntroMarker();
     refreshMapMarks();
