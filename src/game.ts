@@ -144,6 +144,7 @@ import { createDebugOverlay, clipboardLine, type DebugFrameInput, type WorldRead
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
 import { configureDialogueVoice, speakDialogue } from './audio/dialogueVoice';
+import { busStopCrowds } from './world/busStopCrowds';
 import { createAudio, type PoliceAudioInput } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
 import { createPassByDetector } from './audio/passBy';
@@ -485,7 +486,7 @@ export function createGame(
   end();
 
   end = measure('audio');
-  const audio = createAudio(state.targets.length);
+  const audio = createAudio(state.targets.length, busStopCrowds(world.plan.busStops));
   // Background theme song. Loops quietly under the game.
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();

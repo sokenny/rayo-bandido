@@ -15,6 +15,8 @@ import { buildGasStations } from './env/gasStationBuilder';
 import { buildGarage } from './env/garageBuilder';
 import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
+import { createBusStopCrowdVisual } from './busStopCrowdVisual';
+import { busStopCrowds } from '../../world/busStopCrowds';
 import type { CrowdSubject } from './env/humanActs';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
@@ -517,6 +519,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const meets = plan.meets && plan.meets.length > 0 ? createMeetVisual(plan.meets) : null;
   if (meets) root.add(meets.root);
 
+  // People waiting under some of the bus shelters (`busStopCrowdVisual.ts`), built as the camera nears.
+  const stopPeople = plan.busStops && plan.busStops.length > 0 ? createBusStopCrowdVisual(busStopCrowds(plan.busStops)) : null;
+  if (stopPeople) root.add(stopPeople.root);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -591,6 +597,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       }
       // The people at the meets notice the car (`people`); the cars parked there do not move.
       meets?.update(camX, camZ, time, frameDt, people);
+      if (stopPeople && camX !== undefined && camZ !== undefined) stopPeople.update(camX, camZ, time, frameDt, people);
     },
     dispose() {
       atmosphere.dispose();
@@ -600,6 +607,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       for (const m of streetMarkers) m.dispose();
       for (const b of boards) b.board.dispose();
       meets?.dispose();
+      stopPeople?.dispose();
       badkala.dispose();
       screenAtlas.dispose();
       graffiti.dispose();

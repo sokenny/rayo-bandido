@@ -1382,6 +1382,99 @@ export const HORNS = {
 };
 
 /**
+ * The street yelling at the car (`src/audio/ambientVoice.ts`, lines in `src/content/ambientVoice.ts`):
+ * traffic drivers and the people waiting at bus stops. Presentation only. One line at a time, and
+ * silence is the usual answer — every trigger is a roll, not a promise. Distances in metres, times
+ * in seconds, speeds in m/s.
+ */
+export const AMBIENT_VOICE = {
+  /** Loudness at `near` (clips are RMS-normalized on decode). */
+  volume: 0.85,
+  /** Full loudness within this; silent at `hearing`. Nobody further than `hearing` is offered a line. */
+  near: 7,
+  hearing: 70,
+  /** After a line starts, no other ambient line for a random time in this range. */
+  globalCooldown: [8, 12] as const,
+  /** The same car, or the same bus stop, says nothing again for this long. */
+  sourceCooldown: 30,
+  /** A reaction starts this long after what caused it (random in the range). */
+  delay: [0.1, 0.5] as const,
+  /** A reaction that could not start within this of its moment is dropped, never queued. */
+  staleAfter: 0.3,
+  /** Playback variation per line: ±volume share and ±playback-rate share. */
+  volumeJitter: 0.08,
+  rateJitter: 0.03,
+  /** Share of the physical doppler kept, and the most it may bend the pitch either way. */
+  dopplerDepth: 0.35,
+  dopplerMax: 0.04,
+  /** The lowpass with distance: open at the speaker, darker at `hearing` (Hz). Never below speech. */
+  brightHz: 12000,
+  darkHz: 3800,
+  /** Chance an eligible trigger speaks, and which wins when two are waiting (higher beats lower). */
+  chance: {
+    // Traffic offers pass-bys constantly; kept rare so the drivers do not eat every quiet spell.
+    driverFast: 0.15,
+    driverClose: 0.35,
+    driverCut: 0.55,
+    driverSwipe: 0.7,
+    driverHit: 0.85,
+    stopFast: 0.55,
+    stopDrift: 0.6,
+    stopCrash: 0.7,
+    stopPursuit: 0.6,
+    stopRayo: 0.8,
+  },
+  priority: {
+    driverFast: 1,
+    stopFast: 1,
+    driverClose: 2,
+    driverCut: 2,
+    stopDrift: 2,
+    driverSwipe: 3,
+    driverHit: 3,
+    stopCrash: 3,
+    stopPursuit: 3,
+    stopRayo: 4,
+  },
+  /**
+   * At or above this priority (a crash, a chase, the Rayo) a trigger ignores the global cooldown,
+   * outranks a weaker line from the same source still on its cooldown, and cuts off a weaker line
+   * on air: the "¡Dale, Toretto!" from the approach must not swallow the curse after the hit.
+   */
+  preemptPriority: 3,
+  driver: {
+    /** A pass-by of a car (`audio/passBy.ts`) this fast relative to it counts as blowing past. */
+    fastClosing: 24,
+    /** A touch that closed slower than this is a swipe down the side, not a hit. */
+    swipeClosing: 9,
+    /** A near miss that ends this far ahead of the car's nose, this close to its line, cut it up. */
+    cutAhead: 1.2,
+    cutLateral: 2.4,
+  },
+  stop: {
+    /** Share of bus stops with people waiting, and how many wait at each. */
+    populated: 0.7,
+    minWaiting: 2,
+    maxWaiting: 4,
+    /** Built the first time the camera comes this close; drawn within `showWithin`. */
+    spawnWithin: 240,
+    showWithin: 190,
+    /** Clips are fetched once the car first comes this close to a populated stop. */
+    preloadWithin: 160,
+    /** Each approach rolls each trigger once; leaving this re-arms the stop. */
+    rearmBeyond: 60,
+    fastRadius: 28,
+    fastSpeed: 20,
+    driftRadius: 32,
+    pursuitRadius: 36,
+    crashRadius: 40,
+    /** An impact this hard (m/s) is a crash worth a reaction. `CRASH_DAMAGE.tiers.light.impact`. */
+    crashImpact: 7,
+    rayoRadius: 60,
+  },
+};
+
+/**
  * The air a fast car tears past things with (`audio/passBy.ts` finds the passes,
  * `audio/windGust.ts` voices them). Every car, bus, police car, pillar, post and street prop
  * the player blows past close and quick gets a short doppler rush of wind on its side of the

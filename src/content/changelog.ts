@@ -36,6 +36,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'More trapitos working the ring, the market and the quay.',
       'Police chatter over the radio during a chase: your shots, your drifts and your crashes get called in.',
       'Trapitos now work street corners all over the city, not just the landmarks.',
+      'Traffic drivers and people at bus stops now yell at you as you drive by — close calls, drifts and crashes.',
+      'Bus stops are no longer empty: two to four people wait under every shelter.',
     ],
   },
   {

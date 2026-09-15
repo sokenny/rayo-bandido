@@ -13,6 +13,9 @@ import { createEvDisabledAudio } from './evDisabled';
 import { createWindGusts } from './windGust';
 import { createHorns } from './horns';
 import type { PassByGust } from './passBy';
+import { createAmbientVoices } from './ambientVoice';
+import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
+import type { BusStopCrowd } from '../world/busStopCrowds';
 import { skidIntensity } from './dsp';
 
 /** Slide state for the tire scrub, read each frame. */
@@ -88,7 +91,8 @@ const SILENT: AudioSystem = {
   dispose() {},
 };
 
-export function createAudio(targetCount: number): AudioSystem {
+/** `busStops`: the people waiting at stops (`world/busStopCrowds.ts`), who may shout at the car. */
+export function createAudio(targetCount: number, busStops: readonly BusStopCrowd[] = []): AudioSystem {
   const core = createAudioCore();
   if (!core) return SILENT;
 
@@ -106,6 +110,11 @@ export function createAudio(targetCount: number): AudioSystem {
   // The chasers' radio barks (`audio/policeRadio.ts`), fed from what `update` already reads.
   const radio = createPoliceRadio(core);
   const radioFrame: PoliceRadioFrame = { listener: null!, speed: 0, drifting: false, units: [] };
+  // Drivers and bus-stop people yelling at the car (`audio/ambientVoice.ts`): never over the story's
+  // voices or the radio.
+  const ambient = createAmbientVoices(core, busStops, {
+    blocked: () => radio.busy || dialogueSpeaking() || dialogueHooks().isMuted(),
+  });
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
   // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
@@ -134,10 +143,12 @@ export function createAudio(targetCount: number): AudioSystem {
         radioFrame.units = policeInput.units;
         radio.update(dt, radioFrame);
       }
+      ambient.update(dt, listener, targets, skid.drifting, !!policeInput?.siren);
     },
 
     onEvent(ev) {
       radio.onEvent(ev);
+      ambient.onEvent(ev);
       switch (ev.type) {
         case 'lightningFired':
           // The recording (`audio/lightningCharge.ts`); the synthesized zap only until it has loaded.
@@ -247,6 +258,7 @@ export function createAudio(targetCount: number): AudioSystem {
 
     passBy(gust) {
       wind.play(gust);
+      ambient.gust(gust);
     },
 
     reset() {
@@ -259,6 +271,7 @@ export function createAudio(targetCount: number): AudioSystem {
       rayo.reset();
       evDown.reset();
       radio.reset();
+      ambient.reset();
     },
 
     setMuted(muted) {
@@ -278,6 +291,7 @@ export function createAudio(targetCount: number): AudioSystem {
       horns.dispose();
       police.dispose();
       radio.dispose();
+      ambient.dispose();
       rain.dispose();
       nitro.dispose();
       rayo.dispose();

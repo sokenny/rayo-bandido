@@ -299,6 +299,8 @@ export function createPoliceRadioDirector(deps: PoliceRadioDirectorDeps): Police
 export interface PoliceRadio {
   onEvent(ev: GameEvent): void;
   update(dt: number, frame: PoliceRadioFrame): void;
+  /** A transmission is on air (or being fetched): the street's ambient voices wait it out. */
+  readonly busy: boolean;
   reset(): void;
   dispose(): void;
 }
@@ -512,6 +514,9 @@ export function createPoliceRadio(core: AudioCore): PoliceRadio {
   }
 
   const radio: PoliceRadio = {
+    get busy() {
+      return director.busy;
+    },
     onEvent(ev) {
       director.onEvent(ev);
       // The arrest, the escape or an activity ends the chase: nobody is on the radio after it, and

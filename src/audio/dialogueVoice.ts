@@ -9,7 +9,7 @@
  */
 
 /** Mirrors the keys of `CHARACTER_VOICES` in `server/dialogue/voices.mjs`. */
-export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito' | 'policia';
+export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito' | 'policia' | 'npc-masculino-1';
 
 export interface SpeakDialogueOptions {
   characterId: DialogueCharacterId;
@@ -42,6 +42,8 @@ export interface DialogueVoice {
   speak(options: SpeakDialogueOptions): Promise<VoiceClip | null>;
   /** Silence everything, or — given a character — only that character's line, pending or audible. */
   stop(characterId?: DialogueCharacterId): void;
+  /** A line is audible or on its way. The street's ambient voices hold their tongue meanwhile. */
+  speaking(): boolean;
 }
 
 export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
@@ -110,7 +112,7 @@ export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
     }
   }
 
-  return { speak, stop };
+  return { speak, stop, speaking: () => current !== null || pending !== null };
 }
 
 /* ------------------------------------------------------------------ the game's one voice */
@@ -192,6 +194,11 @@ export async function requestSpeech(characterId: DialogueCharacterId, text: stri
   });
   if (!res.ok) throw new Error(`speech ${res.status}`);
   return ((await res.json()) as { audioUrl: string }).audioUrl;
+}
+
+/** Whether a dialogue line is audible or being fetched right now. */
+export function dialogueSpeaking(): boolean {
+  return shared.speaking();
 }
 
 export function speakDialogue(options: SpeakDialogueOptions): Promise<VoiceClip | null> {

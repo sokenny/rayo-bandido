@@ -32,6 +32,8 @@ export interface PassByGust {
   size: number;
   /** Seconds until the object is abreast. The voice peaks then. */
   lead: number;
+  /** Index into `targets` when the object is a traffic car, else -1 (`audio/ambientVoice.ts`). */
+  target: number;
 }
 
 export interface PassByDetector {
@@ -131,7 +133,7 @@ export function createPassByDetector(layout: ArenaLayout): PassByDetector {
 
   const out: PassByGust[] = [];
   const pool: PassByGust[] = [];
-  for (let i = 0; i < 8; i++) pool.push({ side: 0, strength: 0, speed: 0, size: 0, lead: 0 });
+  for (let i = 0; i < 8; i++) pool.push({ side: 0, strength: 0, speed: 0, size: 0, lead: 0, target: -1 });
 
   const recentKey = new Int32Array(RECENT).fill(-1);
   const recentAt = new Float64Array(RECENT).fill(-1e9);
@@ -182,6 +184,7 @@ export function createPassByDetector(layout: ArenaLayout): PassByDetector {
     g.speed = rel;
     g.size = size;
     g.lead = tc;
+    g.target = key >= KEY_TARGET && key < KEY_BUS ? key - KEY_TARGET : -1;
     out.push(g);
   }
 

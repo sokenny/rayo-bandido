@@ -46,7 +46,29 @@ const radioVoice = (voiceId) => ({
   version: 1,
 });
 
+/**
+ * Street NPCs yelling at a passing car (`src/audio/ambientVoice.ts`). Never asked for at runtime:
+ * `scripts/generate-npc-voices.mjs` renders their few lines once into `public/npc-voice/`. v3 at
+ * "creative" stability so the `[shouting]` direction lands; 64 kbps is plenty for a two-second
+ * shout heard through a lowpass from across the street.
+ */
+const shoutVoice = (voiceId) => ({
+  voiceId,
+  modelId: 'eleven_v3',
+  languageCode: 'es',
+  outputFormat: 'mp3_44100_64',
+  voiceSettings: {
+    stability: 0,
+    similarityBoost: 0.8,
+    style: 0,
+    useSpeakerBoost: true,
+    speed: 1.0,
+  },
+  version: 1,
+});
+
 export const CHARACTER_VOICES = {
+  'npc-masculino-1': shoutVoice('9JOGcDYAYTmowtTJuqVV'),
   badkala: voice('iHaDFejiMLsI0XjCnQVt'),
   buho: voice('bew2VwXQAJqJ81jujT8j'),
   'loco-mustang': voice('tRJ3Kfo9sezJtxC5JySt'),
