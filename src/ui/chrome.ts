@@ -51,7 +51,7 @@ export function frameDecor(screen: string): string {
     `<span class="rb-frame__read rb-frame__read--tl">RB//OS 0.9 · ${RELEASE_STAGE} · ${screen}</span>` +
     `<span class="rb-frame__read rb-frame__read--tr"><i class="rb-blink"></i>SYS LINK</span>` +
     `<span class="rb-frame__read rb-frame__read--bl">0x4F52 · 0xB1D0 · JDM/CYB 50:50</span>` +
-    `<span class="rb-frame__read rb-frame__read--br">NO ACCOUNTS · NO COPS · NO MERCY</span>` +
+    `<span class="rb-frame__read rb-frame__read--br">NO COPS · NO MERCY</span>` +
     `</div>`
   );
 }

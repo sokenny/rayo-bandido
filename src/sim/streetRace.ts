@@ -111,6 +111,7 @@ function makeCar(id: string, name: string, slot: number): RivalCar {
     bestLap: -1,
     finishTime: -1,
     money: 0,
+    score: 0,
   };
 }
 

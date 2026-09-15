@@ -29,6 +29,11 @@ import { RUSH } from '../config/tuning';
  */
 export interface RushOverlayOptions {
   onActivate(): void;
+  /**
+   * QUICK PLAY's run (`?mode=rush`): there is no free roam to go back to, so the card's way out
+   * says what R and ESC do there instead — another run from the marker, or the menu.
+   */
+  quickPlay?: boolean;
 }
 
 export interface RushOverlay {
@@ -72,16 +77,6 @@ export function formatScore(value: number): string {
     if (fromEnd > 1 && (fromEnd - 1) % 3 === 0) out += ',';
   }
   return out;
-}
-
-/**
- * How the prompt says what is left today. Spelled out rather than a bare number, because
- * "0 RANKED ATTEMPTS LEFT" has to read as "you can still play, it just will not count".
- */
-export function attemptsLabel(left: number, total: number): string {
-  if (left < 0) return `INTENTOS RANKEADOS · VERIFICANDO`;
-  if (left === 0) return `NO QUEDAN INTENTOS RANKEADOS HOY · PRÁCTICA`;
-  return `INTENTOS RANKEADOS HOY · ${left}/${total}`;
 }
 
 /**
@@ -129,7 +124,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     `<span>APAGÁ CON EL RAYO TODOS LOS ELÉCTRICOS QUE PUEDAS</span>` +
     `<span class="rb-rush__prompt-target"></span>` +
     `</span>` +
-    `<span class="rb-rush__prompt-attempts">INTENTOS RANKEADOS · VERIFICANDO</span>` +
     `<span class="rb-rush__prompt-key"><span class="rb-key">F</span> EMPEZAR</span>` +
     `</button>` +
     // The live readout: clock, score, streak.
@@ -159,11 +153,13 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     `<div><dt>BONUS DE DERRAPE / ESTILO</dt><dd class="rb-rush__r-style">0</dd></div>` +
     `<div><dt>MEJOR ANTERIOR</dt><dd class="rb-rush__r-prev">—</dd></div>` +
     `</dl>` +
-    `<button type="button" class="rb-rush__dismiss"><span class="rb-key">F</span> VOLVER AL MODO LIBRE</button>` +
+    (options.quickPlay
+      ? `<button type="button" class="rb-rush__dismiss"><span class="rb-key">R</span><span>OTRA VEZ</span>` +
+        `<span class="rb-key">ESC</span><span>MENÚ</span></button>`
+      : `<button type="button" class="rb-rush__dismiss"><span class="rb-key">F</span> VOLVER AL MODO LIBRE</button>`) +
     `</div>`;
 
   const promptEl = pick<HTMLButtonElement>(root, '.rb-rush__prompt');
-  const promptAttemptsEl = pick<HTMLElement>(root, '.rb-rush__prompt-attempts');
   const promptMissionEl = pick<HTMLElement>(root, '.rb-rush__prompt-mission');
   const promptTargetEl = pick<HTMLElement>(root, '.rb-rush__prompt-target');
   const promptDurationEl = pick<HTMLElement>(root, '.rb-rush__prompt-lines b');
@@ -177,7 +173,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   const targetValueEl = pick<HTMLElement>(root, '.rb-rush__target-value');
   const feedEls = Array.from(root.querySelectorAll<HTMLElement>('.rb-rush__line'));
   const resultsEl = pick<HTMLElement>(root, '.rb-rush__results');
-  const resultsHeadEl = pick<HTMLElement>(root, '.rb-rush__results-head');
   const resultsScoreEl = pick<HTMLElement>(root, '.rb-rush__results-score');
   const resultsBestEl = pick<HTMLElement>(root, '.rb-rush__results-best');
   const resultsMissionEl = pick<HTMLElement>(root, '.rb-rush__results-mission');
@@ -206,7 +201,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   // Displayed-value cache. Sentinels guarantee a first write for every field.
   let shownPhase = '';
   let shownPrompt = false;
-  let shownAttempts = -2;
   let shownSeconds = -1;
   let shownScore = -1;
   let shownMultiplier = -1;
@@ -276,11 +270,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
             260,
           );
         }
-      }
-      if (promptOn && rush.attemptsLeft !== shownAttempts) {
-        shownAttempts = rush.attemptsLeft;
-        promptAttemptsEl.textContent = attemptsLabel(rush.attemptsLeft, RUSH.dailyRankedAttempts);
-        promptAttemptsEl.classList.toggle('is-spent', rush.attemptsLeft === 0);
       }
       // Which mission is on offer here. Cached on the rendered STRING rather than on the level
       // number: the same mission can be re-offered at the same site with nothing to rewrite,
@@ -352,7 +341,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
       const results = rush.results;
       if (results && results.score !== shownResults) {
         shownResults = results.score;
-        resultsHeadEl.textContent = results.ranked ? 'RAYO RUSH · TIEMPO' : 'RAYO RUSH · TIEMPO · PRÁCTICA';
         resultsScoreEl.textContent = formatScore(results.score);
         // The verdict on the mission this run was FOR — read off the frozen results and not off
         // the live state, which by now is already offering the next one.
@@ -366,7 +354,7 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           resultsMissionHeadEl.textContent = `MISIÓN ${results.level + 1} COMPLETA`;
           resultsMissionNextEl.textContent = rush.allClear
             ? 'TODAS LAS MISIONES COMPLETAS · EL MARCADOR ES TUYO'
-            : `SIGUIENTE · ${rush.levelLabel || `MISIÓN ${rush.level + 1}`}`;
+            : `SIGUIENTE · MISIÓN ${rush.level + 1} · MÁS DURA, MISMO LUGAR`;
         } else if (results.cleared) {
           resultsMissionHeadEl.textContent = `MISIÓN ${results.level + 1} · SUPERADA OTRA VEZ`;
           resultsMissionNextEl.textContent = results.levelLabel;
@@ -403,7 +391,6 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           shownMultiplier = -1;
           shownChainStep = -1;
           shownResults = -1;
-          shownAttempts = -2;
           shownTarget = -1;
           // The class as well as the cache. `is-passed` is only ever written when the flag
           // CHANGES, so a run that can never set it — a free run, once the chain is done —

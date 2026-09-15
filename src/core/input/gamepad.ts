@@ -32,6 +32,8 @@ const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_BACK = 8;
 const BTN_START = 9;
+/** Left stick click: "no" to an offer. */
+const BTN_L3 = 10;
 /** Right stick click. NFSU2 leaves it free, and the Rayo Rush marker takes it. */
 const BTN_R3 = 11;
 const BTN_DPAD_LEFT = 14;
@@ -120,6 +122,7 @@ export function createGamepadInput(): InputSource {
         out.shiftDown = false;
         out.transmission = false;
         out.activate = false;
+        out.decline = false;
         return;
       }
 
@@ -148,6 +151,8 @@ export function createGamepadInput(): InputSource {
       out.shiftDown = pressed(pad, BTN_LB);
       out.transmission = false;
       out.activate = pressed(pad, BTN_R3);
+      // The other stick's click says no to an offer (a washer at a red light); driving on does too.
+      out.decline = pressed(pad, BTN_L3);
     },
     dispose() {
       wasDown.clear();

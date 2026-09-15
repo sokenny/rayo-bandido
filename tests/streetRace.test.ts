@@ -18,6 +18,7 @@ import {
 import { CITY_ROADS, RAMP_SPECS, VIADUCT_SPEC } from '../src/world/citySpec';
 import { METRO_BUHO_SITE, METRO_CIRCUIT_SITE, METRO_PASSENGER_STOPS, METRO_RUSH_SITES, METRO_STREET_SITES } from '../src/world/metroSpec';
 import { createOpenWorld } from '../src/world/openWorld';
+import { CURVA_SITE } from '../src/world/curvaSpec';
 import { STREET_SHORTCUTS, STREET_SPEC } from '../src/world/streetSpec';
 import { INTRO } from '../src/content/intro';
 import { createStreetWorld } from '../src/world/streetWorld';
@@ -320,15 +321,15 @@ describe('the series', () => {
     let p = emptyStreetRaceProgress();
     p = recordStreetRace(p, 0, 1, true);
     writeStreetRaceProgress(p);
-    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, -1, -1, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, -1, -1] });
     p = recordStreetRace(readStreetRaceProgress(), 1, 3, false);
     writeStreetRaceProgress(p);
-    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, 3, -1, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 1, best: [1, 3, -1] });
     // A replayed loss of event 0 cannot un-win it.
     p = recordStreetRace(readStreetRaceProgress(), 0, 2, false);
-    expect(p).toEqual({ cleared: 1, best: [1, 3, -1, -1] });
+    expect(p).toEqual({ cleared: 1, best: [1, 3, -1] });
     installStorage({ 'rb.street.races': '{"cleared": 99, "best": ["x", 0]}' });
-    expect(readStreetRaceProgress()).toEqual({ cleared: 3, best: [-1, -1, -1, -1] });
+    expect(readStreetRaceProgress()).toEqual({ cleared: 3, best: [-1, -1, -1] });
   });
 
   it('opens the rings one win at a time', () => {
@@ -367,8 +368,10 @@ describe('the rings in the street', () => {
   const city = createOpenWorld();
   const sites = city.layout.streetSites!;
 
-  it('are on the road, mid-block, and clear of every other ring', () => {
-    expect(sites).toHaveLength(STREET_RACE.events.length);
+  it('are one ring, on La Curva lot, clear of every other ring', () => {
+    expect(sites).toEqual([CURVA_SITE]);
+    expect(METRO_STREET_SITES).toEqual(sites);
+    expect(city.plan.streetMarkers).toEqual(sites);
     const others = [
       ...METRO_RUSH_SITES.map((s) => ({ ...s, r: RUSH.marker.promptRadius })),
       ...METRO_PASSENGER_STOPS.map((s) => ({ ...s, r: PASSENGER.marker.promptRadius })),
@@ -376,19 +379,12 @@ describe('the rings in the street', () => {
       { ...METRO_CIRCUIT_SITE, r: TIME_ATTACK.marker.promptRadius },
       { ...INTRO.route.meetup, r: INTRO.route.meetup.radius },
     ];
-    // La Curva's ring stands on the meet's lot, not a road (`tests/curvaRace.test.ts`).
-    for (const site of sites.filter((_, i) => !STREET_RACE.events[i].standalone)) {
-      expect(city.plan.isRoad(site.x, site.z, -STREET_RACE.marker.promptRadius)).toBe(true);
-      expect(city.plan.isSolid(site.x, site.z, STREET_RACE.marker.promptRadius)).toBe(false);
-      for (const o of others) {
-        expect(Math.hypot(site.x - o.x, site.z - o.z)).toBeGreaterThan(STREET_RACE.marker.promptRadius + o.r + 6);
-      }
+    for (const o of others) {
+      expect(Math.hypot(sites[0].x - o.x, sites[0].z - o.z)).toBeGreaterThan(STREET_RACE.marker.promptRadius + o.r + 6);
     }
-    expect(METRO_STREET_SITES.length).toBe(sites.length);
-    expect(city.plan.streetMarkers).toEqual(sites);
   });
 
-  it('offer only the events already reached, and one press takes the key once', () => {
+  it('offer the newest event reached on the one ring, and one press takes the key once', () => {
     const s = createStreetGateState(0);
     const v = createVehicleState(-300, -300, 0);
     const cmd = createPlayerCommand();
@@ -398,9 +394,6 @@ describe('the rings in the street', () => {
       events.length = 0;
       stepStreetGate(s, sites, v, cmd, events);
     };
-    // Event II's ring is not open yet: standing on it offers nothing.
-    v.x = sites[1].x;
-    v.z = sites[1].z;
     tick();
     expect(canEnterStreetRace(s)).toBe(false);
     v.x = sites[0].x;
@@ -412,12 +405,10 @@ describe('the rings in the street', () => {
     expect(events).toContainEqual({ type: 'streetRaceEnter', event: 0 });
     tick(true);
     expect(events.some((e) => e.type === 'streetRaceEnter')).toBe(false);
-    // With two wins, ring II opens and reports its own event.
+    // With two wins, the same ring offers event III.
     const s2 = createStreetGateState(2);
-    v.x = sites[1].x;
-    v.z = sites[1].z;
     stepStreetGate(s2, sites, v, cmd, events);
-    expect(s2.atSite).toBe(1);
+    expect(s2.atSite).toBe(2);
   });
 
   it('switch the police off from the key press, and keep them out of the race world', () => {

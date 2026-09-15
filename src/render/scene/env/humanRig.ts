@@ -36,9 +36,10 @@ export interface HumanCrowd {
   readonly poses: readonly BodyPose[];
   /**
    * Step everyone by `dt` seconds at `time`, with the player's car in the group's own space (or
-   * null), and pose the skeleton to match.
+   * null), and pose the skeleton to match. With `awake`, only the people whose flag is set are
+   * stepped; the rest hold the pose they were last left in.
    */
-  update(time: number, dt: number, subject: CrowdSubject | null): void;
+  update(time: number, dt: number, subject: CrowdSubject | null, awake?: Uint8Array): void;
   dispose(): void;
 }
 
@@ -237,12 +238,13 @@ export function createHumanCrowd(members: readonly CrowdMember[], name = 'crowd'
     group,
     actors,
     poses,
-    update(time, dt, subject) {
+    update(time, dt, subject, awake) {
       // The lit parts breathe a little rather than sitting at one brightness, and the pools
       // under them breathe with them.
       if (accentMat) accentMat.color.setScalar(0.85 + 0.15 * Math.sin(time * 0.9));
       if (poolMat) poolMat.opacity = 0.64 + 0.1 * Math.sin(time * 0.9);
       for (let i = 0; i < actors.length; i++) {
+        if (awake && !awake[i]) continue;
         stepActor(actors[i], time, dt, subject, poses[i]);
         apply(rigs[i], poses[i]);
       }

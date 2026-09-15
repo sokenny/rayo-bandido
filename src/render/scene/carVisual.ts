@@ -72,6 +72,8 @@ export interface CarVisual {
    * positive for an upshift. One call per shift — this is an impulse, not a per-frame value.
    */
   shiftKick(strength: number): void;
+  /** The lightning leaving the car, 0..1 by shot size: the body dips and rebounds. An impulse. */
+  dischargeKick(strength: number): void;
   /** Settle the body back to level immediately (respawn). */
   resetBody(): void;
   setBrakeLights(on: boolean): void;
@@ -660,6 +662,9 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
     shiftKick(strength) {
       attitude.kick(strength);
     },
+    dischargeKick(strength) {
+      attitude.discharge(strength);
+    },
     resetBody() {
       attitude.reset();
       chassis.rotation.set(0, 0, 0);
@@ -684,6 +689,7 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
       chassis.rotation.x = attitude.pitch;
       // The shell runs fore-aft on its mounts; the wheels below it never move.
       chassis.position.z = attitude.surge;
+      chassis.position.y = attitude.heave;
       syncWheelInstances();
       interior.update(frameDt);
       if (charge > 0.6) {

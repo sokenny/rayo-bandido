@@ -3,13 +3,26 @@ import type { GameMode } from './core/types';
 import { createGame, type Game } from './game';
 import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
 import { showMainMenu, type MenuChoice } from './ui/mainMenu';
-import { showRaceMenu, type RaceChoice } from './ui/raceMenu';
+import { showQuickPlayMenu, showQuickPlayModeMenu, type QuickPlayChoice } from './ui/quickPlayMenu';
 import { createChangelogScreen } from './ui/changelog';
 import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
-import { WORLD_ROOM_CODE, sanitizeName, sanitizeRoomCode, sanitizeRoomLabel, type RoomEntry } from './net/protocol';
+import {
+  ROOM_GAMES,
+  WORLD_ROOM_CODE,
+  sanitizeName,
+  sanitizeRoomCode,
+  sanitizeRoomGame,
+  sanitizeRoomLabel,
+  type RoomEntry,
+  type RoomGame,
+} from './net/protocol';
+import { readStreetRaceProgress } from './core/progress';
+import { streetNewestEvent } from './sim/streetGate';
 import { installMobileShell } from './ui/mobileShell';
+import { account } from './net/account';
+import { createAccountBadge } from './ui/accountBadge';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 const hudRoot = document.getElementById('hud-root');
@@ -23,15 +36,17 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  * What to load comes from the URL: `?mode=city` (the open world, Bandido Metro —
  * `src/world/openWorld.ts`), `?mode=bay` and `?mode=stack` (the two cities the metro was merged
  * from, Bandido Bay and The Stack, driven alone and on no menu), `?mode=circuit`
- * (the city circuit on your own), `?mp=1` (the same circuit in a room), `?race=1` (the screen
- * that chooses between those two), `?mode=race` (the Bandido Loop, the original circuit —
+ * (TIME ATTACK on your own), `?mode=street` (a STREET RACE against the AI), `?mode=rush` (a
+ * RAYO RUSH run in the city, straight from the marker), `?mp=1` (any of those three in a room),
+ * `?quick=1` (QUICK PLAY: pick one of the three) and `?quick=rush|street|circuit` (the screen
+ * that chooses between alone and a room), `?mode=race` (the Bandido Loop, the original circuit —
  * still built and still what the perf gate measures, just no longer on a menu) or
  * `?mode=test` (the original test block). Without any of them the main menu is shown and the choice is written
  * into the URL, so a world is always one reload away.
  *
- * RACE IS ONE TAB. The menu used to offer RACE and VERSUS as two cards on two different
- * circuits; now RACE opens `?race=1`, where OFFLINE and VERSUS both lead to the Bandido Grid
- * and the only difference is whether anybody else is on it.
+ * QUICK PLAY IS ONE TAB. It used to be RACE (`?race=1`, still an alias): one circuit, alone or
+ * in a room. Now it is the open world's three games, each of them OFFLINE or ONLINE, and the
+ * only difference between the two is whether anybody else is in it.
  *
  * THE OPEN WORLD IS A SERVER. `?mode=city` does not build a private city any more: it joins the
  * one permanent room every server holds (`WORLD_ROOM_CODE`), so whoever else picked OPEN WORLD
@@ -45,6 +60,8 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  *   ?mp=1                    the room browser: create one, type a code, or join a public room
  *   ?mp=1&room=K7QP          straight into K7QP — this is the link a host hands out
  *   ?mp=1&create=1           open a fresh room and go straight to its lobby
+ *   ...&game=rush            which game the browser shows, and a created room plays
+ *                            (`RoomGame`: circuit, street or rush; the circuit when absent)
  *   ?mp=1&room=K7QP&create=1 join K7QP, opening it under that code if it has expired: a link
  *                            that keeps working, which is what the QA harness uses
  *
@@ -57,21 +74,48 @@ function modeFromUrl(): GameMode | null {
   const mode = new URLSearchParams(location.search).get('mode');
   // `?mode=metro` was the metro's address while it was a card of its own; it is the open world now.
   if (mode === 'metro') return 'city';
-  return mode === 'test' || mode === 'race' || mode === 'circuit' || mode === 'city' || mode === 'street' || mode === 'stack' || mode === 'bay' ? mode : null;
+  return mode === 'test' ||
+    mode === 'race' ||
+    mode === 'circuit' ||
+    mode === 'city' ||
+    mode === 'street' ||
+    mode === 'stack' ||
+    mode === 'bay' ||
+    mode === 'rush'
+    ? mode
+    : null;
 }
 
 /**
- * The world a versus race is run on. One place, because the lobby, the loading caption and the
- * race all have to agree, and because moving the field from one circuit to another is exactly
- * this constant changing.
+ * The world a room's game is played in. One place, because the lobby, the loading caption and
+ * the match all have to agree — and they do, because each game is named after its world.
  */
-const VERSUS_MODE: GameMode = 'circuit';
+function gameMode(game: RoomGame): GameMode {
+  return game;
+}
+
+/** Which game `?game=` asks for. The circuit when absent, which is what every room used to be. */
+function gameFromUrl(): RoomGame {
+  return sanitizeRoomGame(new URLSearchParams(location.search).get('game'));
+}
+
+/** `?quick=` : the QUICK PLAY list (`'menu'`), one game's OFFLINE / ONLINE screen, or neither. */
+function quickFromUrl(): RoomGame | 'menu' | null {
+  const params = new URLSearchParams(location.search);
+  // RACE was this tab's name, and `?race=1` its address: old links land on QUICK PLAY.
+  if (params.has('race')) return 'menu';
+  const quick = params.get('quick');
+  if (quick === null) return null;
+  return (ROOM_GAMES as readonly string[]).includes(quick) ? (quick as RoomGame) : 'menu';
+}
 
 /** Which screen an address asks for, for `urlWith`. Anything left out of it is cleared. */
 interface Destination {
   mode?: GameMode;
-  /** The race menu: OFFLINE or VERSUS. */
-  race?: boolean;
+  /** QUICK PLAY: the list of games (`'menu'`), or one game's OFFLINE / ONLINE screen. */
+  quick?: RoomGame | 'menu';
+  /** Which game the room browser is for, and what a room created from it plays. */
+  game?: RoomGame;
   /** The changelog tab: what shipped and when. Reads, drives nothing. */
   log?: boolean;
   /** Multiplayer — the room browser, or `room` when one is named. */
@@ -100,7 +144,7 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, race = false, log = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
+  const { mode = null, quick = null, game = null, log = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
@@ -110,8 +154,11 @@ function urlWith(to: Destination = {}): string {
   else params.delete('event');
   if (from) params.set('from', from);
   else params.delete('from');
-  if (race) params.set('race', '1');
-  else params.delete('race');
+  params.delete('race');
+  if (quick) params.set('quick', quick === 'menu' ? '1' : quick);
+  else params.delete('quick');
+  if (multiplayer && game) params.set('game', game);
+  else params.delete('game');
   if (log) params.set('log', '1');
   else params.delete('log');
   if (multiplayer) params.set('mp', '1');
@@ -136,6 +183,7 @@ function roomEntryFromUrl(name: string): RoomEntry | null {
         label: sanitizeRoomLabel(params.get('label') ?? `${name} ROOM`),
         // Public unless asked otherwise, which is the checkbox's default too.
         listed: params.get('listed') !== '0',
+        game: gameFromUrl(),
       }
     : undefined;
   if (!join && !create) return null;
@@ -154,6 +202,10 @@ async function buildGame(
   net: NetSession | null,
   options: { onEnterCircuit?: () => void; onEnterStreetRace?: (event: number) => void } = {},
 ): Promise<Game> {
+  // The world is built from what the player has saved (the wallet, the missions, the intro), so
+  // the account's boot sync lands in storage first. Capped: a slow server costs a moment, and a
+  // dead one costs nothing but the sync (`src/net/account.ts`).
+  await account().ready();
   loading.set(mode === 'race' || mode === 'circuit' || mode === 'street' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
@@ -289,8 +341,9 @@ async function openWorld(): Promise<void> {
 }
 
 /**
- * Single player: build the world, start driving, ESC goes back to the menu — the race menu for
- * a circuit, because that is the screen it was chosen on, and the main menu for anything else.
+ * Single player: build the world, start driving, ESC goes back to the menu — the QUICK PLAY
+ * screen of the game that was chosen, because that is where it was chosen, and the main menu
+ * for anything else.
  */
 async function boot(mode: GameMode): Promise<void> {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
@@ -305,8 +358,10 @@ async function boot(mode: GameMode): Promise<void> {
   const back = cameFromCity
     ? urlWith({ mode: 'city' })
     : mode === 'circuit' || mode === 'race'
-      ? urlWith({ race: true })
-      : urlWith();
+      ? urlWith({ quick: 'circuit' })
+      : mode === 'street' || mode === 'rush'
+        ? urlWith({ quick: mode })
+        : urlWith();
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') location.assign(back);
   });
@@ -331,6 +386,11 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
   const session = createSession(storedName(), entry);
   let game: Game | null = null;
   /**
+   * What this room plays. The address's `game` until the server has welcomed us, and the room's
+   * own from then on — a friend's link can land in a room playing something else entirely.
+   */
+  const roomGame = (): RoomGame => session.room?.game ?? gameFromUrl();
+  /**
    * Put the room we actually landed in into the address bar, once. A created room's code is
    * only known now, and a reload has to come back here rather than to the browser screen.
    */
@@ -345,7 +405,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
       // is to join a different one.
       teardownRace();
       session.dispose();
-      location.assign(urlWith({ mp: true }));
+      location.assign(urlWith({ mp: true, game: roomGame() }));
     },
   });
 
@@ -363,9 +423,10 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     goPending = false;
     teardownRace();
     lobby.hide();
-    loading.show('BUILDING THE CIRCUIT');
+    const mode = gameMode(roomGame());
+    loading.show(mode === 'rush' ? 'BUILDING THE CITY' : 'BUILDING THE CIRCUIT');
     try {
-      game = await buildGame(VERSUS_MODE, loading, session);
+      game = await buildGame(mode, loading, session);
       session.notifyLoaded();
       loading.set('WAITING FOR THE GRID', 1);
       canvas!.focus();
@@ -408,7 +469,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     lobby.refresh();
     if (!addressed && session.room) {
       addressed = true;
-      history.replaceState(null, '', urlWith({ mp: true, room: session.room.code }));
+      history.replaceState(null, '', urlWith({ mp: true, room: session.room.code, game: session.room.game }));
     }
     // A connection that drops mid-race leaves a world running that nobody can score.
     if ((session.phase === 'refused' || session.phase === 'closed') && game) {
@@ -424,7 +485,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     if (e.code === 'Escape' && game) {
       teardownRace();
       session.dispose();
-      location.assign(urlWith({ race: true }));
+      location.assign(urlWith({ quick: roomGame() }));
     }
   });
 }
@@ -438,11 +499,12 @@ function storedName(): string {
   }
 }
 
-/** The room browser: pick or open a room, then reload into it. */
+/** The room browser for one game: pick or open a room, then reload into it. */
 function rooms(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
-  createRoomBrowser(menuRoot!, storedName(), {
+  const game = gameFromUrl();
+  createRoomBrowser(menuRoot!, storedName(), game, {
     onEnter(entry) {
       // A reload rather than an in-place hand-off, so the address bar and the game agree from
       // the first frame — and so a failed connection can simply be reloaded. Everything else
@@ -450,7 +512,9 @@ function rooms(): void {
       const params = new URLSearchParams(location.search);
       params.delete('mode');
       params.delete('race');
+      params.delete('quick');
       params.set('mp', '1');
+      params.set('game', entry.create?.game ?? game);
       if (entry.join) params.set('room', entry.join);
       else params.delete('room');
       if (entry.create) {
@@ -467,7 +531,7 @@ function rooms(): void {
       setTimeout(() => location.assign(`${location.pathname}?${params.toString()}`), 120);
     },
     onBack() {
-      location.assign(urlWith({ race: true }));
+      location.assign(urlWith({ quick: game }));
     },
   });
 }
@@ -475,10 +539,12 @@ function rooms(): void {
 function menu(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  // Who is playing, and the way to sign in: on the main menu only, never over a world.
+  createAccountBadge(menuRoot!, account());
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
     const url =
-      choice === 'race'
-        ? urlWith({ race: true })
+      choice === 'quick'
+        ? urlWith({ quick: 'menu' })
         : choice === 'changelog'
           ? urlWith({ log: true })
           : choice === 'intro'
@@ -498,20 +564,40 @@ function changelog(): void {
   });
 }
 
-/**
- * The race menu: the second step of the RACE tab. Both cards lead to the same circuit, so the
- * only thing chosen here is whether anybody else is on it.
- */
-function raceMenu(): void {
+/** QUICK PLAY, first step: RAYO RUSH, STREET RACE or TIME ATTACK. */
+function quickPlayMenu(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
-  showRaceMenu(menuRoot!, {
-    onSelect(choice: RaceChoice) {
-      const url = choice === 'multiplayer' ? urlWith({ mp: true }) : urlWith({ mode: 'circuit' });
-      setTimeout(() => location.assign(url), 180);
+  showQuickPlayMenu(menuRoot!, {
+    onSelect(game: RoomGame) {
+      setTimeout(() => location.assign(urlWith({ quick: game })), 180);
     },
     onBack() {
       location.assign(urlWith());
+    },
+  });
+}
+
+/**
+ * QUICK PLAY, second step: the chosen game alone, or a room. OFFLINE loads exactly the world the
+ * open world's door for that game would have — a STREET RACE at the newest event this browser has
+ * reached — so the progress is one and the same.
+ */
+function quickPlayModeMenu(game: RoomGame): void {
+  const loading = createLoadingScreen(document.getElementById('loading-root'));
+  void loading.hide();
+  showQuickPlayModeMenu(menuRoot!, game, {
+    onSelect(choice: QuickPlayChoice) {
+      const url =
+        choice === 'online'
+          ? urlWith({ mp: true, game })
+          : game === 'street'
+            ? urlWith({ mode: 'street', event: streetNewestEvent(readStreetRaceProgress().cleared) })
+            : urlWith({ mode: gameMode(game) });
+      setTimeout(() => location.assign(url), 180);
+    },
+    onBack() {
+      location.assign(urlWith({ quick: 'menu' }));
     },
   });
 }
@@ -520,6 +606,10 @@ function raceMenu(): void {
 // fast double tap, no pinch, no pull-to-refresh, no callout on a held button. Installed once
 // for the life of the page, whichever screen the address bar asks for.
 installMobileShell();
+
+// The account's boot sync starts now, on every screen, so it has usually finished by the time a
+// world is chosen and built.
+account();
 
 /**
  * BACK AND FORWARD REBUILD THE SCREEN. Every route here is an address, and each one is entered
@@ -547,6 +637,7 @@ if (new URLSearchParams(location.search).has('mp')) {
   else rooms();
 } else if (mode === 'city') void openWorld();
 else if (mode) void boot(mode);
-else if (new URLSearchParams(location.search).has('race')) raceMenu();
+else if (quickFromUrl() === 'menu') quickPlayMenu();
+else if (quickFromUrl()) quickPlayModeMenu(quickFromUrl() as RoomGame);
 else if (new URLSearchParams(location.search).has('log')) changelog();
 else menu();

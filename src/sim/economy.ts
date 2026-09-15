@@ -4,7 +4,7 @@ import { TARGETS } from '../config/tuning';
 /**
  * The single place money is paid out.
  *
- * - `targetDestroyed` pays `TARGETS.reward` exactly once per target; the event's `reward`
+ * - `targetDestroyed` pays `TARGETS.reward` exactly once per target (`TARGETS.rushReward` during a RAYO RUSH run); the event's `reward`
  *   field is filled in here so presentation can show the amount.
  * - `nearMiss` pays the points the pass already earned in `src/sim/nearMiss.ts`. Those are
  *   scored once when the pass closes, so no extra guard is needed here.
@@ -12,7 +12,8 @@ import { TARGETS } from '../config/tuning';
  *   raised after this pass has run, so it has a pass of its own; it is raised exactly once per
  *   ride by `src/sim/passenger.ts`, so it needs no guard either.
  */
-export function applyRewards(e: EconomyState, targets: TargetState[], events: GameEvent[]): void {
+export function applyRewards(e: EconomyState, targets: TargetState[], events: GameEvent[], duringRush = false): void {
+  const bounty = duringRush ? TARGETS.rushReward : TARGETS.reward;
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
     if (ev.type === 'nearMiss') {
@@ -24,10 +25,10 @@ export function applyRewards(e: EconomyState, targets: TargetState[], events: Ga
     const t = targets[ev.targetId];
     if (!t || t.rewarded) continue;
     t.rewarded = true;
-    e.money += TARGETS.reward;
+    e.money += bounty;
     e.destroyed += 1;
-    e.lastReward += TARGETS.reward;
-    ev.reward = TARGETS.reward;
+    e.lastReward += bounty;
+    ev.reward = bounty;
   }
 }
 
@@ -62,6 +63,17 @@ export function spendMoney(e: EconomyState, amount: number): boolean {
  */
 export function chargeCrashFine(e: EconomyState, fine: number): number {
   const charged = Math.max(0, Math.min(e.money, fine));
+  e.money -= charged;
+  return charged;
+}
+
+/**
+ * A street service the player said yes to: the windshield washer's clean (`src/sim/hustlers.ts`).
+ * Taken once, on the yes, and never below zero — a player short of the price is cleaned for
+ * what they have. Returns what was actually taken.
+ */
+export function payStreetService(e: EconomyState, price: number): number {
+  const charged = Math.max(0, Math.min(e.money, price));
   e.money -= charged;
   return charged;
 }

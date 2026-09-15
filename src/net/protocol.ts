@@ -20,9 +20,9 @@
  * Bumped whenever a message shape changes. A mismatch is refused at `hello`. Also bumped when
  * the open world is a different map (5: Bandido Bay became Bandido Metro), because every
  * position on the wire is a coordinate in it: a page still driving the old city would be a car
- * inside somebody else's walls.
+ * inside somebody else's walls. 6: a room carries the QUICK PLAY game it plays (`RoomGame`).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Players per VERSUS match. Also that room's capacity: a fifth connection is refused. */
 export const MAX_PLAYERS = 4;
@@ -78,6 +78,26 @@ export const WORLD_ROOM_LABEL = 'BANDIDO METRO';
  */
 export type RoomMode = 'versus' | 'world';
 
+/**
+ * What a versus room PLAYS — QUICK PLAY's three games, named by the world each one builds:
+ *
+ *   circuit — TIME ATTACK: two laps of the Bandido Grid, won on time.
+ *   street  — STREET RACE: La Curva, won on time.
+ *   rush    — RAYO RUSH: the same run in the same corner of the city for everyone, started
+ *             together at GO and won on score.
+ *
+ * Chosen by whoever opens the room and fixed for its life; anyone who joins by code or link is
+ * welcomed into it, whichever game their own menu had open. The open world carries one too and
+ * ignores it.
+ */
+export type RoomGame = 'circuit' | 'street' | 'rush';
+export const ROOM_GAMES: readonly RoomGame[] = ['circuit', 'street', 'rush'];
+
+/** Anything that is not one of `ROOM_GAMES` is the circuit, which is what every room was before. */
+export function sanitizeRoomGame(raw: unknown): RoomGame {
+  return (ROOM_GAMES as readonly unknown[]).includes(raw) ? (raw as RoomGame) : 'circuit';
+}
+
 /** How often a client publishes its car, and how often the server fans snapshots back out. */
 export const SNAPSHOT_HZ = 20;
 /** How often the host publishes the electric-car traffic it owns. */
@@ -101,20 +121,20 @@ export const RIVAL_TIMEOUT_MS = 3000;
 export const NAME_MAX = 14;
 
 /**
- * THE RAYO RUSH BOARD. Not part of the socket protocol at all — it is three plain HTTP routes
- * on the same server (`server/leaderboard.mjs`), because a scoreboard is a request and a
- * response, not a conversation, and it has to work for a player driving the city alone with no
- * socket open at all.
+ * THE BOARDS AND THE ACCOUNT. Not part of the socket protocol at all — plain HTTP routes on the
+ * same server (`server/api.mjs`), because a scoreboard is a request and a response, not a
+ * conversation, and it has to work for a player driving the city alone with no socket open. The
+ * session is a cookie, so they are always addressed on the page's own origin.
  *
- *   GET  /leaderboard?board=rush&limit=20   the top rows
- *   GET  /rush/attempts?cid=<client id>     what this player has left today, and their best
- *   POST /rush/score                        file a run; spends one of the day's attempts
+ *   GET  /api/boards/:board?limit=10   the top rows (`rush`, `circuit`, `street`)
+ *   GET  /api/boards/:board/standing   this player's best, rank, and rush attempts left today
+ *   POST /api/boards/:board/runs       file a run; a rush run spends one of the day's attempts
+ *   GET  /api/me · POST /api/progress · POST /api/profile · /auth/…   (`src/net/account.ts`)
  *
- * `src/net/leaderboard.ts` is the only thing that speaks to them.
+ * `src/net/leaderboard.ts` and `src/net/account.ts` are the only things that speak to them.
  */
-export const LEADERBOARD_PATH = '/leaderboard';
-export const RUSH_ATTEMPTS_PATH = '/rush/attempts';
-export const RUSH_SCORE_PATH = '/rush/score';
+export const BOARDS_PATH = '/api/boards';
+export type BoardId = 'rush' | 'circuit' | 'street';
 
 /**
  * Ranked attempts one player may file per UTC day. `RUSH.dailyRankedAttempts` in
@@ -239,6 +259,8 @@ export interface WireRace {
   fin: number;
   /** Money earned this race. */
   money: number;
+  /** RAYO RUSH score so far this run. 0 in a race. */
+  sc: number;
 }
 
 export interface WirePlayer {
@@ -263,6 +285,8 @@ export interface RoomInfo {
   listed: boolean;
   /** 'world' for the open city, 'versus' for a race room. Fixed for the life of the room. */
   mode: RoomMode;
+  /** What a versus room plays. Fixed for the life of the room. */
+  game: RoomGame;
 }
 
 /** One row of `GET /rooms`: what the browser screen needs to decide whether to knock. */
@@ -289,7 +313,14 @@ export function worldListing(rooms: readonly RoomListing[]): RoomListing | null 
  */
 export interface RoomEntry {
   join?: string;
-  create?: { label: string; listed: boolean };
+  create?: RoomCreate;
+}
+
+/** What a client asks for when it opens a room. */
+export interface RoomCreate {
+  label: string;
+  listed: boolean;
+  game: RoomGame;
 }
 
 export interface HelloMessage {
@@ -299,7 +330,7 @@ export interface HelloMessage {
   /** Room code to join, or '' when only `create` applies. */
   room: string;
   /** Present when this client may open a room. */
-  create?: { label: string; listed: boolean };
+  create?: RoomCreate;
 }
 
 export interface WelcomeMessage {
@@ -406,7 +437,7 @@ export interface BumpMessage {
 export interface ResultsMessage {
   t: typeof S2C.results;
   raceId: number;
-  /** Classification: finishers by time, then everyone else by race progress. */
+  /** Classification: finishers by time, then everyone else by race progress. A rush: by score. */
   order: Array<{
     id: string;
     name: string;
@@ -417,6 +448,8 @@ export interface ResultsMessage {
     /** Laps completed as a fraction, which ranks whoever did not finish. */
     prog: number;
     money: number;
+    /** RAYO RUSH score, which ranks a rush match. 0 in a race. */
+    score: number;
     finished: boolean;
   }>;
 }

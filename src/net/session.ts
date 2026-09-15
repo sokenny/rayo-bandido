@@ -69,6 +69,8 @@ export interface CarPublish {
   /** Seconds into the current lap. The race state cannot derive this without the sim clock. */
   lapTime: number;
   money: number;
+  /** RAYO RUSH score so far, in a rush match. 0 otherwise. */
+  score: number;
 }
 
 export interface NetSession {
@@ -114,7 +116,8 @@ export interface NetSession {
   reportHit(targetId: number): void;
   /** Non-host: tell the host this car shoved an electric car, and by how much. */
   reportBump(targetId: number, kx: number, kz: number): void;
-  reportFinish(total: number, bestLap: number): void;
+  /** Crossed the line for the last time — or, in a rush match, the run's clock ran out with `score`. */
+  reportFinish(total: number, bestLap: number, score?: number): void;
 
   /** Best estimate of the server clock, in server ms. What every timestamp on the wire is in. */
   serverNow(): number;
@@ -210,7 +213,7 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
 
   // One wire object each, refilled in place: these are written 20 and 10 times a second.
   const wireCar: WireCar = { x: 0, z: 0, h: 0, vx: 0, vz: 0, sp: 0, sa: 0, la: 0, ga: 0, f: 0, ch: 0 };
-  const wireRace: WireRace = { lap: 1, prog: 0, lapT: 0, best: -1, fin: -1, money: 0 };
+  const wireRace: WireRace = { lap: 1, prog: 0, lapT: 0, best: -1, fin: -1, money: 0, sc: 0 };
   const trafficData: number[] = [];
   /** One object per traffic report, handed to `onTraffic` handlers and dropped. */
   const trafficReport = { data: trafficData, at: 0 };
@@ -410,6 +413,7 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
       wireRace.best = race ? q(race.bestLap) : -1;
       wireRace.fin = race ? q(race.finishTime) : -1;
       wireRace.money = input.money;
+      wireRace.sc = input.score;
       connection.send({ t: C2S.car, c: wireCar, r: wireRace });
     },
 
@@ -438,9 +442,9 @@ export function createSession(name: string, entry: RoomEntry): NetSession {
       return connection.serverNow();
     },
 
-    reportFinish(total, bestLap) {
+    reportFinish(total, bestLap, score = 0) {
       if (!match) return;
-      connection.send({ t: C2S.finish, raceId: match.raceId, total, best: bestLap });
+      connection.send({ t: C2S.finish, raceId: match.raceId, total, best: bestLap, score });
     },
 
     countdownSeconds() {

@@ -30,7 +30,7 @@ import type { StreetPropsState } from '../sim/streetProps';
  * world (Bandido Metro, `src/world/openWorld.ts`); `bay` and `stack` are the two cities it was
  * merged from, kept loadable by address only.
  */
-export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street' | 'stack' | 'bay';
+export type GameMode = 'test' | 'race' | 'city' | 'circuit' | 'street' | 'stack' | 'bay' | 'rush';
 
 /** One tick of player intent. Produced by the input layer; consumed by the simulation. */
 export interface PlayerCommand {
@@ -67,6 +67,12 @@ export interface PlayerCommand {
    * (`src/sim/rush.ts`). Edge-triggered, and ignored everywhere nothing is on offer.
    */
   activate: boolean;
+  /**
+   * Say no to whatever is being offered right now — today that is a windshield washer at a red
+   * light (`src/sim/hustlers.ts`). Edge-triggered like `activate`. Optional: every source that
+   * predates it simply never declines, and driving on is always a no as well.
+   */
+  decline?: boolean;
 }
 
 export type Transmission = 'auto' | 'manual';
@@ -313,7 +319,7 @@ export type FlairMessageId =
   | 'finoComoCeja'
   | 'acaNoPasoNada'
   | 'todoCalculado'
-  | 'deCostado'
+  | 'aura'
   | 'conEstilo'
   | 'puraSeda'
   | 'auraPlus'
@@ -708,6 +714,8 @@ export interface RivalCar {
   bestLap: number;
   finishTime: number;
   money: number;
+  /** RAYO RUSH score this run, in a rush match. 0 everywhere else. */
+  score: number;
 }
 
 /** Discrete happenings for presentation and audio. Cleared at the start of every tick. */
@@ -909,6 +917,19 @@ export type GameEvent =
   | { type: 'garagePrompt'; on: boolean }
   /** Loco Mustang said something. The subtitle strip shows it for `lineSeconds`. */
   | { type: 'garageLine'; text: string; kind: GarageLineKind }
+
+  /* ---------------------------------------------------------------- street hustlers */
+
+  /** A trapito or a windshield washer said something (`src/sim/hustlers.ts`). `npc` indexes `HustlerState.npcs`. */
+  | { type: 'hustlerLine'; npc: number; text: string; kind: HustlerLineKind }
+  /** A washer's offer went up (`on`) or came down, whatever brought it down. */
+  | { type: 'washerOffer'; npc: number; on: boolean }
+  /** The player let a washer clean the windshield: `charged` is what was actually taken (never below zero). */
+  | { type: 'washerPaid'; npc: number; price: number; charged: number }
+  /** The player said no. Nothing is taken. */
+  | { type: 'washerRefused'; npc: number }
+  /** A clean was cut short before it finished: the car drove off, or the light or the police got in the way. */
+  | { type: 'washerCancelled'; npc: number; reason: WasherCancelReason }
   /* ---------------------------------------------------------------- the police */
   /** A civilian electric car was neutralised in Free Roam. `category` is the range band the heat came from. */
   | { type: 'policeOffense'; distance: number; category: PoliceOffenseCategory; heat: number; witnessed: boolean }
@@ -1091,6 +1112,112 @@ export interface GarageState {
   seed: number;
 }
 
+/* ------------------------------------------------------------------ street hustlers */
+
+/** A trapito watches parking spaces nobody asked him to; a washer works a red light. */
+export type HustlerKind = 'trapito' | 'washer';
+
+/**
+ * Where one street hustler works (`src/world/hustlerSpots.ts`). Everything is in world space;
+ * headings follow the game's convention (0 faces north, -z; + clockwise).
+ */
+export interface HustlerSpot {
+  id: string;
+  kind: HustlerKind;
+  /** Where he stands and waits: pavement, never a lane. */
+  x: number;
+  z: number;
+  /** Which way he faces while he waits: at the road. */
+  heading: number;
+  /** Picks his clothes, his build and his nickname: any integer. */
+  seed: number;
+  /** Trapito: the imaginary space at the kerb he points the car at. */
+  space?: { x: number; z: number };
+  /**
+   * Washer: the approach he works. `x`/`z` is where a car waiting at the light sits (its middle),
+   * `heading` the way it points, and the signal governing it stands at `signal`, facing the car.
+   */
+  approach?: { x: number; z: number; heading: number };
+  signal?: { x: number; z: number; heading: number; offset: number };
+  /** For debugging and QA only. */
+  label: string;
+}
+
+export type HustlerLineKind = 'call' | 'ignored' | 'damaged' | 'clean' | 'regular' | 'offer' | 'cleaning' | 'thanks' | 'refused' | 'pursuit';
+
+export type WasherCancelReason = 'drove' | 'light' | 'police' | 'locked';
+
+/**
+ * What one hustler is doing, which is all the picture needs to pose him (`humanActs.ts`):
+ *   trapito  idle -> call -> wait -> grumble -> idle
+ *   washer   idle -> offer -> approach -> clean -> thanks -> retreat -> idle
+ *                          \-> refused / waveOff -> idle
+ */
+export type HustlerPhase = 'idle' | 'call' | 'wait' | 'grumble' | 'offer' | 'approach' | 'clean' | 'thanks' | 'retreat' | 'refused' | 'waveOff';
+
+/** The car as a hustler sized it up: what the reaction animation plays. */
+export type HustlerMood = 'plain' | 'damaged' | 'clean';
+
+export interface HustlerNpcState {
+  phase: HustlerPhase;
+  /** Sim time the phase began. The picture times every gesture from it. */
+  since: number;
+  /** Nothing new starts before this sim time. */
+  cooldownUntil: number;
+  /** Seconds the car has been worth noticing, or waiting at his light; resets when it is not. */
+  dwell: number;
+  /** Times he has worked the player this session. His nickname shows from `HUSTLERS.nicknameAfter`. */
+  encounters: number;
+  mood: HustlerMood;
+  /** Where he is walking from and to (world), for `approach` and `retreat`, and where he faces while cleaning. */
+  fromX: number;
+  fromZ: number;
+  toX: number;
+  toZ: number;
+  /** Washer: the car's pose when the clean began. It must not move off it. */
+  carX: number;
+  carZ: number;
+  carHeading: number;
+}
+
+/**
+ * The trapitos and washers (`src/sim/hustlers.ts`). One line on screen at a time for the whole
+ * cast, and at most one washer's offer.
+ */
+export interface HustlerState {
+  npcs: HustlerNpcState[];
+  /** Nobody starts anything while another activity has the car. Written by the orchestrator. */
+  locked: boolean;
+  /** Another activity's prompt is up: the F key is not the washer's to take. Written by the orchestrator. */
+  keyBusy: boolean;
+  /** Somebody else is talking (a passenger, El Búho, Loco Mustang): hustlers hold their tongue. */
+  othersTalking: boolean;
+  /** Which npc is speaking, the line, and how long it has left. `lineId` increments per line. */
+  speaker: number;
+  line: string;
+  lineKind: HustlerLineKind;
+  lineId: number;
+  lineTimeLeft: number;
+  lastText: string;
+  /** The washer whose offer is up, or -1. */
+  offering: number;
+  /** Deterministic pick state for line variants. */
+  seed: number;
+  stats: { calls: number; offers: number; paid: number; refused: number; cancelled: number; charged: number };
+}
+
+/** What the hustlers' overlay needs. */
+export interface HustlerHudSnapshot {
+  /** Who is talking, as the subtitle names him: the trade, or his nickname once he knows you. */
+  speaker: string;
+  kind: HustlerKind;
+  line: string;
+  lineId: number;
+  /** A washer is offering: the two buttons are up. */
+  offer: boolean;
+  price: number;
+}
+
 /** What one of El Búho's lines is for. */
 export type BuhoLineKind = 'greeting' | 'remark' | 'broke' | 'busy';
 
@@ -1202,6 +1329,12 @@ export interface PassengerQueuedLine {
   expires: number;
 }
 
+/** Straight-line length a trip may be (m). `PASSENGER.offer` unless a world names its own. */
+export interface PassengerTripRange {
+  minTrip: number;
+  maxTrip: number;
+}
+
 /**
  * The trip on offer or under way. Everything a ride needs is chosen HERE, before it starts:
  * which character, which two stops, which opening — so nothing is decided while driving.
@@ -1225,6 +1358,8 @@ export interface PassengerState {
   offerIn: number;
   /** How many offers have been made; the catalogue and the stops are rotated by it. */
   offers: number;
+  /** How long this world's trips are. Fixed at creation; a restart keeps it. */
+  tripRange: PassengerTripRange;
   trip: PassengerTrip | null;
   /** True while the car is stopped inside the pickup pin. */
   atPickup: boolean;
@@ -1402,6 +1537,8 @@ export interface GameState {
   intro: IntroState | null;
   /** The crashable street props (`src/sim/streetProps.ts`), in worlds that carry them. Local only. */
   streetProps: StreetPropsState | null;
+  /** Trapitos and windshield washers (`src/sim/hustlers.ts`), in worlds that carry their spots. Local only. */
+  hustlers: HustlerState | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -1602,6 +1739,8 @@ export interface ArenaLayout {
    * carry the activity. Every one is a stopping point on a road; the world's tests say so.
    */
   passengerStops?: PassengerStop[] | null;
+  /** How long a ride between those stops is. Missing: `PASSENGER.offer`, sized for Bandido Metro. */
+  passengerTrip?: PassengerTripRange | null;
   /**
    * The drivable street centrelines, for working out a route between two points on them
    * (`src/world/roadGraph.ts`): today the destination arrow that leads a fare home. Ground
@@ -1640,6 +1779,8 @@ export interface ArenaLayout {
   streetProps?: StreetPropDef[] | null;
   /** Storm grates at the kerb, some steaming (`src/world/streetProps.ts`). Art only. */
   sewerVents?: SewerVentDef[] | null;
+  /** Where the trapitos and windshield washers work (`src/world/hustlerSpots.ts`). The open world only. */
+  hustlerSpots?: HustlerSpot[] | null;
   minimap: MinimapData;
 }
 
@@ -1723,6 +1864,8 @@ export interface HudSnapshot {
   streetGate: StreetGateHudSnapshot | null;
   /** Loco Mustang's garage; null in a world without it. */
   garage: GarageHudSnapshot | null;
+  /** Trapitos and windshield washers; null in a world without them. */
+  hustlers: HustlerHudSnapshot | null;
   /** The STREET RACE readout; null outside a Street Race. */
   streetRace: StreetRaceHudSnapshot | null;
   police: PoliceHudSnapshot | null;

@@ -26,7 +26,8 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createRooms } from './rooms.mjs';
-import { createLeaderboard } from './leaderboard.mjs';
+import { createDatabase } from './db/index.mjs';
+import { createApi } from './api.mjs';
 import { RUSH_DAILY_ATTEMPTS, SNAPSHOT_HZ } from './protocol.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -64,9 +65,17 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (msg) => console.log(`[${stamp()}] ${msg}`);
 
 const rooms = createRooms({ laps, log });
-// The RAYO RUSH board. Independent of the rooms: a run is scored in the free world, alone or
-// in company, and the server neither watches it nor knows a room it belongs to.
-const leaderboard = createLeaderboard({ dailyAttempts: RUSH_DAILY_ATTEMPTS, log });
+// Accounts, saved progress and the high-score boards (`server/api.mjs`). Independent of the
+// rooms: a run is scored in the free world, alone or in company, and the server neither watches
+// it nor knows a room it belongs to. A database that cannot be opened is not fatal — the game and
+// the rooms still serve, and every `/api/` route answers 503 until it is fixed.
+let db = null;
+try {
+  db = await createDatabase({ log });
+} catch (err) {
+  log(`database: could not open (${err.message}); accounts and boards are off`);
+}
+const api = createApi({ db, dailyAttempts: RUSH_DAILY_ATTEMPTS, log });
 // The open world is a room like any other, except that it is always there: opened before the
 // first connection so `GET /rooms` can report an empty city rather than no city at all.
 rooms.ensureWorld();
@@ -76,50 +85,6 @@ rooms.ensureWorld();
 function notFound(res, message) {
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
   res.end(message);
-}
-
-function badRequest(res, message) {
-  res.writeHead(400, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
-  });
-  res.end(JSON.stringify({ error: message }));
-}
-
-/** Longest score submission accepted. A run is a handful of small numbers; this is generous. */
-const MAX_BODY_BYTES = 4096;
-
-/**
- * Read a JSON request body, refusing anything oversized rather than buffering it. `done` is
- * called exactly once, with either the parsed body or a reason it could not be used.
- */
-function readJsonBody(req, done) {
-  let size = 0;
-  const chunks = [];
-  let settled = false;
-  const settle = (body, err) => {
-    if (settled) return;
-    settled = true;
-    done(body, err);
-  };
-  req.on('data', (chunk) => {
-    size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
-      req.destroy();
-      settle(null, 'body too large');
-      return;
-    }
-    chunks.push(chunk);
-  });
-  req.on('end', () => {
-    try {
-      settle(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-    } catch {
-      settle(null, 'malformed JSON');
-    }
-  });
-  req.on('error', () => settle(null, 'read failed'));
 }
 
 /** Resolve a URL path inside `dist/`, refusing anything that climbs out of it. */
@@ -193,47 +158,10 @@ const server = createServer((req, res) => {
     return;
   }
 
-  /* ------------------------------------------------------------- rayo rush board */
+  /* ------------------------------------------------------- accounts and boards */
 
-  // Read cross-origin for the same reason `/rooms` is: in development the game is served by
-  // Vite on another port. Nothing here is private — it is a scoreboard.
   const url = new URL(req.url || '/', 'http://localhost');
-
-  if (req.method === 'OPTIONS' && (url.pathname === '/rush/score' || url.pathname.startsWith('/rush/'))) {
-    res.writeHead(204, {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'access-control-allow-headers': 'content-type',
-      'access-control-max-age': '86400',
-    });
-    res.end();
-    return;
-  }
-
-  if (url.pathname === '/leaderboard') {
-    const top = leaderboard.top(url.searchParams.get('board') || 'rush', Number(url.searchParams.get('limit')));
-    if (!top) return badRequest(res, 'unknown board');
-    json(top);
-    return;
-  }
-
-  if (url.pathname === '/rush/attempts') {
-    const standing = leaderboard.standing('rush', url.searchParams.get('cid'));
-    if (!standing) return badRequest(res, 'unknown board');
-    json(standing);
-    return;
-  }
-
-  if (url.pathname === '/rush/score') {
-    if (req.method !== 'POST') return badRequest(res, 'POST only');
-    readJsonBody(req, (body, err) => {
-      if (err) return badRequest(res, err);
-      const result = leaderboard.submit('rush', body);
-      if (!result) return badRequest(res, 'unknown board');
-      json(result);
-    });
-    return;
-  }
+  if (api.handle(req, res, url)) return;
 
   if (!existsSync(dist)) {
     res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
@@ -315,8 +243,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     log('shutting down');
     clearInterval(timer);
-    // Flush the board before the sockets go: a score filed a second ago must not be lost.
-    leaderboard.close();
+    void db?.close().catch(() => {});
     wss.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();

@@ -62,7 +62,7 @@ export const MESSAGES: readonly FlairMessage[] = [
   { id: 'finoComoCeja', text: 'FINO COMO CEJA DE TURRO', tier: 'common' },
   { id: 'acaNoPasoNada', text: 'ACÁ NO PASÓ NADA', tier: 'common' },
   { id: 'todoCalculado', text: 'TODO CALCULADO', tier: 'common' },
-  { id: 'deCostado', text: 'DE COSTADO', tier: 'common' },
+  { id: 'aura', text: 'AURA', tier: 'common' },
   { id: 'conEstilo', text: 'CON ESTILO', tier: 'common' },
   { id: 'puraSeda', text: 'PURA SEDA', tier: 'special' },
   { id: 'auraPlus', text: 'AURA +1000', tier: 'special' },

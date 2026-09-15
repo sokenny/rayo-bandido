@@ -534,6 +534,90 @@ body {
   color: rgba(255, 43, 61, 0.45);
 }
 
+/* ---------------------------------------------------- the account corner (`ui/accountBadge.ts`) */
+
+.rb-account {
+  position: absolute;
+  top: 34px;
+  right: 34px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 68px));
+  pointer-events: auto;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--rb-dim);
+}
+
+.rb-account__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.rb-account__dot {
+  width: 7px;
+  height: 7px;
+  background: var(--rb-red);
+  box-shadow: 0 0 8px var(--rb-red);
+}
+
+.rb-account__dot.is-on {
+  background: var(--rb-acid);
+  box-shadow: 0 0 8px var(--rb-acid);
+}
+
+.rb-account__who {
+  font-family: var(--rb-display);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--rb-text);
+}
+
+.rb-account__notice {
+  color: var(--rb-acid);
+}
+
+.rb-account__notice.is-bad {
+  color: var(--rb-red);
+}
+
+.rb-account__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.rb-account__btn {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--rb-yellow);
+  background: var(--rb-panel);
+  border: 1px solid var(--rb-hairline);
+  padding: 7px 11px;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+}
+
+.rb-account__btn:hover,
+.rb-account__btn:focus-visible {
+  color: var(--rb-ink);
+  background: var(--rb-yellow);
+  outline: none;
+}
+
+.rb-account__btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 /* ------------------------------------------------------------- the wordmark */
 
 .rb-head {
@@ -813,19 +897,25 @@ body {
   text-shadow: 0 0 20px rgba(252, 238, 10, 0.35);
 }
 
-/* Each world keeps its own signature colour on the row it owns. RACE and the OFFLINE card it
-   opens share one: they are the same circuit, one screen apart. */
+/* Each world keeps its own signature colour on the row it owns. QUICK PLAY and TIME ATTACK share
+   one, the circuit's; STREET RACE wears its ring's orange; ONLINE is the rooms' cyan. RAYO RUSH
+   keeps the menu's own yellow, which is the Rayo's. */
+.rb-item[data-mode='quick'].is-selected,
 .rb-item[data-mode='race'].is-selected,
 .rb-item[data-mode='circuit'].is-selected {
   background: rgba(255, 61, 240, 0.09);
   box-shadow: inset 0 0 0 1px rgba(255, 61, 240, 0.6), 0 0 30px rgba(255, 61, 240, 0.14);
 }
 
+.rb-item[data-mode='quick'].is-selected::before,
 .rb-item[data-mode='race'].is-selected::before,
 .rb-item[data-mode='circuit'].is-selected::before {
   background: var(--rb-magenta);
 }
 
+.rb-item[data-mode='quick'].is-selected .rb-item__index,
+.rb-item[data-mode='quick'].is-selected .rb-item__kicker,
+.rb-item[data-mode='quick'].is-selected .rb-item__name,
 .rb-item[data-mode='race'].is-selected .rb-item__index,
 .rb-item[data-mode='race'].is-selected .rb-item__kicker,
 .rb-item[data-mode='race'].is-selected .rb-item__name,
@@ -835,15 +925,35 @@ body {
   color: var(--rb-magenta);
 }
 
+.rb-item[data-mode='street'].is-selected {
+  background: rgba(255, 138, 42, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 42, 0.6), 0 0 30px rgba(255, 138, 42, 0.14);
+}
+
+.rb-item[data-mode='street'].is-selected::before {
+  background: #ff8a2a;
+}
+
+.rb-item[data-mode='street'].is-selected .rb-item__index,
+.rb-item[data-mode='street'].is-selected .rb-item__kicker,
+.rb-item[data-mode='street'].is-selected .rb-item__name {
+  color: #ff8a2a;
+}
+
+.rb-item[data-mode='online'].is-selected,
 .rb-item[data-mode='multiplayer'].is-selected {
   background: rgba(79, 243, 255, 0.08);
   box-shadow: inset 0 0 0 1px rgba(79, 243, 255, 0.55), 0 0 30px rgba(79, 243, 255, 0.14);
 }
 
+.rb-item[data-mode='online'].is-selected::before,
 .rb-item[data-mode='multiplayer'].is-selected::before {
   background: var(--rb-cyan);
 }
 
+.rb-item[data-mode='online'].is-selected .rb-item__index,
+.rb-item[data-mode='online'].is-selected .rb-item__kicker,
+.rb-item[data-mode='online'].is-selected .rb-item__name,
 .rb-item[data-mode='multiplayer'].is-selected .rb-item__index,
 .rb-item[data-mode='multiplayer'].is-selected .rb-item__kicker,
 .rb-item[data-mode='multiplayer'].is-selected .rb-item__name {
@@ -951,11 +1061,17 @@ body {
   color: var(--rb-text);
 }
 
+.rb-dossier[data-mode='quick'] .rb-dossier__kicker,
 .rb-dossier[data-mode='race'] .rb-dossier__kicker,
 .rb-dossier[data-mode='circuit'] .rb-dossier__kicker {
   color: var(--rb-magenta);
 }
 
+.rb-dossier[data-mode='street'] .rb-dossier__kicker {
+  color: #ff8a2a;
+}
+
+.rb-dossier[data-mode='online'] .rb-dossier__kicker,
 .rb-dossier[data-mode='multiplayer'] .rb-dossier__kicker {
   color: var(--rb-cyan);
 }
@@ -3658,19 +3774,6 @@ body.rb-touch-pad .rb-minimap {
   font-weight: 700;
 }
 
-.rb-rush__prompt-attempts {
-  font-family: var(--rb-mono);
-  font-size: 0.82em;
-  letter-spacing: 0.18em;
-  color: var(--rb-yellow-dim);
-}
-
-/* Out of ranked attempts: the run is still offered, it just will not count. Red, because that
-   is this skin's word for "this is not the thing you think it is". */
-.rb-rush__prompt-attempts.is-spent {
-  color: var(--rb-red);
-}
-
 .rb-rush__prompt-key {
   margin-top: 0.22em;
   display: flex;
@@ -4002,6 +4105,7 @@ body.rb-touch-pad .rb-minimap {
   font-size: 9px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
@@ -4648,6 +4752,82 @@ body.rb-touch-pad .rb-minimap {
   --rb-pax: #ff5a3c;
   --rb-pax-deep: #c7321c;
   --rb-pax-hairline: rgba(255, 90, 60, 0.3);
+}
+
+/* ================================================================== street hustlers */
+
+/* The passenger's subtitle strip (`hustlerOverlay.ts`) in hi-vis orange; a washer in lime. The two
+   choices sit just over the strip, small and side by side: a man at a car window, not a mission. */
+.rb-hustler {
+  --rb-pax: #ff8a2a;
+  --rb-pax-deep: #d9580c;
+  --rb-pax-hairline: rgba(255, 138, 42, 0.32);
+}
+
+.rb-hustler.is-washer {
+  --rb-pax: #c8ff3a;
+  --rb-pax-deep: #86c21a;
+  --rb-pax-hairline: rgba(200, 255, 58, 0.3);
+}
+
+.rb-hustler__offer {
+  position: absolute;
+  left: 50%;
+  bottom: calc(13% + 52px);
+  transform: translate(-50%, 0);
+  display: none;
+  gap: 10px;
+  max-width: 92vw;
+  pointer-events: none;
+}
+
+.rb-hustler__offer.is-on {
+  display: flex;
+}
+
+.rb-hustler__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 9px 16px 10px;
+  border: 0;
+  background: var(--rb-panel);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline), 0 0 24px rgba(0, 0, 0, 0.45);
+  clip-path: var(--rb-notch);
+  --rb-n: 8px;
+  color: var(--rb-text);
+  font-family: var(--rb-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rb-hustler__choice--yes {
+  color: var(--rb-pax);
+}
+
+.rb-hustler__choice .rb-key {
+  color: var(--rb-pax);
+  box-shadow: inset 0 0 0 1px var(--rb-pax-hairline);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  .rb-hustler__offer {
+    bottom: calc(17% + 40px);
+    gap: 6px;
+  }
+
+  .rb-hustler__choice {
+    padding: 7px 10px 8px;
+    font-size: 11px;
+    gap: 6px;
+  }
 }
 
 /* ------------------------------------------------------------- the police */

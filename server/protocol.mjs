@@ -7,7 +7,7 @@
  * the duplication cannot rot silently. Change one, change the other.
  */
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const MAX_PLAYERS = 4;
 export const MAX_WORLD_PLAYERS = 8;
 export const SNAPSHOT_HZ = 20;
@@ -25,6 +25,9 @@ export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const ROOM_LABEL_MAX = 20;
 export const MAX_ROOMS = 64;
 export const EMPTY_ROOM_TTL_MS = 120000;
+
+/* What a race room plays: QUICK PLAY's three games. See `RoomGame` in `src/net/protocol.ts`. */
+export const ROOM_GAMES = ['circuit', 'street', 'rush'];
 
 /* The open world is one permanent room on a reserved code. See `src/net/protocol.ts`. */
 export const WORLD_ROOM_CODE = 'WRLD';
@@ -84,4 +87,9 @@ export function sanitizeRoomLabel(raw, fallback = 'BANDIDO ROOM') {
   if (typeof raw !== 'string') return fallback;
   const trimmed = raw.replace(/\s+/g, ' ').trim().slice(0, ROOM_LABEL_MAX);
   return trimmed.length > 0 ? trimmed : fallback;
+}
+
+/** Mirrors `sanitizeRoomGame`: one of `ROOM_GAMES`, and the circuit for anything else. */
+export function sanitizeRoomGame(raw) {
+  return ROOM_GAMES.includes(raw) ? raw : 'circuit';
 }

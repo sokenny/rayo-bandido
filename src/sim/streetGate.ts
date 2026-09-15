@@ -2,12 +2,12 @@ import type { ActivitySite, GameEvent, PlayerCommand, StreetGateState, VehicleSt
 import { STREET_RACE } from '../config/tuning';
 
 /**
- * THE STREET RACE RINGS, as places in the city: how the three events are found.
+ * THE STREET RACE RING, as a place in the city: how the series is found.
  *
- * The same door `src/sim/circuitGate.ts` is, with one difference: there are up to three of
- * them open at once. Event N's ring is open once N events have been won (a standalone event's always is) — so a fresh player
- * sees one ring, and every event already won stays open to be driven again. Which ring the car
- * is on is `atSite`; the key takes the player to THAT event, on the other side of a page load.
+ * The same door `src/sim/circuitGate.ts` is: ONE ring, and it does not move. It always offers
+ * the newest event this player has reached — so a win does not send them across the map, it
+ * puts a harder field on the same lot. `atSite` is the EVENT the ring is offering while the car
+ * is on it (-1 off it); the key takes the player to that event, on the other side of a page load.
  *
  * Nothing here knows what a race is. It is a door, and a door's only job is to be somewhere
  * and to open. Pure data in, pure data out; no allocation per tick.
@@ -62,8 +62,8 @@ export function canEnterStreetRace(s: StreetGateState): boolean {
 }
 
 /**
- * One tick of the doors. `sites` is one per event, in event order; only the open ones answer.
- * `cmd.activate` is the same per-tick latch every activity is taken up with.
+ * One tick of the door. `sites[0]` is the ring; a world that ships more only ever uses the
+ * first. `cmd.activate` is the same per-tick latch every activity is taken up with.
  */
 export function stepStreetGate(
   s: StreetGateState,
@@ -75,34 +75,16 @@ export function stepStreetGate(
   const wasOffering = canEnterStreetRace(s);
   const wasAt = s.atSite;
   const m = STREET_RACE.marker;
+  const site = sites[0];
+  if (!site) return;
 
-  // Wider to leave than to enter, so a car parked exactly on a ring cannot flicker the sign.
-  let at = -1;
-  let nearest2 = Infinity;
-  for (let i = 0; i < sites.length; i++) {
-    if (!streetEventOpen(s.cleared, i)) continue;
-    const site = sites[i];
-    const dx = v.x - site.x;
-    const dz = v.z - site.z;
-    const d2 = dx * dx + dz * dz;
-    const limit = s.atSite === i ? m.exitRadius : m.promptRadius;
-    if (d2 <= limit * limit && d2 < nearest2) {
-      nearest2 = d2;
-      at = i;
-    }
-  }
-  s.atSite = at;
-  if (!s.rearmed) {
-    // Rearm once the car is clear of EVERY ring, not only the one it left through.
-    let clear = true;
-    for (let i = 0; i < sites.length; i++) {
-      if (!streetEventOpen(s.cleared, i)) continue;
-      const dx = v.x - sites[i].x;
-      const dz = v.z - sites[i].z;
-      if (dx * dx + dz * dz <= m.rearmRadius * m.rearmRadius) clear = false;
-    }
-    if (clear) s.rearmed = true;
-  }
+  // Wider to leave than to enter, so a car parked exactly on the ring cannot flicker the sign.
+  const dx = v.x - site.x;
+  const dz = v.z - site.z;
+  const d2 = dx * dx + dz * dz;
+  const limit = s.atSite >= 0 ? m.exitRadius : m.promptRadius;
+  s.atSite = d2 <= limit * limit ? streetNewestEvent(s.cleared) : -1;
+  if (!s.rearmed && d2 > m.rearmRadius * m.rearmRadius) s.rearmed = true;
 
   if (cmd.activate && canEnterStreetRace(s)) {
     s.entering = true;

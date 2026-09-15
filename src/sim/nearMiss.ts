@@ -79,7 +79,7 @@ export function nearMissPoints(minDist: number, speed: number): number {
   return Math.round(Math.min(NEAR_MISS.maxPoints, points));
 }
 
-/** Quality 0..1 of a pass, for presentation (popup size, whoosh loudness). */
+/** Quality 0..1 of a pass, for presentation (popup size). */
 export function nearMissQuality(points: number): number {
   const span = NEAR_MISS.maxPoints - NEAR_MISS.minPoints;
   return span > 0 ? clamp01((points - NEAR_MISS.minPoints) / span) : 0;

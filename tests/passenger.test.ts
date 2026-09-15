@@ -144,7 +144,7 @@ describe('passenger catalogue', () => {
   const { layout } = createCityWorld();
 
   it('is valid against the city, and every character has a face and a body', () => {
-    expect(validatePassengerCatalog(PASSENGERS, layout.passengerStops)).toEqual([]);
+    expect(validatePassengerCatalog(PASSENGERS, layout.passengerStops, layout.passengerTrip ?? undefined)).toEqual([]);
     expect(PASSENGERS.length).toBeGreaterThanOrEqual(3);
     for (const p of PASSENGERS) expect(hasPortrait(p.portrait), `${p.id} has no portrait`).toBe(true);
     // The person standing at the stop is drawn from the same key as the portrait, so a
@@ -196,11 +196,12 @@ describe('passenger stops in the city', () => {
 
   it('lets every character plan a trip from anywhere', () => {
     for (let i = 0; i < PASSENGERS.length * 3; i++) {
-      const trip = planTrip(PASSENGERS, stops, i, -66, -20);
+      const range = layout.passengerTrip ?? PASSENGER.offer;
+      const trip = planTrip(PASSENGERS, stops, i, -66, -20, range);
       expect(trip, `offer ${i}`).not.toBeNull();
       expect(trip!.pickupId).not.toBe(trip!.destinationId);
-      expect(trip!.distance).toBeGreaterThanOrEqual(PASSENGER.offer.minTrip);
-      expect(trip!.distance).toBeLessThanOrEqual(PASSENGER.offer.maxTrip);
+      expect(trip!.distance).toBeGreaterThanOrEqual(range.minTrip);
+      expect(trip!.distance).toBeLessThanOrEqual(range.maxTrip);
       expect(trip!.fare).toBe(fareFor(trip!.distance));
     }
   });

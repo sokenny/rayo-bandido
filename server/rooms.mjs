@@ -8,6 +8,7 @@ import {
   WORLD_ROOM_CODE,
   WORLD_ROOM_LABEL,
   sanitizeRoomCode,
+  sanitizeRoomGame,
   sanitizeRoomLabel,
 } from './protocol.mjs';
 import { createRoom } from './room.mjs';
@@ -57,10 +58,10 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
     return '';
   }
 
-  function open(code, label, listed, mode = 'versus') {
-    const room = createRoom({ code, label, listed, mode, laps, log });
+  function open(code, label, listed, mode = 'versus', game = 'circuit') {
+    const room = createRoom({ code, label, listed, mode, game, laps, log });
     entries.set(code, { room, emptySince: now() });
-    log(`room ${code} opened — "${label}"${listed ? ' (public)' : ''}${mode === 'world' ? ' (open world)' : ''} — ${entries.size} open`);
+    log(`room ${code} opened — "${label}"${listed ? ' (public)' : ''}${mode === 'world' ? ' (open world)' : ` (${game})`} — ${entries.size} open`);
     return room;
   }
 
@@ -150,7 +151,9 @@ export function createRooms({ laps = 2, log = () => {} } = {}) {
         // code, so the link a host handed out yesterday still works today.
         const code = wanted || freshCode();
         if (!code) return refuse(sendRaw, 'busy', 'could not find a free room code. Try again.');
-        open(code, sanitizeRoomLabel(create.label), !!create.listed);
+        // What the room plays is the creator's to say, once: everyone after them is welcomed
+        // into that game whatever their own link asked for.
+        open(code, sanitizeRoomLabel(create.label), !!create.listed, 'versus', sanitizeRoomGame(create.game));
         entry = entries.get(code);
       }
 

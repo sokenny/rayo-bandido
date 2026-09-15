@@ -1,11 +1,13 @@
 import { MAX_PLAYERS, MAX_WORLD_PLAYERS, worldListing } from '../net/protocol';
+import { RUSH } from '../config/tuning';
 import { fetchRooms } from '../net/connection';
 import { CHANGELOG } from '../content/changelog';
 import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuScreen';
 
 /**
- * Main menu: pick a world. Two of them — the city you drive for its own sake, and the circuit
- * you race on — and a third tab that is not a world at all, the CHANGELOG. Built on
+ * Main menu: pick a world. Two ways in — the city you drive for its own sake, and QUICK PLAY,
+ * which is the city's three activities without the drive to their doors — and a third tab that
+ * is not a world at all, the CHANGELOG. Built on
  * `menuScreen.ts`; this file is the copy, the live readout and the choice, nothing else.
  *
  * The changelog is a tab rather than a key or a corner link because it is the one place the
@@ -14,17 +16,16 @@ import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuS
  * card advertises the real date of the last change rather than a number somebody has to
  * remember to bump.
  *
- * RACE IS ONE TAB, TWO WAYS IN. It used to be two — RACE for a solo circuit and VERSUS for a
- * room — which asked the player to decide how they wanted to play before they had decided what
- * they wanted to play. Now RACE leads to `raceMenu.ts`, where OFFLINE and VERSUS are a choice
- * about company rather than about the track: both run the Bandido Grid, the street circuit cut
- * through the open-world city (`circuitSpec.ts`).
+ * QUICK PLAY IS ONE TAB, THREE GAMES, TWO WAYS IN. It used to be RACE, one circuit alone or in a
+ * room. Now it leads to `quickPlayMenu.ts`: RAYO RUSH, STREET RACE or TIME ATTACK — the same
+ * games the open world offers at its markers — and then OFFLINE or ONLINE, a choice about
+ * company rather than about the game. Online, any of the three can be a room you make.
  *
  * The original circuit is still here, unretired: the Bandido Loop out of `raceSpec.ts` is what
  * `?mode=race` builds, and it is what the perf gate measures.
  *
  * Both worlds on this screen are online, in two different senses: OPEN WORLD is one city
- * everybody shares and RACE can be a room you make. So the screen polls `GET /rooms` while it
+ * everybody shares and QUICK PLAY can be a room you make. So the screen polls `GET /rooms` while it
  * is up and shows how many cars are in the city — the answer to "is anyone playing?" belongs
  * here, before the choice, not after it.
  */
@@ -33,7 +34,7 @@ export interface MainMenu {
 }
 
 /** What the main menu can hand back: a world to drive, a screen one step deeper, or the intro again. */
-export type MenuChoice = 'city' | 'race' | 'changelog' | 'intro';
+export type MenuChoice = 'city' | 'quick' | 'changelog' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -57,15 +58,14 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
     ],
   },
   {
-    id: 'race',
-    kicker: 'CIRCUIT · SOLO OR ONLINE',
-    name: 'RACE',
-    desc: `Bandido Grid: a street circuit cut through Bandido Bay. Downtown, the waterfront, and the viaduct out over the bay. Run it alone against the clock, or fill the grid with up to ${MAX_PLAYERS} cars.`,
+    id: 'quick',
+    kicker: 'SOLO OR ONLINE',
+    name: 'QUICK PLAY',
+    desc: `The open world's games, straight off the menu: a ${RUSH.durationSeconds}-second RAYO RUSH, a STREET RACE on La Curva or a TIME ATTACK on the Bandido Grid. Play them alone, or open a room for up to ${MAX_PLAYERS} and bring your friends.`,
     spec: [
-      ['CIRCUIT', 'BANDIDO GRID'],
-      ['LENGTH', '1.5 KM'],
-      ['LAPS', '02'],
-      ['ENTRY', 'OFFLINE OR VERSUS'],
+      ['GAMES', 'RUSH · STREET · TIME ATTACK'],
+      ['PROGRESS', 'SHARED WITH THE OPEN WORLD'],
+      ['ENTRY', 'OFFLINE OR ONLINE ROOM'],
     ],
   },
   {

@@ -86,7 +86,7 @@ describe('the flair phrases', () => {
       'finoComoCeja',
       'acaNoPasoNada',
       'todoCalculado',
-      'deCostado',
+      'aura',
       'conEstilo',
       'puraSeda',
       'auraPlus',
@@ -107,7 +107,7 @@ describe('the flair phrases', () => {
       'FINO COMO CEJA DE TURRO',
       'ACÁ NO PASÓ NADA',
       'TODO CALCULADO',
-      'DE COSTADO',
+      'AURA',
       'CON ESTILO',
       'PURA SEDA',
       'AURA +1000',
@@ -119,11 +119,11 @@ describe('the flair phrases', () => {
     ]);
   });
 
-  it('holds a common phrase for 1.3s and a big one for 1.8s', () => {
+  it('holds a common phrase for 1.3s, a big one for 1.8s, and a crash for 2.8s', () => {
     expect(flairSeconds('common')).toBeCloseTo(1.3);
     expect(flairSeconds('special')).toBeCloseTo(1.8);
     expect(flairSeconds('peak')).toBeCloseTo(1.8);
-    expect(flairSeconds('crash')).toBeCloseTo(1.3);
+    expect(flairSeconds('crash')).toBeCloseTo(2.8);
   });
 });
 
@@ -132,7 +132,7 @@ describe('drift milestones', () => {
     const r = rig();
     r.startDrift();
     r.run(12);
-    expect(r.ids()).toEqual(['deCostado', 'conEstilo', 'puraSeda', 'laCalleEsTuya']);
+    expect(r.ids()).toEqual(['aura', 'conEstilo', 'puraSeda', 'laCalleEsTuya']);
     // Each one is said no earlier than the drift second that earned it.
     const at = r.said;
     expect(at[0].at).toBeGreaterThanOrEqual(1.5);
@@ -154,13 +154,13 @@ describe('drift milestones', () => {
     const r = rig();
     r.startDrift();
     r.run(2);
-    expect(r.ids()).toEqual(['deCostado']);
+    expect(r.ids()).toEqual(['aura']);
     r.endDrift();
     r.run(1);
     r.startDrift();
     r.run(2);
     // The drift re-armed its milestone, and the ten-second guard swallowed it anyway.
-    expect(r.ids()).toEqual(['deCostado']);
+    expect(r.ids()).toEqual(['aura']);
     expect(r.f.driftMilestones & 1).toBe(1);
   });
 
@@ -305,10 +305,10 @@ describe('the crash', () => {
     r.startDrift();
     // Long enough to be worth losing (4.2 units) and to have just said CON ESTILO.
     r.run(4.2);
-    expect(r.ids()).toEqual(['deCostado', 'conEstilo']);
+    expect(r.ids()).toEqual(['aura', 'conEstilo']);
     r.endDrift();
     r.run(0.2, [collision(HARD)]);
-    expect(r.ids()).toEqual(['deCostado', 'conEstilo', 'auraMenos']);
+    expect(r.ids()).toEqual(['aura', 'conEstilo', 'auraMenos']);
     // Said well inside the gap that holds two celebrations apart: the crash does not wait.
     const said = r.said;
     expect(said[2].at - said[1].at).toBeLessThan(FLAIR.show.gapSeconds);

@@ -27,7 +27,8 @@ import { createRaceState, resetRaceState, stepRace } from './race';
 import { createTimeAttackState, resetTimeAttackState, stepTimeAttack } from './timeAttack';
 import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
 import { createFlairState, resetFlairState, stepFlair } from './flair';
-import { cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
+import { canBoard, canDropOff, cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
+import { createHustlerState, resetHustlerState, stepHustlers, type HustlerContext } from './hustlers';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { createGarageState, resetGarageState, stepGarage } from './garage';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
@@ -151,7 +152,7 @@ export function createInitialGameState(
     rush: layout.rushSites && layout.rushSites.length > 0 ? createRushState(layout.targetSpawns.length) : null,
     // The crash line is said wherever a crash can be charged, rush or no rush.
     flair: (layout.rushSites && layout.rushSites.length > 0) || layout.garageSite ? createFlairState() : null,
-    passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length) : null,
+    passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length, layout.passengerTrip ?? undefined) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     garage: layout.garageSite ? createGarageState() : null,
     crash: layout.garageSite || layout.race ? createCrashDamageState() : null,
@@ -160,6 +161,7 @@ export function createInitialGameState(
     police: options.police ? createPoliceState(layout) : null,
     intro: options.intro ? createIntroState() : null,
     streetProps: createStreetPropsState(layout),
+    hustlers: layout.hustlerSpots && layout.hustlerSpots.length > 0 ? createHustlerState(layout.hustlerSpots) : null,
     events: [],
   };
   return state;
@@ -194,6 +196,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   // The intro goes back to its safe beginning (`resetIntroState` leaves a finished one alone).
   if (state.intro) resetIntroState(state.intro);
   if (state.streetProps) resetStreetPropsState(state.streetProps);
+  if (state.hustlers) resetHustlerState(state.hustlers);
   state.events.length = 0;
 }
 
@@ -258,6 +261,20 @@ const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true }
 
 /** What `stepCrashDamage` is told about the tick. One object, never reallocated. */
 const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false };
+
+/** What `stepHustlers` is told about the car. One object, never reallocated. */
+const HUSTLER_CONTEXT: HustlerContext = { damaged: false, pursued: false };
+
+/**
+ * Whether another activity's prompt is up right now, so the F key is already spoken for: a washer
+ * never puts an offer up over a ring, a pin or a door that the same key would answer.
+ */
+function keyClaimed(state: GameState): boolean {
+  if (state.rush && (state.rush.atMarker || state.rush.phase !== 'idle')) return true;
+  if (state.passenger && (canBoard(state.passenger) || canDropOff(state.passenger))) return true;
+  if (state.buho?.atSite || state.garage?.atSite || state.circuitGate?.atSite) return true;
+  return !!state.streetGate && state.streetGate.atSite >= 0;
+}
 
 /**
  * The command a race crash stall applies (`src/sim/crashDamage.ts`): the engine is dead and the
@@ -366,7 +383,9 @@ export function stepGame(
   // The introduction (`src/sim/intro.ts`), right behind the shot: it sees the kill the beam
   // just made on this very tick.
   if (state.intro) stepIntro(state.intro, INTRO, state, dt, state.events);
-  applyRewards(state.economy, state.targets, state.events);
+  // A RAYO RUSH run has no police on the car, so its kills pay the reduced bounty.
+  const rushOn = state.rush?.phase === 'countdown' || state.rush?.phase === 'running';
+  applyRewards(state.economy, state.targets, state.events, rushOn);
   if (race && layout.race) stepRace(race, layout.race, state.vehicle, state.time, dt, state.events);
   // Right behind the race, and only ever watching it: the circuit mission chain judges the
   // finish `stepRace` decided on this tick against the crashes the collision pass raised
@@ -475,6 +494,19 @@ export function stepGame(
     CRASH_RULES.atGarage = !!state.garage && state.garage.atSite;
     crashed = stepCrashDamage(state.crash, state.economy, CRASH_RULES, state.time, dt, state.events) !== null;
     if (crashed) breakDriftChain(state.drift, state.events);
+  }
+  // The trapitos and the washers (`src/sim/hustlers.ts`), once the tick has decided whether the car
+  // is dented and whether the police are on it. Never an activity that holds the car: they go quiet
+  // while one does, never take the key from another prompt, and never talk over anyone else.
+  if (state.hustlers && layout.hustlerSpots) {
+    const h = state.hustlers;
+    h.locked = lockOtherActivities(state) !== null;
+    h.keyBusy = keyClaimed(state);
+    h.othersTalking = (!!state.passenger && state.passenger.lineTimeLeft > 0) || (!!state.buho && state.buho.lineTimeLeft > 0) || (!!state.garage && state.garage.lineTimeLeft > 0);
+    HUSTLER_CONTEXT.damaged = !!state.crash && (state.crash.marks > 0 || state.crash.heavy);
+    HUSTLER_CONTEXT.pursued = !!state.police && (state.police.phase === 'pursuit' || state.police.phase === 'escaping');
+    // `input`, not `cmd`: a hold (the grid, an arrest, a stall) has already taken the key away.
+    stepHustlers(h, layout.hustlerSpots, state.vehicle, input, state.economy, HUSTLER_CONTEXT, state.time, dt, state.events);
   }
   // The phrases (`src/sim/flair.ts`). Last of the things that watch the driving, and the most
   // thoroughly a watcher of them all: it reads the drift, the near misses, the collisions and the

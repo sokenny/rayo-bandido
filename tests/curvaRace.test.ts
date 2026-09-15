@@ -15,16 +15,18 @@ import { METRO_MEET, METRO_MEET_LOT, METRO_STREET_SITES } from '../src/world/met
 import { createProjection, pointAtStation, projectOntoPath, type TrackPath } from '../src/world/track';
 
 /**
- * LA CURVA: the standalone Street Race on Bandido Metro, met at the car meet.
+ * LA CURVA: the Street Race series on Bandido Metro, met at one ring on the car meet's lot.
  *
  * Pinned: the ribbon is on the city's roads and decks at their own heights with nothing solid in
  * it; the lap climbs onto the viaduct over the meet and runs The Stack's deck; no straight is
  * long; the fence is closed everywhere but the branch mouths; each branch validates a lap; the
- * ring is on the lot and its race stays out of the series; and three rivals drive it home.
+ * ring is on the lot and offers each harder event in place; and three rivals drive it home.
  */
 
 const DT = SIM_STEP;
-const CURVA = STREET_RACE.events.findIndex((e) => e.course === 'curva');
+/** The first and the hardest event of the series, both on this course. */
+const CURVA = 0;
+const HARD = STREET_RACE.events.length - 1;
 const world = createCurvaWorld(4321);
 const course = world.layout.race as RaceCourse;
 const path = course.path;
@@ -291,16 +293,19 @@ describe('La Curva branch gates', () => {
 
 /* ------------------------------------------------------------------ the ring and the rules */
 
-describe('La Curva as an event', () => {
-  it('is a standalone event after the series, open from the first visit, one lap long', () => {
-    expect(CURVA).toBe(STREET_RACE.events.length - 1);
-    expect(streetEventStandalone(CURVA)).toBe(true);
-    expect(streetEventCount()).toBe(CURVA);
-    expect(streetEventOpen(0, CURVA)).toBe(true);
-    expect(streetEvent(CURVA).rivals).toBe(3);
-    expect(streetEvent(CURVA).laps).toBe(CURVA_LAPS);
+describe('La Curva as the series', () => {
+  it('runs every event on La Curva, one lap each, from one ring, each harder than the last', () => {
+    expect(STREET_RACE.events.every((e) => e.course === 'curva' && !e.standalone)).toBe(true);
+    expect(streetEventCount()).toBe(STREET_RACE.events.length);
+    for (let i = 0; i < STREET_RACE.events.length; i++) {
+      expect(streetEvent(i).laps).toBe(CURVA_LAPS);
+      expect(streetEventStandalone(i)).toBe(false);
+      if (i > 0) expect(streetEvent(i).rivals).toBeGreaterThan(streetEvent(i - 1).rivals);
+    }
+    expect(streetEvent(HARD).rivals).toBe(3);
+    expect(streetEventOpen(0, 1)).toBe(false);
     expect(course.laps).toBe(CURVA_LAPS);
-    expect(METRO_STREET_SITES[CURVA]).toEqual(CURVA_SITE);
+    expect(METRO_STREET_SITES).toEqual([CURVA_SITE]);
   });
 
   it('puts its ring on La Curva lot, clear of the cars, the people, the props and the intro', () => {
@@ -316,23 +321,26 @@ describe('La Curva as an event', () => {
     expect(Math.hypot(INTRO.route.meetup.x - CURVA_SITE.x, INTRO.route.meetup.z - CURVA_SITE.z)).toBeGreaterThan(r + INTRO.route.meetup.radius + 20);
   });
 
-  it('offers its ring to a player who has won nothing, and enters event La Curva', () => {
-    const s = createStreetGateState(0);
-    const v = createVehicleState(CURVA_SITE.x, CURVA_SITE.z, 0);
+  it('offers the newest event on the same ring, and enters it', () => {
     const cmd = createPlayerCommand();
     const events: GameEvent[] = [];
-    stepStreetGate(s, METRO_STREET_SITES, v, cmd, events);
-    expect(canEnterStreetRace(s)).toBe(true);
-    expect(s.atSite).toBe(CURVA);
-    cmd.activate = true;
-    events.length = 0;
-    stepStreetGate(s, METRO_STREET_SITES, v, cmd, events);
-    expect(events).toContainEqual({ type: 'streetRaceEnter', event: CURVA });
+    for (let cleared = 0; cleared <= STREET_RACE.events.length; cleared++) {
+      const s = createStreetGateState(cleared);
+      const v = createVehicleState(CURVA_SITE.x, CURVA_SITE.z, 0);
+      cmd.activate = false;
+      stepStreetGate(s, METRO_STREET_SITES, v, cmd, events);
+      expect(canEnterStreetRace(s)).toBe(true);
+      expect(s.atSite).toBe(Math.min(cleared, HARD));
+      cmd.activate = true;
+      events.length = 0;
+      stepStreetGate(s, METRO_STREET_SITES, v, cmd, events);
+      expect(events).toContainEqual({ type: 'streetRaceEnter', event: Math.min(cleared, HARD) });
+    }
   });
 
-  it('fields its three rivals whatever the series, pays once, and never moves the series', () => {
-    const sr = createStreetRaceState(course, CURVA, 0);
-    expect(sr.event).toBe(CURVA);
+  it('pays a win once, moves the series on, and fields three rivals at the top', () => {
+    const sr = createStreetRaceState(course, HARD, HARD);
+    expect(sr.event).toBe(HARD);
     expect(sr.rivals).toHaveLength(3);
     const state = createInitialGameState(world.layout, 'auto', {});
     sr.phase = 'racing';
@@ -340,22 +348,24 @@ describe('La Curva as an event', () => {
     state.race!.finishTime = 150;
     stepStreetRace(sr, world.layout, state, DT, state.events);
     expect(sr.results?.won).toBe(true);
-    expect(sr.results?.advanced).toBe(false);
+    expect(sr.results?.advanced).toBe(true);
+    expect(sr.results?.allClear).toBe(true);
     expect(sr.results?.unlockedName).toBeNull();
-    expect(sr.results?.reward).toBe(streetEvent(CURVA).reward);
-    expect(sr.cleared).toBe(0);
-    expect(state.economy.money).toBe(streetEvent(CURVA).reward);
+    expect(sr.results?.reward).toBe(streetEvent(HARD).reward);
+    expect(state.economy.money).toBe(streetEvent(HARD).reward);
 
-    const again = createStreetRaceState(course, CURVA, 0, true);
+    // A replay of an event already won pays nothing and leaves the series where it is.
+    const again = createStreetRaceState(course, 0, 1);
     const state2 = createInitialGameState(world.layout, 'auto', {});
     again.phase = 'racing';
     state2.race!.phase = 'finished';
     state2.race!.finishTime = 150;
     stepStreetRace(again, world.layout, state2, DT, state2.events);
     expect(again.results?.reward).toBe(0);
+    expect(again.cleared).toBe(1);
 
-    const p = recordStreetRace(emptyStreetRaceProgress(), CURVA, 1, false);
-    expect(p.cleared).toBe(0);
+    const p = recordStreetRace(emptyStreetRaceProgress(), CURVA, 1, true);
+    expect(p.cleared).toBe(1);
     expect(p.best[CURVA]).toBe(1);
   });
 });
@@ -365,7 +375,7 @@ describe('La Curva as an event', () => {
 describe('La Curva rivals', () => {
   it('drive the real cars round the lap, up and down the highways, on the route, and take the flag', () => {
     const state = createInitialGameState(world.layout, 'auto', {});
-    const sr = createStreetRaceState(course, CURVA, 0);
+    const sr = createStreetRaceState(course, HARD, HARD);
     const cmd = createPlayerCommand();
     const proj = createProjection();
     let worstOff = 0;

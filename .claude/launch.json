@@ -139,6 +139,18 @@
         "--strictPort"
       ],
       "port": 5186
+    },
+    {
+      "name": "rayo-bandido-api",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["RB_AUTH_DEV=1", "node", "server/index.mjs", "--port", "8080"],
+      "port": 8080
+    },
+    {
+      "name": "rayo-bandido-dev-5190",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5190", "--strictPort"],
+      "port": 5190
     }
   ]
 }

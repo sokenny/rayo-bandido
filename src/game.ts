@@ -4,6 +4,7 @@ import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { STACK_SPEC } from './world/stackSpec';
 import { createOpenWorld } from './world/openWorld';
+import { createRushWorld } from './world/rushWorld';
 import { createStreetWorld } from './world/streetWorld';
 import { createCurvaWorld } from './world/curvaWorld';
 import { spawnForSlot } from './world/arrivals';
@@ -14,6 +15,7 @@ import type {
   ActivitySite,
   BuhoHudSnapshot,
   GarageHudSnapshot,
+  HustlerHudSnapshot,
   GameEvent,
   GameMode,
   GameState,
@@ -29,7 +31,7 @@ import type {
   RushHudSnapshot,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -42,6 +44,7 @@ import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
 import { createCruiseController } from './sim/cruise';
 import {
+  beginRush,
   canStartRush,
   markRushTargets,
   rushAllClear,
@@ -70,7 +73,7 @@ import {
   timeAttackLevelIndex,
 } from './sim/timeAttack';
 import { canEnterCircuit } from './sim/circuitGate';
-import { canEnterStreetRace, streetEventOpen, streetEventStandalone, streetNewestEvent } from './sim/streetGate';
+import { canEnterStreetRace, streetNewestEvent } from './sim/streetGate';
 import {
   createStreetRaceState,
   interpolateStreetRivals,
@@ -82,7 +85,7 @@ import {
   streetPosition,
   type StreetRaceState,
 } from './sim/streetRace';
-import { readStreetRaceProgress, recordStreetRace, writeStreetRaceProgress } from './core/progress';
+import { readStreetRaceProgress, readWallet, recordStreetRace, writeStreetRaceProgress, writeWallet } from './core/progress';
 import { readIntroProgress, writeIntroProgress } from './core/progress';
 import { activitySuppressed, engagedActivity, introEngaged, type ActivityKind } from './sim/activities';
 import { INTRO } from './content/intro';
@@ -106,8 +109,11 @@ import { createGarageFigure } from './render/scene/env/garageFigure';
 import { GARAGE } from './world/garage';
 import { LOCO_MUSTANG } from './content/garage';
 import { garageOpenToTalk } from './sim/garage';
+import { hustlerName, washerOfferOpen } from './sim/hustlers';
+import { createHustlersVisual } from './render/scene/hustlersVisual';
 import { createMoogulTrip } from './render/scene/moogulTrip';
-import { createLeaderboard } from './net/leaderboard';
+import { createLeaderboard, fetchBoard, submitRaceTime } from './net/leaderboard';
+import type { LeaderboardKind } from './content/leaderboards';
 import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
 import { createSpeedBlur, speedBlurStrength } from './render/post/speedBlur';
@@ -138,6 +144,8 @@ import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
 import { createAudio, type PoliceAudioInput } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
+import { createPassByDetector } from './audio/passBy';
+import type { Listener } from './audio/electricHum';
 import { msToKmh } from './core/math';
 import { slotCss } from './core/playerColors';
 import { MAX_WORLD_PLAYERS } from './net/protocol';
@@ -185,6 +193,9 @@ export interface GameOptions {
 /** Metres past the last gate a multiplayer respawn puts the car (see `rescue`). */
 const RESPAWN_AHEAD = 6;
 
+/** How often the hologram high-score boards ask the server for their rows again (ms). */
+const BOARD_REFRESH_MS = 60_000;
+
 /** `performance.measure` wrapper: start a mark and return a function that closes it. */
 function measure(name: string): () => void {
   const startMark = `rb:${name}:start`;
@@ -224,9 +235,15 @@ export function createGame(
         : mode === 'street'
           ? // The Street Race's own instance of the city: the Bay's Quay Circuit
             // (`src/world/streetWorld.ts`), or La Curva on the metro (`src/world/curvaWorld.ts`).
+            // In a room the match id is the seed, as it is on the circuit: every client lays the
+            // same traffic on the lap.
             streetEvent(Number(params.get('event') ?? 0)).course === 'curva'
-            ? createCurvaWorld()
-            : createStreetWorld()
+            ? createCurvaWorld(options.net?.match?.raceId)
+            : createStreetWorld(options.net?.match?.raceId)
+        : mode === 'rush'
+          ? // RAYO RUSH on its own (`src/world/rushWorld.ts`): the metro with nothing in it but the
+            // run, the car put down on the marker — the mission on offer alone, the first in a room.
+            createRushWorld(options.net ? 0 : rushLevelIndex(readRushProgress().cleared))
         : mode === 'city'
           ? // The open world: Bandido Metro, with the doors to the races painted on it. Layers
             // over the city rather than parts of it (`src/world/openWorld.ts`), for the same
@@ -264,6 +281,9 @@ export function createGame(
   if (match && layout.race && layout.race.grid.length > 0) {
     const slot = layout.race.grid[match.slot % layout.race.grid.length];
     layout.playerSpawn = { x: slot.x, z: slot.z, heading: slot.heading };
+  } else if (match && mode === 'rush') {
+    // A rush room has no grid: the slot fans the field out around the marker they all start on.
+    layout.playerSpawn = spawnForSlot(layout.playerSpawn, match.slot);
   } else if (roaming && net) {
     // The city has one spawn and no grid, so the slot fans the arrivals out around it —
     // otherwise every car that joins materialises inside the last one.
@@ -320,6 +340,14 @@ export function createGame(
     // whether they exist at all is this one.
     police: mode === 'city' || mode === 'bay',
   });
+  /**
+   * THE WALLET (`readWallet`): the money follows the player across the page loads between the
+   * open world and the races it opens onto. Not in a versus race, whose counter is the match's.
+   */
+  const hasWallet = (mode === 'city' || mode === 'street' || mode === 'rush' || hasTimeAttack) && !match;
+  let savedMoney = hasWallet ? readWallet() : 0;
+  if (hasWallet) state.economy.money = savedMoney;
+  let walletEconomy = state.economy;
   // The field: built from the grid, clamped to the events this browser has unlocked. A
   // standalone event (La Curva) also carries whether it has been won here before, for its reward.
   const streetEventAsked = Number(params.get('event') ?? 0);
@@ -467,7 +495,8 @@ export function createGame(
   const hasRush = !!(rushSites && rushSites.length > 0 && state.rush);
   // The global board and the day's allowance. It never blocks: `standing()` answers from
   // localStorage at once and refreshes behind the frame (`src/net/leaderboard.ts`).
-  const leaderboard = hasRush ? createLeaderboard() : null;
+  // Not in a rush ROOM: a match is a run against the people in it, not an attempt on the board.
+  const leaderboard = hasRush && !match ? createLeaderboard() : null;
   /** One flag per electric car: whether it is drawn as a target this frame. */
   const rushMarks = hasRush ? new Uint8Array(state.targets.length) : null;
   /**
@@ -476,7 +505,8 @@ export function createGame(
    * that gets written back, so there is never a moment where the world is showing one mission
    * and storage believes another.
    */
-  let rushProgress = hasRush ? readRushProgress() : null;
+  // Nor is its run a step of anybody's mission chain: every car in a room plays the first site.
+  let rushProgress = hasRush && !match ? readRushProgress() : null;
   if (state.rush && rushProgress) setRushProgress(state.rush, rushProgress.cleared);
   /**
    * Where the marker is standing right now: the site of the mission currently on offer. Asked
@@ -500,6 +530,17 @@ export function createGame(
    */
   let timeAttackPreviousBest = -1;
   let timeAttackNewBest = false;
+  /**
+   * QUICK PLAY'S RAYO RUSH (`?mode=rush`): the run is taken up for the player — on the first tick,
+   * and again on every restart — rather than waiting on the F key at the marker the car is
+   * already standing on. In a rush ROOM it is taken up once, at the server's GO, and never
+   * again: the one run is the match.
+   */
+  const quickRush = mode === 'rush' && hasRush;
+  const rushMatch = quickRush && !!match;
+  let rushBeginPending = quickRush;
+  /** The room's run has been taken up; the marker offers nothing after it. */
+  let rushMatchStarted = false;
 
   /* --------------------------------------------------------------- passengers */
 
@@ -577,6 +618,19 @@ export function createGame(
   const hasGarage = !!(garageSite && state.garage && world.plan.garage);
   const garageFigure = hasGarage && world.plan.garage ? createGarageFigure(world.plan.garage) : null;
   if (garageFigure) scene.add(garageFigure.group);
+  /**
+   * The trapitos and the windshield washers (`src/sim/hustlers.ts`), in the world that carries their
+   * spots: the people and the washers' lights in the scene, the foam on this car's own windscreen.
+   */
+  const hustlerSpots = layout.hustlerSpots ?? null;
+  const hasHustlers = !!(hustlerSpots && hustlerSpots.length > 0 && state.hustlers);
+  const hustlersVisual = hasHustlers && hustlerSpots ? createHustlersVisual(hustlerSpots) : null;
+  if (hustlersVisual) {
+    scene.add(hustlersVisual.root);
+    car.chassis.add(hustlersVisual.foam);
+  }
+  /** A tap on the washer's "No, gracias": the G key by another route, like `activateQueued`. */
+  let declineQueued = false;
   const moogul = hasBuho
     ? createMoogulTrip({
         scene,
@@ -591,7 +645,7 @@ export function createGame(
   end = measure('hud');
   const hud = createHud(hudRoot, mode, !!net, {
     onActivate:
-      hasRush || hasPassengers || hasBuho || hasGarage || hasCircuitGate || hasStreetGate
+      hasRush || hasPassengers || hasBuho || hasGarage || hasCircuitGate || hasStreetGate || hasHustlers
         ? () => {
             activateQueued = true;
           }
@@ -600,11 +654,19 @@ export function createGame(
     passengers: hasPassengers,
     buho: hasBuho,
     garage: hasGarage,
+    hustlers: hasHustlers,
+    onDecline: hasHustlers
+      ? () => {
+          declineQueued = true;
+        }
+      : undefined,
     circuitGate: hasCircuitGate,
     streetGate: hasStreetGate,
     police: !!state.police,
     // The fine's AURA line is the open world's; a race stall is said by the HUD's own message.
     crashDamage: !!state.crash && !state.race,
+    quickRush: mode === 'rush' && !net,
+    escToCity: params.get('from') === 'city',
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
@@ -612,7 +674,8 @@ export function createGame(
   const debug = createDebugOverlay(debugRoot, params.has('debug'), { precise: () => sampleProbe(true) });
   // Live classification and floating names, only when there is a field to classify.
   const lapLength = layout.race ? layout.race.path.length : 0;
-  const standings: Standings | null = match || streetRace ? createStandings(hudRoot, lapLength, rivals.length + 1) : null;
+  const standings: Standings | null =
+    match || streetRace ? createStandings(hudRoot, lapLength, rivals.length + 1, mode === 'rush' ? 'points' : 'distance') : null;
   // In a race the field is fixed, so tags are only worth making when there is one. In the city
   // somebody can drive up at any moment, so the layer exists from the start and fills in.
   const nameTags: NameTags | null = roaming || rivals.length > 0 ? createNameTags(hudRoot, rivals) : null;
@@ -689,6 +752,7 @@ export function createGame(
         bestLap: -1,
         finishTime: -1,
         money: 0,
+        score: 0,
       };
       const vis = createRivalCarVisual(c.slot);
       vis.sync(car);
@@ -782,10 +846,10 @@ export function createGame(
     if (!activitySuppressed(engaged, 'circuit') && circuitSite) {
       mapMarks.push({ x: circuitSite.x, z: circuitSite.z, kind: 'circuit' });
     }
-    // Every open Street Race ring: won events stay on the map, the newest one with them.
-    if (!activitySuppressed(engaged, 'street') && streetSites && state.streetGate) {
-      const cleared = state.streetGate.cleared;
-      for (let i = 0; i < streetSites.length; i++) if (streetEventOpen(cleared, i)) mapMarks.push({ x: streetSites[i].x, z: streetSites[i].z, kind: 'street', label: STREET_RACE.events[i]?.name });
+    // The one Street Race ring, named for the event it is offering now.
+    if (!activitySuppressed(engaged, 'street') && streetSites && streetSites.length > 0 && state.streetGate) {
+      const ring = streetSites[0];
+      mapMarks.push({ x: ring.x, z: ring.z, kind: 'street', label: streetEvent(streetNewestEvent(state.streetGate.cleared)).name });
     }
     // El Búho is never "engaged" himself, so he goes quiet whenever anything else has the car.
     if (engaged === null && hasBuho && buhoSite) mapMarks.push({ x: buhoSite.x, z: buhoSite.z, kind: 'buho' });
@@ -926,6 +990,8 @@ export function createGame(
   }
 
   const pose: InterpolatedPose = { x: 0, y: 0, z: 0, heading: 0 };
+  /** Where the audio hears from: the car's pose plus its velocity, for the horns' doppler. */
+  const hearing: Listener = { x: 0, z: 0, heading: 0, y: 0, vx: 0, vz: 0 };
   /** The car as the people standing about the city see it: where it is, how fast, and whether it is sliding. */
   const crowdSubject: CrowdSubject = { x: 0, z: 0, speed: 0, drifting: false };
   const cameraPose: CameraPose = { x: 0, y: 0, z: 0, heading: 0, roadPitch: 0, vx: 0, vz: 0, speed: 0, slipAngle: 0, nitro: 0, drifting: false, roll: 0, pitch: 0 };
@@ -966,6 +1032,7 @@ export function createGame(
     passenger: null,
     buho: null,
     garage: null,
+    hustlers: null,
     circuitGate: null,
     streetGate: null,
     streetRace: null,
@@ -981,6 +1048,8 @@ export function createGame(
     lineId: 0,
   };
   if (hasGarage) snapshot.garage = garageSnapshot;
+  const hustlerSnapshot: HustlerHudSnapshot = { speaker: '', kind: 'trapito', line: '', lineId: 0, offer: false, price: HUSTLERS.washer.price };
+  if (hasHustlers) snapshot.hustlers = hustlerSnapshot;
   const buhoSnapshot: BuhoHudSnapshot = {
     name: BUHO.name,
     tagline: BUHO.tagline,
@@ -1173,6 +1242,9 @@ export function createGame(
   let ready = false;
   // Exhaust pops. One trigger feeds both the bang and the flame so they land on the same frame.
   const backfire = createBackfireTrigger();
+  // Wind past whatever the car tears by close and fast. Also presentation-owned, like the pops.
+  const passBy = createPassByDetector(layout);
+  let passByCount = 0;
   /** Last frame's `limiterCut`, so each fuel cut cracks the exhaust once on its leading edge. */
   let prevLimiterCut = 0;
 
@@ -1196,16 +1268,24 @@ export function createGame(
   }
 
   /**
-   * What to call this player on the global board: the name they gave the lobby, or the same
-   * fallback the rest of the game uses. Read fresh each time, because it can change in
-   * another tab.
+   * THE HOLOGRAM BOARDS' ROWS (`environment.leaderboards`): each board's top ten from the server,
+   * painted in when the world starts, every `BOARD_REFRESH_MS` after, and straight after a run is
+   * filed. Never waited on — a board the server cannot answer for keeps what it last showed.
+   * Timed boards are kept in milliseconds on the server and drawn in seconds.
    */
-  function playerName(): string {
-    if (net?.self?.name) return net.self.name;
-    try {
-      return localStorage.getItem('rb.name') || 'BANDIDO';
-    } catch {
-      return 'BANDIDO';
+  let boardsFetchedAt = -Infinity;
+  /** Set by `dispose`, so a board answer arriving after the world is gone paints nothing. */
+  let disposed = false;
+  function refreshHolograms(only?: LeaderboardKind): void {
+    boardsFetchedAt = performance.now();
+    for (const kind of Object.keys(environment.leaderboards) as LeaderboardKind[]) {
+      if (only && kind !== only) continue;
+      const board = environment.leaderboards[kind];
+      if (!board) continue;
+      void fetchBoard(kind, 10).then((rows) => {
+        if (disposed || rows.length === 0) return;
+        board.setRows(rows.map((r) => ({ name: r.name, value: kind === 'rush' ? r.value : r.value / 1000 })));
+      });
     }
   }
 
@@ -1320,6 +1400,7 @@ export function createGame(
     race: state.race,
     lapTime: 0,
     money: 0,
+    score: 0,
   };
   /** The flag is reported once; a re-crossing after the finish must not report it again. */
   let reportedFinish = false;
@@ -1361,6 +1442,18 @@ export function createGame(
     if (standingsRows.length === 0) return;
     const race = state.race;
     const mine = standingsRows[0];
+    if (mode === 'rush') {
+      // A rush room is ranked on points: each car's live score, as its own client reports it.
+      mine.progress = state.rush ? state.rush.score : 0;
+      mine.finished = false;
+      for (let i = 0; i < rivals.length; i++) {
+        const row = standingsRows[i + 1];
+        row.progress = rivals[i].score;
+        row.finished = false;
+      }
+      rankStandings(standingsOrder, 1);
+      return;
+    }
     // Against local rivals the row is ranked the way they are (`rankingProgress`): a car still
     // behind the line on lap 1 must not read as nearly a lap ahead of one that has crossed it.
     mine.progress = race ? (streetRace ? rankingProgress(race) : race.progress) : 0;
@@ -1421,6 +1514,7 @@ export function createGame(
     bodyGear = v.gear;
     effects.reset();
     backfire.reset();
+    passBy.reset();
     prevLimiterCut = 0;
     fillCameraPose(1);
     chase.snap(cameraPose);
@@ -1437,7 +1531,12 @@ export function createGame(
     switch (ev.type) {
       case 'lightningFired':
         effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
-        chase.shake(CAMERA.shakeLightning);
+        {
+          // A snap shot still kicks; a full-reach bolt kicks the hardest.
+          const size = 0.55 + 0.45 * Math.min(1, ev.spent / LIGHTNING.cost);
+          chase.tremble(size);
+          car.dischargeKick(size);
+        }
         break;
       case 'targetDestroyed':
         effects.powerDown(ev.x, ev.y, ev.z);
@@ -1462,6 +1561,11 @@ export function createGame(
         effects.rushPopup(ev.x, ev.y, ev.z, ev.points);
         break;
       case 'rushLevelUp':
+        // QUICK PLAY puts the car down on the marker, and R puts it back there: the next mission's.
+        if (quickRush && !rushMatch) {
+          const next = rushSite();
+          if (next) layout.playerSpawn = { x: next.x, z: next.z, y: next.y, heading: next.heading };
+        }
         // A mission fell, and the chain has already moved on: the marker packs up and re-paints
         // itself at the next site, and the map points there too. Presentation only — the
         // `rushEnd` immediately behind this event is where the new total is written down, so
@@ -1469,6 +1573,11 @@ export function createGame(
         placeRushMarker();
         break;
       case 'rushEnd':
+        // In a room the run IS the match: its score is this car's classification.
+        if (rushMatch && net && !reportedFinish) {
+          reportedFinish = true;
+          net.reportFinish(-1, -1, ev.results.score);
+        }
         // The clock has stopped and the card is already on screen; the board is told about it
         // afterwards, and never waited on. A run that cannot be filed is still a run.
         rushPreviousBest = leaderboard ? leaderboard.standing().best : -1;
@@ -1488,12 +1597,14 @@ export function createGame(
             bestChain: ev.results.bestChain,
             styleBonus: ev.results.styleBonus,
           };
-          void leaderboard.submit(run, playerName()).then((result) => {
+          void leaderboard.submit(run).then((result) => {
             // The server may know a better previous best than this browser did (the same
             // player on another machine), so the card is corrected if the answer arrives
             // while it is still up.
             rushPreviousBest = result.previousBest;
             rushNewBest = result.newBest;
+            // The hologram beside the ring shows the run the moment it is on the board.
+            if (result.accepted) refreshHolograms('rush');
           });
         }
         break;
@@ -1508,6 +1619,11 @@ export function createGame(
         if (timeAttackProgress) {
           timeAttackProgress = recordTimeAttackRun(timeAttackProgress, ev.results.level, ev.results.time, ev.results.advanced);
           writeTimeAttackProgress(timeAttackProgress);
+        }
+        // The TIME ATTACK board: any finished run inside its crash allowance, whichever mission it
+        // was for — every mission is the same two laps of the Bandido Grid. Not waited on.
+        if (ev.results.time > 0 && ev.results.withinCrashes) {
+          void submitRaceTime('circuit', ev.results.time, { crashes: ev.results.crashes, level: ev.results.level });
         }
         break;
       }
@@ -1549,6 +1665,11 @@ export function createGame(
           streetProgress = recordStreetRace(streetProgress, ev.results.event, ev.results.placement, ev.results.advanced);
           writeStreetRaceProgress(streetProgress);
         }
+        // The STREET RACE board: the finish time, whatever the placing — every event is one lap
+        // of La Curva, so a time is a time. Not waited on.
+        if (ev.results.time > 0) {
+          void submitRaceTime('street', ev.results.time, { placement: ev.results.placement, field: ev.results.field, event: ev.results.event });
+        }
         break;
       case 'circuitEnter':
         // The key on the start line. The rules are done — this world is over — and where the
@@ -1574,6 +1695,8 @@ export function createGame(
         endIntro(ev.reason);
         break;
       case 'restart':
+        // QUICK PLAY's R is another run from the marker, not a drive back to it.
+        if (quickRush && !rushMatch) rushBeginPending = true;
         placeIntroMarker();
         rushPreviousBest = -1;
         rushNewBest = false;
@@ -1584,6 +1707,7 @@ export function createGame(
         moogul?.stop();
         effects.reset();
         backfire.reset();
+        passBy.reset();
     prevLimiterCut = 0;
         car.resetBody();
         bodyGear = state.vehicle.gear;
@@ -1661,6 +1785,10 @@ export function createGame(
       command.activate = true;
       activateQueued = false;
     }
+    if (declineQueued) {
+      command.decline = true;
+      declineQueued = false;
+    }
     // Asked every tick rather than captured: the day's allowance is spent by finishing runs,
     // and the answer can also change when the board finally reports in.
     if (leaderboard) stepOptions.rushRanked = leaderboard.canRank();
@@ -1680,7 +1808,25 @@ export function createGame(
     // The intro's protection from the room: nobody can shove the tutorial player. Their car
     // is still drawn and still published; only this client's collision pass looks away.
     stepOptions.rivals = introEngaged(state.intro) ? null : net ? net.rivals : streetRace ? streetRace.cars : null;
+    // A rush room's one run: nothing at the marker may start a second, before GO or after the
+    // card. F still puts the card away.
+    if (rushMatch && state.rush && state.rush.phase !== 'results') command.activate = false;
     stepGame(state, command, layout, dt, stepOptions);
+    // QUICK PLAY's run, taken up for the player. After the tick, so the events it raises are
+    // this tick's and reach the HUD and the audio below; a room's count-in ends on the server's GO.
+    if (rushBeginPending && state.rush && !command.restart) {
+      rushBeginPending = false;
+      const countdown = rushMatch && net ? net.countdownSeconds() : RUSH.countdownSeconds;
+      if (!rushMatch || !rushMatchStarted) {
+        const began = beginRush(state.rush, leaderboard ? leaderboard.canRank() : false, countdown < 0 ? RUSH.countdownSeconds : countdown, state.events);
+        rushMatchStarted = rushMatchStarted || began;
+        // The marker offered the run on this same tick, to a car put down on it; the offer was
+        // taken before anybody could see it, so its chime is not raised.
+        if (began) {
+          for (let i = state.events.length - 1; i >= 0; i--) if (state.events[i].type === 'rushPrompt') state.events.splice(i, 1);
+        }
+      }
+    }
     // One tick's worth: the rescue that set it has been seen.
     stepOptions.respawned = false;
     simTime = state.time;
@@ -1691,6 +1837,17 @@ export function createGame(
     }
     const events = state.events;
     for (let i = 0; i < events.length; i++) handleEvent(events[i]);
+    if (hasWallet) {
+      // A restart swaps the economy for an empty one; the wallet is not the run's to wipe.
+      if (state.economy !== walletEconomy) {
+        state.economy.money = savedMoney;
+        walletEconomy = state.economy;
+      }
+      if (state.economy.money !== savedMoney) {
+        savedMoney = state.economy.money;
+        writeWallet(savedMoney);
+      }
+    }
 
     if (net && trafficSync) {
       // The host publishes the traffic it owns; everyone else eases theirs onto it, and
@@ -1713,6 +1870,7 @@ export function createGame(
       publish.charge = state.lightning.charge / LIGHTNING.capacity;
       publish.lapTime = state.race && state.race.phase === 'racing' ? state.time - state.race.lapStart : 0;
       publish.money = state.economy.money;
+      publish.score = rushMatch && state.rush ? state.rush.score : 0;
       net.publishCar(publish);
     }
   }
@@ -1782,6 +1940,7 @@ export function createGame(
     crowdSubject.speed = Math.abs(v.speed);
     crowdSubject.drifting = state.drift.active;
     environment.update(frameDt, simTime, chase.camera.position.x, chase.camera.position.z, crowdSubject);
+    if (performance.now() - boardsFetchedAt > BOARD_REFRESH_MS) refreshHolograms();
     if (streetPropsVisual && state.streetProps) streetPropsVisual.update(state.streetProps, chase.camera.position.x, chase.camera.position.z, alpha);
     if (sewerVisual) sewerVisual.update(frameDt, chase.camera.position.x, chase.camera.position.z, v.x, v.z, v.vx, v.vz);
     // After the environment, so the sky and the fog it blends from are this frame's. The
@@ -1808,7 +1967,16 @@ export function createGame(
       garageFigure.setProximity(engagedActivity(state) !== null ? 0 : near * near);
       garageFigure.update(simTime, crowdSubject);
     }
+    if (hustlersVisual && state.hustlers) {
+      hustlersVisual.update(state.hustlers, simTime, frameDt, chase.camera.position.x, chase.camera.position.z, crowdSubject);
+    }
     chase.update(cameraPose, frameDt);
+    hearing.x = pose.x;
+    hearing.z = pose.z;
+    hearing.y = pose.y;
+    hearing.heading = pose.heading;
+    hearing.vx = v.vx;
+    hearing.vz = v.vz;
     audio.update(
       frameDt,
       {
@@ -1819,11 +1987,15 @@ export function createGame(
         nitro: state.nitro.active,
         limiterCut: v.limiterCut,
       },
-      pose,
+      hearing,
       state.targets,
       { lateralSpeed: v.lateralSpeed, speed: v.speed, drifting: state.drift.active, wheelspin: v.wheelspin, yawRate: v.yawRate },
       policeAudio,
     );
+    audio.lightningCharging(state.lightning.charging);
+    const gusts = passBy.step(v, state.targets, state.buses, state.police ? state.police.units : null, state.streetProps);
+    for (let i = 0; i < gusts.length; i++) audio.passBy(gusts[i]);
+    passByCount += gusts.length;
 
     // Pops and bangs: one decision, fired into the audio and the tailpipes together. Banging
     // off the limiter owns the exhaust while it lasts: every fuel cut spits its own crack, on
@@ -1966,23 +2138,19 @@ export function createGame(
         streetGateSnapshot.circuit = spec.circuit;
         streetGateSnapshot.laps = spec.laps;
         streetGateSnapshot.rivals = spec.rivals;
-        streetGateSnapshot.completed = streetEventStandalone(shown) ? streetProgress?.best[shown] === 1 : shown < sgate.cleared;
-        streetGateSnapshot.placeLabel = streetSites[shown]?.label ?? '';
+        streetGateSnapshot.completed = shown < sgate.cleared;
+        streetGateSnapshot.placeLabel = streetSites[0]?.label ?? '';
       }
-      const markers = environment.streetMarkers;
-      const newest = streetNewestEvent(sgate.cleared);
-      for (let i = 0; i < markers.length; i++) {
-        const site = streetSites[i];
-        if (!site) continue;
-        const marker = markers[i];
-        const dx = pose.x - site.x;
-        const dz = pose.z - site.z;
+      // One ring: it never goes quiet, because there is always an event on it to drive.
+      const marker = environment.streetMarkers[0];
+      const ring = streetSites[0];
+      if (marker && ring) {
+        const dx = pose.x - ring.x;
+        const dz = pose.z - ring.z;
         const reach = STREET_RACE.marker.promptRadius * 3;
         const near = 1 - Math.min(1, Math.sqrt(dx * dx + dz * dz) / reach);
         marker.setProximity(near * near);
-        // Won events stay open but go quiet; the newest one is the loud one.
-        marker.setRunning(streetEventStandalone(i) ? streetProgress?.best[i] === 1 : i < newest);
-        marker.setHidden(!streetEventOpen(sgate.cleared, i) || activitySuppressed(engaged, 'street'));
+        marker.setHidden(activitySuppressed(engaged, 'street'));
       }
     }
     const pax = state.passenger;
@@ -2055,6 +2223,17 @@ export function createGame(
       garageSnapshot.open = garageOpenToTalk(garage);
       garageSnapshot.line = garage.line;
       garageSnapshot.lineId = garage.lineId;
+    }
+    const hustlers = state.hustlers;
+    if (hustlers && hustlerSpots) {
+      const speaker = hustlers.speaker >= 0 ? hustlers.speaker : hustlers.offering;
+      if (speaker >= 0) {
+        hustlerSnapshot.speaker = hustlerName(hustlers, hustlerSpots, speaker);
+        hustlerSnapshot.kind = hustlerSpots[speaker].kind;
+      }
+      hustlerSnapshot.line = hustlers.line;
+      hustlerSnapshot.lineId = hustlers.lineId;
+      hustlerSnapshot.offer = washerOfferOpen(hustlers);
     }
     const race = state.race;
     if (race) {
@@ -2295,6 +2474,7 @@ export function createGame(
       loop.stop();
     },
     dispose() {
+      disposed = true;
       loop.stop();
       window.removeEventListener('resize', onResize);
       canvas.removeEventListener('pointerdown', onLookDown);
@@ -2361,6 +2541,7 @@ export function createGame(
         scene.remove(garageFigure.group);
         garageFigure.dispose();
       }
+      hustlersVisual?.dispose();
       environment.dispose();
       if (pickupMarker) {
         scene.remove(pickupMarker.group);
@@ -2390,6 +2571,8 @@ export function createGame(
     state,
     layout,
     command,
+    /** Wind gusts voiced since load (`audio/passBy.ts`), for automation. */
+    passByCount: () => passByCount,
     /** Multiplayer, for automation: the rival cars as this client currently sees them. */
     multiplayer: !!net,
     rivals,
@@ -2649,6 +2832,43 @@ export function createGame(
      *   __rb.buho.status()          // { active, elapsed, intensity, shown, faces, finish }
      *   __rb.buho.end()             // wear it off now
      */
+    /**
+     * The trapitos and washers (`src/sim/hustlers.ts`). `state` is the live rules state; `spots` is
+     * where they work; `goTo(id)` stops the car where that one works — on a washer's lane, at his
+     * light — so a script can watch him without driving there.
+     *
+     *   __rb.hustlers.goTo('washer-downtown')
+     *   __rb.hustlers.accept()      // the F key      __rb.hustlers.decline()   // the G key
+     */
+    hustlers: hasHustlers && hustlerSpots
+      ? {
+          spots: hustlerSpots,
+          get state() {
+            return state.hustlers;
+          },
+          goTo(id: string) {
+            const spot = hustlerSpots.find((h) => h.id === id);
+            if (!spot) return false;
+            const at = spot.approach ?? { x: spot.x + Math.sin(spot.heading) * 8, z: spot.z - Math.cos(spot.heading) * 8, heading: spot.heading + Math.PI / 2 };
+            const v = state.vehicle;
+            v.x = v.prevX = at.x;
+            v.z = v.prevZ = at.z;
+            v.y = v.prevY = 0;
+            v.pitch = 0;
+            v.heading = v.prevHeading = at.heading;
+            v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
+            fillCameraPose(1);
+            chase.snap(cameraPose);
+            return true;
+          },
+          accept() {
+            activateQueued = true;
+          },
+          decline() {
+            declineQueued = true;
+          },
+        }
+      : null,
     buho: hasBuho
       ? {
           config: MOOGUL,

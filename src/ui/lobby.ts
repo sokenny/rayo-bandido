@@ -1,9 +1,11 @@
 import { MAX_PLAYERS, NAME_MAX, sanitizeName, sanitizeRoomCode } from '../net/protocol';
 import type { NetSession } from '../net/session';
+import { account } from '../net/account';
 import { slotCss } from '../core/playerColors';
 import { formatRaceTime } from './hud';
 import { createGamepadMenuNav } from '../core/input/gamepadMenu';
 import { frameDecor, menuHeader } from './chrome';
+import { GAME_NAMES } from './quickPlayMenu';
 
 /**
  * The multiplayer lobby: everything between opening the link and the lights going out, and
@@ -44,7 +46,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
   wrap.className = 'rb-menu rb-lobby';
   wrap.innerHTML =
     frameDecor('LOBBY') +
-    menuHeader('MULTIPLAYER · BANDIDO GRID', 'room') +
+    menuHeader('ONLINE · CONNECTING', 'room') +
     `<div class="rb-status rb-lobby__status" data-role="status">CONNECTING</div>` +
     `<div class="rb-panel rb-lobby__panel" data-role="panel">` +
     `<div class="rb-panel__head"><span>GRID_ROSTER</span><span class="rb-panel__id">${MAX_PLAYERS} SLOTS</span></div>` +
@@ -89,11 +91,13 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
   function renderRoom(): void {
     const room = session.room;
     if (!room) {
-      roomEl.textContent = 'MULTIPLAYER · BANDIDO GRID';
+      roomEl.textContent = 'ONLINE · CONNECTING';
       linkEl.textContent = '';
       return;
     }
-    roomEl.textContent = `${room.label} · ${room.code}${room.listed ? ' · PUBLIC' : ' · PRIVATE'}`;
+    // Which game first: a friend's link can land in a room playing something other than what
+    // this player's own menu had open, and the lobby is the last chance to find that out.
+    roomEl.textContent = `${GAME_NAMES[room.game] ?? GAME_NAMES.circuit} · ${room.label} · ${room.code}${room.listed ? ' · PUBLIC' : ' · PRIVATE'}`;
     shareLabelEl.textContent = room.listed ? 'SHARE' : 'INVITE';
     linkEl.textContent = shareLink(room.code);
   }
@@ -126,6 +130,9 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
 
   let ready = false;
   let lastResultsKey = '';
+
+  /** A RAYO RUSH room: a run rather than a race, ranked on points rather than on time. */
+  const isRush = (): boolean => session.room?.game === 'rush';
 
   function renderPlayers(): void {
     const players = session.players;
@@ -164,7 +171,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
       lastResultsKey = '';
       return;
     }
-    const key = results.map((r) => `${r.id}:${r.total}`).join('|');
+    const key = results.map((r) => `${r.id}:${r.total}:${r.score}`).join('|');
     resultsEl.hidden = false;
     if (key === lastResultsKey) return;
     lastResultsKey = key;
@@ -175,8 +182,10 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
       results
         .map((row, i) => {
           const you = row.id === session.selfId ? ' is-self' : '';
-          const time = row.finished ? formatRaceTime(row.total) : 'DNF';
-          const best = row.best >= 0 ? `BEST ${formatRaceTime(row.best)}` : '—';
+          const rush = isRush();
+          const score = Number(row.score) || 0;
+          const time = rush ? `${score.toLocaleString('en-US')} PTS` : row.finished ? formatRaceTime(row.total) : 'DNF';
+          const best = rush ? (row.finished ? 'FULL RUN' : 'CUT SHORT') : row.best >= 0 ? `BEST ${formatRaceTime(row.best)}` : '—';
           return (
             `<div class="rb-lobby__result${you}" style="--rb-standings-colour:${slotCss(slotOf(row.id))}">` +
             `<span class="rb-lobby__rpos">P${i + 1}</span>` +
@@ -232,32 +241,34 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
     startBtn.hidden = !(canDrive && isHost);
     startBtn.disabled = count === 0;
 
+    const rush = isRush();
+    const noun = rush ? 'RUSH' : 'RACE';
     if (phase === 'loading') {
       const waiting = count;
-      statusEl.textContent = `BUILDING THE CIRCUIT · WAITING FOR ${waiting} CAR${waiting === 1 ? '' : 'S'}`;
-      hintEl.innerHTML = `the grid launches when everyone is ready`;
+      statusEl.textContent = `${rush ? 'BUILDING THE CITY' : 'BUILDING THE CIRCUIT'} · WAITING FOR ${waiting} CAR${waiting === 1 ? '' : 'S'}`;
+      hintEl.innerHTML = rush ? `the clock starts when everyone is ready` : `the grid launches when everyone is ready`;
       return;
     }
     if (phase === 'countdown' || phase === 'racing') {
-      statusEl.textContent = 'RACE IN PROGRESS';
-      hintEl.innerHTML = `you will be pulled into the next race`;
+      statusEl.textContent = `${noun} IN PROGRESS`;
+      hintEl.innerHTML = `you will be pulled into the next ${noun.toLowerCase()}`;
       return;
     }
 
     const rtt = session.rtt >= 0 ? ` · ${Math.round(session.rtt)} ms` : '';
     statusEl.textContent =
       phase === 'results'
-        ? `RACE OVER · ${count}/${MAX_PLAYERS} IN THE ROOM${rtt}`
+        ? `${noun} OVER · ${count}/${MAX_PLAYERS} IN THE ROOM${rtt}`
         : `${count}/${MAX_PLAYERS} IN THE ROOM · ${readyCount} READY${rtt}`;
 
     ready = session.self?.ready ?? false;
     readyBtn.textContent = ready ? 'NOT READY' : 'READY';
     readyBtn.classList.toggle('is-on', ready);
-    startBtn.textContent = phase === 'results' ? 'RACE AGAIN' : 'START RACE';
+    startBtn.textContent = phase === 'results' ? `${noun} AGAIN` : `START ${noun}`;
 
     hintEl.innerHTML = isHost
-      ? `<b>ENTER</b> start the race · <b>ESC</b> leave the room · you are the host, so you start it`
-      : `<b>ENTER</b> ready up · <b>ESC</b> leave the room · the host starts the race`;
+      ? `<b>ENTER</b> start the ${noun.toLowerCase()} · <b>ESC</b> leave the room · you are the host, so you start it`
+      : `<b>ENTER</b> ready up · <b>ESC</b> leave the room · the host starts the ${noun.toLowerCase()}`;
   }
 
   /* ------------------------------------------------------------------ input */
@@ -266,11 +277,8 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
     const next = sanitizeName(nameInput.value);
     nameInput.value = next;
     session.setName(next);
-    try {
-      localStorage.setItem('rb.name', next);
-    } catch {
-      // Private browsing, or storage disabled. The name simply is not remembered.
-    }
+    // Remembered on this browser and saved to the account, which is the name the boards show.
+    account().setName(next);
   }
 
   function toggleReady(): void {

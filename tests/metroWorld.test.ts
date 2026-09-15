@@ -11,6 +11,7 @@ import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { buildReclamation } from '../src/render/scene/env/reclaimBuilder';
 import { buildScreens } from '../src/render/scene/env/screenBuilder';
 import { PASSENGERS, validatePassengerCatalog } from '../src/content/passengers';
+import { planTrip } from '../src/sim/passenger';
 import { createCityWorld } from '../src/world/cityWorld';
 import { inRect, type RibbonDef } from '../src/world/cityPlan';
 import { METRO_BUS_ROUTES, METRO_MEET, METRO_RUSH_SITES, METRO_SPEC, METRO_VIADUCT_Y, STACK_OFFSET, STACK_RECT } from '../src/world/metroSpec';
@@ -307,7 +308,15 @@ describe('metro bus network and activities', () => {
     }
     expect(layout.rushSites!.length).toBe(METRO_RUSH_SITES.length);
     const stops = layout.passengerStops!;
+    expect(layout.passengerTrip ?? null).toBeNull();
     expect(validatePassengerCatalog(PASSENGERS, stops)).toEqual([]);
+    // Cross-town rides: every offer for three rounds of the catalogue lands in the long range.
+    for (let i = 0; i < PASSENGERS.length * 3; i++) {
+      const trip = planTrip(PASSENGERS, stops, i, METRO_SPEC.spawn.x, METRO_SPEC.spawn.z);
+      expect(trip, `offer ${i}`).not.toBeNull();
+      expect(trip!.distance, `offer ${i}`).toBeGreaterThanOrEqual(PASSENGER.offer.minTrip);
+      expect(trip!.distance, `offer ${i}`).toBeLessThanOrEqual(PASSENGER.offer.maxTrip);
+    }
     for (const stop of stops) {
       expect(plan.isRoad(stop.x, stop.z, -PASSENGER.marker.promptRadius * 0.6), `${stop.id} is not on a road`).toBe(true);
       expect(blockedAt(layout, stop.x, stop.z, 0, PASSENGER.marker.promptRadius), stop.id).toBeNull();

@@ -8,6 +8,7 @@ import type {
   PassengerState,
   PassengerStop,
   PassengerTrip,
+  PassengerTripRange,
   PlayerCommand,
   TargetState,
   VehicleState,
@@ -61,12 +62,13 @@ const QUEUE_CAP = 6;
 /** Sim time far enough ahead to mean "never expires". */
 const NEVER = Number.POSITIVE_INFINITY;
 
-export function createPassengerState(targetCount: number): PassengerState {
+export function createPassengerState(targetCount: number, tripRange: PassengerTripRange = PASSENGER.offer): PassengerState {
   return {
     phase: 'idle',
     locked: false,
     offerIn: PASSENGER.offer.firstDelay,
     offers: 0,
+    tripRange: { minTrip: tripRange.minTrip, maxTrip: tripRange.maxTrip },
     trip: null,
     atPickup: false,
     atDestination: false,
@@ -165,7 +167,8 @@ export function fareFor(distance: number): number {
  * The pickup is chosen from the character's eligible stops at least `minDistanceFromPlayer`
  * from the car (falling back to any eligible stop when none is that far, so a tiny world still
  * offers). The destination is the eligible stop whose distance from the pickup best fits the
- * trip range: inside it if any is, else the nearest to it. Null when the world has no stops or
+ * trip range (`range`, the world's; `PASSENGER.offer` by default): inside it if any is, else
+ * the nearest to it. Null when the world has no stops or
  * the character no possible trip, in which case there is no offer this time round.
  */
 export function planTrip(
@@ -174,11 +177,13 @@ export function planTrip(
   offers: number,
   playerX: number,
   playerZ: number,
+  range: PassengerTripRange = PASSENGER.offer,
 ): PassengerTrip | null {
   if (catalog.length === 0 || stops.length < 2) return null;
   const def = catalog[offers % catalog.length];
   const round = Math.floor(offers / catalog.length);
   const o = PASSENGER.offer;
+  const { minTrip, maxTrip } = range;
 
   // Pickups: the character's kind of place, and not right next to the car.
   let pickups: PassengerStop[] = [];
@@ -199,11 +204,11 @@ export function planTrip(
   for (const stop of stops) {
     if (stop === pickup || stop.id === pickup.id || !tagged(stop, def.destinationTags)) continue;
     const d = stopDistance(pickup, stop);
-    const fits = d >= o.minTrip && d <= o.maxTrip;
+    const fits = d >= minTrip && d <= maxTrip;
     if (fits) inRange++;
     // Inside the range every candidate scores 0; the rotation below picks between them.
     // Outside it, how far outside.
-    const score = fits ? 0 : d < o.minTrip ? o.minTrip - d : d - o.maxTrip;
+    const score = fits ? 0 : d < minTrip ? minTrip - d : d - maxTrip;
     if (score < bestScore) {
       bestScore = score;
       best = stop;
@@ -216,7 +221,7 @@ export function planTrip(
     for (const stop of stops) {
       if (stop === pickup || stop.id === pickup.id || !tagged(stop, def.destinationTags)) continue;
       const d = stopDistance(pickup, stop);
-      if (d < o.minTrip || d > o.maxTrip) continue;
+      if (d < minTrip || d > maxTrip) continue;
       if (want === 0) {
         best = stop;
         break;
@@ -577,7 +582,7 @@ export function offerRide(
   v: VehicleState,
   events: GameEvent[],
 ): boolean {
-  const trip = planTrip(catalog, stops, s.offers, v.x, v.z);
+  const trip = planTrip(catalog, stops, s.offers, v.x, v.z, s.tripRange);
   if (!trip) {
     s.offerIn = PASSENGER.offer.reofferSeconds;
     return false;

@@ -73,7 +73,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function startServer() {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [ENTRY, '--port', '0'], { cwd: ROOT });
+    // An in-memory database: never the `.data/` one a dev server on this machine may have open.
+    const child = spawn(process.execPath, [ENTRY, '--port', '0'], { cwd: ROOT, env: { ...process.env, RB_DATABASE_URL: 'memory://' } });
     const timer = setTimeout(() => reject(new Error('the match server did not start in time')), 10_000);
     child.stdout.on('data', (chunk) => {
       const match = /http:\/\/127\.0\.0\.1:(\d+)/.exec(chunk.toString());

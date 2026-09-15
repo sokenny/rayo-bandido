@@ -55,6 +55,7 @@ function rival(overrides: Partial<RivalCar> = {}): RivalCar {
     bestLap: -1,
     finishTime: -1,
     money: 0,
+    score: 0,
     ...overrides,
   };
 }
@@ -174,7 +175,7 @@ describe('rival interpolation', () => {
     const set = createRivalSet(players);
     const flags = packCarFlags(true, false, true, false);
     expect(flags).toBe(CAR_FLAG.drifting | CAR_FLAG.braking);
-    set.apply('p2', 1000, wire({ f: flags, ch: 0.5 }), { lap: 2, prog: 1.4, lapT: 12, best: 41.2, fin: -1, money: 600 });
+    set.apply('p2', 1000, wire({ f: flags, ch: 0.5 }), { lap: 2, prog: 1.4, lapT: 12, best: 41.2, fin: -1, money: 600, sc: 900 });
     set.update(1000 + INTERP_DELAY_MS, SIM_STEP);
     const car = set.all[0];
     expect(car.drifting).toBe(true);
@@ -184,6 +185,8 @@ describe('rival interpolation', () => {
     expect(car.lap).toBe(2);
     expect(car.progress).toBeCloseTo(1.4, 5);
     expect(car.money).toBe(600);
+    // A rush room's live score rides the same record.
+    expect(car.score).toBe(900);
   });
 
   it('rolls the wheels from the speed rather than sending them', () => {

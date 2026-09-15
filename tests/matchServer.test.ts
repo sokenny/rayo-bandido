@@ -35,7 +35,8 @@ let port = 0;
 /** Start the server and wait for it to say which port it bound. */
 function startServer(): Promise<number> {
   return new Promise((resolve, reject) => {
-    server = spawn(process.execPath, [ENTRY, '--port', '0'], { cwd: ROOT });
+    // An in-memory database: never the `.data/` one a dev server on this machine may have open.
+    server = spawn(process.execPath, [ENTRY, '--port', '0'], { cwd: ROOT, env: { ...process.env, RB_DATABASE_URL: 'memory://' } });
     const timer = setTimeout(() => reject(new Error('the match server did not start in time')), 10_000);
     server.stdout.on('data', (chunk: Buffer) => {
       const match = /http:\/\/127\.0\.0\.1:(\d+)/.exec(chunk.toString());
@@ -91,7 +92,7 @@ function nextRoomCode(): string {
 async function connect(
   name: string,
   version = PROTOCOL_VERSION,
-  room: { join?: string; create?: { label: string; listed: boolean } } = {
+  room: { join?: string; create?: { label: string; listed: boolean; game?: string } } = {
     join: roomCode,
     create: { label: `${roomCode} TEST`, listed: false },
   },
@@ -533,6 +534,56 @@ describe('rooms', () => {
     expect(welcome.room.code).toBe(code);
     const lobby = await second.expect<{ players: Array<{ name: string }> }>(S2C.lobby);
     expect(lobby.players.map((p) => p.name)).toEqual(['JUAN', 'ROMEO']);
+    await resetRoom();
+  });
+
+  it('plays the game its creator opened it for, whatever a guest asks for', async () => {
+    const code = nextRoomCode();
+    const host = await connect('JUAN', PROTOCOL_VERSION, { join: code, create: { label: 'RUSH HOUR', listed: true, game: 'rush' } });
+    const hostWelcome = await host.expect<{ room: { game: string } }>(S2C.welcome);
+    expect(hostWelcome.room.game).toBe('rush');
+    // A guest whose own menu had the circuit open still lands in a rush.
+    const guest = await connect('ROMEO', PROTOCOL_VERSION, { join: code, create: { label: 'NOT MINE', listed: true, game: 'circuit' } });
+    const guestWelcome = await guest.expect<{ room: { game: string; label: string } }>(S2C.welcome);
+    expect(guestWelcome.room).toMatchObject({ game: 'rush', label: 'RUSH HOUR' });
+
+    const response = await fetch(`http://127.0.0.1:${port}/rooms`);
+    const body = (await response.json()) as { rooms: Array<{ code: string; game: string }> };
+    expect(body.rooms.find((room) => room.code === code)).toMatchObject({ game: 'rush' });
+    await resetRoom();
+  });
+
+  it('opens a circuit room when the game is missing or unknown', async () => {
+    const code = nextRoomCode();
+    const host = await connect('JUAN', PROTOCOL_VERSION, { join: code, create: { label: 'OLD LINK', listed: false, game: 'bowling' } });
+    const welcome = await host.expect<{ room: { game: string } }>(S2C.welcome);
+    expect(welcome.room.game).toBe('circuit');
+    await resetRoom();
+  });
+
+  it('classifies a rush room on score, not on time', async () => {
+    const code = nextRoomCode();
+    const create = { label: 'RUSH', listed: false, game: 'rush' };
+    const host = await connect('JUAN', PROTOCOL_VERSION, { join: code, create });
+    await host.expect(S2C.welcome);
+    const guest = await connect('ROMEO', PROTOCOL_VERSION, { join: code, create });
+    await guest.expect(S2C.welcome);
+    host.send({ t: C2S.start });
+    const match = await host.expect<{ raceId: number }>(S2C.match);
+    await guest.expect(S2C.match);
+    host.send({ t: C2S.loaded, raceId: match.raceId });
+    guest.send({ t: C2S.loaded, raceId: match.raceId });
+    await host.expect(S2C.go);
+
+    // The host's run ends first and lower; the guest's later and higher. Order of arrival and
+    // the (absent) times must not matter.
+    host.send({ t: C2S.finish, raceId: match.raceId, total: -1, best: -1, score: 1450 });
+    await sleep(100);
+    expect(host.all(S2C.results)).toHaveLength(0);
+    guest.send({ t: C2S.finish, raceId: match.raceId, total: -1, best: -1, score: 2210 });
+    const results = await host.expect<{ order: Array<{ name: string; score: number; finished: boolean }> }>(S2C.results);
+    expect(results.order.map((r) => r.name)).toEqual(['ROMEO', 'JUAN']);
+    expect(results.order[0]).toMatchObject({ score: 2210, finished: true });
     await resetRoom();
   });
 

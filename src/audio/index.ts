@@ -5,6 +5,12 @@ import { createElectricHums, type Listener } from './electricHum';
 import { createTireScreech } from './tireScreech';
 import { createOneShots } from './oneShots';
 import { createPoliceAudio } from './police';
+import { createRainAudio } from './rain';
+import { createNitroBoostAudio } from './nitroBoost';
+import { createLightningChargeAudio } from './lightningCharge';
+import { createWindGusts } from './windGust';
+import { createHorns } from './horns';
+import type { PassByGust } from './passBy';
 import { skidIntensity } from './dsp';
 
 /** Slide state for the tire scrub, read each frame. */
@@ -24,10 +30,11 @@ export interface SkidInput {
  * CONTRACT (called from `src/game.ts`)
  * - `update(dt, engine, listener, targets, skid)` every render frame: drives the continuous
  *   voices — the player's gas engine (+ turbo), the tire scrub while sliding, and each electric
- *   car's hover hum, spatialized to the listener.
+ *   car's hover hum, spatialized to the listener — and the rain on the car (`audio/rain.ts`), faster with speed.
  * - `onEvent(ev)` for every `GameEvent`: fires one-shots (lightning zap, nitro whoosh, the
  *   electric-car power-down when a target is destroyed, and the pickup chime when the car rolls
  *   onto an activity marker).
+ * - `passBy(gust)` for each thing the car tears past (`audio/passBy.ts`): a panned rush of air.
  * - `backfire(strength)` whenever the exhaust pops. The caller owns the trigger (see
  *   `audio/backfire.ts`) so the bang and the flame at the tailpipes land on the same frame.
  * - `reset()` on restart.
@@ -55,6 +62,10 @@ export interface AudioSystem {
   onEvent(ev: GameEvent): void;
   /** One exhaust pop/bang (0..1), fired from `createBackfireTrigger` in the composition root. */
   backfire(strength: number): void;
+  /** The air of blowing past something close at speed, found by `createPassByDetector` in the composition root. */
+  passBy(gust: PassByGust): void;
+  /** Every frame: whether the Rayo is loading (`LightningState.charging`), for its charge-up sound. */
+  lightningCharging(charging: boolean): void;
   reset(): void;
   setMuted(muted: boolean): void;
   /** AudioContext state for QA/automation: 'suspended' | 'running' | 'closed' | 'unavailable'. */
@@ -67,6 +78,8 @@ const SILENT: AudioSystem = {
   update() {},
   onEvent() {},
   backfire() {},
+  passBy() {},
+  lightningCharging() {},
   reset() {},
   setMuted() {},
   status: () => 'unavailable',
@@ -82,6 +95,11 @@ export function createAudio(targetCount: number): AudioSystem {
   const hums = createElectricHums(core, targetCount);
   const oneShots = createOneShots(core);
   const police = createPoliceAudio(core);
+  const rain = createRainAudio(core);
+  const nitro = createNitroBoostAudio(core);
+  const rayo = createLightningChargeAudio(core);
+  const wind = createWindGusts(core);
+  const horns = createHorns(core, targetCount);
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
   // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
@@ -99,22 +117,26 @@ export function createAudio(targetCount: number): AudioSystem {
       engine.update(dt, engineInput);
       tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin, skid.yawRate), Math.hypot(skid.speed, skid.lateralSpeed));
       hums.update(dt, listener, targets);
+      horns.update(dt, listener, targets);
+      rain.update(dt, Math.hypot(skid.speed, skid.lateralSpeed));
       if (policeInput) police.update(dt, listener, policeInput.units, policeInput.siren);
     },
 
     onEvent(ev) {
       switch (ev.type) {
         case 'lightningFired':
-          oneShots.lightning();
+          // The recording (`audio/lightningCharge.ts`); the synthesized zap only until it has loaded.
+          if (!rayo.release()) oneShots.lightning();
           break;
         case 'targetDestroyed':
           oneShots.shutdown();
           break;
-        case 'nearMiss':
-          oneShots.nearMiss(ev.quality);
-          break;
         case 'nitroStart':
-          engine.nitroWhoosh();
+          // The recording (`audio/nitroBoost.ts`); the synthesized whoosh only until it has loaded.
+          if (!nitro.start()) engine.nitroWhoosh();
+          break;
+        case 'nitroEnd':
+          nitro.stop();
           break;
         case 'raceCountdown':
           oneShots.countdown(false);
@@ -126,6 +148,9 @@ export function createAudio(targetCount: number): AudioSystem {
         case 'circuitPrompt':
         case 'passengerPrompt':
         case 'passengerDropPrompt':
+        case 'streetRacePrompt':
+        case 'buhoPrompt':
+        case 'garagePrompt':
           // Every free-world marker gets the same chime: RAYO RUSH's circle, the circuit's start
           // line and a passenger's ring are the same gesture — you have rolled onto something
           // you can act on — and one sound for it is what makes each new activity read as part
@@ -183,7 +208,10 @@ export function createAudio(targetCount: number): AudioSystem {
           engine.reset();
           tires.reset();
           hums.reset();
+          horns.reset();
           police.reset();
+          nitro.reset();
+          rayo.reset();
           break;
         default:
           break;
@@ -194,11 +222,22 @@ export function createAudio(targetCount: number): AudioSystem {
       engine.backfire(strength);
     },
 
+    lightningCharging(charging) {
+      rayo.setCharging(charging);
+    },
+
+    passBy(gust) {
+      wind.play(gust);
+    },
+
     reset() {
       engine.reset();
       tires.reset();
       hums.reset();
+      horns.reset();
       police.reset();
+      nitro.reset();
+      rayo.reset();
     },
 
     setMuted(muted) {
@@ -215,7 +254,11 @@ export function createAudio(targetCount: number): AudioSystem {
       engine.dispose();
       tires.dispose();
       hums.dispose();
+      horns.dispose();
       police.dispose();
+      rain.dispose();
+      nitro.dispose();
+      rayo.dispose();
       core.dispose();
     },
   };

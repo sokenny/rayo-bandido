@@ -1,11 +1,14 @@
 import { MAX_PLAYERS, ROOM_CODE_LEN, ROOM_LABEL_MAX, sanitizeRoomCode, sanitizeRoomLabel } from '../net/protocol';
-import type { RoomEntry, RoomListing } from '../net/protocol';
+import type { RoomEntry, RoomGame, RoomListing } from '../net/protocol';
+import { GAME_NAMES } from './quickPlayMenu';
 import { fetchRooms } from '../net/connection';
 import { frameDecor, menuHeader } from './chrome';
 
 /**
- * The room browser: the screen between VERSUS — the online half of the RACE menu — and the
- * lobby.
+ * The room browser: the screen between ONLINE — the second half of a QUICK PLAY game — and the
+ * lobby. It is opened for one game (`RoomGame`): a room created here plays that game, and the
+ * public list only shows rooms playing it. A code or a link still gets into any room, whatever
+ * it plays — the lobby says which.
  *
  * One server holds many rooms (`server/rooms.mjs`), so arriving at multiplayer is a choice
  * rather than a fact — make your own room and hand out its link, type the code a friend sent,
@@ -19,7 +22,7 @@ import { frameDecor, menuHeader } from './chrome';
  * into it.
  *
  * DOM only, like the rest of `src/ui`, and dressed as the main menu so the whole run from
- * RACE to the grid feels like one screen going deeper.
+ * QUICK PLAY to the grid feels like one screen going deeper.
  */
 export interface RoomBrowser {
   dispose(): void;
@@ -28,19 +31,20 @@ export interface RoomBrowser {
 export interface RoomBrowserCallbacks {
   /** A room was chosen or created: connect with this. */
   onEnter(entry: RoomEntry): void;
-  /** ESC: back to the main menu. */
+  /** ESC: back to the game's OFFLINE / ONLINE screen. */
   onBack(): void;
 }
 
 /** How often the public list is re-read while the screen is up. */
 const POLL_MS = 4000;
 
-export function createRoomBrowser(root: HTMLElement, driverName: string, callbacks: RoomBrowserCallbacks): RoomBrowser {
+export function createRoomBrowser(root: HTMLElement, driverName: string, game: RoomGame, callbacks: RoomBrowserCallbacks): RoomBrowser {
+  const gameName = GAME_NAMES[game];
   const wrap = document.createElement('div');
   wrap.className = 'rb-menu rb-rooms';
   wrap.innerHTML =
     frameDecor('ROOMS') +
-    menuHeader('MULTIPLAYER · YOUR ROOM, YOUR RULES') +
+    menuHeader(`ONLINE · ${gameName} · YOUR ROOM, YOUR RULES`) +
     `<div class="rb-status rb-lobby__status" data-role="status">LOOKING FOR ROOMS</div>` +
     `<div class="rb-rooms__cols">` +
     `<div class="rb-panel rb-lobby__panel rb-rooms__panel">` +
@@ -66,7 +70,7 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
     `<div class="rb-rooms__list" data-role="list"></div>` +
     `</div>` +
     `</div>` +
-    `<div class="rb-menu__hint"><b>ENTER</b> create · <b>ESC</b> back to the menu</div>`;
+    `<div class="rb-menu__hint"><b>ENTER</b> create · <b>ESC</b> back</div>`;
   root.appendChild(wrap);
 
   const pick = <T extends HTMLElement>(role: string): T => wrap.querySelector<T>(`[data-role="${role}"]`)!;
@@ -109,7 +113,7 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
     if (rooms.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'rb-rooms__empty';
-      empty.textContent = 'NO SIGNAL. NOBODY IS HOSTING A PUBLIC ROOM. OPEN ONE.';
+      empty.textContent = `NO SIGNAL. NOBODY IS HOSTING A PUBLIC ${gameName} ROOM. OPEN ONE.`;
       listEl.appendChild(empty);
       listIdEl.textContent = '00 FOUND';
       return;
@@ -137,7 +141,7 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
 
       const phase = document.createElement('span');
       phase.className = 'rb-rooms__rphase';
-      phase.textContent = full ? 'FULL' : room.phase === 'lobby' || room.phase === 'results' ? 'OPEN' : 'RACING';
+      phase.textContent = full ? 'FULL' : room.phase === 'lobby' || room.phase === 'results' ? 'OPEN' : 'PLAYING';
 
       row.append(label, code, count, phase);
       row.addEventListener('click', () => enter({ join: room.code }));
@@ -152,13 +156,14 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
     try {
       // The open world is listed too — it is a room like any other to the server — but it is
       // not something you knock on from here: it has its own card on the main menu.
-      const rooms = (await fetchRooms(controller.signal)).filter((room) => room.mode !== 'world');
+      // Only this game's rooms: the player picked the game one screen back.
+      const rooms = (await fetchRooms(controller.signal)).filter((room) => room.mode !== 'world' && room.game === game);
       if (controller.signal.aborted || done) return;
       statusEl.classList.remove('is-bad');
       statusEl.textContent =
         rooms.length === 0
-          ? `NO PUBLIC ROOMS · UP TO ${MAX_PLAYERS} CARS EACH`
-          : `${rooms.length} PUBLIC ROOM${rooms.length === 1 ? '' : 'S'} · UP TO ${MAX_PLAYERS} CARS EACH`;
+          ? `NO PUBLIC ${gameName} ROOMS · UP TO ${MAX_PLAYERS} CARS EACH`
+          : `${rooms.length} PUBLIC ${gameName} ROOM${rooms.length === 1 ? '' : 'S'} · UP TO ${MAX_PLAYERS} CARS EACH`;
       renderRooms(rooms);
     } catch (err) {
       if (controller.signal.aborted || done) return;
@@ -182,7 +187,7 @@ export function createRoomBrowser(root: HTMLElement, driverName: string, callbac
   /* ------------------------------------------------------------------ input */
 
   function createRoom(): void {
-    enter({ create: { label: sanitizeRoomLabel(labelInput.value), listed: listedInput.checked } });
+    enter({ create: { label: sanitizeRoomLabel(labelInput.value), listed: listedInput.checked, game } });
   }
 
   function joinTyped(): void {

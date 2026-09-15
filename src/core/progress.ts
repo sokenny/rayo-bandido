@@ -6,6 +6,14 @@ import { INTRO } from '../content/intro';
  * the RAYO RUSH mission chain and what they scored on each one, how far through the CIRCUIT
  * chain and their best time on each of those, and the side rides they have run.
  *
+ * NOW WITH A SERVER BEHIND IT, AND STILL NOT WAITING ON ONE. Every player has an account on the
+ * server (`server/accounts.mjs`), and `src/net/account.ts` keeps that account and this storage in
+ * step: it writes the server's record in here at boot (`applyProgressSnapshot`) and sends this
+ * storage's record up after every write (`setProgressObserver`, `readProgressSnapshot`). Nothing
+ * below knows that — reads still answer from storage at once and writes still just write. What
+ * follows about the browser being the record describes the moment of play; the server is where
+ * the record lives between devices.
+ *
  * WHY IT IS ITS OWN MODULE. `src/net/leaderboard.ts` already keeps a personal best in
  * localStorage, but it keeps it as a MIRROR of something the server owns: the board is the
  * truth and the local copy exists so the prompt has a number before the network answers. This
@@ -52,12 +60,25 @@ function readRaw(key: string): string | null {
   }
 }
 
+/**
+ * Told after every write, so the account (`src/net/account.ts`) can send the record to the
+ * server. One observer; null until the account installs itself, which a test never does.
+ */
+let observer: (() => void) | null = null;
+/** True while a server record is being written down, so writing it does not echo it back. */
+let applying = false;
+
+export function setProgressObserver(fn: (() => void) | null): void {
+  observer = fn;
+}
+
 function writeRaw(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch {
     /* storage full or unavailable: the session still plays, it just forgets */
   }
+  if (!applying) observer?.();
 }
 
 /** A stored count made safe: a whole number no bigger than the chain that exists now. */
@@ -358,5 +379,93 @@ export function clearIntroProgress(): void {
     localStorage.removeItem(INTRO.persistence.key);
   } catch {
     /* storage unavailable: nothing to forget */
+  }
+}
+
+/* ===================================================================== wallet */
+
+const WALLET_KEY = 'rb.wallet';
+
+/**
+ * The player's money, kept between pages. Every world change — the city to a Street Race or the
+ * circuit and back — is a page load, so a counter that lived only in the session was a reward
+ * paid on one page and gone on the next. Same contract as everything above: no server, never
+ * throws, garbage reads as an empty wallet.
+ */
+export function readWallet(): number {
+  return clampCount(readRaw(WALLET_KEY));
+}
+
+export function writeWallet(money: number): void {
+  writeRaw(WALLET_KEY, String(clampCount(money)));
+}
+
+/* ========================================================= the account's view of it */
+
+/**
+ * Everything above as one record, in the shape the server stores (`server/accounts.mjs`). Intro
+ * carries its version whichever build wrote it, so the server can tell a newer intro from an
+ * older one; `null` where this browser has nothing.
+ */
+export interface ProgressSnapshot {
+  wallet: number | null;
+  intro: { status: IntroStatus; version: number } | null;
+  rides: RideProgress | null;
+  rush: RushProgress | null;
+  circuit: TimeAttackProgress | null;
+  street: StreetRaceProgress | null;
+}
+
+function readIntroRecord(): ProgressSnapshot['intro'] {
+  const raw = readRaw(INTRO.persistence.key);
+  if (!raw) return null;
+  try {
+    const record = JSON.parse(raw) as { version?: unknown; status?: unknown };
+    const version = Number(record.version);
+    if (!Number.isFinite(version) || (record.status !== 'completed' && record.status !== 'skipped')) return null;
+    return { status: record.status, version };
+  } catch {
+    return null;
+  }
+}
+
+export function readProgressSnapshot(): ProgressSnapshot {
+  return {
+    wallet: readRaw(WALLET_KEY) === null ? null : readWallet(),
+    intro: readIntroRecord(),
+    rides: readRaw(RIDES_KEY) === null ? null : readRideProgress(),
+    rush: readRaw(PROGRESS_KEY) === null ? null : readRushProgress(),
+    circuit: readRaw(CIRCUIT_KEY) === null ? null : readTimeAttackProgress(),
+    street: readRaw(STREET_KEY) === null ? null : readStreetRaceProgress(),
+  };
+}
+
+/**
+ * Write a record from the server into storage. Only what it has is written — a null leaves this
+ * browser's own value alone — and nothing written here is reported back to the observer.
+ * `wallet: false` keeps this browser's money, for when it has spent or earned since it last sent.
+ */
+export function applyProgressSnapshot(snapshot: Partial<ProgressSnapshot>, { wallet = true } = {}): void {
+  applying = true;
+  try {
+    if (wallet && typeof snapshot.wallet === 'number') writeWallet(snapshot.wallet);
+    if (snapshot.intro) writeRaw(INTRO.persistence.key, JSON.stringify({ version: snapshot.intro.version, status: snapshot.intro.status, at: Date.now() }));
+    if (snapshot.rides) writeRideProgress(snapshot.rides);
+    if (snapshot.rush) writeRushProgress(snapshot.rush);
+    if (snapshot.circuit) writeTimeAttackProgress(snapshot.circuit);
+    if (snapshot.street) writeStreetRaceProgress(snapshot.street);
+  } finally {
+    applying = false;
+  }
+}
+
+/** Forget every saved record: a signed-out browser starts over as a new guest. */
+export function clearSavedProgress(): void {
+  for (const key of [WALLET_KEY, INTRO.persistence.key, RIDES_KEY, PROGRESS_KEY, CIRCUIT_KEY, STREET_KEY]) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* storage unavailable: nothing to forget */
+    }
   }
 }

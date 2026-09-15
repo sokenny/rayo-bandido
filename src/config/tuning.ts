@@ -419,6 +419,20 @@ export const BODY = {
    * grabs and shoves the body back, where the upshift's cut lets it run forward.
    */
   downshiftScale: 0.85,
+
+  /* ------------------------------------------------------- lightning discharge
+   * Releasing E: the body squats onto its springs and bounces back once, as if the shot pulled
+   * the car down with it. Scaled by the shot's size (`game.ts`, from the charge it spent). */
+  /** Downward velocity a full shot injects (m/s). Peak drop is roughly this / `heaveFrequency`. */
+  dischargeHeaveImpulse: 0.32,
+  /** Nose-up recoil a full shot injects on the shift-pitch spring (rad/s). */
+  dischargePitchImpulse: 0.07,
+  /** Heave spring frequency (rad/s). */
+  heaveFrequency: 13,
+  /** Heave damping ratio. Low enough for the one rebound that reads as a discharge. */
+  heaveDamping: 0.42,
+  /** How far the body may travel vertically (m). */
+  heaveLimit: 0.04,
 };
 
 export const DRIFT = {
@@ -502,6 +516,12 @@ export const LIGHTNING = {
 
 export const TARGETS = {
   reward: 100,
+  /**
+   * What a kill pays while a RAYO RUSH run is on (countdown or clock). The police do not chase
+   * during a run, so the shot carries no risk and pays a fraction of the free-roam bounty. The
+   * run's SCORE is separate (`RUSH.scoring.disable`) and is not touched by this.
+   */
+  rushReward: 20,
   /** Patrol speed of electric cars (m/s). Slow and homogeneous. */
   patrolSpeed: 6,
   /** Distance to a waypoint at which the next waypoint is selected (m). */
@@ -644,8 +664,7 @@ export const NEAR_MISS = {
   fullSpeed: 59,
   /**
    * Seconds after a pass in which the next one counts as part of the same run of them. Used by
-   * presentation only - the HUD tally counts up in place inside this window (`ui/hud.ts`) and
-   * the reward chime climbs a step (`audio/oneShots.ts`). One number so the two never disagree.
+   * presentation only - the HUD tally counts up in place inside this window (`ui/hud.ts`).
    */
   chainWindow: 1.6,
   /** Award floor for any qualifying pass. */
@@ -712,6 +731,18 @@ export const CAMERA = {
   /** Shake amplitude on collision per m/s of impact (m). */
   shakeCollisionPerImpact: 0.02,
   shakeDecay: 6,
+  /**
+   * Lightning discharge tremble: a fast, small jitter (not the slow shake above) with a hair of
+   * lens roll, fading out in about a third of a second. Scaled by the shot's size.
+   */
+  tremble: {
+    /** Positional jitter at full strength (m). */
+    position: 0.03,
+    /** Lens roll at full strength (rad). ~0.6 deg. */
+    roll: 0.01,
+    /** Envelope decay rate (1/s). */
+    decay: 7,
+  },
 
   /**
    * Click-and-drag look (chase view only). Dragging on the canvas orbits the camera around
@@ -1143,19 +1174,38 @@ export const AUDIO = {
   tireVolume: 0.3,
   /** Per-car electric hover hum level. Deliberately near-silent. */
   humVolume: 0.05,
+  /**
+   * Rain hitting the car (`audio/rain.ts`, the recording at `rainSrc`) at full `ATMOSPHERE.rain.intensity`. Faint on purpose: it is
+   * ambience under the engine, noticed mostly when the car is idling.
+   */
+  rainVolume: 0.55,
+  /** The rain-on-the-car recording (served from public/), looped by `audio/rain.ts`. */
+  rainSrc: '/rain.mp3',
+  /**
+   * How much faster the rain loop plays at top speed (`REF_SPEED`): 0.6 is 1.6x flat out. A car
+   * driving into rain takes more drops per second, and harder ones.
+   */
+  rainSpeedRate: 0.6,
   /** Lightning zap one-shot level. */
   lightningVolume: 0.55,
+  /** The Rayo's recordings (served from public/), played by `audio/lightningCharge.ts`. */
+  lightningLoadSrc: '/rayo-load.mp3',
+  lightningReleaseSrc: '/rayo-release.mp3',
+  /** The charge-up while fire is held: under the engine, building. */
+  lightningLoadVolume: 0.7,
+  /** The discharge when the bolt leaves: the loudest thing in that moment. */
+  lightningReleaseVolume: 1.4,
   /** Electric-vehicle-out-of-service (power-down) one-shot level. */
   shutdownVolume: 0.5,
-  /** Near-miss whoosh level. Scaled down further by how good the pass was. */
-  nearMissVolume: 0.45,
-  /**
-   * The bright ping ON TOP of that whoosh: the whoosh is the physics, this is the reward. Held
-   * a little under the whoosh so a long run of passes never turns into a xylophone solo.
-   */
-  nearMissChimeVolume: 0.3,
   /** Nitro spool whoosh level. */
   nitroVolume: 0.4,
+  /** The nitro recording (served from public/), played on each boost by `audio/nitroBoost.ts`. */
+  nitroSrc: '/nitro.mp3',
+  /**
+   * Its level. Held to the end, its last 2 s fade out into the engine's own nitro roar; let go
+   * sooner and it is cut with a short fade.
+   */
+  nitroSampleVolume: 1.6,
   /** Race countdown beeps level. */
   countdownVolume: 0.35,
   /** Engine firing fundamental at idle (Hz) — a ~4-cylinder at ~850 rpm. */
@@ -1186,6 +1236,82 @@ export const AUDIO = {
   scannerVolume: 0.32,
   bustedVolume: 0.5,
   shieldVolume: 0.3,
+};
+
+/**
+ * Oncoming electric cars leaning on the horn (`audio/horns.ts`) when the player comes at them
+ * fast. The horn is a sound SOURCE on that car, not a sound on the player: it is panned and
+ * attenuated from where the car is, and doppler-shifted by how fast the two close and separate —
+ * so it rises as you bear down, drops the moment you are past, and a faster pass leaves it
+ * behind sooner. Presentation only.
+ */
+export const HORNS = {
+  /** The player's own speed (m/s) under which nobody bothers honking. ~80 km/h. */
+  minSpeed: 22,
+  /** Closing speed (m/s) under which nobody bothers honking. */
+  minClosing: 30,
+  /** Only a car at least this far ahead (m) is decided on: nearer, there is no time to honk. */
+  minAhead: 10,
+  /** How far ahead (m) a car starts watching the player come at it. */
+  maxAhead: 90,
+  /**
+   * Seconds until the two meet, inside which a car decides whether to honk. Close enough that a
+   * held horn is still sounding as you go by, which is where the doppler drop is heard.
+   */
+  decideWithin: 1.5,
+  /** How far off the player's line (m) a car still feels aimed at. About a lane and a half. */
+  maxLateral: 4,
+  /** Cos of the angle between the car's heading and the player's travel: below this it is oncoming. */
+  oncomingDot: -0.6,
+  /** The odds a car that qualifies actually honks. "Occasional." */
+  chance: 0.5,
+  /** Seconds after any honk before another car may start one. */
+  cooldown: 2.2,
+  /** Most horns sounding at once. */
+  maxVoices: 2,
+  /** Horn pitches (Hz): two notes a major third apart, the cheap dual-tone horn. */
+  lowHz: 415,
+  highHz: 523,
+  /** Speed of sound for the doppler (m/s). Real is 343; lower exaggerates the drop. */
+  soundSpeed: 343,
+  /** Full loudness within this (m). */
+  near: 10,
+  /** Silent past this (m). A horn carries. */
+  far: 170,
+  volume: 0.32,
+};
+
+/**
+ * The air a fast car tears past things with (`audio/passBy.ts` finds the passes,
+ * `audio/windGust.ts` voices them). Every car, bus, police car, pillar, post and street prop
+ * the player blows past close and quick gets a short doppler rush of wind on its side of the
+ * stereo field. Presentation only: it pays nothing and is not the near-miss rule — a scored
+ * pass sounds exactly like an unscored one, because the wind does not know about money.
+ */
+export const PASS_BY = {
+  /** Closing speed (m/s) under which nothing is heard. ~65 km/h. */
+  minSpeed: 18,
+  /** Closing speed (m/s) at which the gust is at full strength. Past the un-boosted top speed. */
+  fullSpeed: 62,
+  /** Body-to-body clearance (m) past which a pass is too wide to hear. */
+  maxClearance: 3.2,
+  /** The player's half width (m), taken off the centre-line distance to get a clearance. */
+  halfWidth: 0.95,
+  /**
+   * Seconds before the object is abreast that the gust is launched, so its swell PEAKS as the
+   * thing goes by instead of a frame after it is already behind the camera.
+   */
+  lead: 0.09,
+  /** Gusts weaker than this are not played: a wide slow pass is silence, not a whisper. */
+  minStrength: 0.05,
+  /** A static collider counts as a post only when its footprint is under this (m). Buildings are not passes. */
+  maxPostSize: 3,
+  /** One object cannot gust twice inside this many seconds (a car running alongside). */
+  repeatGap: 0.6,
+  /** Most gusts sounding at once. A colonnade at nitro speed is a flutter, not a wall of noise. */
+  maxVoices: 5,
+  /** Overall level. */
+  volume: 0.7,
 };
 
 /**
@@ -1608,9 +1734,14 @@ export const PASSENGER = {
     reofferSeconds: 10,
     /** A pin never goes up closer to the car than this (m): it is found, not handed over. */
     minDistanceFromPlayer: 70,
-    /** Straight-line trip length the planner aims for (m). Long enough to be a ride, short enough to stay a side thing. */
-    minTrip: 170,
-    maxTrip: 520,
+    /**
+     * Straight-line trip length the planner aims for (m): a ride across Bandido Metro, not round
+     * the block. On the grid the road is a third longer again, so 600 m is ~800 m of driving and
+     * the top end crosses the map. A world too small for this names its own range
+     * (`CitySpec.passengerTrip`; the Bay does).
+     */
+    minTrip: 600,
+    maxTrip: 1700,
   },
   /**
    * The pickup and drop-off zones. Like the RAYO RUSH marker, the painted ring IS the trigger:
@@ -1725,7 +1856,7 @@ export const PASSENGER = {
     baseFare: 120,
     farePerMetre: 0.6,
     /** The most a delighted passenger tips. Scales linearly from `tipFloor` mood to 100. */
-    maxTip: 300,
+    maxTip: 100,
     /** Mood at or under which the tip is nothing. */
     tipFloor: 35,
   },
@@ -1748,7 +1879,7 @@ export const PASSENGER = {
  */
 export const MOOGUL = {
   /** ¥. Charged once, on the confirming press. */
-  price: 400,
+  price: 250,
   /** El Búho's ring: the bay under the deck is 12 m wide, so it is tighter than a passenger stop. */
   marker: {
     promptRadius: 5.5,
@@ -2093,64 +2224,47 @@ export const STREET_RACE = {
    * `reward` is paid once, on the first win. Names are what the standings and the name tags show.
    */
   events: [
+    // ONE RING, THREE RACES: every event is La Curva (`src/world/curvaSpec.ts`), met on the car
+    // meet's lot. Winning one does not move the ring; it puts the next, harder field on it.
+    // One lap each: ~3.8 km, two highways, ~145 s for the hard tier (`curvaSpec.ts`, CURVA_LAPS).
     {
-      name: 'STREET RACE I',
+      name: 'LA CURVA I',
       difficulty: 'FÁCIL',
-      blurb: 'UN RIVAL, DOS VUELTAS AL CIRCUITO DEL MUELLE. ÉL TAMBIÉN ESTÁ APRENDIENDO.',
+      blurb: 'UN RIVAL. ARRIBA DE LA AUTOPISTA SOBRE EL CAR MEET, POR EL DECK DE THE STACK Y DE VUELTA. ÉL TAMBIÉN ESTÁ APRENDIENDO.',
       rivals: 1,
       ai: 'easy' as const,
       reward: 300,
       rivalNames: ['ROOKIE'],
-      course: 'quay' as const,
-      circuit: 'CIRCUITO DEL MUELLE',
-      laps: 2,
+      course: 'curva' as const,
+      circuit: 'CIRCUITO LA CURVA',
+      laps: 1,
       standalone: false,
     },
     {
-      name: 'STREET RACE II',
+      name: 'LA CURVA II',
       difficulty: 'MEDIA',
-      blurb: 'DOS RIVALES QUE CONOCEN LOS CALLEJONES. MANEJÁ LIMPIO Y TOMÁ LOS ATAJOS.',
+      blurb: 'DOS RIVALES QUE CONOCEN LA HORQUILLA. MANEJÁ LIMPIO Y ELEGÍ BIEN LA RUTA.',
       rivals: 2,
       ai: 'medium' as const,
       reward: 700,
       rivalNames: ['SHIN', 'ORO'],
-      course: 'quay' as const,
-      circuit: 'CIRCUITO DEL MUELLE',
-      laps: 2,
+      course: 'curva' as const,
+      circuit: 'CIRCUITO LA CURVA',
+      laps: 1,
       standalone: false,
     },
     {
-      name: 'STREET RACE III',
+      name: 'LA CURVA III',
       difficulty: 'DIFÍCIL',
       blurb: 'TRES DE LOS RÁPIDOS. SIN LUGAR, SIN PIEDAD, SIN SEGUNDAS OPORTUNIDADES.',
       rivals: 3,
       ai: 'hard' as const,
       reward: 1500,
-      rivalNames: ['KAITO', 'VELVET', 'GHOST'],
-      course: 'quay' as const,
-      circuit: 'CIRCUITO DEL MUELLE',
-      laps: 2,
-      standalone: false,
-    },
-    /**
-     * LA CURVA (`src/world/curvaSpec.ts`): not part of the series. Met at the car meet, open
-     * from the start, run on Bandido Metro through The Stack with three alternative routes.
-     * `standalone` keeps it out of `cleared`: its reward is paid on its own first win.
-     * Measured against itself only (the hard tier drives its one lap in ~145 s).
-     */
-    {
-      name: 'LA CURVA',
-      difficulty: 'DIFÍCIL',
-      blurb: 'TRES RIVALES. ARRIBA DE LA AUTOPISTA SOBRE EL CAR MEET, POR EL DECK DE THE STACK Y SU HORQUILLA, Y DE VUELTA.',
-      rivals: 3,
-      ai: 'hard' as const,
-      reward: 1200,
       rivalNames: ['LOBO', 'NEÓN', 'LA VIUDA'],
       course: 'curva' as const,
       circuit: 'CIRCUITO LA CURVA',
-      // One lap: ~3.8 km, two highways, ~145 s for the hard tier (`curvaSpec.ts`, CURVA_LAPS).
       laps: 1,
-      standalone: true,
+      standalone: false,
     },
   ],
   /**
@@ -2224,7 +2338,7 @@ export const FLAIR = {
    * Only while a RAYO RUSH run is actually being driven, and only for the local car. Free roam
    * is quiet. Flip this to say the lines everywhere.
    */
-  duringRushOnly: true,
+  duringRushOnly: false,
   /** Console trace of every qualification and every arbitration. Off, and stays off. */
   debug: false,
   /** The streak that links the two manoeuvres together. */
@@ -2241,7 +2355,7 @@ export const FLAIR = {
    * reporting. Ascending, one shot each per drift, re-armed when that drift ends.
    */
   driftMilestones: [
-    { seconds: 1.5, message: 'deCostado' },
+    { seconds: 1.5, message: 'aura' },
     { seconds: 3.5, message: 'conEstilo' },
     { seconds: 6, message: 'puraSeda' },
     { seconds: 10, message: 'laCalleEsTuya' },
@@ -2276,7 +2390,7 @@ export const FLAIR = {
     /** Seconds a special or peak line stays up. */
     specialSeconds: 1.8,
     /** Seconds the crash line stays up: a short punchline, not an announcement. */
-    crashSeconds: 1.3,
+    crashSeconds: 2.8,
     /** Minimum seconds between two celebrations STARTING. The crash line ignores it. */
     gapSeconds: 2.2,
     /** A candidate held through the gap is stale after this and is dropped, never queued. */
@@ -2384,6 +2498,81 @@ export const CROWD = {
   fullWithin: 90,
   animateWithin: 220,
   farStride: 3,
+};
+
+/**
+ * Street hustlers (`src/sim/hustlers.ts`): the trapitos who offer to watch a space nobody is
+ * parking in, and the windshield washers who work a red light. Client-local; nobody is solid.
+ * Distances in metres, speeds in m/s, times in seconds.
+ */
+export const HUSTLERS = {
+  /** A car higher than this above the street is on a deck or a ramp, not in front of them. */
+  streetY: 2.5,
+  /** The subtitle is cut once the car is this far from whoever is saying it. */
+  hearRadius: 45,
+  /** Encounters before the subtitle calls him by his nickname. */
+  nicknameAfter: 3,
+  /** Share of lines, once he knows you, that are "you again" lines. */
+  regularChance: 0.35,
+  /** How far one steps out of the way of a car coming at him. Presentation only. */
+  dodgeStep: 1.4,
+  /** Camera distance past which the cast is not drawn, and the rig past which it is not stepped. */
+  showWithin: 300,
+  trapito: {
+    /** Within this, a car under `slowSpeed` for `noticeSeconds` is a car looking for a space. */
+    noticeRadius: 16,
+    slowSpeed: 7,
+    noticeSeconds: 0.5,
+    /** Anywhere within this for `lingerSeconds`, whatever the speed, and he is on it too. */
+    lingerRadius: 11,
+    lingerSeconds: 2.5,
+    /** How long the whole call plays — turn, cloth, point, "come this way" — before he just waits. */
+    callSeconds: 5.5,
+    /** Past this the car has left him. */
+    leaveRadius: 24,
+    /** A follow-up is said only if the car leaves within this of the call, and then only this often. */
+    followWindow: 18,
+    followChance: 0.7,
+    grumbleSeconds: 2.4,
+    /** Nothing more from him for this long after a car has left. Generous: driving past twice is not a bit. */
+    cooldown: 45,
+    /** Share of calls to a clean car that are compliments instead. */
+    cleanChance: 0.4,
+  },
+  washer: {
+    /** What the clean costs. Taken once, on "yes", and never below zero. */
+    price: 2000,
+    /** His light's cycle. Long on red, which is why he works this corner. */
+    signal: { green: 14, amber: 3, red: 22 },
+    /** The stretch of lane he works round `approach`: behind and ahead along the car's heading, and either side. */
+    area: { behind: 9, ahead: 4, across: 4.5 },
+    /** Under this a car at the light is stopped. */
+    stopSpeed: 1.2,
+    /** Stopped in the area on red this long before he comes over. */
+    noticeSeconds: 0.8,
+    /** An offer stands this long before he gives up on it. */
+    offerSeconds: 7,
+    /** Red left, on top of what a whole clean takes, for an offer to go up at all. */
+    offerMargin: 1.5,
+    /** Faster than this, or further than `driveOffDistance` from where it stopped, and the car has driven on. */
+    driveOffSpeed: 2.5,
+    driveOffDistance: 1.5,
+    /** His pace between the kerb and the car, and the least and most a walk takes. */
+    walkSpeed: 3.2,
+    walkMin: 0.6,
+    walkMax: 2.2,
+    /** The bottle, then the squeegee across the glass `strokes` times. */
+    spraySeconds: 0.6,
+    wipeSeconds: 2.6,
+    strokes: 4,
+    thanksSeconds: 1.4,
+    refusedSeconds: 2.2,
+    /** Where he stands to clean, in the car's frame: this far ahead of its middle and out to his side. */
+    standForward: 1.2,
+    standSide: 1.2,
+    /** Nothing more from him for this long after. */
+    cooldown: 30,
+  },
 };
 
 /**

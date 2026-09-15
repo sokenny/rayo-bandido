@@ -1,5 +1,6 @@
 import type { World } from './arenaWorld';
 import { addCircuitGate } from './cityCircuitGate';
+import { addHustlers } from './hustlerSpots';
 import { addStreetSites } from './cityStreetSites';
 import { addStreetProps } from './streetProps';
 import { createCityWorld } from './cityWorld';
@@ -16,6 +17,6 @@ import { METRO_CIRCUIT_SITE, METRO_SPEC, METRO_STREET_SITES } from './metroSpec'
  * doors are where the metro hands the player over to them.
  */
 export function createOpenWorld(): World {
-  // The street props go on last: they keep clear of every door and ring laid before them.
-  return addStreetProps(addStreetSites(addCircuitGate(createCityWorld(METRO_SPEC), METRO_CIRCUIT_SITE), METRO_STREET_SITES));
+  // The street props go on last: they keep clear of every door, ring and hustler laid before them.
+  return addStreetProps(addHustlers(addStreetSites(addCircuitGate(createCityWorld(METRO_SPEC), METRO_CIRCUIT_SITE), METRO_STREET_SITES)));
 }

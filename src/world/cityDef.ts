@@ -103,6 +103,8 @@ export interface CitySpec {
   /** The free-world activities, in worlds that carry them. */
   rushSites: ActivitySiteSpec[];
   passengerStops: PassengerStopSpec[];
+  /** Straight-line trip range between those stops (m). Missing: `PASSENGER.offer`, Bandido Metro's. */
+  passengerTrip?: { minTrip: number; maxTrip: number };
   buhoSite: ActivitySiteSpec | null;
   /**
    * Car meets (`carMeet.ts`): blocks given up as lots, with the cars and people on them. Each

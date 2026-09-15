@@ -10,6 +10,7 @@ import { createFlairOverlay, type FlairOverlay } from './flairOverlay';
 import { createPassengerOverlay, type PassengerOverlay } from './passengerOverlay';
 import { createBuhoOverlay, type BuhoOverlay } from './buhoOverlay';
 import { createGarageOverlay, type GarageOverlay } from './garageOverlay';
+import { createHustlerOverlay, type HustlerOverlay } from './hustlerOverlay';
 import { NEAR_MISS } from '../config/tuning';
 import { createGateOverlay, type GateOverlay } from './gateOverlay';
 import { createPoliceOverlay, type PoliceOverlay } from './policeOverlay';
@@ -58,6 +59,13 @@ export interface HudOptions {
   /** Loco Mustang's garage. Defaults to off, the same way. */
   garage?: boolean;
   /**
+   * The trapitos' and washers' subtitles and the washer's yes/no (`src/ui/hustlerOverlay.ts`).
+   * Defaults to off; needs `onActivate` for the yes and `onDecline` for the no.
+   */
+  hustlers?: boolean;
+  /** Raise `PlayerCommand.decline` on the next tick: the washer's "No, gracias" tapped. */
+  onDecline?: () => void;
+  /**
    * The start line the circuit missions are entered on. Defaults to off: only the open world
    * carries the door, and the circuit itself must never offer a way into the circuit.
    */
@@ -68,6 +76,13 @@ export interface HudOptions {
   streetGate?: boolean;
   /** Crash damage (`src/sim/crashDamage.ts`): its AURA line needs the flair overlay even without a rush. */
   crashDamage?: boolean;
+  /** QUICK PLAY's RAYO RUSH alone: the run's card points at R and ESC rather than at free roam. */
+  quickRush?: boolean;
+  /**
+   * Where ESC goes from a race's results card: back into the open world when the race was
+   * entered at its door there, the menu when it was picked from QUICK PLAY.
+   */
+  escToCity?: boolean;
 }
 
 /** Seconds of play after which the controls card fades away. */
@@ -207,9 +222,8 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
     `<div class="rb-results__meta"></div>` +
     `<div class="rb-results__verdict"></div>` +
     `<div class="rb-results__mission"></div>` +
-    (mode === 'street'
-      ? `<div class="rb-results__keys"><span class="rb-key">R</span> reintentar <span class="rb-key">ESC</span> modo libre</div>`
-      : `<div class="rb-results__keys"><span class="rb-key">R</span> correr de nuevo <span class="rb-key">ESC</span> menú</div>`) +
+    `<div class="rb-results__keys"><span class="rb-key">R</span> ${mode === 'street' ? 'reintentar' : 'correr de nuevo'} ` +
+    `<span class="rb-key">ESC</span> ${options.escToCity ? 'modo libre' : 'menú'}</div>` +
     `</div>` +
     `<div class="rb-stack rb-stack--left">` +
     `<div class="rb-driftline">` +
@@ -251,7 +265,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
    * where the activity exists — `onActivate` is what says so, and it is the game that knows.
    */
   const rush: RushOverlay | null =
-    options.onActivate && options.rush !== false ? createRushOverlay({ onActivate: options.onActivate }) : null;
+    options.onActivate && options.rush !== false ? createRushOverlay({ onActivate: options.onActivate, quickPlay: options.quickRush }) : null;
   if (rush) hud.appendChild(rush.root);
   /** The passengers' furniture, the same way. */
   const passengers: PassengerOverlay | null =
@@ -263,6 +277,10 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
   /** Loco Mustang's, the same way. */
   const garage: GarageOverlay | null = options.onActivate && options.garage ? createGarageOverlay({ onActivate: options.onActivate }) : null;
   if (garage) hud.appendChild(garage.root);
+  /** The street hustlers', the same way. */
+  const hustlers: HustlerOverlay | null =
+    options.onActivate && options.onDecline && options.hustlers ? createHustlerOverlay({ onAccept: options.onActivate, onDecline: options.onDecline }) : null;
+  if (hustlers) hud.appendChild(hustlers.root);
   /** And the circuit missions' sign, which is one prompt and nothing else. */
   const gate: GateOverlay | null =
     options.onActivate && options.circuitGate ? createGateOverlay({ onActivate: options.onActivate }) : null;
@@ -433,8 +451,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
    * Put a scored pass on the glass, over the car. Inside `NEAR_MISS.chainWindow` of the previous
    * one it adds to the line already up - `NEAR MISS ×3  +¥140` - and re-punches it; outside that
    * window it starts a fresh tally. Either way it holds where it is until `NEAR_MISS_HOLD` runs
-   * out in `update`, instead of drifting anywhere. The chime in `audio/oneShots.ts` climbs on
-   * the same window, so the number and the note step together.
+   * out in `update`, instead of drifting anywhere.
    */
   function showNearMiss(points: number): void {
     const now = lastFrameTime;
@@ -573,7 +590,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       : `${place} · DERROTA`;
     const reward = r.reward > 0 ? ` · +¥${r.reward}` : '';
     resultsMissionEl.textContent = r.won
-      ? `${r.eventName} · ${place}${reward}${r.unlockedName ? ' · UN NUEVO RIVAL TE ESPERA EN LA CIUDAD' : ''}`
+      ? `${r.eventName} · ${place}${reward}${r.unlockedName ? ' · UN RIVAL MÁS DURO TE ESPERA EN LA CURVA' : ''}`
       : `${r.eventName} · REINTENTÁ O VOLVÉ AL MODO LIBRE`;
   }
 
@@ -668,6 +685,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       if (passengers && s.passenger) passengers.update(s.passenger);
       if (buho && s.buho) buho.update(s.buho);
       if (garage && s.garage) garage.update(s.garage);
+      if (hustlers && s.hustlers) hustlers.update(s.hustlers);
       if (gate && s.circuitGate) gate.update(s.circuitGate);
       if (street && s.streetGate) street.update(s.streetGate);
       if (police && s.police) police.update(s.police);
@@ -846,6 +864,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       passengers?.onEvent(e);
       buho?.onEvent(e);
       garage?.onEvent(e);
+      hustlers?.onEvent(e);
       police?.onEvent(e);
       if (e.type === 'nearMiss') {
         showNearMiss(e.points);
@@ -964,6 +983,7 @@ export function createHud(root: HTMLElement, mode: GameMode = 'test', multiplaye
       passengers?.dispose();
       buho?.dispose();
       garage?.dispose();
+      hustlers?.dispose();
       gate?.dispose();
       street?.dispose();
       root.classList.remove('is-cruise-clean');

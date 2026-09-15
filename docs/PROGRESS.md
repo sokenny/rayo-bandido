@@ -2891,3 +2891,47 @@ the road, not the skyline), and a blade 30 % of the time on the top panel of bot
 within 80 m. In the metro that is 16: 5 boards and 11 blades. `tests/screens.test.ts` +1: boards
 and blades both carry it, the right number of poster triangles, portrait, low enough, 80 m apart.
 Checked in the browser on a blade and on a board. 877 tests and the typecheck green.
+
+## Street hustlers: trapitos and windshield washers (2026-09-14)
+
+Juan asked for two groups of Argentine street NPCs in the open world. Eight of them, each working a
+few metres of pavement at a place a player already goes (`src/world/hustlerSpots.ts`, layered over
+the metro like the race doors): **trapitos** outside Loco Mustang's garage, at the car meet's gate,
+on the NEOGAS forecourt, by the EV chargers in the south-west neon district and beside the Bandido
+Grid start line; **washers** at av-s1 × st-w3 (under the west ramp, by VOLTA), av-central ×
+ring-south (the way into downtown) and av-e1 × st-south (OCTANO, industrial).
+
+**Rules** (`src/sim/hustlers.ts`, stepped last in `stepGame`, client-local). A trapito notices a car
+that slows or lingers, turns, waves his rag, points at a space and beckons, with one line (dents
+first, then sometimes a compliment or "you again"), and may say something when it drives off. No
+button, price or waiting, and a 45 s cooldown. A washer works one approach to his own light. **There
+was no traffic-light system in the game**, so each washer corner has a signal whose phase is a pure
+function of sim time (`signalAt`); the AI traffic does not obey it. Stopped in his lane on red, he
+offers: F (or the button) pays `HUSTLERS.washer.price` once, never below zero
+(`payStreetService`); G, the other button, the L3 click (new optional `PlayerCommand.decline`) or
+driving on is a no. An offer only goes up with enough red left for a whole clean, so the light never
+cuts one short; moving the car does, and he steps away at once. No offer while the police are
+chasing (he waves you on), while another activity has the car, or while another prompt owns the F
+key. One voice for the whole cast, never over a passenger, El Búho or Loco Mustang. The strip is cut
+when the car is out of earshot. Nicknames (El Chino, Pity, El Tucu…) show from the third encounter.
+Dialogue lives in `src/content/hustlers.ts`.
+
+**Picture.** One skinned crowd for all eight (`src/render/scene/hustlersVisual.ts`): new `trapito`
+and `washer` acts in `humanActs.ts`, driven by a per-frame cue. They cover reaction by mood, rag
+waves, pointing, beckoning, grumbles, offering, walking to the front corner, spraying, and wiping
+with the shoulders and reach following the blade. The thank-you salute and the step back reuse
+`react()` for the car, with a 1.4 m dodge; nobody is solid. New look options in `humanFigure.ts`:
+open hi-vis vest, shorts, track-pant stripe, fluorescent rag, squeegee, bottle. Signals are one
+merged mesh plus instanced lamps. Foam on the player's windscreen comes off blob by blob as the
+squeegee passes (`foamCleared`). Cost measured at a washer corner: +6 draw calls, +4.1k triangles
+(+1 call for the foam during a clean). The HUD adds a subtitle strip and two small buttons
+(`src/ui/hustlerOverlay.ts`).
+
+`tests/hustlers.test.ts` (19): content, light cycle, foam, trapito calls/cooldown/damage
+priority/nickname/earshot, washer offer/charge-once/below-zero/refusal/drive-off/police/key-busy,
+spots on pavement with washers' cars on their lanes, props kept off their patch, and the rig
+budget and finite poses through every phase. Checked in the browser (`__rb.hustlers.goTo(id)`,
+`accept()`, `decline()`): a full paid clean, a timed-out offer, and the cabin view of the foam.
+
+**Open questions for Juan.** The price is 2,000 as asked, against a ¥100 kill and a ¥250 Moogul,
+and the button shows it as `$2.000`. The AI traffic runs the washers' red lights.

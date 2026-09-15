@@ -11,6 +11,9 @@ import { slotCss } from '../core/playerColors';
  * prediction of how fast the car ahead is going, which is exactly the number the network is
  * least sure about; distance along the centreline is something both clients already agree on,
  * and in a race this short "18 m" is the more useful thing to know anyway.
+ *
+ * A RAYO RUSH room is ranked the same way on a different number: `progress` is each car's score
+ * and the gap is in points (`'points'`), because a run has no lap to be behind on.
  */
 export interface StandingsRow {
   name: string;
@@ -60,6 +63,14 @@ export function rankStandings(order: StandingsRow[], lapLength: number): void {
 /** Below this the two cars are effectively together and a number would just flicker. */
 const SAME_PLACE_M = 1;
 
+/** What the gap column counts: metres along the lap, or RAYO RUSH points. */
+export type StandingsUnit = 'distance' | 'points';
+
+function formatPoints(row: StandingsRow, index: number): string {
+  if (index === 0) return `${Math.round(row.progress).toLocaleString('en-US')} PTS`;
+  return row.gap < 1 ? 'TIED' : `-${Math.round(row.gap).toLocaleString('en-US')}`;
+}
+
 function formatGap(row: StandingsRow, index: number, lapLength: number): string {
   if (index === 0) return row.finished ? 'FINISHED' : 'LEADER';
   if (row.finished) return 'FINISHED';
@@ -71,7 +82,7 @@ function formatGap(row: StandingsRow, index: number, lapLength: number): string 
   return `+${Math.round(row.gap)} m`;
 }
 
-export function createStandings(root: HTMLElement, lapLength: number, maxRows: number): Standings {
+export function createStandings(root: HTMLElement, lapLength: number, maxRows: number, unit: StandingsUnit = 'distance'): Standings {
   const wrap = document.createElement('div');
   wrap.className = 'rb-standings';
   root.appendChild(wrap);
@@ -135,7 +146,7 @@ export function createStandings(root: HTMLElement, lapLength: number, maxRows: n
           row.el.classList.toggle('is-self', data.self);
           row.shownSelf = data.self;
         }
-        const gap = formatGap(data, i, lapLength);
+        const gap = unit === 'points' ? formatPoints(data, i) : formatGap(data, i, lapLength);
         if (gap !== row.shownGap) {
           row.gap.textContent = gap;
           row.shownGap = gap;

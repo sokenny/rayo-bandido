@@ -1,4 +1,4 @@
-import type { PassengerPreferenceKind, PassengerReaction, PassengerStop } from '../core/types';
+import type { PassengerPreferenceKind, PassengerReaction, PassengerStop, PassengerTripRange } from '../core/types';
 import { PASSENGER } from '../config/tuning';
 
 /**
@@ -23,7 +23,9 @@ import { PASSENGER } from '../config/tuning';
  * their collision line fails a test rather than a ride.
  *
  * VOICE. Subtitles: one or two short sentences, sentence case, read at a glance while driving.
- * The player never answers — nothing here is a question that waits for one.
+ * The player never answers — nothing here is a question that waits for one. The lines are in
+ * rioplatense Spanish (vos, the swearing included) and cheeky with it, the way El Búho's are
+ * (`src/content/buho.ts`); the chrome round them — names, taglines, the rules — stays English.
  */
 
 export interface PassengerPreference {
@@ -122,9 +124,14 @@ export function resolveLine(text: string, destination: string): string {
 /**
  * Everything that must hold for the catalogue to be playable, as a list of complaints. Empty
  * means fine. Run at test time (`tests/passenger.test.ts`), so a bad entry fails a test rather
- * than a ride. `stops` is optional: without it the location checks are skipped.
+ * than a ride. `stops` is optional: without it the location checks are skipped. `range` is the
+ * world's trip range (`ArenaLayout.passengerTrip`), `PASSENGER.offer` when it names none.
  */
-export function validatePassengerCatalog(catalog: readonly PassengerDef[], stops?: readonly PassengerStop[] | null): string[] {
+export function validatePassengerCatalog(
+  catalog: readonly PassengerDef[],
+  stops?: readonly PassengerStop[] | null,
+  range: PassengerTripRange = PASSENGER.offer,
+): string[] {
   const problems: string[] = [];
   const ids = new Set<string>();
   const check = (ok: boolean, message: string): void => {
@@ -193,10 +200,10 @@ export function validatePassengerCatalog(catalog: readonly PassengerDef[], stops
         for (const b of stops) {
           if (b === a || !b.tags.some((t) => p.destinationTags.includes(t))) continue;
           const d = Math.hypot(b.x - a.x, b.z - a.z);
-          if (d >= PASSENGER.offer.minTrip && d <= PASSENGER.offer.maxTrip) trips++;
+          if (d >= range.minTrip && d <= range.maxTrip) trips++;
         }
       }
-      check(trips > 0, `${who}: no pickup/destination pair between ${PASSENGER.offer.minTrip} and ${PASSENGER.offer.maxTrip} m apart`);
+      check(trips > 0, `${who}: no pickup/destination pair between ${range.minTrip} and ${range.maxTrip} m apart`);
     }
   }
   return problems;
@@ -225,22 +232,22 @@ export const PASSENGERS: readonly PassengerDef[] = [
       { kind: 'drift', weight: 1 },
     ],
     openings: [
-      "I'm live. Give them something worth watching — just keep the car in one piece.",
-      'Chat says the last driver was boring. Prove them wrong, yeah?',
-      'DeadAir, three hundred viewers, one back seat. No pressure.',
+      'Estoy en vivo, así que no me hagas quedar como una boluda. Dale gas, pero el auto entero.',
+      'El chat dice que el último chofer era un plomo. Demostrales que se equivocan, ¿dale?',
+      'DeadAir, trescientos mirando y yo en tu asiento de atrás. Cero presión, bombón.',
     ],
-    brief: 'Take me to {destination}. Fast, sideways, and no bodywork on the road. Chat can tell the difference.',
+    brief: 'Llevame a {destination}. Rápido, de costado y sin dejar chapa en el asfalto. El chat se da cuenta.',
     reactions: {
-      goodSpeed: ['Okay, THIS is a segment.', 'Chat is losing it. Keep going.', 'Speed. Finally.'],
-      tooSlow: ['We are… cruising. Chat is leaving.', 'Is this the scenic route or the school run?', 'You know the pedal on the right, yeah?'],
-      driftGood: ['Clip that. CLIP THAT.', 'Sideways! That one is going on the highlight reel.', 'Okay, you can drive.'],
-      collision: ["That's a crash, not content.", 'Clean, I said. Chat is laughing at us.', 'Ow. Style points do not survive that.'],
+      goodSpeed: ['¡Esto sí es contenido, papá!', 'El chat está re manija. No aflojes.', 'Por fin alguien que sabe dónde queda el acelerador.'],
+      tooSlow: ['¿Esto es un paseo de jubilados? El chat se está yendo.', '¿Vamos por la panorámica o me llevás al colegio?', 'El pedal de la derecha, amor. Pisalo, no lo acaricies.'],
+      driftGood: ['¡Clipeá eso! ¡CLIPEÁ ESO!', '¡De costado, la puta madre! Eso va derecho al resumen.', 'Mirá vos. Con eso te ganaste mi número. Bah, el del chat.'],
+      collision: ['Eso es un choque, no contenido, pelotudo.', 'Limpio, te dije. El chat se está cagando de risa.', 'Auch. Los puntos de estilo no sobreviven a eso.'],
     },
-    arrival: "This is it. Park it somewhere the camera can see the car.",
+    arrival: 'Es acá. Estacioná donde la cámara lo vea, que quiero que se luzca.',
     farewell: {
-      high: ['Best segment all week. Chat wants your handle.', 'That was a show. Tip is from the viewers, honestly.'],
-      medium: ['Decent stream. Could use more sideways next time.', 'Fine. A few good bits. Chat gives it a six.'],
-      low: ['Dead air, the whole way. Ironic.', 'I have seen more excitement in a lift.'],
+      high: ['El mejor stream de la semana. El chat pide tu Instagram, y yo también.', 'Eso fue un show. La propina la juntó el chat, posta.'],
+      medium: ['Stream decente. La próxima, más de costado y menos de abuela.', 'Zafa. Un par de momentos buenos. El chat te pone un seis.'],
+      low: ['Aire muerto todo el viaje. Qué ironía, ¿no?', 'He visto más emoción en un ascensor, boludo.'],
     },
   },
   {
@@ -258,22 +265,22 @@ export const PASSENGERS: readonly PassengerDef[] = [
       { kind: 'noDrift', weight: 1 },
     ],
     openings: [
-      "I've spent twelve hours fixing machines. Please don't make me climb out of another broken one.",
-      "Home. Slowly. If I fall asleep, that's a compliment.",
-      "Twelve hours, four fried inverters, one me. Just get me home.",
+      'Doce horas arreglando máquinas. No me hagas bajar de otra rota, te lo pido por favor.',
+      'A casa. Despacito. Si me duermo, tomalo como un elogio.',
+      'Doce horas, cuatro inversores fritos y una sola yo. Llevame a casa y no me hables.',
     ],
-    brief: 'Take me to {destination}. Keep it under eighty and keep the tyres pointing where we are going. No sliding.',
+    brief: 'Llevame a {destination}. Por debajo de ochenta y con las ruedas apuntando para donde vamos. Nada de derrapar.',
     reactions: {
-      goodSpeed: ['This is nice. Keep doing this.', "See, this is how it's done. I could sleep.", 'Smooth. Thank you.'],
-      tooFast: ['Slow down. I did not survive a shift to die in a hatchback.', 'Eighty. The number was eighty.', 'Too fast. My coffee agrees.'],
-      driftBad: ['No. No sliding. I said that.', 'The car is sideways. Why is the car sideways?', 'That is exactly the thing I asked you not to do.'],
-      collision: ['Wonderful. Now something else is broken.', 'I fix machines for a living. I am not fixing this one.', 'Was that necessary?'],
+      goodSpeed: ['Esto está bien. Seguí así y te presento a mi hermana.', 'Así se maneja, carajo. Me podría dormir.', 'Suavecito. Gracias, en serio.'],
+      tooFast: ['Frená. No sobreviví a un turno doble para morirme en un hatchback.', 'Ochenta. Te dije ochenta, no ciento ochenta.', 'Muy rápido. Mi café y yo te odiamos.'],
+      driftBad: ['No. Nada de derrapar. Te lo dije, la concha de la lora.', '¿Por qué el auto va de costado? ¿Por qué el auto va de costado?', 'Justo lo único que te pedí que no hicieras. Genio.'],
+      collision: ['Espectacular. Otra cosa rota. Justo lo que necesitaba.', 'Arreglo máquinas para vivir. Esta no te la arreglo ni en pedo.', '¿Era necesario, pedazo de animal?'],
     },
-    arrival: "That's my street. Anywhere here is fine. Gently.",
+    arrival: 'Esa es mi calle. Dejame por acá. Despacio, ¿eh?',
     farewell: {
-      high: ['I nearly fell asleep. Highest praise I have. Here.', 'Smooth all the way. You may drive me again.'],
-      medium: ['Got here. Mostly in one piece. Thanks.', 'Adequate. That is not sarcasm. I am too tired for sarcasm.'],
-      low: ['Next time I take the bus. The bus is slower and it has never drifted.', 'I asked for one thing.'],
+      high: ['Casi me duermo. Es lo mejor que te puedo decir. Tomá.', 'Suave todo el camino. Tenés permiso para volver a llevarme.'],
+      medium: ['Llegamos. Casi enteros. Gracias.', 'Aceptable. No es sarcasmo. Estoy demasiado cansada para el sarcasmo.'],
+      low: ['La próxima me tomo el bondi. Es más lento, pero nunca derrapó.', 'Te pedí una sola cosa. Una. Andá a cagar.'],
     },
   },
   {
@@ -291,21 +298,21 @@ export const PASSENGERS: readonly PassengerDef[] = [
       { kind: 'noDrift', weight: 1 },
     ],
     openings: [
-      'Corporate EVs? Shut them down if you get a clean shot. But keep it steady — this equipment is worth more than my apartment.',
-      'Static. Do not ask what is in the case. Do ask if you see one of their cars.',
-      "Every one of those EVs is a camera on wheels. I'd take it kindly if fewer of them were working.",
+      'EVs corporativos: si tenés tiro limpio, bajalos. Pero manejá derecho, que lo que llevo vale más que mi departamento.',
+      'Me dicen Static. No preguntes qué hay en la valija. Sí avisame si ves uno de sus autos.',
+      'Cada EV de esos es un buchón con ruedas. Cuantos menos anden, mejor dormimos todos.',
     ],
-    brief: 'Take me to {destination}. Rayo any corporate EV you get a clean line on. No sliding — the case does not like sideways.',
+    brief: 'Llevame a {destination}. Fundí cualquier EV corporativo que tengas a tiro. Y nada de derrapar: la valija no va de costado.',
     reactions: {
-      rayoGood: ['Ha! Lights out. One less camera.', "Clean hit. Somebody's dashboard just went very quiet.", 'That is what I am talking about.'],
-      driftBad: ['Steady! The case! Do you know what is in the case?', 'Sideways is bad for the merchandise.', 'Every slide is a component I cannot sell.'],
-      collision: ['Not like that! The bolt, not the bumper!', 'That was a crash, and crashes have witnesses.', 'The case. Think of the case.'],
+      rayoGood: ['¡Ja! Apagado. Un buchón menos.', 'Tiro limpio. A algún garca se le acaba de apagar el tablero.', '¡Eso, hermano! ¡Eso es lo que quiero ver!'],
+      driftBad: ['¡Derecho! ¡La valija! ¿Vos sabés lo que hay en la valija?', 'De costado es malo para la mercadería, ¿entendés?', 'Cada derrape es un componente que no voy a poder vender. Me estás fundiendo.'],
+      collision: ['¡Así no! ¡Con el rayo, no con el paragolpes!', 'Eso fue un choque, y los choques tienen testigos. Y la yuta.', 'La valija. Pensá en la valija, por el amor de Dios.'],
     },
-    arrival: 'This is the spot. Pull in, nice and quiet.',
+    arrival: 'Es acá. Metete despacito y en silencio, como si no existiéramos.',
     farewell: {
-      high: ['Steady hands and a good aim. You are on my list. The good list.', 'Two fewer cameras on the streets and not a scratch on the case. Here.'],
-      medium: ['Case is intact. Could have used a bit more darkness on the way.', 'Fine. Not memorable. That is a compliment in my line.'],
-      low: ['The case is rattling. If anything is broken, I know your plate.', 'I said steady. I said clean.'],
+      high: ['Pulso firme y buena puntería. Estás en mi lista. La buena.', 'Dos cámaras menos en la calle y la valija sin un rayón. Tomá, te lo ganaste.'],
+      medium: ['La valija está entera. Faltó un poco más de oscuridad en el camino.', 'Bien. Nada memorable. En mi rubro, eso es un elogio.'],
+      low: ['La valija hace ruido. Si algo se rompió, tengo tu patente.', 'Te dije derecho. Te dije limpio. Rezá que no se haya roto nada.'],
     },
   },
 ];

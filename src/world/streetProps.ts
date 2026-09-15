@@ -148,6 +148,8 @@ export function placeStreetProps(world: World): StreetPropDef[] {
   if (layout.buhoSite) markers.push({ x: layout.buhoSite.x, z: layout.buhoSite.z, r: P.markerClear });
   if (layout.garageSite) markers.push({ x: layout.garageSite.x, z: layout.garageSite.z, r: P.markerClear });
   for (const st of plan.busStops ?? []) markers.push({ x: st.x, z: st.z, r: 12 });
+  // A trapito's patch and a washer's corner, with his light on it: nothing to trip over while he works.
+  for (const h of layout.hustlerSpots ?? []) markers.push({ x: h.x, z: h.z, r: 7 });
 
   const placed: StreetPropDef[] = [];
   const propCells = new Map<number, number[]>();

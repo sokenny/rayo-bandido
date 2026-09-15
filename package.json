@@ -24,10 +24,13 @@
     "perf:check": "npm run build && node scripts/perf-probe.mjs --check"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1132.0",
+    "pg": "^8.23.0",
     "three": "^0.170.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/three": "^0.170.0",
     "@types/ws": "^8.18.1",
     "puppeteer-core": "^23.11.1",

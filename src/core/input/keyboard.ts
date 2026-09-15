@@ -32,6 +32,7 @@ export function createPlayerCommand(): PlayerCommand {
     shiftDown: false,
     transmission: false,
     activate: false,
+    decline: false,
   };
 }
 
@@ -46,6 +47,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
   let shiftDownLatched = false;
   let transmissionLatched = false;
   let activateLatched = false;
+  let declineLatched = false;
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) {
@@ -60,6 +62,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
     if (e.code === 'KeyZ') shiftDownLatched = true;
     if (e.code === 'KeyT') transmissionLatched = true;
     if (e.code === 'KeyF') activateLatched = true;
+    if (e.code === 'KeyG') declineLatched = true;
     if (isGameKey(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -121,6 +124,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       out.shiftDown = shiftDownLatched;
       out.transmission = transmissionLatched;
       out.activate = activateLatched;
+      out.decline = declineLatched;
       restartLatched = false;
       cruiseLatched = false;
       povLatched = false;
@@ -128,6 +132,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): Inpu
       shiftDownLatched = false;
       transmissionLatched = false;
       activateLatched = false;
+      declineLatched = false;
     },
     dispose() {
       target.removeEventListener('keydown', onKeyDown as EventListener);

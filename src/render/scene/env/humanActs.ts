@@ -1,4 +1,5 @@
-import { CROWD } from '../../../config/tuning';
+import { CROWD, HUSTLERS } from '../../../config/tuning';
+import type { HustlerMood, HustlerPhase } from '../../../core/types';
 import type { HumanPose } from './humanFigure';
 
 /**
@@ -51,7 +52,14 @@ export type HumanAct =
   /** Leans on the bonnet of the car at `focus`, points at something, straightens up. */
   | 'inspect'
   /** Flags down the car coming for them. */
-  | 'hail';
+  | 'hail'
+  /**
+   * A trapito: waits with his rag, and — cued by the rules (`src/sim/hustlers.ts`) — calls a car
+   * into a space, points at it, waves it in, and grumbles when it drives off. Needs `Actor.cue`.
+   */
+  | 'trapito'
+  /** A windshield washer: watches his light, offers, walks to the car, cleans, walks back. Needs `Actor.cue`. */
+  | 'washer';
 
 export interface ActorSpec {
   act: HumanAct;
@@ -76,6 +84,46 @@ export interface CrowdSubject {
   /** m/s, unsigned. */
   speed: number;
   drifting: boolean;
+}
+
+/**
+ * What a street hustler is doing this frame, written onto his actor by whoever drives him
+ * (`scene/hustlersVisual.ts`) from the rules' state. Everything is in the actor's own space — the
+ * space his `x`/`z` are in — and `t` is seconds into `phase`.
+ */
+export interface HustlerCue {
+  phase: HustlerPhase;
+  t: number;
+  mood: HustlerMood;
+  /** The player's car. */
+  carX: number;
+  carZ: number;
+  /** A trapito's imaginary space at the kerb. */
+  spaceX: number;
+  spaceZ: number;
+  /** A walk to or from a car: where it starts and ends, and 0..1 along it. */
+  fromX: number;
+  fromZ: number;
+  toX: number;
+  toZ: number;
+  walk: number;
+  /** A clean: the middle of the windscreen, the unit direction across it (the car's right), and the squeegee on it. */
+  glassX: number;
+  glassZ: number;
+  acrossX: number;
+  acrossZ: number;
+  u: number;
+  v: number;
+  wiping: number;
+  /** A washer's light is red. */
+  red: boolean;
+}
+
+export function createHustlerCue(): HustlerCue {
+  return {
+    phase: 'idle', t: 0, mood: 'plain', carX: 0, carZ: 0, spaceX: 0, spaceZ: 0, fromX: 0, fromZ: 0, toX: 0, toZ: 0,
+    walk: 0, glassX: 0, glassZ: 0, acrossX: 1, acrossZ: 0, u: 0, v: 0, wiping: 0, red: false,
+  };
 }
 
 /** One person's joint angles and offsets. See the file's conventions. */
@@ -135,6 +183,8 @@ export interface Actor {
   gait: number;
   stride: number;
   facing: number;
+  /** A street hustler's cue, or null for everyone else. Written from outside every frame. */
+  cue: HustlerCue | null;
 }
 
 export function createActor(spec: ActorSpec): Actor {
@@ -156,6 +206,7 @@ export function createActor(spec: ActorSpec): Actor {
     gait: 0,
     stride: 0,
     facing: toward,
+    cue: spec.act === 'trapito' || spec.act === 'washer' ? createHustlerCue() : null,
   };
 }
 
@@ -194,6 +245,12 @@ export function stepActor(a: Actor, time: number, dt: number, subject: CrowdSubj
       break;
     case 'hail':
       hail(a, t, out);
+      break;
+    case 'trapito':
+      trapito(a, t, out);
+      break;
+    case 'washer':
+      washer(a, t, out);
       break;
     default:
       break;
@@ -490,10 +547,226 @@ function hail(a: Actor, t: number, p: BodyPose): void {
   p.lean -= 0.04 * w;
 }
 
+/* ================================================================== the hustlers */
+
+/** Turn the whole body towards a point by `w` (the rest of the way stays the act's), and step up to `step` metres at it. */
+function faceAndStep(a: Actor, p: BodyPose, x: number, z: number, w: number, step: number): void {
+  const rel = toward(a, p, x, z);
+  p.turn += clamp(rel, -2.9, 2.9) * w;
+  if (step > 0) {
+    const dx = x - (a.spec.x + p.x);
+    const dz = z - (a.spec.z + p.z);
+    const d = Math.hypot(dx, dz);
+    if (d > 0.01) {
+      const k = Math.min(step, Math.max(0, d - 2.5)) / d;
+      p.x += dx * k;
+      p.z += dz * k;
+    }
+  }
+}
+
+/** Walking from `from` to `to`, 0..1 along: where they are, facing the way, legs and free arm swinging. */
+function walkAlong(a: Actor, c: HustlerCue, p: BodyPose, fromHome: boolean): void {
+  const x = c.fromX + (c.toX - c.fromX) * c.walk;
+  const z = c.fromZ + (c.toZ - c.fromZ) * c.walk;
+  p.x = x - a.spec.x;
+  p.z = z - a.spec.z;
+  const len = Math.hypot(c.toX - c.fromX, c.toZ - c.fromZ);
+  const moving = len > 0.2 && c.walk < 1 ? 1 : 0;
+  if (moving) {
+    p.turn = wrap(bearing(c.fromX, c.fromZ, c.toX, c.toZ) - a.spec.heading);
+    const swing = Math.sin(c.walk * len * 2.6) * 0.5;
+    p.legL = swing;
+    p.legR = -swing;
+    p.lift += -0.02 + 0.035 * Math.abs(Math.cos(c.walk * len * 2.6));
+    p.lean += 0.12;
+    p.tilt = 0;
+    arm(p, false, -swing * 0.7, 0.08, 0.35, 0, 1);
+  } else if (!fromHome) {
+    p.turn = wrap(bearing(a.spec.x + p.x, a.spec.z + p.z, c.carX, c.carZ) - a.spec.heading);
+  }
+}
+
+/** A shrug with the palms up and a shake of the head: "bueno, yo ofrecí". */
+function shrug(p: BodyPose, t: number, w: number): void {
+  arm(p, false, 0.35, 0.45, 1.35, 0, w);
+  arm(p, true, 0.35, 0.45, 1.35, 0, w);
+  p.lift += 0.02 * w;
+  p.look += 0.28 * Math.sin(t * 9) * w;
+  p.nod += -0.06 * w;
+}
+
+function trapito(a: Actor, t: number, p: BodyPose): void {
+  const s = a.spec.seed * 13;
+  const c = a.cue;
+  p.item = 1;
+  if (!c || c.phase === 'idle') {
+    // The rag hanging from the fist, swinging a little; now and then a lazy flick of it at the street.
+    arm(p, true, 0.08 + 0.05 * Math.sin(t * 1.3), 0.14, 0.3, 0, 1);
+    arm(p, false, 0.15, 0.02, 0.7, 0.45, 1);
+    const flick = spell(t, 6.5, 0.3, s + 30);
+    arm(p, true, 1.05 + 0.25 * Math.sin(t * 6), 0.35, 0.8 + 0.3 * Math.sin(t * 6 + 1), 0, flick * 0.7);
+    return;
+  }
+  const k = c.t;
+  if (c.phase === 'grumble') {
+    // Turns back to his spot, flicks the rag down at the car that left, shrugs.
+    const off = ease(k / 1.2);
+    faceAndStep(a, p, c.carX, c.carZ, 0.6 * (1 - off), 0);
+    const flick = envelope(k, 0, 0.25, 0.6, 0.9);
+    arm(p, true, 0.9 - 0.8 * ease(k / 0.7), 0.3, 0.6, 0, flick);
+    shrug(p, t, envelope(k, 0.7, 1.0, 2.0, 2.4));
+    return;
+  }
+
+  // Calling, or waiting on the car to take the space: face it, a step or so off his patch towards it.
+  const turnIn = c.phase === 'call' ? ease(k / 0.6) : 1;
+  const step = (c.phase === 'call' ? ease((k - 3.5) / 1.2) * 0.9 : 0.9);
+  faceAndStep(a, p, c.carX, c.carZ, 0.85 * turnIn, step);
+
+  if (c.phase === 'wait') {
+    // Talking the car in: one hand going, the rag pointed at the space now and then.
+    const talking = spell(t, 2.4, 0.6, s + 31);
+    arm(p, false, 0.55 + 0.25 * Math.sin(t * 2.3), 0.15, 1.1 + 0.45 * Math.sin(t * 3.3 + 1.1), 0.25, talking);
+    const point = spell(t, 3.1, 0.4, s + 32);
+    const relSpace = toward(a, p, c.spaceX, c.spaceZ);
+    p.twist += clamp(relSpace, -0.8, 0.8) * 0.6 * point;
+    arm(p, true, 1.4, 0.1 + clamp(relSpace, 0, 0.9) * 0.6, 0.12, clamp(-relSpace, 0, 0.9) * 0.5, point);
+    arm(p, true, 0.1, 0.14, 0.3, 0, 1 - point);
+    return;
+  }
+
+  // THE CALL, beat by beat.
+  const startle = envelope(k, 0, 0.3, 1.0, 1.4);
+  if (c.mood === 'damaged') {
+    // Both hands to his head at the state of it.
+    arm(p, false, 2.1, 0.55, 2.2, 0.5, startle);
+    arm(p, true, 2.1, 0.55, 2.2, 0.5, startle);
+    p.lean -= 0.12 * startle;
+  } else if (c.mood === 'clean') {
+    // Arms out: "apa, mirá esa nave".
+    arm(p, false, 0.45, 1.1, 0.35, 0, startle);
+    arm(p, true, 0.45, 1.1, 0.35, 0, startle);
+    p.lean -= 0.08 * startle;
+    p.nod -= 0.1 * startle;
+  } else {
+    // One arm up to get the driver's eye.
+    arm(p, true, 0.3, 2.6, 0.3, 0, startle);
+  }
+  // The rag waved over his head.
+  const wave = envelope(k, 1.1, 1.4, 2.6, 2.9);
+  const flap = Math.sin(t * 8);
+  arm(p, true, 0.25, 2.45 + 0.3 * flap, 0.45 + 0.35 * Math.sin(t * 8 + 0.8), 0, wave);
+  // Pointing at the space, shoulders round to it.
+  const point = envelope(k, 2.7, 3.0, 3.9, 4.2);
+  const relSpace = toward(a, p, c.spaceX, c.spaceZ);
+  p.twist += clamp(relSpace, -0.9, 0.9) * 0.7 * point;
+  p.look += (clamp(relSpace, -1.1, 1.1) - p.look) * point;
+  arm(p, true, 1.45, 0.1 + clamp(relSpace, 0, 0.9) * 0.7, 0.1, clamp(-relSpace, 0, 0.9) * 0.6, point);
+  // "Dale, dale, seguí": the free hand beckoning the car on, the rag still out at the space.
+  const beckon = envelope(k, 4.0, 4.3, 6, 7);
+  arm(p, false, 0.85, 0.25, 1.15 + 0.6 * Math.sin(t * 7.5), 0.15, beckon);
+  arm(p, true, 1.2, 0.35, 0.3, 0, beckon * 0.7);
+}
+
+function washer(a: Actor, t: number, p: BodyPose): void {
+  const s = a.spec.seed * 13;
+  const c = a.cue;
+  p.item = 1;
+  // The squeegee down by his leg, the bottle in the other hand. Everything below starts from here.
+  arm(p, true, 0.12, 0.1, 0.35, 0, 1);
+  arm(p, false, 0.15, 0.1, 0.45, 0, 1);
+  if (!c || c.phase === 'idle') {
+    // On the balls of his feet while his light is red, tapping the squeegee on his palm; loose otherwise.
+    const tap = c && c.red ? 1 : spell(t, 5, 0.3, s + 40);
+    arm(p, true, 0.75, -0.05, 1.2 + 0.18 * Math.max(0, Math.sin(t * 6)), 0.55, tap);
+    arm(p, false, 0.55, -0.05, 1.2, 0.7, tap);
+    if (c && c.red) p.lift += 0.012 * Math.abs(Math.sin(t * 3.2));
+    return;
+  }
+  const k = c.t;
+  switch (c.phase) {
+    case 'offer': {
+      // A step off the kerb at the car, squeegee up, the other hand out: "¿te lo limpio?"
+      faceAndStep(a, p, c.carX, c.carZ, ease(k / 0.4), 0.9 * ease(k / 0.6));
+      const up = ease(k / 0.35);
+      arm(p, true, 2.0 + 0.12 * Math.sin(t * 5), 0.25, 0.65, 0, up);
+      arm(p, false, 0.75, 0.2, 0.9 + 0.2 * Math.sin(t * 3), 0, up);
+      p.nod -= 0.05 * up;
+      return;
+    }
+    case 'approach':
+    case 'retreat':
+      walkAlong(a, c, p, c.phase === 'retreat');
+      if (c.phase === 'retreat' && c.walk >= 1) shrug(p, t, 0);
+      return;
+    case 'clean': {
+      p.x = c.toX - a.spec.x;
+      p.z = c.toZ - a.spec.z;
+      p.turn = wrap(bearing(c.toX, c.toZ, c.glassX, c.glassZ) - a.spec.heading);
+      p.legL = 0.18;
+      p.legR = -0.05;
+      if (c.wiping < 0.5) {
+        // The bottle up and pumping at the glass.
+        p.lean += 0.22;
+        arm(p, false, 1.35, 0.1, 0.35 + 0.18 * Math.max(0, Math.sin(t * 16)), 0.2, 1);
+        arm(p, true, 0.6, 0.1, 0.9, 0.2, 1);
+        p.nod += 0.2;
+        return;
+      }
+      // Wiping: the squeegee drawn across the glass, and the body going with it — shoulders round
+      // to where the blade is, the reach higher on the top strokes, weight over the bonnet.
+      const tx = c.glassX + c.acrossX * (c.u - 0.5) * 1.05;
+      const tz = c.glassZ + c.acrossZ * (c.u - 0.5) * 1.05;
+      const rel = toward(a, p, tx, tz);
+      p.lean += 0.42 + 0.1 * c.v;
+      p.twist += clamp(rel, -0.9, 0.9) * 0.65;
+      p.look += (clamp(rel * 0.5, -0.6, 0.6) - p.look) * 0.8;
+      p.nod += 0.28;
+      p.x += c.acrossX * (c.u - 0.5) * 0.18;
+      p.z += c.acrossZ * (c.u - 0.5) * 0.18;
+      const reach = 1.45 - 0.35 * c.v;
+      arm(p, true, reach, 0.1 + clamp(rel, 0, 0.9) * 0.9, 0.35, clamp(-rel, 0, 0.9) * 0.9, 1);
+      // The other hand braced on the bonnet, bottle and all.
+      arm(p, false, 1.0, 0.25, 0.25, 0.1, 1);
+      return;
+    }
+    case 'thanks': {
+      p.x = c.toX - a.spec.x;
+      p.z = c.toZ - a.spec.z;
+      p.turn = wrap(bearing(c.toX, c.toZ, c.glassX, c.glassZ) - a.spec.heading);
+      // Squeegee up like a salute, a nod, done.
+      const up = envelope(k, 0, 0.25, 1.1, 1.4);
+      arm(p, true, 2.2, 0.35, 1.0, 0, up);
+      p.nod -= 0.12 * up;
+      p.lean -= 0.05 * up;
+      return;
+    }
+    case 'refused':
+      faceAndStep(a, p, c.carX, c.carZ, 0.7, 0);
+      shrug(p, t, envelope(k, 0, 0.3, 1.6, 2.1));
+      return;
+    case 'waveOff': {
+      // Both arms sweeping the car on, a step back from it.
+      faceAndStep(a, p, c.carX, c.carZ, 0.85, 0);
+      const go = envelope(k, 0, 0.2, 1.7, 2.1);
+      const sweep = Math.sin(t * 9);
+      arm(p, false, 0.8 + 0.5 * sweep, 0.35, 0.7 - 0.4 * sweep, 0, go);
+      arm(p, true, 0.8 + 0.5 * sweep, 0.35, 0.7 - 0.4 * sweep, 0, go);
+      p.lean -= 0.1 * go;
+      return;
+    }
+    default:
+      return;
+  }
+}
+
 /* ================================================================== the car */
 
 /** How much of an act's head the car may take: bent over a cooler, they do not look up. */
 function gazeWeight(a: Actor): number {
+  // A hustler at work already looks where his work is: at the car, the space, the glass.
+  if (a.cue && a.cue.phase !== 'idle') return 0.3;
   return a.spec.act === 'pace' ? 0.6 : a.spec.act === 'vendor' ? 0.7 : 1;
 }
 
@@ -541,7 +814,7 @@ function react(a: Actor, t: number, dt: number, subject: CrowdSubject | null, p:
     if (act === 'phone' || act === 'pace') {
       // Phones up.
       arm(p, true, 1.3, 0.1, 0.45, 0.25, h);
-    } else if (act !== 'film' && act !== 'hail') {
+    } else if (act !== 'film' && act !== 'hail' && act !== 'washer' && !(a.cue && a.cue.phase !== 'idle')) {
       const pump = Math.sin(t * 8.5);
       arm(p, false, 0.3, 2.45 + 0.25 * pump, 0.35 + 0.25 * pump, 0, h);
       arm(p, true, 0.3, 2.45 - 0.25 * pump, 0.35 - 0.25 * pump, 0, h);
@@ -552,8 +825,10 @@ function react(a: Actor, t: number, dt: number, subject: CrowdSubject | null, p:
 
   if (a.flinch > 0.001 && dist > 0.01) {
     const f = a.flinch;
-    p.x -= (dx / dist) * CROWD.flinchStep * f;
-    p.z -= (dz / dist) * CROWD.flinchStep * f;
+    // Nobody here is solid, so a hustler gets properly out of the way instead of flinching in place.
+    const step = a.cue ? HUSTLERS.dodgeStep : CROWD.flinchStep;
+    p.x -= (dx / dist) * step * f;
+    p.z -= (dz / dist) * step * f;
     arm(p, false, 1.0, 0.25, 1.4, 0.6, f);
     arm(p, true, 1.0, 0.25, 1.4, 0.6, f);
     p.lean += (-0.3 - p.lean) * f;

@@ -291,8 +291,28 @@ export function canStartRush(rush: RushState): boolean {
  */
 export function startRush(rush: RushState, ranked: boolean, events: GameEvent[]): boolean {
   if (!canStartRush(rush)) return false;
-  rush.phase = 'countdown';
-  rush.countdown = RUSH.countdownSeconds;
+  launchRush(rush, ranked, RUSH.countdownSeconds, events);
+  return true;
+}
+
+/**
+ * Start a run from wherever the car is, without the marker's say-so. Returns false when a run
+ * (or its card) is already up.
+ *
+ * Two callers need it and neither is a player standing on the paint: QUICK PLAY puts the car on
+ * the marker with the count-in already running (`?mode=rush`), and a rush ROOM starts every car's
+ * run at once, with `countdown` set to however long is left until the server's GO — so the clock
+ * starts on the same instant for everybody, wherever each car was put down.
+ */
+export function beginRush(rush: RushState, ranked: boolean, countdown: number, events: GameEvent[]): boolean {
+  if (rush.phase !== 'idle') return false;
+  launchRush(rush, ranked, Math.max(0, countdown), events);
+  return true;
+}
+
+function launchRush(rush: RushState, ranked: boolean, countdown: number, events: GameEvent[]): void {
+  rush.phase = countdown > 0 ? 'countdown' : 'running';
+  rush.countdown = countdown;
   rush.timeLeft = RUSH.durationSeconds;
   rush.score = 0;
   rush.disabled = 0;
@@ -307,8 +327,7 @@ export function startRush(rush: RushState, ranked: boolean, events: GameEvent[])
   rush.scored.fill(0);
   events.push({ type: 'rushStart', ranked });
   // The first number of the count-in shows on the tick the run is taken up, not a tick later.
-  events.push({ type: 'rushCountdown', seconds: Math.ceil(RUSH.countdownSeconds) });
-  return true;
+  events.push({ type: 'rushCountdown', seconds: Math.ceil(countdown) });
 }
 
 /**

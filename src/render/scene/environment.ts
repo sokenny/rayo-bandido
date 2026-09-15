@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RENDER } from '../../config/tuning';
+import { RENDER, STREET_RACE } from '../../config/tuning';
 import type { CityPlan } from '../../world/cityPlan';
 import { applyPalette, PAL } from './env/palette';
 import { createBuilders } from './env/builders';
@@ -19,6 +19,8 @@ import type { CrowdSubject } from './env/humanActs';
 import { createDecalMaterial, makeGraffitiAtlas } from './env/graffiti';
 import { createWantedBillboard } from './env/wantedBillboard';
 import { createActivityMarker, CIRCUIT_MARKER, RUSH_MARKER, STREET_MARKER, type ActivityMarkerVisual, type MarkerGround } from './env/activityMarker';
+import { createLeaderboardHologram, type LeaderboardHologramVisual } from './env/leaderboardHologram';
+import { LEADERBOARDS, type LeaderboardKind } from '../../content/leaderboards';
 import { pathBox } from '../../world/cityGen';
 import { createProjection, projectOntoPath } from '../../world/track';
 import { createBadkalaPoster } from './env/badkalaPoster';
@@ -80,8 +82,10 @@ export interface EnvironmentVisual {
    * second spec (`env/activityMarker.ts`), not a second kind of marker.
    */
   circuitMarker: ActivityMarkerVisual | null;
-  /** The STREET RACE rings, one per event, in the open world; empty everywhere else. */
+  /** The STREET RACE ring (one) in the open world; empty everywhere else. */
   streetMarkers: ActivityMarkerVisual[];
+  /** The high-score holograms beside the rings, by board; only the ones this world stands. */
+  leaderboards: Partial<Record<LeaderboardKind, LeaderboardHologramVisual>>;
   /** The neon sign atlas (`env/textures.ts`), shared with the pavement signs (`streetPropsVisual.ts`). Owned here. */
   signAtlas: THREE.Texture;
   /**
@@ -457,9 +461,20 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   const circuitMarker = plan.circuitMarker ? createActivityMarker(plan.circuitMarker, CIRCUIT_MARKER, ground) : null;
   if (circuitMarker) root.add(circuitMarker.group);
 
-  // The Street Race rings: all three built, and hidden by the game until their event is reached.
+  // The Street Race ring: one, on La Curva's lot. It offers whichever event the player has reached.
   const streetMarkers = (plan.streetMarkers ?? []).map((site) => createActivityMarker(site, STREET_MARKER, ground));
   for (const m of streetMarkers) root.add(m.group);
+
+  // A hologram of high scores beside each ring, in the ring's own neon (`env/leaderboardHologram.ts`).
+  // Each follows its marker off the street whenever the marker is taken off it.
+  const boards: Array<{ kind: LeaderboardKind; board: LeaderboardHologramVisual; marker: ActivityMarkerVisual }> = [];
+  if (rushMarker && plan.rushMarkers) boards.push({ kind: 'rush', board: createLeaderboardHologram(plan.rushMarkers[0], LEADERBOARDS.rush, RUSH_MARKER.tint, ground), marker: rushMarker });
+  if (circuitMarker && plan.circuitMarker) boards.push({ kind: 'circuit', board: createLeaderboardHologram(plan.circuitMarker, LEADERBOARDS.circuit, CIRCUIT_MARKER.tint, ground), marker: circuitMarker });
+  if (streetMarkers[0] && plan.streetMarkers) boards.push({ kind: 'street', board: createLeaderboardHologram(plan.streetMarkers[0], LEADERBOARDS.street, STREET_RACE.icon.tint, ground), marker: streetMarkers[0] });
+  for (const b of boards) root.add(b.board.group);
+  // By kind, for the game to paint the boards' rows from the server into.
+  const leaderboards: Partial<Record<LeaderboardKind, LeaderboardHologramVisual>> = {};
+  for (const b of boards) leaderboards[b.kind] = b.board;
 
   /* ------------------------------------------------- car meets */
 
@@ -483,6 +498,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     rushMarker,
     circuitMarker,
     streetMarkers,
+    leaderboards,
     signAtlas: signTex,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
@@ -533,6 +549,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       rushMarker?.update(time);
       circuitMarker?.update(time);
       for (let i = 0; i < streetMarkers.length; i++) streetMarkers[i].update(time);
+      for (let i = 0; i < boards.length; i++) {
+        const b = boards[i];
+        b.board.setHidden(!b.marker.group.visible);
+        b.board.update(time, camX, camZ);
+      }
       // The people at the meets notice the car (`people`); the cars parked there do not move.
       meets?.update(camX, camZ, time, frameDt, people);
     },
@@ -542,6 +563,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       rushMarker?.dispose();
       circuitMarker?.dispose();
       for (const m of streetMarkers) m.dispose();
+      for (const b of boards) b.board.dispose();
       meets?.dispose();
       badkala.dispose();
       screenAtlas.dispose();

@@ -148,8 +148,14 @@ tree_fingerprint() {
   else
     stat_cmd=(stat -f '%N %m %z')
   fi
+  # -co lists the INDEX plus untracked files, so a file `git rm`-able but not
+  # yet staged as deleted (deleted on disk, still tracked) still appears here.
+  # Filter to files that actually exist before stat'ing, and don't let a
+  # missing one's failure (under pipefail) abort the whole pipeline.
   git ls-files -co --exclude-standard -z \
-    | xargs -0 -r "${stat_cmd[@]}" 2>/dev/null \
+    | while IFS= read -r -d '' f; do
+        if [[ -e "$f" ]]; then "${stat_cmd[@]}" -- "$f" 2>/dev/null || true; fi
+      done \
     | sort | shasum -a 1 | cut -d' ' -f1
 }
 FINGERPRINT_BEFORE=$(tree_fingerprint)

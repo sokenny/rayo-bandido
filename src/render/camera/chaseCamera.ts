@@ -80,6 +80,8 @@ export interface ChaseCamera {
   update(pose: CameraPose, frameDt: number): void;
   /** Add camera shake (meters of amplitude). Decays automatically. */
   shake(amount: number): void;
+  /** Fast, small tremble with a hint of lens roll (lightning discharge). `strength` 0..1. */
+  tremble(strength: number): void;
   /**
    * Drag-look: orbit the chase camera by these deltas (rad). Held while `dragging` is true
    * and for `CAMERA.dragHold` after it goes false, then eased back behind the car.
@@ -111,6 +113,11 @@ export function createChaseCamera(aspect: number): ChaseCamera {
   let fov = CAMERA.fov;
   let shakeAmp = 0;
   let shakeT = 0;
+  let tremble = 0;
+  let trembleT = 0;
+  /** The tremble's positional offset last frame, taken back out before the camera follows. */
+  let trembleX = 0;
+  let trembleY = 0;
   let lag = 0;
   /** Drag-look orbit offsets around the follow heading (rad) and their recentre timer. */
   let lookYaw = 0;
@@ -230,6 +237,27 @@ export function createChaseCamera(aspect: number): ChaseCamera {
     camera.rotateX(pose.pitch * mount.pitchFollow);
   }
 
+  /**
+   * Layer the tremble onto the pose the camera has just been given. Runs after `lookAt`, so
+   * the jitter translates the lens instead of re-aiming it, and the roll is about the view axis.
+   */
+  function applyTremble(dt: number): void {
+    if (tremble < 0.002) {
+      tremble = 0;
+      return;
+    }
+    trembleT += dt * Math.PI * 2;
+    const t = trembleT;
+    const p = CAMERA.tremble.position * tremble;
+    // Incommensurate frequencies (Hz) so it reads as buzz, not a wobble with a period.
+    trembleX = (Math.sin(t * 29) + 0.6 * Math.sin(t * 47 + 1.3)) * p;
+    trembleY = (Math.sin(t * 37 + 0.7) + 0.6 * Math.sin(t * 53 + 2.2)) * p;
+    camera.position.x += trembleX;
+    camera.position.y += trembleY;
+    camera.rotateZ((Math.sin(t * 23 + 2.1) + 0.5 * Math.sin(t * 41)) * CAMERA.tremble.roll * tremble);
+    tremble = damp(tremble, 0, CAMERA.tremble.decay, dt);
+  }
+
   /** Apply a view's near plane and base FOV. Only touches the projection when it changes. */
   function applyLens(near: number, targetFov: number, dt: number, immediate: boolean): void {
     fov = immediate ? targetFov : damp(fov, targetFov, CAMERA.fovDamping, dt);
@@ -249,6 +277,9 @@ export function createChaseCamera(aspect: number): ChaseCamera {
       lookPitch = 0;
       lookHold = 0;
       shakeAmp = 0;
+      tremble = 0;
+      trembleX = 0;
+      trembleY = 0;
       cut = false;
       const mount = view === 'chase' ? null : CAMERA.mounts[view];
       if (mount) {
@@ -263,6 +294,11 @@ export function createChaseCamera(aspect: number): ChaseCamera {
       applyLens(CHASE_NEAR, CAMERA.fov, 0, true);
     },
     update(pose, dt) {
+      // Last frame's tremble is not somewhere the follow should damp from.
+      camera.position.x -= trembleX;
+      camera.position.y -= trembleY;
+      trembleX = 0;
+      trembleY = 0;
       // A bolted-on lens is placed outright: no damping, no lag, no follow heading. Shake
       // still applies — an impact rattles the mount as much as it rattles a chase camera.
       const mount = view === 'chase' ? null : CAMERA.mounts[view];
@@ -279,6 +315,7 @@ export function createChaseCamera(aspect: number): ChaseCamera {
           camera.position.y += Math.cos(shakeT * 1.7) * shakeAmp;
           shakeAmp = damp(shakeAmp, 0, CAMERA.shakeDecay, dt);
         }
+        applyTremble(dt);
         applyLens(CAMERA.mountNear, mount.fov + CAMERA.mountFovNitro * clamp01(pose.nitro), dt, immediate);
         return;
       }
@@ -328,11 +365,15 @@ export function createChaseCamera(aspect: number): ChaseCamera {
         shakeAmp = damp(shakeAmp, 0, CAMERA.shakeDecay, dt);
       }
       camera.lookAt(look);
-      applyLens(CHASE_NEAR, CAMERA.fov + (CAMERA.fovNitro - CAMERA.fov) * clamp01(pose.nitro), dt, cut);
+      applyTremble(dt);
+      applyLens(CHASE_NEAR, CAMERA.fov +(CAMERA.fovNitro - CAMERA.fov) * clamp01(pose.nitro), dt, cut);
       cut = false;
     },
     shake(amount) {
       shakeAmp = Math.max(shakeAmp, amount);
+    },
+    tremble(strength) {
+      tremble = Math.max(tremble, Math.min(1, Math.max(0, strength)));
     },
     look(dYaw, dPitch) {
       if (view !== 'chase') return;

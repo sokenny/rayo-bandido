@@ -8,6 +8,11 @@ export interface Listener {
   x: number;
   z: number;
   heading: number;
+  /** Road height, for sources that only count on the listener's level. Missing = no level test. */
+  y?: number;
+  /** World velocity (m/s), for the doppler on sources that have one (`audio/horns.ts`). Missing = still. */
+  vx?: number;
+  vz?: number;
 }
 
 export interface ElectricHums {

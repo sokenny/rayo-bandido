@@ -26,6 +26,11 @@ import { C2S, MAX_PLAYERS, MAX_WORLD_PLAYERS, PROTOCOL_VERSION, S2C, sanitizeNam
  *   `LOAD_TIMEOUT_MS`, so one broken client cannot hold the grid). `countdown` is the window
  *   between announcing GO and reaching it. `results` stays up until the host starts again.
  *
+ * WHAT A VERSUS ROOM PLAYS (`game`) is fixed when it is opened: the Bandido Grid (`circuit`),
+ * La Curva (`street`) or a RAYO RUSH in the city (`rush`). The server does not build any of
+ * them — every client does, from the `game` it is welcomed with — so the only rule here that
+ * changes with it is the classification: a race is won on time, a rush on score.
+ *
  * THE OPEN WORLD (`mode: 'world'`) IS THE SAME ROOM WITH THE PHASE MACHINE TAKEN OUT. There is
  * no match to start, so there is nothing to be ready for, nothing to load and no flag: the
  * phase is `roaming` from the moment the room opens until the process dies, cars are relayed
@@ -53,10 +58,20 @@ const FINISH_GRACE_MS = 60_000;
 /** A race with nobody left in it is abandoned rather than left running forever. */
 const EMPTY_RACE_MS = 5_000;
 
-export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = false, mode = 'versus', laps = 2, log: rawLog = () => {} } = {}) {
+export function createRoom({
+  code = '----',
+  label = 'BANDIDO ROOM',
+  listed = false,
+  mode = 'versus',
+  game = 'circuit',
+  laps = 2,
+  log: rawLog = () => {},
+} = {}) {
   /** Every line a room prints says which room it came from: one process, many rooms. */
   const log = (msg) => rawLog(`${code} · ${msg}`);
   const world = mode === 'world';
+  /** A RAYO RUSH match: everybody's run starts at GO, and the classification is by score. */
+  const rush = !world && game === 'rush';
   const capacity = world ? MAX_WORLD_PLAYERS : MAX_PLAYERS;
   /** @type {Map<string, any>} */
   const players = new Map();
@@ -177,8 +192,16 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
       best: p.result ? p.result.best : p.race ? p.race.best : -1,
       prog: p.race ? p.race.prog : 0,
       money: p.race ? p.race.money : 0,
+      // The run's score: what the flag reported, or the last live one for a car that never got
+      // there. Always 0 in a race.
+      score: p.result ? p.result.score : p.race ? Number(p.race.sc) || 0 : 0,
       finished: !!p.result,
     }));
+    // A rush is won on points, and a run that was cut short still scored what it scored.
+    if (rush) {
+      rows.sort((a, b) => b.score - a.score || (a.finished !== b.finished ? (a.finished ? -1 : 1) : 0));
+      return rows;
+    }
     // Whoever took the flag, by time; then whoever got furthest.
     rows.sort((a, b) => {
       if (a.finished !== b.finished) return a.finished ? -1 : 1;
@@ -268,7 +291,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
 
       case C2S.finish:
         if (world || msg.raceId !== raceId || player.result) break;
-        player.result = { total: Number(msg.total), best: Number(msg.best) };
+        player.result = { total: Number(msg.total), best: Number(msg.best), score: Math.max(0, Number(msg.score) || 0) };
         player.finished = true;
         if (firstFinishAt === 0) firstFinishAt = now();
         pushLobby();
@@ -309,6 +332,9 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
     get mode() {
       return mode;
     },
+    get game() {
+      return game;
+    },
     get phase() {
       return phase;
     },
@@ -318,7 +344,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
 
     /** One row of `GET /rooms`, and what `welcome` says about the room a socket landed in. */
     listing() {
-      return { code, label, listed, mode, players: players.size, max: capacity, phase };
+      return { code, label, listed, mode, game, players: players.size, max: capacity, phase };
     },
 
     /**
@@ -365,7 +391,7 @@ export function createRoom({ code = '----', label = 'BANDIDO ROOM', listed = fal
         result: null,
       };
       players.set(player.id, player);
-      send(player, { t: S2C.welcome, id: player.id, now: now(), room: { code, label, listed, mode } });
+      send(player, { t: S2C.welcome, id: player.id, now: now(), room: { code, label, listed, mode, game } });
       pushLobby();
       log(`${player.name} (${player.id}) joined — ${players.size}/${capacity}`);
       return player;

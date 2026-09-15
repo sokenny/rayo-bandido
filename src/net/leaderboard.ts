@@ -1,30 +1,26 @@
-import { LEADERBOARD_PATH, RUSH_ATTEMPTS_PATH, RUSH_SCORE_PATH } from './protocol';
-import { matchServerUrl } from './connection';
+import { BOARDS_PATH, type BoardId } from './protocol';
 import { RUSH } from '../config/tuning';
 
 /**
- * The RAYO RUSH global board, from the client's side.
+ * The high-score boards, from the client's side: RAYO RUSH's global board with its daily ranked
+ * attempts, and the two timed boards (TIME ATTACK on the Bandido Grid, STREET RACE at La Curva).
  *
  * THE RULE THIS MODULE EXISTS TO KEEP: the activity must never wait on the network. A player
  * driving the city with the server down, or on a build served from a file, still gets the
- * marker, the countdown, the two minutes, the score and a personal best — the only thing they
- * lose is the global board. So every value here has a local answer first and a server answer
- * second: `standing()` returns what localStorage knows immediately and refreshes from the
- * server in the background, and `submit()` records the personal best locally before the
- * request is even sent.
+ * marker, the countdown, the run, the score and a personal best — the only thing they lose is
+ * the global board. So every value here has a local answer first and a server answer second:
+ * `standing()` returns what localStorage knows immediately and refreshes from the server in the
+ * background, and `submit()` records the personal best locally before the request is even sent.
  *
- * IDENTITY. There are no accounts in this game and there is not going to be one for a
- * leaderboard. A player is a random id their browser mints once and keeps (`rb.cid`), and
- * their name is the same one the lobby uses (`rb.name`). Clearing site data means a new
- * identity and a fresh daily allowance; see the trust model in `server/leaderboard.mjs`.
+ * IDENTITY is the account (`src/net/account.ts`): a session cookie the server hands every browser
+ * on its first request, guest or signed in. Nothing here names the player — the server knows who
+ * is asking, and the name on the board is the account's.
  *
  * THE DAILY ALLOWANCE is the server's to enforce and the client's to display. The local mirror
  * exists so the prompt can say a number before the network answers, and so an offline session
  * cannot silently bank unlimited ranked runs to file later — it cannot file them at all.
  */
 
-/** The player's stable, anonymous id, and the mirror of what the board knows about them. */
-const CID_KEY = 'rb.cid';
 const BEST_KEY = 'rb.rush.best';
 const ATTEMPTS_KEY = 'rb.rush.attempts';
 
@@ -32,6 +28,14 @@ const ATTEMPTS_KEY = 'rb.rush.attempts';
 const REFRESH_MS = 60_000;
 /** A board request that has not answered in this long is treated as offline (ms). */
 const TIMEOUT_MS = 4000;
+
+/** A row of any board. `value` is points on rush and milliseconds on the timed boards. */
+export interface BoardRow {
+  rank: number;
+  name: string;
+  value: number;
+  at: number;
+}
 
 export interface LeaderboardRow {
   rank: number;
@@ -86,7 +90,7 @@ export interface Leaderboard {
   /** Whether starting a run now would be a ranked attempt. */
   canRank(): boolean;
   /** File a finished run. Never rejects: an unreachable board is a result, not an error. */
-  submit(run: RushSubmission, name: string): Promise<RushSubmitResult>;
+  submit(run: RushSubmission): Promise<RushSubmitResult>;
   /** The top of the board, or an empty list when it cannot be reached. */
   top(limit?: number): Promise<LeaderboardRow[]>;
 }
@@ -109,26 +113,15 @@ function write(key: string, value: string): void {
   }
 }
 
-/** A random, URL-safe id in the shape `server/leaderboard.mjs` accepts. */
-function mintCid(): string {
-  const bytes = new Uint8Array(16);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+/** Forget the local mirror of the rush board: a signed-out browser is a different player. */
+export function clearBoardMirror(): void {
+  for (const key of [BEST_KEY, ATTEMPTS_KEY]) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* nothing to forget */
+    }
   }
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0');
-  return out;
-}
-
-/** This browser's id, minted on first use and kept from then on. */
-export function clientId(): string {
-  const stored = read(CID_KEY);
-  if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) return stored;
-  const fresh = mintCid();
-  write(CID_KEY, fresh);
-  return fresh;
 }
 
 /** Today, in the same UTC day the server counts attempts by. */
@@ -138,53 +131,52 @@ export function localDayKey(at = Date.now()): string {
 
 /* --------------------------------------------------------------------- http */
 
-/**
- * The board's origin: the same host the socket would open on, over http(s) rather than ws.
- * Derived rather than configured for the reason the socket URL is — one deployment serves the
- * game, the rooms and the board from one place, so there is nothing to point at.
- */
-export function boardUrl(path: string, ws: string = matchServerUrl()): string {
-  const http = ws.replace(/^ws/, 'http');
-  return `${http.replace(/\/ws$/, '')}${path}`;
-}
-
 async function getJson<T>(url: string): Promise<T | null> {
   if (typeof fetch !== 'function') return null;
-  const controller = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : null;
   try {
-    const response = await fetch(url, { cache: 'no-store', signal: controller?.signal });
+    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch {
     // Offline, blocked, timed out, or served from a file. All the same answer to the caller.
     return null;
-  } finally {
-    if (timer !== null) clearTimeout(timer);
   }
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T | null> {
   if (typeof fetch !== 'function') return null;
-  const controller = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : null;
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(body),
-      signal: controller?.signal,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch {
     return null;
-  } finally {
-    if (timer !== null) clearTimeout(timer);
   }
 }
 
-/* --------------------------------------------------------------------- module */
+/** The top of any board, or an empty list when it cannot be reached. */
+export async function fetchBoard(board: BoardId, limit = 10): Promise<BoardRow[]> {
+  const body = await getJson<{ entries?: BoardRow[] }>(`${BOARDS_PATH}/${board}?limit=${limit}`);
+  return body && Array.isArray(body.entries) ? body.entries : [];
+}
+
+/**
+ * File a finished race on a timed board. Fire and forget: resolves with whether the server took
+ * it, and false for an unreachable one. The race's own card never waits on this.
+ */
+export async function submitRaceTime(board: Exclude<BoardId, 'rush'>, seconds: number, stats: Record<string, number> = {}): Promise<boolean> {
+  if (!(seconds > 0)) return false;
+  const body = await postJson<{ accepted?: boolean }>(`${BOARDS_PATH}/${board}/runs`, { ms: Math.round(seconds * 1000), ...stats });
+  return !!body?.accepted;
+}
+
+/* --------------------------------------------------------------------- the rush board */
 
 interface StoredAttempts {
   day: string;
@@ -213,7 +205,6 @@ function readBest(): number {
 }
 
 export function createLeaderboard(): Leaderboard {
-  const cid = clientId();
   let best = readBest();
   let attempts = readAttempts();
   let rank = -1;
@@ -238,29 +229,31 @@ export function createLeaderboard(): Leaderboard {
     write(ATTEMPTS_KEY, JSON.stringify(attempts));
   }
 
+  /** Fold a server answer into the mirror. The server's count wins; the higher best wins. */
+  function absorb(body: { attemptsLeft?: number; best?: number; rank?: number }): void {
+    online = true;
+    checkedAt = Date.now();
+    if (Number.isFinite(body.attemptsLeft)) {
+      attempts = { day: localDayKey(), used: Math.max(0, RUSH.dailyRankedAttempts - (body.attemptsLeft as number)) };
+      saveAttempts();
+    }
+    // Whichever best is higher, so a run posted from another device is not lost and neither is
+    // one made offline since.
+    if (Number.isFinite(body.best) && (body.best as number) > best) {
+      best = body.best as number;
+      write(BEST_KEY, String(best));
+    }
+    if (Number.isFinite(body.rank)) rank = body.rank as number;
+  }
+
   async function fetchStanding(): Promise<RushStanding> {
-    const body = await getJson<{ attemptsLeft?: number; dailyAttempts?: number; best?: number; rank?: number }>(
-      `${boardUrl(RUSH_ATTEMPTS_PATH)}?cid=${encodeURIComponent(cid)}`,
-    );
+    const body = await getJson<{ attemptsLeft?: number; best?: number; rank?: number }>(`${BOARDS_PATH}/rush/standing`);
     checkedAt = Date.now();
     if (!body) {
       online = false;
       return current();
     }
-    online = true;
-    const allowance = Number.isFinite(body.dailyAttempts) ? (body.dailyAttempts as number) : RUSH.dailyRankedAttempts;
-    if (Number.isFinite(body.attemptsLeft)) {
-      // The server's count wins outright: it is the one that will refuse a submission.
-      attempts = { day: localDayKey(), used: Math.max(0, allowance - (body.attemptsLeft as number)) };
-      saveAttempts();
-    }
-    // Whichever best is higher, so a run posted before the browser was cleared is not lost and
-    // neither is one made offline since.
-    if (Number.isFinite(body.best) && (body.best as number) > best) {
-      best = body.best as number;
-      write(BEST_KEY, String(best));
-    }
-    rank = Number.isFinite(body.rank) ? (body.rank as number) : -1;
+    absorb(body);
     return current();
   }
 
@@ -286,7 +279,7 @@ export function createLeaderboard(): Leaderboard {
       return current().attemptsLeft > 0;
     },
 
-    async submit(run, name) {
+    async submit(run) {
       const previousBest = best;
       const localNewBest = run.score > previousBest;
       // Local first, and unconditionally: the personal best on the results card is the
@@ -303,33 +296,16 @@ export function createLeaderboard(): Leaderboard {
         attempts.used += 1;
         saveAttempts();
       }
-
       if (!wasRankable) {
         return { accepted: false, newBest: localNewBest, previousBest, rank, attemptsLeft: 0, online };
       }
 
-      const body = await postJson<{
-        accepted?: boolean;
-        rank?: number;
-        best?: number;
-        attemptsLeft?: number;
-      }>(boardUrl(RUSH_SCORE_PATH), { cid, name, ...run });
-
+      const body = await postJson<{ accepted?: boolean; rank?: number; best?: number; attemptsLeft?: number }>(`${BOARDS_PATH}/rush/runs`, run);
       if (!body) {
         online = false;
         return { accepted: false, newBest: localNewBest, previousBest, rank, attemptsLeft: current().attemptsLeft, online };
       }
-      online = true;
-      checkedAt = Date.now();
-      if (Number.isFinite(body.attemptsLeft)) {
-        attempts = { day: localDayKey(), used: Math.max(0, RUSH.dailyRankedAttempts - (body.attemptsLeft as number)) };
-        saveAttempts();
-      }
-      if (Number.isFinite(body.best) && (body.best as number) > best) {
-        best = body.best as number;
-        write(BEST_KEY, String(best));
-      }
-      if (Number.isFinite(body.rank)) rank = body.rank as number;
+      absorb(body);
       return {
         accepted: !!body.accepted,
         newBest: localNewBest,
@@ -341,9 +317,10 @@ export function createLeaderboard(): Leaderboard {
     },
 
     async top(limit = 10) {
-      const body = await getJson<{ entries?: LeaderboardRow[] }>(`${boardUrl(LEADERBOARD_PATH)}?board=rush&limit=${limit}`);
+      const body = await getJson<{ entries?: Array<BoardRow & { disabled?: number; bestChain?: number }> }>(`${BOARDS_PATH}/rush?limit=${limit}`);
       online = !!body;
-      return body && Array.isArray(body.entries) ? body.entries : [];
+      if (!body || !Array.isArray(body.entries)) return [];
+      return body.entries.map((e) => ({ rank: e.rank, name: e.name, score: e.value, disabled: e.disabled ?? 0, bestChain: e.bestChain ?? 0, at: e.at }));
     },
   };
 }

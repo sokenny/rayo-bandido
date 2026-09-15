@@ -49,8 +49,11 @@ export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'hood' | 'b
 /** The one thing about a face that is visible at night, if anything is. */
 export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
 
-/** What they brought. `camera` is held in the hand; the rest stand on the ground beside them. */
-export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera';
+/**
+ * What they brought. `camera`, `cloth` (a trapito's fluorescent rag) and `squeegee` are held in the
+ * hand; the rest stand on the ground beside them.
+ */
+export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera' | 'cloth' | 'squeegee';
 
 /**
  * One person's whole appearance. Only the colours are required: everything else has a default
@@ -75,6 +78,17 @@ export interface HumanLook {
   boots: number;
   /** A sleeveless shirt: the arms are bare from the shoulder, in `skin`. */
   sleeveless?: boolean;
+  /**
+   * A hi-vis vest over whatever `coat` is, open down the front so the shirt shows: a trapito's or a
+   * washer's. Pair it with `band` for the reflective strip across it.
+   */
+  vest?: number;
+  /** Shorts: bare from the knee down, in `skin`. */
+  shorts?: boolean;
+  /** A stripe down the outside of each leg, in this colour: track pants. */
+  legStripe?: number;
+  /** A reused plastic bottle in the left hand, in this colour: a washer's. */
+  bottle?: number;
   /** Ink on bare arms, in this colour: a sleeve of it down each upper arm and forearm. */
   tattoo?: number;
   /** A big number printed on the chest (two digits, drawn in blocks), in `print`. Loco Mustang's 99. */
@@ -173,6 +187,8 @@ const WRIST = 0.93;
 /** Where a held thing is gripped, at the bottom of the hand. */
 const GRIP_JOINT = 0.86;
 const LEG_X = 0.15;
+/** Where shorts end. */
+const KNEE = 0.5;
 /** How far a body's normals lean towards the sky by default. See `HumanLook.skyBias`. */
 const SKY_BIAS = 0.5;
 /**
@@ -334,8 +350,17 @@ function buildLegs(f: Body, look: HumanLook): void {
   for (const side of [-1, 1]) {
     f.bone(side < 0 ? BONE.legL : BONE.legR);
     const x = side * LEG_X;
+    const hem = look.shorts ? KNEE : FOOT;
     f.color(look.legs, 1);
-    f.box(x, (FOOT + HIP) / 2, 0, 0.22, HIP - FOOT, 0.26);
+    f.box(x, (hem + HIP) / 2, 0, 0.22, HIP - hem, 0.26);
+    if (look.shorts) {
+      f.color(look.skin, 1);
+      f.box(x, (FOOT + KNEE) / 2, 0, 0.15, KNEE - FOOT, 0.17);
+    }
+    if (look.legStripe !== undefined) {
+      f.color(look.legStripe, 1);
+      f.box(x + side * 0.112, (hem + HIP) / 2, 0, 0.012, HIP - hem, 0.06);
+    }
     f.color(look.boots, 1);
     f.box(x, FOOT / 2, -0.02, 0.24, FOOT, 0.3, true);
   }
@@ -352,6 +377,21 @@ function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
   // face it cannot see yet.
   f.color(look.coat, 0.8);
   f.box(0, SHOULDER - 0.05, 0, look.sleeveless ? w + 0.02 : w + 0.16, 0.12, d + 0.06);
+  if (look.vest !== undefined) {
+    // Open down the front: two panels and a gap the shirt shows through, the back whole, and the
+    // sides. A shade proud of the coat everywhere so it never z-fights it.
+    const top = SHOULDER - 0.11;
+    const bottom = HIP - 0.08;
+    const mid = (top + bottom) / 2;
+    const h = top - bottom;
+    const panel = w * 0.36;
+    f.color(look.vest, 1.1);
+    f.box(0, mid, d / 2 + 0.014, w + 0.028, h, 0.026);
+    f.box(-(w / 2 - panel / 2) - 0.014, mid, -d / 2 - 0.014, panel, h, 0.026);
+    f.box(w / 2 - panel / 2 + 0.014, mid, -d / 2 - 0.014, panel, h, 0.026);
+    f.box(-w / 2 - 0.014, mid, 0, 0.026, h, d + 0.028);
+    f.box(w / 2 + 0.014, mid, 0, 0.026, h, d + 0.028);
+  }
   // A stub of a neck, so the head is not sitting straight on the collar.
   f.color(look.skin, 0.9);
   f.box(0, (SHOULDER + NECK_TOP) / 2, 0, 0.16, NECK_TOP - SHOULDER, 0.16);
@@ -453,7 +493,19 @@ function buildHead(f: Body, look: HumanLook): void {
  */
 function buildHeld(f: Body, look: HumanLook, armX: number): void {
   f.bone(BONE.hand);
-  if ((look.prop ?? 'none') === 'camera') {
+  if (look.prop === 'cloth') {
+    // A rag hanging from the fist, flat to the front so it reads when it is waved.
+    f.color(look.propColor ?? 0xff7a1a, 1.15);
+    f.box(armX + 0.04, GRIP_JOINT - 0.25, -0.02, 0.3, 0.42, 0.025);
+  } else if (look.prop === 'squeegee') {
+    // A handle down from the fist and the blade across the end of it, sponge side to the front.
+    f.color(look.propColor ?? 0xe0b020, 1);
+    f.box(armX, GRIP_JOINT - 0.22, -0.02, 0.04, 0.44, 0.04);
+    f.color(0x1c1d20, 1);
+    f.box(armX, GRIP_JOINT - 0.46, -0.02, 0.36, 0.05, 0.05);
+    f.color(0x8fd14f, 0.9);
+    f.box(armX, GRIP_JOINT - 0.46, -0.06, 0.34, 0.07, 0.035);
+  } else if ((look.prop ?? 'none') === 'camera') {
     f.color(look.propColor ?? 0x1a1a22, 1);
     f.box(armX, GRIP_JOINT - 0.1, -0.02, 0.16, 0.24, 0.22);
     f.color(look.propColor ?? 0x1a1a22, 0.7);
@@ -461,6 +513,14 @@ function buildHeld(f: Body, look: HumanLook, armX: number): void {
   } else if (look.phone !== undefined) {
     f.color(0x15161a, 1);
     f.box(armX, GRIP_JOINT - 0.04, -0.02, 0.09, 0.16, 0.03);
+  }
+  if (look.bottle !== undefined) {
+    // Held by the neck in the other hand, on the forearm so it swings with it, never put away.
+    f.bone(BONE.foreArmL);
+    f.color(look.bottle, 1);
+    f.box(-armX, WRIST - 0.24, -0.02, 0.09, 0.22, 0.09);
+    f.color(0xe8eef2, 1);
+    f.box(-armX, WRIST - 0.11, -0.02, 0.04, 0.05, 0.04);
   }
 }
 
@@ -516,8 +576,9 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number, armX: numb
     // Across the chest and across the back, so it reads from either side of the street.
     f.bone(BONE.spine);
     f.color(look.band, 1);
-    f.panel(0, 1.3, -d / 2 - 0.012, w * 0.92, 0.08);
-    f.panel(0, 1.3, d / 2 + 0.012, w * 0.92, 0.08, true);
+    const proud = look.vest !== undefined ? 0.03 : 0.012;
+    f.panel(0, 1.3, -d / 2 - proud, w * 0.92, 0.08);
+    f.panel(0, 1.3, d / 2 + proud, w * 0.92, 0.08, true);
   }
 
   f.bone(BONE.hand);
@@ -539,6 +600,11 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number, armX: numb
       break;
     case 'toolbag':
       f.panel(-0.62, 0.2, -0.22, 0.44, 0.04);
+      break;
+    case 'cloth':
+      // A reflective strip across the rag: it is the thing a driver sees first.
+      f.bone(BONE.hand);
+      f.panel(armX + 0.04, GRIP_JOINT - 0.3, -0.036, 0.28, 0.05);
       break;
     case 'camera':
       // The dot that says it is recording, on the face that is on top while they film.

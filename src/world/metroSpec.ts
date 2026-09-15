@@ -671,11 +671,12 @@ export const METRO_SPAWN = { x: -56, z: 420, heading: 0 };
  * from three rectangles; the central avenue inside the Stack's core under the spine; and
  * the waterfront, with the water at your back. Each mid-block, never in a junction.
  */
-export const METRO_RUSH_SITES = [
-  { x: -150, z: RING.south, y: 0, heading: Math.PI / 2, label: 'RING SOUTH' },
-  { x: -60, z: -300, y: 0, heading: 0, label: 'DOWNTOWN CANYON' },
-  { x: -150, z: METRO_QUAY_Z - 14, y: 0, heading: Math.PI / 2, label: 'THE WATERFRONT' },
-];
+/**
+ * RAYO RUSH is met at ONE place: every mission of the chain is offered on this ring, and
+ * clearing one makes the next harder rather than moving it (`rushSiteFor` runs the later
+ * missions at the last site a world ships).
+ */
+export const METRO_RUSH_SITES = [{ x: -150, z: RING.south, y: 0, heading: Math.PI / 2, label: 'RING SOUTH' }];
 
 /** Where passengers wait: mid-block stopping points, the Bay's tags so the catalogue needs nothing new. */
 export const METRO_PASSENGER_STOPS: PassengerStopSpec[] = [
@@ -702,19 +703,16 @@ export const METRO_BUHO_SITE = { x: -VIA_X, z: 460, y: 0, heading: -Math.PI / 2,
  *
  * Each is mid-block on a boulevard with 60 m of clear road either side, never in a junction
  * (`tests/metroWorld.test.ts`). The start line is on the avenue that runs east from the meet
- * under the viaduct, where the introduction leaves the player; the three Street Race rings go
- * round the map in event order: south of downtown, north of it, and the quay.
+ * under the viaduct, where the introduction leaves the player; the one Street Race
+ * ring is on the car meet's lot.
  */
 export const METRO_CIRCUIT_SITE = { x: -156, z: 500, y: 0, heading: Math.PI / 2, label: 'BANDIDO GRID · START LINE' };
 
-export const METRO_STREET_SITES = [
-  { x: 140, z: RING.south, y: 0, heading: Math.PI / 2, label: 'RING SOUTH · THE CROSSING' },
-  { x: 140, z: RING.north, y: 0, heading: Math.PI / 2, label: 'RING NORTH · DOWNTOWN' },
-  { x: 410, z: METRO_QUAY_Z - 14, y: 0, heading: Math.PI / 2, label: 'THE EAST QUAY' },
-  // LA CURVA, the standalone fourth event: on the meet's lot, and run here on the metro
-  // rather than on the Bay (`curvaSpec.ts`, `curvaWorld.ts`).
-  CURVA_SITE,
-];
+/**
+ * STREET RACE is met at ONE ring, on La Curva's lot (`curvaSpec.ts`). It offers the newest event
+ * of the series; winning puts a harder field on the same ring (`src/sim/streetGate.ts`).
+ */
+export const METRO_STREET_SITES = [CURVA_SITE];
 
 /* ------------------------------------------------------------------ the spec */
 

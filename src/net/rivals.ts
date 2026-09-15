@@ -111,6 +111,7 @@ function emptyRival(id: string, name: string, slot: number): RivalCar {
     bestLap: -1,
     finishTime: -1,
     money: 0,
+    score: 0,
   };
 }
 
@@ -223,6 +224,7 @@ export function createRivalSet(players: Array<{ id: string; name: string; slot: 
         r.bestLap = race.best;
         r.finishTime = race.fin;
         r.money = race.money;
+        r.score = Number(race.sc) || 0;
       }
     },
 

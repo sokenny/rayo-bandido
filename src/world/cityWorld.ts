@@ -429,6 +429,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     rushSites: spec.rushSites.map((site) => ({ ...site })),
     // Where passengers wait. Points on roads; the rules and the art both read this list.
     passengerStops: spec.passengerStops.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
+    passengerTrip: spec.passengerTrip ? { ...spec.passengerTrip } : null,
     // The streets, as centrelines, for `src/world/roadGraph.ts` to route a passenger home over.
     // Ground only: the viaduct and its ramps are left out because every stop is a kerb, and a
     // deck crossing over a street is not a turning off it.

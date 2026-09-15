@@ -389,5 +389,8 @@ export const BAY_SPEC: CitySpec = {
   spawn: CITY_SPAWN,
   rushSites: RUSH_SITES,
   passengerStops: PASSENGER_STOPS,
+  // The Bay is a few blocks across: its stops are never more than ~400 m apart, so it keeps the
+  // short rides it was built with rather than the Metro's cross-town ones (`PASSENGER.offer`).
+  passengerTrip: { minTrip: 170, maxTrip: 520 },
   buhoSite: BUHO_SITE,
 };

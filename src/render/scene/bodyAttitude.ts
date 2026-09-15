@@ -17,6 +17,9 @@ import { clamp } from '../../core/math';
  *    dips and rebounds on its own. It runs on three springs of its own (pitch, roll, and a
  *    fore-aft `surge` with no target at all) rather than sharing the corner/brake ones, so
  *    tuning how a shift feels never touches how the car leans or dives.
+ *  - A lightning discharge is the same kind of impulse (`discharge`): the body squats onto its
+ *    springs and rebounds, on a vertical `heave` spring of its own, with a small nose-up
+ *    recoil on the shift-pitch spring.
  *  - Integration is semi-implicit Euler, sub-stepped at `BODY.maxStepDt`, so a hitching
  *    frame slows the spring down instead of blowing it up.
  *
@@ -27,6 +30,7 @@ import { clamp } from '../../core/math';
  *    which is a negative rotation about X; on power the nose lifts.
  *  - `surge` goes on `position.z`. The car decelerating leaves the body running forward,
  *    toward the nose, which is -Z.
+ *  - `heave` goes on `position.y`. Negative is the body sitting down onto the wheels.
  */
 export interface BodyAttitude {
   /** Lean about the forward axis (rad). Apply to `rotation.z`. */
@@ -35,6 +39,8 @@ export interface BodyAttitude {
   readonly pitch: number;
   /** Fore-aft travel on the mounts (m, negative = forward). Apply to `position.z`. */
   readonly surge: number;
+  /** Vertical travel on the springs (m, negative = down). Apply to `position.y`. */
+  readonly heave: number;
   /** Feed the accelerations the body is under this frame (m/s^2, car local frame). */
   setAccel(latAccel: number, longAccel: number): void;
   /**
@@ -43,6 +49,11 @@ export interface BodyAttitude {
    * lower gear grabs and shoves it back). Everything past the impulse is the springs.
    */
   kick(strength: number): void;
+  /**
+   * The lightning leaving the car: the body drops onto its springs and comes back up. `strength`
+   * 0..1, how big the shot was. An impulse, one call per shot.
+   */
+  discharge(strength: number): void;
   /** Advance the springs. `dt` is frame time, not the simulation step. */
   update(dt: number): void;
   /** Drop everything back to level, e.g. on respawn. */
@@ -63,6 +74,8 @@ export function createBodyAttitude(): BodyAttitude {
   let pitchKickVel = 0;
   let rollKick = 0;
   let rollKickVel = 0;
+  let heave = 0;
+  let heaveVel = 0;
 
   const rollStiffness = BODY.rollFrequency * BODY.rollFrequency;
   const rollFriction = 2 * BODY.rollDamping * BODY.rollFrequency;
@@ -74,6 +87,8 @@ export function createBodyAttitude(): BodyAttitude {
   const shiftPitchFriction = 2 * BODY.shiftPitchDamping * BODY.shiftPitchFrequency;
   const shiftRollStiffness = BODY.shiftRollFrequency * BODY.shiftRollFrequency;
   const shiftRollFriction = 2 * BODY.shiftRollDamping * BODY.shiftRollFrequency;
+  const heaveStiffness = BODY.heaveFrequency * BODY.heaveFrequency;
+  const heaveFriction = 2 * BODY.heaveDamping * BODY.heaveFrequency;
 
   return {
     get roll() {
@@ -84,6 +99,9 @@ export function createBodyAttitude(): BodyAttitude {
     },
     get surge() {
       return surge;
+    },
+    get heave() {
+      return heave;
     },
     setAccel(latAccel, longAccel) {
       const lat = clamp(latAccel, -BODY.latAccelClamp, BODY.latAccelClamp);
@@ -101,6 +119,12 @@ export function createBodyAttitude(): BodyAttitude {
       // Torque reaction rocks the shell the same way whichever gear it lands in, so this one
       // keeps the sign of the shift's magnitude, not its direction.
       rollKickVel += Math.abs(scaled) * BODY.shiftRollImpulse;
+    },
+    discharge(strength) {
+      const s = clamp(strength, 0, 1);
+      heaveVel -= s * BODY.dischargeHeaveImpulse;
+      // The bolt leaves the nose: a touch of recoil lifts it, then the spring brings it home.
+      pitchKickVel += s * BODY.dischargePitchImpulse;
     },
     update(dt) {
       if (!(dt > 0)) return;
@@ -120,6 +144,8 @@ export function createBodyAttitude(): BodyAttitude {
         pitchKick = clamp(pitchKick + pitchKickVel * h, -BODY.pitchKickLimit, BODY.pitchKickLimit);
         rollKickVel += (-shiftRollStiffness * rollKick - shiftRollFriction * rollKickVel) * h;
         rollKick = clamp(rollKick + rollKickVel * h, -BODY.rollKickLimit, BODY.rollKickLimit);
+        heaveVel += (-heaveStiffness * heave - heaveFriction * heaveVel) * h;
+        heave = clamp(heave + heaveVel * h, -BODY.heaveLimit, BODY.heaveLimit);
       }
     },
     reset() {
@@ -135,6 +161,8 @@ export function createBodyAttitude(): BodyAttitude {
       pitchKickVel = 0;
       rollKick = 0;
       rollKickVel = 0;
+      heave = 0;
+      heaveVel = 0;
     },
   };
 }

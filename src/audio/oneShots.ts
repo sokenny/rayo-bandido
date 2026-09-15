@@ -1,5 +1,5 @@
 import type { AudioCore } from './core';
-import { AUDIO, CRASH_DAMAGE, NEAR_MISS, STREET_PROPS } from '../config/tuning';
+import { AUDIO, CRASH_DAMAGE, STREET_PROPS } from '../config/tuning';
 import type { StreetPropKind } from '../core/types';
 
 export interface OneShots {
@@ -7,14 +7,6 @@ export interface OneShots {
   lightning(): void;
   /** An electric car losing power and going out of service: a descending spin-down + fizzle. */
   shutdown(): void;
-  /**
-   * The doppler whoosh of shaving past a car, plus the ping that says it PAID. `quality` 0..1
-   * (how good the pass was) makes the whoosh louder, brighter and snappier, so a paint-scraping
-   * pass sounds different from a wide one. Passes inside `NEAR_MISS.chainWindow` of each other
-   * walk the ping up a pentatonic ladder, so threading a line of traffic plays a rising figure
-   * instead of the same note four times.
-   */
-  nearMiss(quality: number): void;
   /** Race countdown tick; `go` is the longer, higher note on the lights going out. */
   countdown(go: boolean): void;
   /**
@@ -43,8 +35,7 @@ export interface OneShots {
   /**
    * A crash that cost money (`crashDamage`): a body thud, torn-metal crunch, two bent-panel clangs
    * a quarter tone apart and a sagging buzz under it all. Unpleasant on purpose — it is the sound
-   * of the fine. `strength` 0..1 by severity; a heavy one adds the glass. Also drops the near-miss
-   * chime back to the bottom of its ladder, since the run it was climbing is over.
+   * of the fine. `strength` 0..1 by severity; a heavy one adds the glass.
    */
   crash(strength: number): void;
 }
@@ -126,18 +117,8 @@ export function createOneShots(core: AudioCore): OneShots {
     };
   }
 
-  /**
-   * Semitones above `CHIME_ROOT` for the 1st, 2nd, 3rd... pass of a run. Major pentatonic, so
-   * any prefix of it is consonant and a long run climbs an octave and a half and then holds
-   * rather than disappearing into dog-whistle territory.
-   */
-  const CHAIN_LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19];
-  /** A6-ish: over the engine, under the lightning crack, out of the way of both. */
-  const CHIME_ROOT = 880;
   let lastPropAt = -Infinity;
   let propBurst = 0;
-  let nearMissStep = 0;
-  let lastNearMissAt = -Infinity;
 
   return {
     lightning() {
@@ -151,30 +132,6 @@ export function createOneShots(core: AudioCore): OneShots {
       playNoise(t, t + 0.07, 'highpass', 1800, 1800, 0.7, 0.7 * v, 0.002);
       // Sizzle tail: crackling electricity dying off.
       playNoise(t + 0.01, t + 0.34, 'bandpass', 3600, 2400, 6, 0.32 * v, 0.01);
-    },
-
-    nearMiss(quality) {
-      const q = quality < 0 ? 0 : quality > 1 ? 1 : quality;
-      const t = ctx.currentTime;
-      const v = AUDIO.nearMissVolume * (0.55 + 0.45 * q);
-      // The pass itself: a band of air sweeping down past the ear. A closer, faster pass
-      // starts brighter and gets through quicker, which is what sells the speed.
-      const dur = 0.34 - 0.1 * q;
-      playNoise(t, t + dur, 'bandpass', 1500 + 1900 * q, 320, 1.6, 0.85 * v, 0.05 + 0.05 * (1 - q));
-      // Body: the low pressure wave under the whoosh, only on a genuinely close pass.
-      if (q > 0.25) playOsc('sine', t + 0.02, t + 0.24, 150, 60, 0.35 * v * q, 0.05);
-
-      // The reward. Deliberately a separate thing from the whoosh: the whoosh happens whether
-      // or not it scored, this only ever plays when the pass paid. A hair behind the air so it
-      // lands as the CONSEQUENCE of it rather than part of it.
-      nearMissStep = t - lastNearMissAt <= NEAR_MISS.chainWindow ? Math.min(nearMissStep + 1, CHAIN_LADDER.length - 1) : 0;
-      lastNearMissAt = t;
-      const f = CHIME_ROOT * Math.pow(2, CHAIN_LADDER[nearMissStep] / 12);
-      const cv = AUDIO.nearMissChimeVolume * (0.6 + 0.4 * q);
-      const at = t + 0.04;
-      // Triangle body with a sine an octave over it: bell-ish without being a literal bell.
-      playOsc('triangle', at, at + 0.3, f, f, 0.6 * cv, 0.003, f * 3.5);
-      playOsc('sine', at, at + 0.19, f * 2, f * 2, 0.3 * cv, 0.003);
     },
 
     countdown(go) {
@@ -319,8 +276,6 @@ export function createOneShots(core: AudioCore): OneShots {
       const s = strength < 0 ? 0 : strength > 1 ? 1 : strength;
       const t = ctx.currentTime;
       const v = CRASH_DAMAGE.volume * (0.6 + 0.4 * s);
-      nearMissStep = 0;
-      lastNearMissAt = -Infinity;
       // The body: a low thud that lands in the chest.
       playOsc('sine', t, t + 0.3 + 0.1 * s, 120, 34, 0.95 * v, 0.003);
       // The crunch: a sharp transient, then a wide band of noise tearing downward.

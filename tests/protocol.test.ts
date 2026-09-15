@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LEN,
+  ROOM_GAMES,
   ROOM_LABEL_MAX,
   RUSH_DAILY_ATTEMPTS,
   S2C,
@@ -20,6 +21,7 @@ import {
   TRAFFIC_HZ,
   sanitizeName,
   sanitizeRoomCode,
+  sanitizeRoomGame,
   sanitizeRoomLabel,
   worldListing,
   type RoomListing,
@@ -88,6 +90,19 @@ describe('wire protocol', () => {
     expect(constant('EMPTY_ROOM_TTL_MS')).toBe(EMPTY_ROOM_TTL_MS);
     // A code typed against one alphabet and read against another would refuse legal rooms.
     expect(text('ROOM_CODE_ALPHABET')).toBe(ROOM_CODE_ALPHABET);
+  });
+
+  it('agrees on the games a room can play', () => {
+    // A room created for RAYO RUSH by one side and read back as a circuit by the other would
+    // build the wrong world for everybody in it.
+    const block = /export const ROOM_GAMES = \[([^\]]*)\];/.exec(serverSource);
+    expect(block).not.toBeNull();
+    const serverGames = [...block![1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    expect(serverGames).toEqual([...ROOM_GAMES]);
+    expect(sanitizeRoomGame('rush')).toBe('rush');
+    expect(sanitizeRoomGame('street')).toBe('street');
+    expect(sanitizeRoomGame('versus')).toBe('circuit');
+    expect(sanitizeRoomGame(undefined)).toBe('circuit');
   });
 
   it('agrees on the code the open world lives at', () => {
@@ -161,6 +176,7 @@ describe('reading the room list', () => {
     label: code,
     listed: true,
     mode,
+    game: 'circuit',
     players,
     max: 4,
     phase: mode === 'world' ? 'roaming' : 'lobby',
