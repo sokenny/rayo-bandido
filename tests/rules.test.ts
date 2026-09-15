@@ -115,6 +115,27 @@ describe('game rules', () => {
     expect(s.economy.money).toBe(TARGETS.reward);
   });
 
+  it('the bolt throws the car it hits 5 to 15 m away from the shooter, by the force of the shot', () => {
+    const slide = (hold: number) => {
+      const { layout, s, t } = aimedAtFirstTarget(8);
+      const startX = t.x;
+      const startZ = t.z;
+      holdFire(s, layout, hold);
+      expect(t.status).toBe('destroyed');
+      // The shooter sits at +Z of the car, so the throw is toward -Z.
+      expect(t.vz).toBeLessThan(0);
+      for (let i = 0; i < 60 * 5; i++) stepGame(s, createPlayerCommand(), layout, DT);
+      expect(Math.abs(t.x - startX)).toBeLessThan(0.1);
+      return startZ - t.z;
+    };
+    const snap = slide(LIGHTNING.minHold + DT);
+    const full = slide(LIGHTNING.maxHold);
+    expect(snap).toBeGreaterThan(4.5);
+    expect(snap).toBeLessThan(6.5);
+    expect(full).toBeGreaterThan(13.5);
+    expect(full).toBeLessThanOrEqual(15.2);
+  });
+
   it('a short hold falls short of a target that a long hold reaches', () => {
     const short = aimedAtFirstTarget(LIGHTNING.range * 0.8);
     holdFire(short.s, short.layout, LIGHTNING.maxHold * 0.5);

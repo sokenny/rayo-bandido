@@ -68,6 +68,7 @@ export const MESSAGES: readonly FlairMessage[] = [
   { id: 'auraPlus', text: 'AURA +1000', tier: 'special' },
   { id: 'laCalleEsTuya', text: 'LA CALLE ES TUYA', tier: 'special' },
   { id: 'faltandoElRespeto', text: 'FALTANDO EL RESPETO', tier: 'special' },
+  { id: 'ojoBala', text: 'DONDE PONE EL OJO, PONE LA BALA', tier: 'special' },
   { id: 'aPuroBandidaje', text: 'A PURO BANDIDAJE', tier: 'special' },
   { id: 'auraInfinita', text: 'AURA INFINITA', tier: 'peak' },
   // The minus is U+2212, not a hyphen: it is a number being taken away, and it is set in the
@@ -87,6 +88,7 @@ const OPENERS: readonly number[] = (
 ).map(flairIndex);
 const AURA_PLUS = flairIndex('auraPlus');
 const FALTANDO = flairIndex('faltandoElRespeto');
+const OJO_BALA = flairIndex('ojoBala');
 const BANDIDAJE = flairIndex('aPuroBandidaje');
 const INFINITA = flairIndex('auraInfinita');
 const CRASH = flairIndex('auraMenos');
@@ -251,6 +253,7 @@ export function stepFlair(
 
   let crashed = false;
   let nearMisses = 0;
+  let targetHit = false;
   for (let i = 0; i < eventCount; i++) {
     const ev = events[i];
     // The severity the collision pass already measured: speed into the contact normal. A soft
@@ -260,6 +263,8 @@ export function stepFlair(
       if (crash === null && ev.impact >= FLAIR.crash.impactSpeed) crashed = true;
     } else if (ev.type === 'nearMiss') {
       nearMisses++;
+    } else if (ev.type === 'targetDestroyed') {
+      targetHit = true;
     }
   }
 
@@ -307,6 +312,12 @@ export function stepFlair(
     f.idle = 0;
   }
 
+  /* --------------------------------------------------------------------------- the shot */
+
+  // A target destroyed on a tick the car is still sliding: the bolt only ever left because a
+  // drift had been charging it, but this is about the aim landing while the tail is still out.
+  const shotWhileDrifting = targetHit && drifting;
+
   /* ------------------------------------------------------------ the streak running out */
 
   if (f.streak && !drifting && nearMisses === 0) {
@@ -341,6 +352,7 @@ export function stepFlair(
       qualified |= 1 << opener;
     }
     if (nearMisses > 0 && insideDrift && !(f.said & (1 << FALTANDO))) qualified |= 1 << FALTANDO;
+    if (shotWhileDrifting && !(f.said & (1 << OJO_BALA))) qualified |= 1 << OJO_BALA;
     if (f.nearMisses >= FLAIR.combo.auraNearMisses && !(f.said & (1 << AURA_PLUS))) qualified |= 1 << AURA_PLUS;
     const b = FLAIR.combo.bandidaje;
     if (
@@ -356,7 +368,7 @@ export function stepFlair(
 
   if (qualified !== 0) {
     // Everything that qualified is spent here, not only the winner. That is the whole of "do
-    // not let DE COSTADO turn up four seconds after A PURO BANDIDAJE already said it better".
+    // not let AURA turn up four seconds after A PURO BANDIDAJE already said it better".
     f.said |= qualified;
     let best = -1;
     for (let i = MESSAGES.length - 1; i >= 0; i--) {

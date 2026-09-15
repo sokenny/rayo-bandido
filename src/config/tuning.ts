@@ -423,16 +423,19 @@ export const BODY = {
   /* ------------------------------------------------------- lightning discharge
    * Releasing E: the body squats onto its springs and bounces back once, as if the shot pulled
    * the car down with it. Scaled by the shot's size (`game.ts`, from the charge it spent). */
-  /** Downward velocity a full shot injects (m/s). Peak drop is roughly this / `heaveFrequency`. */
-  dischargeHeaveImpulse: 0.32,
-  /** Nose-up recoil a full shot injects on the shift-pitch spring (rad/s). */
-  dischargePitchImpulse: 0.07,
-  /** Heave spring frequency (rad/s). */
-  heaveFrequency: 13,
-  /** Heave damping ratio. Low enough for the one rebound that reads as a discharge. */
-  heaveDamping: 0.42,
+  /**
+   * Downward velocity a full shot injects (m/s). With the slow spring below the drop peaks at
+   * about 5 cm and takes ~0.25 s to get there — a heavy sag, not a tick.
+   */
+  dischargeHeaveImpulse: 0.5,
+  /** Nose-up recoil a full shot injects on the shift-pitch spring (rad/s). ~1.2 deg peak, above a full upshift's. */
+  dischargePitchImpulse: 0.3,
+  /** Heave spring frequency (rad/s). Slower than the shift springs, so the sag plays out. */
+  heaveFrequency: 5,
+  /** Heave damping ratio. Leaves one soft rebound. */
+  heaveDamping: 0.55,
   /** How far the body may travel vertically (m). */
-  heaveLimit: 0.04,
+  heaveLimit: 0.08,
 };
 
 export const DRIFT = {
@@ -545,6 +548,20 @@ export const TARGETS = {
     jerk: 0.85,
     /** How long that jerk rings for (s). */
     jerkTime: 0.3,
+    /**
+     * How far the bolt throws the car it hits (m), along the line from the shooter: from the
+     * shortest shot that leaves (`LIGHTNING.minHold`) to a full-reach one. Given as distance and
+     * not speed because distance is what reads; the kick speed is this × `pushDamping`, so a
+     * full shot leaves at ~24 m/s and bleeds it off over a couple of seconds.
+     */
+    boltSlideMin: 5,
+    boltSlideMax: 15,
+    /**
+     * How fast a wreck's shove bleeds off (1/s). Lower than a live car's `knock.damping`: the
+     * motor is dead and nothing is fighting the slide, and it keeps the throw a slide rather
+     * than a teleport.
+     */
+    pushDamping: 1.6,
   },
   /**
    * Physical bump when the player drives into an electric car. Arcade, not realistic: the car
@@ -1171,7 +1188,7 @@ export const AUDIO = {
    * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
    * there and not from this knob — raising this only makes a slide loud.
    */
-  tireVolume: 0.3,
+  tireVolume: 0.22,
   /** Per-car electric hover hum level. Deliberately near-silent. */
   humVolume: 0.05,
   /**
@@ -1193,8 +1210,22 @@ export const AUDIO = {
   lightningReleaseSrc: '/rayo-release.mp3',
   /** The charge-up while fire is held: under the engine, building. */
   lightningLoadVolume: 0.7,
+  /**
+   * Seconds skipped at the start of the load recording. Its first ~175 ms are ~10 dB under what
+   * follows, which made the charge-up seem to start late.
+   */
+  lightningLoadOffset: 0.18,
   /** The discharge when the bolt leaves: the loudest thing in that moment. */
-  lightningReleaseVolume: 1.4,
+  lightningReleaseVolume: 2.0,
+  /**
+   * An electric car hit by the Rayo going dead (`audio/evDisabled.ts`): one of these, at random,
+   * sounding from the car with distance, pan and doppler.
+   */
+  evDisabledSrcs: ['/ev-disabled-1.mp3', '/ev-disabled-2.mp3'],
+  evDisabledVolume: 0.5,
+  /** Metres: full loudness inside `evDisabledNear`, silent beyond `evDisabledFar`. */
+  evDisabledNear: 6,
+  evDisabledFar: 90,
   /** Electric-vehicle-out-of-service (power-down) one-shot level. */
   shutdownVolume: 0.5,
   /** Nitro spool whoosh level. */

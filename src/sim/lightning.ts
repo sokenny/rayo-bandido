@@ -1,5 +1,5 @@
 import type { DriftState, GameEvent, LightningState, PlayerCommand, TargetState, VehicleState } from '../core/types';
-import { LIGHTNING } from '../config/tuning';
+import { LIGHTNING, TARGETS } from '../config/tuning';
 import { forwardX, forwardZ } from '../core/math';
 import { rayTarget } from './targeting';
 
@@ -127,6 +127,21 @@ function fire(
   if (target) {
     target.status = 'destroyed';
     target.hitTime = time;
+    // The bolt shoves it: along the line from the shooter, harder the more the hold loaded.
+    // The roll-out (`coastToAStop` in `src/sim/targets.ts`) carries it, bleeds it and keeps
+    // it out of the walls, exactly as it does a bump.
+    const px = target.x - v.x;
+    const pz = target.z - v.z;
+    const len = Math.sqrt(px * px + pz * pz);
+    if (len > 1e-3) {
+      const { boltSlideMin, boltSlideMax, pushDamping } = TARGETS.dying;
+      const floor = LIGHTNING.minHold / LIGHTNING.maxHold;
+      const force = Math.min(1, Math.max(0, (reach - floor) / (1 - floor)));
+      // A shove decaying at `pushDamping` covers speed / damping, so aim the speed at the slide.
+      const push = (boltSlideMin + (boltSlideMax - boltSlideMin) * force) * pushDamping;
+      target.vx += (px / len) * push;
+      target.vz += (pz / len) * push;
+    }
   }
   // How far the bolt actually went, which for a hit is where the car was and NOT the reach the
   // hold bought. Scoring pays for the distance crossed, so a full hold into a car six metres

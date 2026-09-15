@@ -50,6 +50,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       'QUICK PLAY on the main menu jumps straight into Rayo Rush, Street Race or Time Attack, no drive to the door.',
       'Shooting a car mid-Rayo-Rush now pays a small bounty, with no police to answer for it.',
       'Passenger fares now cross much more of the city; the max tip is down from ¥300 to ¥100.',
+      'A car hit by the Rayo now gets thrown clear, harder the fuller the charge, and slides to a stop.',
+      'Land a shot mid-drift and hear "DONDE PONE EL OJO, PONE LA BALA."',
+      'A downed electric car now powers off with a proper recorded sound instead of a synthesized one.',
+      'The Rayo\'s charge-up now starts right on the press, instead of a beat late.',
     ],
   },
   {

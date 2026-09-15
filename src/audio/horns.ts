@@ -46,10 +46,10 @@ export function dopplerRatio(
 }
 
 /** A target's world velocity: its lane speed along its heading plus any knockback. */
-function carVx(t: TargetState): number {
+export function carVx(t: TargetState): number {
   return Math.sin(t.heading) * t.speed + t.vx;
 }
-function carVz(t: TargetState): number {
+export function carVz(t: TargetState): number {
   return -Math.cos(t.heading) * t.speed + t.vz;
 }
 

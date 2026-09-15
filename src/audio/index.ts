@@ -8,6 +8,7 @@ import { createPoliceAudio } from './police';
 import { createRainAudio } from './rain';
 import { createNitroBoostAudio } from './nitroBoost';
 import { createLightningChargeAudio } from './lightningCharge';
+import { createEvDisabledAudio } from './evDisabled';
 import { createWindGusts } from './windGust';
 import { createHorns } from './horns';
 import type { PassByGust } from './passBy';
@@ -98,6 +99,7 @@ export function createAudio(targetCount: number): AudioSystem {
   const rain = createRainAudio(core);
   const nitro = createNitroBoostAudio(core);
   const rayo = createLightningChargeAudio(core);
+  const evDown = createEvDisabledAudio(core);
   const wind = createWindGusts(core);
   const horns = createHorns(core, targetCount);
 
@@ -118,6 +120,7 @@ export function createAudio(targetCount: number): AudioSystem {
       tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin, skid.yawRate), Math.hypot(skid.speed, skid.lateralSpeed));
       hums.update(dt, listener, targets);
       horns.update(dt, listener, targets);
+      evDown.update(dt, listener, targets);
       rain.update(dt, Math.hypot(skid.speed, skid.lateralSpeed));
       if (policeInput) police.update(dt, listener, policeInput.units, policeInput.siren);
     },
@@ -129,7 +132,10 @@ export function createAudio(targetCount: number): AudioSystem {
           if (!rayo.release()) oneShots.lightning();
           break;
         case 'targetDestroyed':
-          oneShots.shutdown();
+          // The recordings, from the car itself (`audio/evDisabled.ts`); the synthesized power-down
+          // only until they have loaded.
+          if (evDown.ready()) evDown.hit(ev.targetId);
+          else oneShots.shutdown();
           break;
         case 'nitroStart':
           // The recording (`audio/nitroBoost.ts`); the synthesized whoosh only until it has loaded.
@@ -212,6 +218,7 @@ export function createAudio(targetCount: number): AudioSystem {
           police.reset();
           nitro.reset();
           rayo.reset();
+          evDown.reset();
           break;
         default:
           break;
@@ -238,6 +245,7 @@ export function createAudio(targetCount: number): AudioSystem {
       police.reset();
       nitro.reset();
       rayo.reset();
+      evDown.reset();
     },
 
     setMuted(muted) {
@@ -259,6 +267,7 @@ export function createAudio(targetCount: number): AudioSystem {
       rain.dispose();
       nitro.dispose();
       rayo.dispose();
+      evDown.dispose();
       core.dispose();
     },
   };

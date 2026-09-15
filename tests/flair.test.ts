@@ -24,6 +24,10 @@ function collision(impact: number): GameEvent {
   return { type: 'collision', x: 0, y: 0, z: 0, impact };
 }
 
+function targetDestroyed(): GameEvent {
+  return { type: 'targetDestroyed', targetId: 0, x: 0, y: 0, z: 0, reward: 0, distance: 10 };
+}
+
 interface Said {
   id: FlairMessageId;
   at: number;
@@ -92,6 +96,7 @@ describe('the flair phrases', () => {
       'auraPlus',
       'laCalleEsTuya',
       'faltandoElRespeto',
+      'ojoBala',
       'aPuroBandidaje',
       'auraInfinita',
       'auraMenos',
@@ -113,6 +118,7 @@ describe('the flair phrases', () => {
       'AURA +1000',
       'LA CALLE ES TUYA',
       'FALTANDO EL RESPETO',
+      'DONDE PONE EL OJO, PONE LA BALA',
       'A PURO BANDIDAJE',
       'AURA INFINITA',
       '−1000 DE AURA',
@@ -202,7 +208,7 @@ describe('the streak', () => {
   it('says FALTANDO EL RESPETO for a near miss taken two seconds into a drift', () => {
     const r = rig();
     r.startDrift();
-    r.run(2.4); // past DE COSTADO, and the slide is old enough to be disrespectful
+    r.run(2.4); // past AURA, and the slide is old enough to be disrespectful
     r.run(0.2, [nearMiss()]);
     r.run(2.5);
     expect(r.ids()).toContain('faltandoElRespeto');
@@ -214,6 +220,21 @@ describe('the streak', () => {
     r.run(0.5, [nearMiss()]);
     r.run(3);
     expect(r.ids()).not.toContain('faltandoElRespeto');
+  });
+
+  it('says DONDE PONE EL OJO, PONE LA BALA for a target destroyed while drifting', () => {
+    const r = rig();
+    r.startDrift();
+    r.run(0.5, [targetDestroyed()]);
+    r.run(3);
+    expect(r.ids()).toContain('ojoBala');
+  });
+
+  it('does not say it for a target destroyed outside a drift', () => {
+    const r = rig();
+    r.run(0.5, [targetDestroyed()]);
+    r.run(3);
+    expect(r.ids()).not.toContain('ojoBala');
   });
 
   it('wants both manoeuvres for A PURO BANDIDAJE', () => {

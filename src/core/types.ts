@@ -325,6 +325,7 @@ export type FlairMessageId =
   | 'auraPlus'
   | 'laCalleEsTuya'
   | 'faltandoElRespeto'
+  | 'ojoBala'
   | 'aPuroBandidaje'
   | 'auraInfinita'
   | 'auraMenos';

@@ -235,7 +235,8 @@ function coastToAStop(t: TargetState, layout: ArenaLayout, time: number, dt: num
   if (t.hitTime < 0) return;
   const age = time - t.hitTime;
   const { coast, drag, jerk, jerkTime } = TARGETS.dying;
-  if (age > coast) return;
+  // A bolt's shove can outlast the roll-out; it has to run down, not be cut off by the clock.
+  if (age > coast && t.vx === 0 && t.vz === 0) return;
   // The twitch: half a sine, damped, and in the direction the car's id says. Arbitrary, but
   // arbitrary the same way on every machine, which is all the traffic sync asks of it.
   if (age < jerkTime) {
@@ -247,7 +248,7 @@ function coastToAStop(t: TargetState, layout: ArenaLayout, time: number, dt: num
   // also sits under a ceiling that reaches zero at the end of it — a CEILING and not a second
   // decay, because anything multiplied in every tick compounds with the frame rate and would
   // have the car stopped inside half a second.
-  const ceiling = t.patrolSpeed * (1 - age / coast);
+  const ceiling = t.patrolSpeed * Math.max(0, 1 - age / coast);
   t.speed = Math.min(Math.max(0, t.speed - t.speed * drag * dt), ceiling);
   if (t.speed > 0.05) {
     const step = t.speed * dt;
@@ -256,12 +257,12 @@ function coastToAStop(t: TargetState, layout: ArenaLayout, time: number, dt: num
   } else {
     t.speed = 0;
   }
-  // Whatever the player's bump was still doing to it carries on too, so a car shot mid-shove
-  // keeps sliding instead of stopping on the frame the lights went out.
+  // The bolt's throw, and whatever the player's bump was still doing to it, so a car shot
+  // mid-shove keeps sliding instead of stopping on the frame the lights went out.
   if (t.vx !== 0 || t.vz !== 0) {
     t.x += t.vx * dt;
     t.z += t.vz * dt;
-    const decay = Math.max(0, 1 - TARGETS.knock.damping * dt);
+    const decay = Math.max(0, 1 - TARGETS.dying.pushDamping * dt);
     t.vx *= decay;
     t.vz *= decay;
     if (Math.abs(t.vx) < 0.05 && Math.abs(t.vz) < 0.05) {
