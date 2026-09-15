@@ -1099,6 +1099,29 @@ export const ATMOSPHERE = {
   },
 };
 
+export type WetRoadTier = 'low' | 'medium' | 'high';
+
+/**
+ * Planar reflections in the wet asphalt (`src/render/scene/env/wetRoad.ts`). One extra render
+ * of the emissive meshes only, into a small buffer whose HEIGHT is set here (width follows the
+ * aspect) and shrinks with the resolution governor. `auto` is `medium` on desktop and `off` on
+ * touch. `?wet=off|low|medium|high` overrides it.
+ */
+export const WET_ROAD = {
+  quality: 'auto' as 'auto' | 'off' | WetRoadTier,
+  tiers: {
+    low: { height: 256, taps: 3 },
+    medium: { height: 360, taps: 5 },
+    high: { height: 540, taps: 5 },
+  } satisfies Record<WetRoadTier, { height: number; taps: number }>,
+  /** How much reflected light lands on the road at a grazing angle in standing water. */
+  strength: 1.1,
+  /** The mirror ignores everything lower than this over the road (m): lifts, kerbs, light pools. */
+  clipLift: 0.25,
+  /** The mirror camera's far plane (m). Shorter culls more of the metro's chunks out of the pass. */
+  far: 260,
+};
+
 export const RENDER = {
   maxPixelRatio: 1.5,
   /**

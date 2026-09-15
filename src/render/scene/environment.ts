@@ -38,6 +38,7 @@ import type { WallIndex } from './env/builders';
 import { attachTexture, loadTexture } from '../textures/load';
 import { createLampFaults } from './env/lampFaults';
 import { isTouchDevice } from '../../ui/viewport';
+import { createWetRoad, resolveWetTier, type WetRoad } from './env/wetRoad';
 
 /**
  * The Rayo Bandido city: a nocturnal block of city built entirely from a `CityPlan`
@@ -100,6 +101,11 @@ export interface EnvironmentVisual {
     surface: MoogulSurface;
     walls: WallIndex;
   };
+  /**
+   * The mirror in the wet asphalt (`env/wetRoad.ts`). The game renders it once per frame before
+   * the scene; anything else that should show in the road can be put on it with `tag`.
+   */
+  wetRoad: WetRoad;
   /** Resolves when every texture that loads asynchronously (the WANTED portrait) is drawn. */
   ready: Promise<void>;
   /**
@@ -112,7 +118,7 @@ export interface EnvironmentVisual {
   dispose(): void;
 }
 
-export function createEnvironment(scene: THREE.Scene, plan: CityPlan): EnvironmentVisual {
+export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: { wet?: string | null } = {}): EnvironmentVisual {
   // Every builder and texture below reads `PAL`; the world chooses which script fills it.
   applyPalette(plan.palette ?? 'arena');
   const root = new THREE.Group();
@@ -205,6 +211,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
   // the manifest. The procedural asphalt above stays as the fallback and is what is drawn
   // while the file is in flight, so the road is never untextured and never blocks start-up.
   const roadArt = attachTexture(roadMat, 'road/asphalt', asphaltTex);
+  // The lights, mirrored in it: one small extra render of the emissive families below.
+  const wetRoad = createWetRoad(resolveWetTier(options.wet ?? null, isTouchDevice()));
+  wetRoad.patch(roadMat);
+  // The mirror must see the same lights as the main camera, not for how they shade (almost
+  // nothing it draws is lit) but because three bumps its lights-state version whenever two
+  // renders of one scene see different light sets, and that sends every lit material in the
+  // world through `getProgram` again on the next frame: +5 ms of main thread in the metro.
+  wetRoad.tag(hemi);
+  wetRoad.tag(key);
   const laneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const concreteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04 });
   // Rooms behind the panes: each window drifts, and now and then one goes dark or comes back.
@@ -370,6 +385,21 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
    */
   const chunks: Array<{ mesh: THREE.Mesh; x: number; z: number; radius: number }> = [];
   const chunked = plan.render ?? null;
+  // What the wet road mirrors: the light, and the walls the lit windows are set into. Nothing
+  // unlit and nothing lying on the ground. Not the halos either: in the metro they are the
+  // biggest family by draw calls (40 of ~160 at the spawn) and the reflection's blur already
+  // softens every tube it mirrors.
+  const reflected = new Set<THREE.Material>([
+    facadeMat,
+    neonMat,
+    neonPulseMat,
+    neonFlickerMat,
+    signMat,
+    transitMat,
+    screenMats.boards,
+    screenMats.holograms,
+    badkalaMat,
+  ]);
   const add = (builder: MeshBuilder, material: THREE.Material, name: string, order = 0): void => {
     if (builder.empty) return;
     const geo = builder.build();
@@ -380,6 +410,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       mesh.renderOrder = order;
       // Each mesh spans the whole arena, so a frustum test can never reject one.
       mesh.frustumCulled = false;
+      if (reflected.has(material)) wetRoad.tag(mesh);
       root.add(mesh);
       return;
     }
@@ -389,6 +420,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       mesh.name = name;
       mesh.renderOrder = order;
       mesh.frustumCulled = true;
+      if (reflected.has(material)) wetRoad.tag(mesh);
       root.add(mesh);
       const sphere = part.boundingSphere!;
       chunks.push({ mesh, x: sphere.center.x, z: sphere.center.z, radius: sphere.radius });
@@ -434,6 +466,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       metalness: 0.6,
       envMapIntensity: 1.5,
     });
+    // Half a metre under the streets, which the mirror's height mask still mostly lets through.
+    wetRoad.patch(waterMat);
     const water = new THREE.Mesh(geo, waterMat);
     water.name = 'env-water';
     water.position.set((r.minX + r.maxX) / 2, -0.55, (r.minZ + r.maxZ) / 2);
@@ -500,6 +534,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
     streetMarkers,
     leaderboards,
     signAtlas: signTex,
+    wetRoad,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
     ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number, camX?: number, camZ?: number, people: CrowdSubject | null = null) {
@@ -572,6 +607,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan): Environme
       concreteArt.dispose();
       foliageArt.dispose();
       barkArt.dispose();
+      wetRoad.dispose();
       scene.remove(root);
       if (scene.environment === envTex) scene.environment = null;
       scene.fog = null;

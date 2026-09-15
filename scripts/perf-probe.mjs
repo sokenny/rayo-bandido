@@ -151,6 +151,8 @@ async function probeOnce(browser, runIndex) {
         frameCount: window.__perf.frames.length,
         programs: info.programs.length,
         drawCalls: info.render.calls,
+        // The wet-road mirror pass renders before the main pass, so `renderer.info` never sees it.
+        mirrorDraws: rb.wetRoad ? rb.wetRoad.drawCalls : 0,
         triangles: info.render.triangles,
         textures: info.memory.textures,
         geometries: info.memory.geometries,
@@ -190,6 +192,7 @@ async function probeOnce(browser, runIndex) {
       programsAfter: after.programs,
       newPrograms: after.programs - before.programs,
       drawCalls: after.drawCalls,
+      mirrorDraws: after.mirrorDraws,
       triangles: after.triangles,
       simMs: after.simMs,
       renderMs: after.renderMs,
@@ -197,7 +200,7 @@ async function probeOnce(browser, runIndex) {
       pixelRatio: after.pixelRatio,
     };
     console.log(
-      `${name.padEnd(12)} frames ${String(s.frames).padStart(4)}  avg ${String(s.avgMs).padStart(6)} ms  worst ${String(s.worstMs).padStart(6)} ms  >20ms ${String(s.over20ms).padStart(3)}  programs ${before.programs} -> ${after.programs}  draws ${after.drawCalls}  cpu ${after.simMs}+${after.renderMs} ms  gpu ${after.gpuMs} ms  scale ${after.pixelRatio}`,
+      `${name.padEnd(12)} frames ${String(s.frames).padStart(4)}  avg ${String(s.avgMs).padStart(6)} ms  worst ${String(s.worstMs).padStart(6)} ms  >20ms ${String(s.over20ms).padStart(3)}  programs ${before.programs} -> ${after.programs}  draws ${after.drawCalls}+${after.mirrorDraws}  cpu ${after.simMs}+${after.renderMs} ms  gpu ${after.gpuMs} ms  scale ${after.pixelRatio}`,
     );
   };
 

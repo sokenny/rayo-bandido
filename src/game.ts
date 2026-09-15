@@ -376,7 +376,7 @@ export function createGame(
   const scene = new THREE.Scene();
 
   end = measure('environment');
-  const environment = createEnvironment(scene, world.plan);
+  const environment = createEnvironment(scene, world.plan, { wet: params.get('wet') });
   // The crashable pavement props (`src/sim/streetProps.ts`), in the worlds that carry them.
   let streetPropsVisual: StreetPropsVisual | null = null;
   if (state.streetProps) {
@@ -2321,7 +2321,13 @@ export function createGame(
     // Not behind the opening clip: an opaque video over a city nobody can see is GPU time spent
     // on nothing. The simulation above ran regardless — a networked city is never paused.
     if (!introOverlay || !introOverlay.opaque) {
+      // The mirror in the wet road first: the road samples it in the pass below.
+      // When it drew, it has already brought every world matrix up to date this frame, so the
+      // main pass skips walking the scene graph a second time for them.
+      const mirrored = environment.wetRoad.render(renderer, scene, chase.camera, pose.y, simTime, governor.ratio / startRatio);
+      scene.matrixWorldAutoUpdate = !mirrored;
       speedBlur.render(scene, chase.camera, speedBlurStrength(nitroVisual, v.speed), moogul ? moogul.finish : null);
+      scene.matrixWorldAutoUpdate = true;
     }
     gpuTimer.end();
 
@@ -2441,6 +2447,7 @@ export function createGame(
       await loading?.paint();
       let endStage = measure('compile');
       await compileScene(target);
+      await environment.wetRoad.compile(renderer, scene);
       endStage();
 
       loading?.set('WARMING UP', 0.8);
@@ -2449,6 +2456,9 @@ export function createGame(
       await environment.ready;
       endStage();
       endStage = measure('warm-render');
+      // The mirror pass first: it draws its guests into a render target, which is a different
+      // program from the canvas one, and the road samples its buffer in the render after it.
+      environment.wetRoad.render(renderer, scene, chase.camera, pose.y, 0);
       warmRender(target);
       speedBlur.warm();
       endStage();
@@ -2622,6 +2632,8 @@ export function createGame(
     renderer,
     scene,
     camera: chase.camera,
+    /** The wet-road mirror: `tier` and the extra `drawCalls` it issues (not in `renderer.info`). */
+    wetRoad: environment.wetRoad,
     audio,
     theme,
     /** True once the warm-up has finished and the loop may run without first-use hitches. */
