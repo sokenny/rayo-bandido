@@ -26,11 +26,12 @@ const START_RAMP = 0.005;
  *
  * - **Load**: starts the moment a shot begins charging (fire held, `src/sim/lightning.ts`) and
  *   builds while it is held. It plays once and is not looped: held past its end, the charge is
- *   silent. It starts `AUDIO.lightningLoadOffset` seconds in, past the recording's near-silent
- *   first moment, so it is heard on the press rather than a beat after it. It fades out when the
+ *   silent. It starts `AUDIO.lightningLoadOffset` seconds in, past the recording's quiet slow
+ *   build, so it is heard on the press rather than a beat after it. It fades out when the
  *   button lets go — quickly under the release when the bolt leaves, a little
  *   slower on a fumble, where nothing leaves and there is no release to cover it.
- * - **Release**: the discharge, on `lightningFired`.
+ * - **Release**: the discharge, on `lightningFired`. It plays on `core.lead` (its own limiter,
+ *   above the mix's) and ducks the rest of the mix, so it is the loudest thing in that moment.
  */
 export function createLightningChargeAudio(core: AudioCore): LightningChargeAudio {
   const { ctx, master } = core;
@@ -110,7 +111,9 @@ export function createLightningChargeAudio(core: AudioCore): LightningChargeAudi
       src.buffer = releaseBuffer;
       const gain = ctx.createGain();
       gain.gain.value = AUDIO.lightningReleaseVolume;
-      src.connect(gain).connect(master);
+      // Its own bus, over the mix's limiter, with everything else pulled down under it.
+      src.connect(gain).connect(core.lead);
+      core.duck(AUDIO.lightningReleaseDuckDb, releaseBuffer.duration);
       src.onended = () => {
         src.disconnect();
         gain.disconnect();

@@ -1234,12 +1234,14 @@ export const AUDIO = {
   /** The charge-up while fire is held: under the engine, building. */
   lightningLoadVolume: 0.7,
   /**
-   * Seconds skipped at the start of the load recording. Its first ~175 ms are ~10 dB under what
-   * follows, which made the charge-up seem to start late.
+   * Seconds skipped at the start of the load recording (4.3 s long). It builds slowly: its first
+   * second sits ~10 dB under the rest, so starting there made the charge-up seem to start late.
    */
-  lightningLoadOffset: 0.18,
+  lightningLoadOffset: 1.0,
   /** The discharge when the bolt leaves: the loudest thing in that moment. */
-  lightningReleaseVolume: 2.0,
+  lightningReleaseVolume: 6.0,
+  /** dB the rest of the mix drops under the release, recovering over the recording's length. */
+  lightningReleaseDuckDb: 13,
   /**
    * An electric car hit by the Rayo going dead (`audio/evDisabled.ts`): one of these, at random,
    * sounding from the car with distance, pan and doppler.
@@ -2727,4 +2729,62 @@ export const SEWER_STEAM = {
   windZ: 0.2,
   /** A car crossing a steaming vent faster than this (m/s) tears the column along with it. */
   gustSpeed: 6,
+};
+
+/**
+ * Ambient aerial traffic (`src/render/scene/aerialTrafficVisual.ts`): hovercars high over the
+ * avenues and a few drones over the pavements. Purely cosmetic — no sim, no network, no
+ * collisions. The pools are fixed; the counts are per quality preset (`ATMOSPHERE.quality`).
+ */
+export const AERIAL_TRAFFIC = {
+  /** Pool sizes: a busy sky, most of it placed round the camera. */
+  cars: { low: 10, medium: 15, high: 20 } as Record<'low' | 'medium' | 'high', number>,
+  drones: { low: 4, medium: 6, high: 8 } as Record<'low' | 'medium' | 'high', number>,
+  /** No new car / drone is placed while this many are already in the frame (a ceiling, not a quota). */
+  maxCarsInView: 12,
+  maxDronesInView: 4,
+  /**
+   * Cruise altitude band over the road (m), split into four lanes by heading and direction. The
+   * chase camera sits ~2 m up with a 60° fov: kept low so a car enters the frame while it is
+   * still close enough to read.
+   */
+  carAltitude: [30, 62] as [number, number],
+  /** Cruise speed (m/s); each lane scales it by 0.85..1.15. */
+  carSpeed: 24,
+  /** Camera distance (m) out to which cars are drawn; they scale in over the last 20%. */
+  carDrawDistance: 360,
+  /** Extra scale a car carries at 400 m (ramping from 100 m), so its lights stay readable. */
+  carFarScale: 0.6,
+  /** Size of the hovercar and drone silhouettes (1 = a real-sized ~4.6 m car / ~1 m drone). Bigger reads from the street. */
+  carScale: 2,
+  droneScale: 1.8,
+  /** Shortest clear corridor worth flying (m), and the narrowest road that carries one (half width, m). */
+  minCorridor: 260,
+  minHalfWidth: 5,
+  /** Least gap (m) between two cars in the same lane. */
+  carSpacing: 85,
+  /** Drone hover altitude over the pavement (m). */
+  droneAltitude: [4.5, 9.5] as [number, number],
+  /** Drone cruise speed (m/s), route length (m) and the pause at each end (s). */
+  droneSpeed: 3.2,
+  droneRoute: [16, 34] as [number, number],
+  dronePause: [1.4, 3.5] as [number, number],
+  droneDrawDistance: 150,
+  /** Brightness of every emissive part (strips, windows, nav and status lights). */
+  lightIntensity: 3,
+  /**
+   * Soft halos round the lights (one instanced, additive billboard pass): the underglow haze,
+   * the tail strobe, the drone's belly light. Sizes in metres at car scale 1.
+   */
+  halo: { intensity: 0.45, underSize: 2.6, strobeSize: 1.6, droneSize: 0.9, farGrow: 0.4 },
+  /** Nav lights: double flashes per second, and the share of rigs whose strip is failing. */
+  strobeRate: 0.75,
+  tiredShare: 0.18,
+  /**
+   * Faint searchlight beams hanging under some cars, sweeping slowly through the rain. One in
+   * `every` cars carries one; off on `low`.
+   */
+  beam: { every: 3, length: 30, radius: 4.5, intensity: 0.06, sweep: 0.22, distance: 300 },
+  /** The one faint cone under the nearest drone. `high` quality only. */
+  cone: { enabled: true, maxDistance: 45, length: 3.2, radius: 1.1, opacity: 0.06 },
 };

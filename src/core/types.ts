@@ -957,7 +957,7 @@ export type GameEvent =
   /** BadKala's call: the phone starts ringing, the line opens, the line closes. */
   | { type: 'introCall'; phase: 'ringing' | 'connected' | 'ended' }
   /** A subtitle line started. `voice` is the optional clip; `seconds` is the subtitle-only timing. */
-  | { type: 'introLine'; id: string; speaker: string; text: string; voice: string | null; seconds: number }
+  | { type: 'introLine'; id: string; speaker: string; text: string; voice: string | null; seconds: number; tts?: boolean }
   /** The line on screen ended (its time ran out, or it was skipped). */
   | { type: 'introLineEnd'; id: string }
   /** The intro moved to a new stage. */

@@ -122,6 +122,7 @@ import { createStreetPropsVisual, type StreetPropsVisual } from './render/scene/
 import { resolveQuality } from './render/scene/env/atmosphere';
 import { thinSewerSteam, thinStreetProps } from './world/streetProps';
 import { createSewerSteamVisual, type SewerSteamVisual } from './render/scene/sewerSteamVisual';
+import { createAerialTraffic, type AerialTrafficVisual } from './render/scene/aerialTrafficVisual';
 import { createCarVisual } from './render/scene/carVisual';
 import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
 import { createPoliceCarVisual, disposePoliceCarResources, type PoliceCarVisual } from './render/scene/policeCarVisual';
@@ -142,6 +143,7 @@ import { createOnlinePanel, type OnlinePanel } from './ui/onlinePanel';
 import { createDebugOverlay, clipboardLine, type DebugFrameInput, type WorldReadout } from './ui/debugOverlay';
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
+import { configureDialogueVoice, speakDialogue } from './audio/dialogueVoice';
 import { createAudio, type PoliceAudioInput } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
 import { createPassByDetector } from './audio/passBy';
@@ -389,6 +391,13 @@ export function createGame(
     sewerVisual = createSewerSteamVisual(layout.sewerVents, propQuality);
     scene.add(sewerVisual.root);
   }
+  // Hovercars over the avenues and drones over the pavements, cosmetic only
+  // (`src/render/scene/aerialTrafficVisual.ts`). `?aerial=off` leaves them out for an A/B capture.
+  let aerialTraffic: AerialTrafficVisual | null = null;
+  if (params.get('aerial') !== 'off') {
+    aerialTraffic = createAerialTraffic(world.plan, propQuality);
+    if (aerialTraffic) scene.add(aerialTraffic.root);
+  }
   end();
 
   end = measure('vehicles');
@@ -481,6 +490,8 @@ export function createGame(
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
   theme.arm(window);
+  // Spoken dialogue follows the game's mute (M) and sits over the music the way a call does.
+  configureDialogueVoice({ isMuted: () => theme.isMuted(), duckMusic: (level) => theme.duck(level), duckLevel: INTRO.call.duck });
   end();
 
   /* --------------------------------------------------------------- rayo rush */
@@ -1943,6 +1954,7 @@ export function createGame(
     if (performance.now() - boardsFetchedAt > BOARD_REFRESH_MS) refreshHolograms();
     if (streetPropsVisual && state.streetProps) streetPropsVisual.update(state.streetProps, chase.camera.position.x, chase.camera.position.z, alpha);
     if (sewerVisual) sewerVisual.update(frameDt, chase.camera.position.x, chase.camera.position.z, v.x, v.z, v.vx, v.vz);
+    if (aerialTraffic) aerialTraffic.update(frameDt, chase.camera);
     // After the environment, so the sky and the fog it blends from are this frame's. The
     // envelope is read off the rules' clock: 0 the moment the Moogul is gone, and the
     // controller's own fade takes it from there.
@@ -2528,6 +2540,7 @@ export function createGame(
         scene.remove(sewerVisual.root);
         sewerVisual.dispose();
       }
+      if (aerialTraffic) aerialTraffic.dispose();
       for (const t of targetVisuals) t.dispose();
       for (const b of busVisuals) b.dispose();
       for (const p of policeVisuals) p.dispose();
@@ -2583,6 +2596,15 @@ export function createGame(
     command,
     /** Wind gusts voiced since load (`audio/passBy.ts`), for automation. */
     passByCount: () => passByCount,
+    /**
+     * Development only: speak a BadKala line through the server's text-to-speech. Call it twice
+     * with the same text — the first generates (`cache miss`), the second is `cache hit`.
+     *
+     *   await __rb.say('Mirá quién decidió volver al radar.')
+     */
+    say: import.meta.env.DEV
+      ? (text = 'Mirá quién decidió volver al radar.') => speakDialogue({ characterId: 'badkala', text, interrupt: true })
+      : undefined,
     /** Multiplayer, for automation: the rival cars as this client currently sees them. */
     multiplayer: !!net,
     rivals,
@@ -2634,6 +2656,8 @@ export function createGame(
     camera: chase.camera,
     /** The wet-road mirror: `tier` and the extra `drawCalls` it issues (not in `renderer.info`). */
     wetRoad: environment.wetRoad,
+    /** Ambient hovercars and drones: `enabled` toggles them live, `stats()` counts what is drawn. */
+    aerial: aerialTraffic,
     audio,
     theme,
     /** True once the warm-up has finished and the loop may run without first-use hitches. */

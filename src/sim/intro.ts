@@ -195,7 +195,7 @@ function stepDialogue(intro: IntroState, cfg: IntroConfig, state: GameState, dt:
     intro.lineText = l.text;
     intro.lineTimeLeft = seconds;
     intro.lineSeq++;
-    events.push({ type: 'introLine', id, speaker: l.speaker, text: l.text, voice: l.voice, seconds });
+    events.push({ type: 'introLine', id, speaker: l.speaker, text: l.text, voice: l.voice, seconds, ...(l.tts ? { tts: true } : {}) });
     // She asks for it, and only then is it asked for: the objective — the card, the pin, and
     // whether doing the thing counts at all — starts with the line that gives it.
     if (l.instructional) setObjective(intro, cfg, l.instructional, events);

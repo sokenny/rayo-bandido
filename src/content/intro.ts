@@ -39,6 +39,11 @@ export interface IntroLine {
    * same as no clip — the line is still shown for `seconds`.
    */
   voice: string | null;
+  /**
+   * No clip, but spoken anyway: the text is voiced at runtime by the server's text-to-speech
+   * (`src/audio/dialogueVoice.ts`), generated once and cached. Silent if that is unavailable.
+   */
+  tts?: boolean;
   /** Seconds on screen. Omitted: derived from the text length (`timing`). */
   seconds?: number;
   /** Seconds of silence after the line. Omitted: `timing.gap`. */
@@ -57,6 +62,8 @@ const line = (id: string, text: string, extra: Partial<Omit<IntroLine, 'id' | 't
   speaker: 'BADKALA',
   text,
   voice: null,
+  // Every BadKala line is voiced by text-to-speech; `tts: false` on a line keeps it subtitle-only.
+  tts: true,
   ...extra,
 });
 

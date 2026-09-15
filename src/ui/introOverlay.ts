@@ -1,5 +1,6 @@
 import type { GameEvent, IntroObjectiveId, IntroStage } from '../core/types';
 import type { IntroConfig } from '../content/intro';
+import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 import { CONTROLS } from './hud';
 import { createSystemMessage, type SystemMessage } from './systemMessage';
 import { isTouchDevice } from './viewport';
@@ -427,6 +428,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
   function end(reason: 'completed' | 'skipped'): void {
     over = true;
     stopVoice();
+    stopDialogue();
     highlightCharge(false);
     finishPresentation();
     options.hudRoot.classList.remove('rb-intro-running');
@@ -472,6 +474,11 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           if (ev.phase === 'ringing') {
             callEl.classList.add('is-on');
             skipEl.classList.add('is-on');
+            // While it rings: have every voiced line generated (or found cached) before she talks.
+            void prepareDialogue(
+              'badkala',
+              cfg.lines.filter((l) => l.tts && !l.voice).map((l) => l.text),
+            );
             try {
               navigator.vibrate?.(cfg.call.vibrateMs);
             } catch {
@@ -492,10 +499,13 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
           subtitleEl.classList.add('is-on');
           flash(subtitleEl);
           if (ev.voice) playVoice(ev.voice);
+          // Not awaited: the subtitle is already up, and the voice joins it whenever it is ready.
+          else if (ev.tts) void speakDialogue({ characterId: 'badkala', text: ev.text, interrupt: true });
           break;
         case 'introLineEnd':
           subtitleEl.classList.remove('is-on');
           stopVoice();
+          stopDialogue();
           break;
         case 'introStage':
           // Pulling into the meet: the clip, over the car standing among the others.

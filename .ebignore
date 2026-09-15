@@ -35,3 +35,7 @@ artifacts/
 
 *.log
 .DS_Store
+
+# Local secrets: on AWS the environment supplies them. Generated dialogue is regenerated on demand.
+.env
+.cache/

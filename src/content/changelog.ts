@@ -30,6 +30,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-15',
     items: [
       'Wet roads now really mirror the city\'s neon, signs and lit windows, not just a generic sheen.',
+      'BadKala now speaks her intro lines out loud, not just in subtitles.',
+      'Hovercars and drones now drift through the sky over the avenues and pavements.',
     ],
   },
   {

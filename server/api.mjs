@@ -29,7 +29,7 @@ import { BOARDS, createScores } from './scores.mjs';
 const MAX_BODY_BYTES = 16 * 1024;
 const OAUTH_COOKIE = 'rb_oauth';
 
-function send(res, status, body, headers = {}) {
+export function send(res, status, body, headers = {}) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
@@ -39,7 +39,7 @@ function redirect(res, location) {
   res.end();
 }
 
-function readJson(req) {
+export function readJson(req) {
   return new Promise((resolve) => {
     let size = 0;
     const chunks = [];

@@ -31,6 +31,8 @@ const MATCH_SERVER = 'http://127.0.0.1:8080';
 const accountProxy = {
   '/api': { target: MATCH_SERVER, changeOrigin: false },
   '/auth': { target: MATCH_SERVER, changeOrigin: false },
+  // Spoken dialogue clips, cached by the match server (`server/dialogue/speech.mjs`).
+  '/generated-dialogue': { target: MATCH_SERVER, changeOrigin: false },
 };
 
 export default defineConfig({

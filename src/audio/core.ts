@@ -10,6 +10,13 @@ export interface AudioCore {
   readonly ctx: AudioContext;
   /** Pre-limiter bus. Connect every voice here. */
   readonly master: GainNode;
+  /**
+   * A bus for the one sound that must punch through everything (the Rayo's release). It skips the
+   * mix limiter for its own, higher ceiling, and is not touched by `duck`.
+   */
+  readonly lead: GainNode;
+  /** Pull the whole `master` mix down by `db` right now, easing back over `recover` seconds. */
+  duck(db: number, recover: number): void;
   /** Shared 2 s white-noise buffer, safe to loop. Reused by every noise voice. */
   readonly noise: AudioBuffer;
   now(): number;
@@ -57,9 +64,23 @@ export function createAudioCore(): AudioCore | null {
   limiter.release.value = 0.15;
   limiter.connect(ctx.destination);
 
+  // master -> ducker -> limiter: the mute toggle owns master's gain, the ducker owns its own.
+  const ducker = ctx.createGain();
+  ducker.connect(limiter);
   const master = ctx.createGain();
   master.gain.value = AUDIO.masterVolume;
-  master.connect(limiter);
+  master.connect(ducker);
+
+  const leadLimiter = ctx.createDynamicsCompressor();
+  leadLimiter.threshold.value = -2;
+  leadLimiter.knee.value = 2;
+  leadLimiter.ratio.value = 20;
+  leadLimiter.attack.value = 0.001;
+  leadLimiter.release.value = 0.1;
+  leadLimiter.connect(ctx.destination);
+  const lead = ctx.createGain();
+  lead.gain.value = AUDIO.masterVolume;
+  lead.connect(leadLimiter);
 
   const noise = makeNoiseBuffer(ctx, 2);
   let muted = false;
@@ -70,7 +91,16 @@ export function createAudioCore(): AudioCore | null {
   return {
     ctx,
     master,
+    lead,
     noise,
+    duck(db, recover) {
+      const t = ctx.currentTime;
+      const floor = Math.pow(10, -Math.abs(db) / 20);
+      ducker.gain.cancelScheduledValues(t);
+      ducker.gain.setValueAtTime(ducker.gain.value, t);
+      ducker.gain.linearRampToValueAtTime(floor, t + 0.01);
+      ducker.gain.setTargetAtTime(1, t + 0.01, Math.max(0.01, recover) / 3);
+    },
     now() {
       return ctx.currentTime;
     },
@@ -89,6 +119,7 @@ export function createAudioCore(): AudioCore | null {
     setMuted(next: boolean) {
       muted = next;
       master.gain.setTargetAtTime(muted ? 0 : AUDIO.masterVolume, ctx.currentTime, 0.02);
+      lead.gain.setTargetAtTime(muted ? 0 : AUDIO.masterVolume, ctx.currentTime, 0.02);
     },
     isMuted() {
       return muted;
@@ -96,7 +127,10 @@ export function createAudioCore(): AudioCore | null {
     dispose() {
       try {
         master.disconnect();
+        ducker.disconnect();
         limiter.disconnect();
+        lead.disconnect();
+        leadLimiter.disconnect();
         void ctx.close();
       } catch {
         /* already closing */

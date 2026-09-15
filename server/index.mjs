@@ -28,11 +28,20 @@ import { WebSocketServer } from 'ws';
 import { createRooms } from './rooms.mjs';
 import { createDatabase } from './db/index.mjs';
 import { createApi } from './api.mjs';
+import { createDialogueSpeech, createFsSpeechCache } from './dialogue/speech.mjs';
 import { RUSH_DAILY_ATTEMPTS, SNAPSHOT_HZ } from './protocol.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(here, '..');
 const dist = join(root, 'dist');
+
+// Local secrets (`.env`, see `.env.example`). Never shipped (`.ebignore`); on AWS the environment
+// supplies them, and a variable already set always wins over the file.
+try {
+  process.loadEnvFile(join(root, '.env'));
+} catch {
+  /* no .env: fine */
+}
 
 const args = process.argv.slice(2);
 const argPort = args.indexOf('--port');
@@ -76,6 +85,11 @@ try {
   log(`database: could not open (${err.message}); accounts and boards are off`);
 }
 const api = createApi({ db, dailyAttempts: RUSH_DAILY_ATTEMPTS, log });
+// Spoken dialogue (`server/dialogue/speech.mjs`). Needs no database, so it answers ahead of `api`.
+const dialogue = createDialogueSpeech({
+  cache: createFsSpeechCache(join(root, '.cache', 'generated-dialogue')),
+  log,
+});
 // The open world is a room like any other, except that it is always there: opened before the
 // first connection so `GET /rooms` can report an empty city rather than no city at all.
 rooms.ensureWorld();
@@ -161,6 +175,7 @@ const server = createServer((req, res) => {
   /* ------------------------------------------------------- accounts and boards */
 
   const url = new URL(req.url || '/', 'http://localhost');
+  if (dialogue.handle(req, res, url)) return;
   if (api.handle(req, res, url)) return;
 
   if (!existsSync(dist)) {

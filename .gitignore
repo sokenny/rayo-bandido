@@ -13,3 +13,7 @@ artifacts
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Local secrets (see .env.example) and generated text-to-speech clips (server/dialogue/speech.mjs).
+.env
+.cache
