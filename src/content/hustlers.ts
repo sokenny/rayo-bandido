@@ -13,9 +13,16 @@ import { MAX_LINE_CHARS } from './passengers';
  *
  * WINDSHIELD WASHERS work a red light and do take money — once, only on a yes.
  *
- * TONE. Funny, streetwise, a little pushy, and believable: the slang is what somebody on that
- * corner would actually say, and nobody is a caricature. Every line is short enough to read at a
- * red light (`MAX_LINE_CHARS` is the passengers' ceiling; these are all far under it).
+ * SOCK SELLERS walk a stretch of pavement with a cardboard box round their neck and pitch whoever
+ * slows down: three pairs, a good price, for the kids, and — the moment you drive off — that they
+ * are not stealing from anybody, they are selling socks. Talk only, like a trapito.
+ *
+ * TONE. Villero, the way it is actually spoken on that corner: "ameo" and "ñeri" and "pa" instead
+ * of amigo, "la gorra" and "la yuta" for the police, "rescatate", "bardear", "posta", "de una".
+ * Funny, a little pushy, never a caricature and never a threat. The trapitos and washers share a
+ * voice (`trapito`), the sock sellers have the villero one (`villero`); all of them talk alike.
+ * Every line is short enough to read at a red light (`MAX_LINE_CHARS` is the passengers' ceiling;
+ * these are all far under it) and is spoken exactly as written, so it is written to be said.
  */
 
 export interface TrapitoLines {
@@ -48,117 +55,194 @@ export interface WasherLines {
   regular: readonly string[];
 }
 
+export interface MediasLines {
+  /** The car slows by him: he stops walking and pitches. */
+  pitch: readonly string[];
+  /** It is still there: he tries again. */
+  insist: readonly string[];
+  /** It drove off, or sat there without buying. */
+  ignored: readonly string[];
+  /** Said instead of a pitch when the car wears crash damage. Takes priority. */
+  damaged: readonly string[];
+  /** Said instead of anything when the police are on the car. */
+  pursuit: readonly string[];
+  /** Said instead of a pitch, sometimes, to a clean car. */
+  clean: readonly string[];
+  /** Said instead of a pitch, sometimes, once he has seen this car a few times. */
+  regular: readonly string[];
+}
+
 export const TRAPITO_LINES: TrapitoLines = {
   call: [
-    'Ehh, pa, acá tenés lugar.',
-    'Vení, máquina. Acá entra de una.',
-    'Dale, dale… seguí, seguí… ahí estás joya.',
-    'Arrimate, rey. Yo te hago lugar.',
-    'Dejámelo acá, que te lo miro.',
-    'Acá no te lo toca nadie, olvidate.',
-    'Qué nave, hermano. Vení que te la cuido.',
-    'Estacionalo acá, pa. Zona premium.',
-    'Acá queda flama, maestro.',
-    'Dale para atrás… confiá en mí.',
+    'Eu, ameo, acá tenés lugar.',
+    'Vení, ñeri, que acá entra de una.',
+    'Dale, pa, dale… seguí, seguí… ahí, joya.',
+    'Arrimate, ameo, que te hago lugar.',
+    'Dejalo acá, pa, que yo te lo miro.',
+    'Acá no te lo toca nadie, ñeri. Palabra.',
+    'Qué nave, ameo. Vení que te la cuido.',
+    'Tirala acá, pa. Zona vip.',
+    'Acá queda re piola, ñeri. Confiá.',
+    'Dale marcha atrás, pa… tranqui, que yo te guío.',
+    'Eu, ñeri, tengo un lugarcito para vos.',
   ],
   ignored: [
-    'Bueno, máquina, yo te ofrecí.',
-    'Dale, hacete el importante.',
-    'Se pierde alto lugar, pa.',
-    'Después no encontrás dónde dejarlo.',
-    'Mucha nave, poca confianza.',
-    'Andá nomás, rey. Está todo ocupado más adelante.',
-    'Dale, seguí buscando entonces.',
+    'Bueno, ameo, yo te ofrecí.',
+    'Dale, hacete el cheto nomás.',
+    'Se perdió alto lugar, ñeri.',
+    'Después no encontrás dónde dejarlo, eh, pa.',
+    'Mucha nave y poca confianza, ameo.',
+    'Andá nomás, pa. Más adelante está todo lleno.',
+    'Rescatate, ñeri. Te estaba haciendo la gauchada.',
   ],
   damaged: [
-    '¿Qué hiciste, pa? ¿Estacionaste contra una pared?',
-    'Te la cuido, pero revivirla sale aparte.',
-    'Eso no necesita estacionamiento, necesita terapia intensiva.',
-    'Lindo el auto. Medio masticado, pero lindo.',
-    'Dejalo acá antes de que se te termine de desarmar.',
-    'Yo te lo cuido, pero el choque ya vino de fábrica.',
-    'Pa, ahí no entra otro bollo.',
-    'Qué muñeca… pero para pegarle a todo.',
+    '¿Qué hiciste, pa? ¿Lo estacionaste contra una pared?',
+    'Te lo cuido, ameo, pero revivirlo sale aparte.',
+    'Eso no necesita lugar, ñeri. Necesita terapia intensiva.',
+    'Linda nave, pa. Medio masticada, pero linda.',
+    'Dejalo acá antes de que se te desarme todo, ameo.',
+    'Yo te lo cuido, ñeri, pero el bollo ya lo trajiste vos.',
+    'Uh, pa, ahí no entra otro bollo.',
+    '¿Te bardearon la nave o chocaste solito, ameo?',
   ],
   clean: [
-    'Apa, mirá esa nave.',
-    'Eso no se deja en cualquier lado, pa.',
-    'Dejámelo acá que te lo cuido con la vida.',
-    'Qué máquina, rey. Está para ponerle una frazada.',
-    'Ese auto vale más que toda la cuadra.',
+    'Apa, mirá esa nave, pa.',
+    'Eso no se deja en cualquier lado, ameo.',
+    'Dejámelo acá que te lo cuido con la vida, ñeri.',
+    'Qué fierro, pa. Está para ponerle una frazada.',
+    'Esa nave vale más que toda la cuadra, ameo.',
+    'Alta nave, ñeri. Posta te digo.',
   ],
   regular: [
-    '¡Otra vez vos, máquina! Tu lugar te lo guardé.',
+    '¡Otra vez vos, ñeri! Tu lugar te lo guardé.',
     'Mirá quién volvió. Ya sos de la cuadra, pa.',
-    '¿Otra vuelta, rey? Algún día estacionás.',
+    '¿Otra vuelta, ameo? Algún día estacionás.',
+    'Eu, mi ñeri. ¿Hoy sí me lo dejás?',
   ],
 };
 
 export const WASHER_LINES: WasherLines = {
   offer: [
     '¿Te lo limpio, pa?',
-    'Una lavadita, rey. Está pidiendo auxilio.',
-    'Dale, máquina, te lo dejo flama.',
-    '¿Una pasada? Son dos segundos.',
-    'Frená ahí, pa. Te saco toda la mugre.',
-    'Ese vidrio ya está viendo en baja resolución.',
-    '¿Te mando una lavadita?',
-    'Dale, rey, no ves un carajo así.',
+    'Una lavadita, ameo. Está pidiendo auxilio.',
+    'Dale, ñeri, te lo dejo brillando.',
+    '¿Una pasadita? Son dos segundos, pa.',
+    'Frená ahí, ameo. Te saco toda la mugre.',
+    'Ese vidrio ya está viendo en baja resolución, pa.',
+    '¿Te tiro una lavadita, ñeri?',
+    'Dale, pa, que así no ves un carajo.',
   ],
   cleaning: [
-    'Ahí va, máquina.',
-    'Bancame que sale toda.',
-    'Te lo dejo nuevo, pa.',
-    'Mirá cómo cambia.',
-    'Esta mugre ya pagaba alquiler.',
-    'Un segundo más y queda de concesionaria.',
+    'Ahí va, ameo.',
+    'Bancame que sale toda, pa.',
+    'Te lo dejo nuevito, ñeri.',
+    'Mirá cómo cambia, pa.',
+    'Esta mugre ya pagaba alquiler, ameo.',
+    'Un segundito más y queda de concesionaria.',
   ],
   thanks: [
-    'Ahora sí, un espejo.',
-    'Servicio premium, papá.',
-    'Listo, rey. Buen viaje.',
-    'Ahora por lo menos vas a ver contra qué chocás.',
-    'Quedó flama… dentro de lo posible.',
-    'Gracias, máquina. Portate mal.',
+    'Ahora sí, un espejo, pa.',
+    'Servicio premium, ameo.',
+    'Listo, ñeri. Andá con Dios.',
+    'Ahora por lo menos ves contra qué chocás, pa.',
+    'Quedó piola… dentro de lo posible.',
+    'Gracias, ameo. Que Dios te lo devuelva.',
   ],
   refused: [
-    'Está bien, pa. Manejá por intuición.',
-    'Dale, dejá la mugre entonces.',
-    'Bueno, máquina, yo ofrecí.',
-    'Todo bien, rey. Nos vimos.',
-    'Después no le eches la culpa a la niebla.',
-    'Dale, seguí viendo el mundo en 240p.',
+    'Todo bien, pa. Manejá por intuición.',
+    'Dale, quedate con la mugre, ameo.',
+    'Bueno, ñeri, yo ofrecí.',
+    'Tranqui, pa. Nos vemos.',
+    'Después no le eches la culpa a la niebla, ameo.',
+    'Dale, seguí viendo todo borroso, ñeri.',
   ],
   damaged: [
-    'El vidrio te lo limpio. El resto ya es chapista.',
-    'Pa, yo tengo un secador, no una máquina del tiempo.',
-    'Arrancamos por el vidrio y después vemos.',
-    '¿Te chocó un edificio o qué?',
-    'Te limpio el vidrio así ves el próximo paredón.',
-    'Esto con agua no sale, máquina.',
+    'El vidrio te lo limpio, pa. Lo demás ya es chapista.',
+    'Ameo, yo tengo un secador, no una máquina del tiempo.',
+    'Arrancamos por el vidrio y después vemos, ñeri.',
+    '¿Te chocó un edificio o qué, pa?',
+    'Te limpio el vidrio así ves el próximo paredón, ameo.',
+    'Esto con agua no sale, ñeri.',
     'El parabrisas queda nuevo. Del paragolpes no prometo nada.',
-    'Venís juntando paredes, ¿no?',
+    'Venís juntando paredes, ¿no, pa?',
   ],
   pursuit: [
-    'No, no, seguí de largo. Venís complicado.',
-    'Hoy no, pa. Tenés compañía.',
+    'No, no, seguí de largo, pa. Tenés la gorra atrás.',
+    'Hoy no, ameo. Tenés compañía.',
     'Dale, rajá, que a mí no me viste.',
-    'Después volvés… si volvés.',
-    'No frenes acá, máquina. Seguí.',
+    'Después volvés, ñeri… si volvés.',
+    'No frenes acá, pa. Seguí que viene la yuta.',
   ],
   regular: [
     '¡Mi cliente! ¿Lo de siempre, pa?',
-    'Otra vez vos, rey. Este vidrio ya es mío.',
-    'Volviste, máquina. Precio de amigo… mentira, sale lo mismo.',
+    'Otra vez vos, ñeri. Este vidrio ya es mío.',
+    'Volviste, ameo. Precio de amigo… mentira, sale lo mismo.',
+  ],
+};
+
+export const MEDIAS_LINES: MediasLines = {
+  pitch: [
+    'Escuchame, ameo, sin faltar el respeto…',
+    'Vendo medias, dos por tres, pa. Dale, para la criatura.',
+    'Te puedo mostrar, pa. Sin compromiso.',
+    'Eu, ñeri, ¿no precisás unas medias?',
+    'Medias de algodón, ameo. Mirá la calidad.',
+    'Tres pares, pa. Para vos, para tu vieja y para tu viejo.',
+    'Escuchame una cosa, ñeri. Medias de fábrica, de primera.',
+    'Dale, pa, que se viene el frío y estas abrigan.',
+    'Ameo, disculpá que te moleste. Medias, ¿no llevás?',
+  ],
+  insist: [
+    'Tocá, tocá, ameo. Algodón posta.',
+    'Hacé la gauchada, ñeri. Es para la leche de los nenes.',
+    'Te hago precio, pa. Tres pares, dos lucas.',
+    'Mirá que no te estoy bardeando, ameo. Estoy laburando.',
+    'Te muestro sin compromiso, ñeri. Mirar no cuesta nada.',
+    'Negras, blancas, de colores… ¿cuál querés, pa?',
+    'No son truchas, ameo. Son de fábrica, te lo juro por mi vieja.',
+  ],
+  ignored: [
+    'Yo no robo, pa. Solo estoy vendiendo medias.',
+    'Bueno, ameo, Dios te bendiga igual.',
+    'Dale, ñeri. Prefiero vender medias que salir a robar.',
+    'Después no me llores con los pies fríos, pa.',
+    'Andá nomás, ameo. Otro día te llevás.',
+    'Ni me miraste, pa. Qué ortiva.',
+  ],
+  damaged: [
+    'Uh, ameo, ¿qué le pasó a la nave? Eso no lo arreglan unas medias.',
+    'Pa, con ese bollo necesitás un chapista, no medias.',
+    'Sin faltar el respeto, ñeri, pero ese auto está hecho percha.',
+    'Escuchame, pa. Si chocás así, por lo menos andá con los pies calentitos.',
+  ],
+  pursuit: [
+    'No, no, pa. Con la gorra atrás no te vendo nada.',
+    'Seguí, ameo, seguí. Yo solo vendo medias.',
+    'Uh, la yuta. Yo no te conozco, ñeri.',
+    'Rajá, pa. Yo no vi nada, estoy con las medias.',
+  ],
+  clean: [
+    'Qué nave, pa. Con ese fierro, medias nuevas.',
+    'Alto auto, ameo. Un señor así no puede andar con medias rotas.',
+    'Mirá vos, ñeri. Un auto así merece medias de primera.',
+  ],
+  regular: [
+    '¡Mi cliente, pa! ¿Hoy sí te llevás?',
+    'Otra vez vos, ameo. Te guardé los mejores pares.',
+    'Eu, ñeri. ¿Todavía con las medias rotas?',
   ],
 };
 
 /** What the regulars get called once they have worked your car a few times. One each, in spot order. */
 export const HUSTLER_NICKNAMES: readonly string[] = ['El Chino', 'Pity', 'El Tucu', 'Rulo', 'Cabeza', 'Toto', 'Nacho', 'El Pelado', 'Chiqui', 'El Flaco', 'Kevin', 'Brian',
-  'Pocho', 'Lucho', 'El Colo', 'Tincho', 'Fede', 'El Rata', 'Jonathan', 'Maxi', 'Beto', 'El Mono', 'Pipa', 'Cacho', 'Dylan', 'El Topo', 'Chaca', 'Tito', 'Mati', 'El Oso'];
+  'Pocho', 'Lucho', 'El Colo', 'Tincho', 'Fede', 'El Rata', 'Jonathan', 'Maxi', 'Beto', 'El Mono', 'Pipa', 'Cacho', 'Dylan', 'El Topo', 'Chaca', 'Tito', 'Mati', 'El Oso',
+  'Maicol', 'El Pollo', 'Yeison', 'Brandon', 'El Tano', 'Cristian'];
 
 /** What the subtitle calls one before he has a name. */
-export const HUSTLER_TRADE: Record<HustlerKind, string> = { trapito: 'Trapito', washer: 'Limpiavidrios' };
+export const HUSTLER_TRADE: Record<HustlerKind, string> = { trapito: 'Trapito', washer: 'Limpiavidrios', medias: 'Vendedor de medias' };
+
+/** Whose voice says a hustler's lines (`server/dialogue/voices.mjs`). */
+export const HUSTLER_VOICE = { trapito: 'trapito', washer: 'trapito', medias: 'villero' } as const satisfies Record<HustlerKind, string>;
 
 /** The washer's two buttons. The price is filled in from `HUSTLERS.washer.price`. */
 export const WASHER_CHOICES = { accept: 'Dejarlo limpiar', decline: 'No, gracias' } as const;
@@ -175,6 +259,7 @@ export function validateHustlerLines(): string[] {
   const pools: Array<[string, readonly string[]]> = [
     ...Object.entries(TRAPITO_LINES).map(([k, v]) => [`trapito.${k}`, v] as [string, readonly string[]]),
     ...Object.entries(WASHER_LINES).map(([k, v]) => [`washer.${k}`, v] as [string, readonly string[]]),
+    ...Object.entries(MEDIAS_LINES).map(([k, v]) => [`medias.${k}`, v] as [string, readonly string[]]),
   ];
   for (const [name, lines] of pools) {
     // Two at least, so "never the same line twice running" always has somewhere to go.

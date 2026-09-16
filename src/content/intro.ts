@@ -266,7 +266,7 @@ export const INTRO = {
    * `{hand}` and `{aim}` are filled with the device's own key names by the overlay.
    */
   card: {
-    approach: { keys: 'W ACELERAR · A / D DOBLAR', touch: 'GAS PARA ACELERAR · ◀ ▶ PARA DOBLAR' },
+    approach: { keys: '↑ / W ACELERAR · ← → / A D DOBLAR', touch: 'GAS PARA ACELERAR · ◀ ▶ PARA DOBLAR' },
     drift: {
       title: 'PASO 1 · DERRAPÁ',
       keys: 'Tomá velocidad, doblá y mantené {hand} para derrapar',
@@ -306,7 +306,7 @@ export const INTRO = {
     // Stage A — back on the radar
     line('a1', 'Mirá quién volvió a encenderse… Pensé que habían enterrado ese auto con vos.', { gap: 1.6 }),
     line('a2', 'Tu Rayo acaba de aparecer en la red de la ciudad. Por ahora la única que lo vio fui yo, pero eso no va a durar.', { gap: 1.2 }),
-    line('a3', 'Dale, manejá. Metete en la ciudad; yo te voy poniendo al día.', { instructional: 'approach', gap: 1.4 }),
+    line('a3', 'Dale, manejá con las flechitas o con WASD, como te quede más cómodo. Metete en la ciudad; yo te voy poniendo al día.', { instructional: 'approach', gap: 1.4 }),
     // Stage B — entering the city
     line('b1', 'Mientras no estabas, cambiaron los motores por baterías. Casi no queda nadie haciendo ruido.', { gap: 1.4 }),
     line('b2', 'Nosotros seguimos con combustión. Y con un par de modificaciones que no pasan la revisión.', { gap: 1.4 }),
@@ -317,7 +317,7 @@ export const INTRO = {
       instructional: 'drift',
     }),
     line('c2', 'Ahí está. De costado todavía nos entendemos.', { gap: 1.2 }),
-    line('c3', 'Ah, y no te olvides del nitro: es shift. Guardalo para cuando tengas que salir rápido de algún lado.', { gap: 1.2 }),
+    line('c3', 'Ah, y no te olvides del nitro: es shift. Probá usarlo para lograr derrapes más largos, total se carga rápido.', { gap: 1.2 }),
     line('c-hint', 'Entrá con un poco de velocidad, doblá y mantené la barra espaciadora un momento. No hace falta dar la vuelta entera.', {
       instructional: 'drift',
     }),

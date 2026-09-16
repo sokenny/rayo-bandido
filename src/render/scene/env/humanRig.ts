@@ -38,8 +38,19 @@ export interface HumanCrowd {
    * Step everyone by `dt` seconds at `time`, with the player's car in the group's own space (or
    * null), and pose the skeleton to match. With `awake`, only the people whose flag is set are
    * stepped; the rest hold the pose they were last left in.
+   *
+   * `edit` is called with each stepped person's pose after their act has made it and before it is
+   * written into bones, so a caller can lay its own drives over the act without owning the rig.
+   * That is what the micro-scenes do (`render/scene/microSceneVisual.ts`): the act is the city's,
+   * the behaviours are theirs, and neither has to know about the other.
    */
-  update(time: number, dt: number, subject: CrowdSubject | null, awake?: Uint8Array): void;
+  update(time: number, dt: number, subject: CrowdSubject | null, awake?: Uint8Array, edit?: (index: number, pose: BodyPose) => void): void;
+  /**
+   * Where person `i`'s hand is, in WORLD space, into `out`. The bone chain is brought up to date
+   * on the way, so the answer is this frame's rather than last frame's — which is what lets a
+   * small prop be carried in a hand instead of hovering beside one.
+   */
+  handAt(i: number, out: THREE.Vector3): THREE.Vector3;
   dispose(): void;
 }
 
@@ -238,7 +249,7 @@ export function createHumanCrowd(members: readonly CrowdMember[], name = 'crowd'
     group,
     actors,
     poses,
-    update(time, dt, subject, awake) {
+    update(time, dt, subject, awake, edit) {
       // The lit parts breathe a little rather than sitting at one brightness, and the pools
       // under them breathe with them.
       if (accentMat) accentMat.color.setScalar(0.85 + 0.15 * Math.sin(time * 0.9));
@@ -246,8 +257,16 @@ export function createHumanCrowd(members: readonly CrowdMember[], name = 'crowd'
       for (let i = 0; i < actors.length; i++) {
         if (awake && !awake[i]) continue;
         stepActor(actors[i], time, dt, subject, poses[i]);
+        edit?.(i, poses[i]);
         apply(rigs[i], poses[i]);
       }
+    },
+
+    handAt(i, out) {
+      const rig = rigs[i];
+      if (!rig) return out.set(0, 0, 0);
+      rig.hand.updateWorldMatrix(true, false);
+      return out.setFromMatrixPosition(rig.hand.matrixWorld);
     },
     dispose() {
       group.removeFromParent();

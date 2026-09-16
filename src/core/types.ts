@@ -24,6 +24,8 @@
 import type { TrackPath } from '../world/track';
 import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 import type { StreetPropsState } from '../sim/streetProps';
+import type { MicroSceneAnchor } from '../microScenes/types';
+import type { MicroSceneRuntime } from '../microScenes/runtime/director';
 
 /**
  * Which world is loaded: the test arena, a racing circuit, or a free-roam city. `city` is the open
@@ -456,6 +458,12 @@ export interface RushResults {
   bestChain: number;
   /** Everything the drifting paid on top of the base kills. */
   styleBonus: number;
+  /** Crashes charged during the run, and the points they took off (already out of `score`). */
+  crashes: number;
+  crashPenalty: number;
+  /** Near misses during the run, and the points they paid (already in `score`). */
+  nearMisses: number;
+  nearMissPoints: number;
   /** Whether this run was one of the day's ranked attempts. */
   ranked: boolean;
   /**
@@ -536,13 +544,16 @@ export interface RushState {
    * time the nose is pointed at anything. Kept here rather than in `DriftState` because it is
    * a scoring concern: `src/sim/drift.ts` has no reason to remember a drift that has ended.
    */
-  driftSeconds: number;
-  /** Whether that drift ran its whole length without a collision. */
-  driftClean: boolean;
+  /** The deepest |slip angle| that drift reached (rad). What the angle bonus is paid on. */
+  driftAngle: number;
   /** Seconds of credit left. 0 = a shot fired now is not drift-charged. */
   driftCredit: number;
-  /** Whether the drift being held right now has taken a hit. Armed between drifts. */
-  driftHeldClean: boolean;
+  /** Crashes charged during the run, and the points they took off the score. */
+  crashes: number;
+  crashPenalty: number;
+  /** Near misses during the run, and the points they paid into the score. */
+  nearMisses: number;
+  nearMissPoints: number;
   /** The finished run, or null until there is one. */
   results: RushResults | null;
 }
@@ -858,16 +869,18 @@ export type GameEvent =
       multiplier: number;
       /** Style points inside `points`: 0 when the shot was not drift-charged. */
       driftBonus: number;
-      /** Seconds of the drift that charged the shot (0 when it was not one). */
-      driftSeconds: number;
-      /** True when that drift ran from start to finish without a collision. */
-      cleanDrift: boolean;
+      /** Deepest slip angle of the drift that charged the shot, in degrees (0 when it was not one). */
+      driftAngle: number;
       /** Points inside `points` paid for the shot's reach: 0 for anything fired up close. */
       rangeBonus: number;
       /** How far the bolt travelled to get there (m). */
       shotDistance: number;
     }
   | { type: 'rushEnd'; results: RushResults }
+  /** A crash during a run took `points` off the score (what was actually taken; never below zero). */
+  | { type: 'rushCrash'; severity: CrashSeverity; points: number; score: number }
+  /** A near miss during a run paid `points` into the score. */
+  | { type: 'rushNearMiss'; points: number; score: number }
   /**
    * A mission was cleared for the first time and the chain moved on. Raised immediately before
    * the `rushEnd` that carries the run itself, so anything listening sees the run and the
@@ -933,6 +946,41 @@ export type GameEvent =
   | { type: 'washerRefused'; npc: number }
   /** A clean was cut short before it finished: the car drove off, or the light or the police got in the way. */
   | { type: 'washerCancelled'; npc: number; reason: WasherCancelReason }
+
+  /* ---------------------------------------------------------------- urban micro-scenes */
+
+  /**
+   * A micro-scene went up (`src/microScenes/`). Presentation only: the renderer builds the slot
+   * and the audio warms its clips. `slot` indexes the director's fixed pool.
+   */
+  | { type: 'microSceneSpawn'; slot: number; scene: string; anchor: string; x: number; y: number; z: number }
+  /** A micro-scene is coming down. The renderer fades the slot out; the audio drops its clips. */
+  | { type: 'microSceneDespawn'; slot: number; scene: string; reason: MicroSceneEndReason }
+  /**
+   * Somebody in a micro-scene said a line. The audio plays `clip` FROM the speaker's own position
+   * — one emitter per speaker — and nothing is generated at runtime. `seconds` is what the rules
+   * have allotted it; a clip that runs longer than that is faded, never queued behind the next.
+   */
+  | {
+      type: 'microSceneLine';
+      slot: number;
+      scene: string;
+      /** The `ActorDefinition.id` speaking, and their index in the scene's cast. */
+      speaker: string;
+      actor: number;
+      /** The static clip (`public/npc-voice/scenes/<clip>.mp3`) and the voice profile behind it. */
+      clip: string;
+      voice: string;
+      text: string;
+      seconds: number;
+      x: number;
+      y: number;
+      z: number;
+    }
+  /** The line is over, or was cut short. The audio stops that emitter. */
+  | { type: 'microSceneLineEnd'; slot: number; cut: boolean }
+  /** A micro-scene noticed the player, or the police. At most one player reaction per appearance. */
+  | { type: 'microSceneReaction'; slot: number; scene: string; reaction: string; trigger: string }
   /* ---------------------------------------------------------------- the police */
   /** A civilian electric car was neutralised in Free Roam. `category` is the range band the heat came from. */
   | { type: 'policeOffense'; distance: number; category: PoliceOffenseCategory; heat: number; witnessed: boolean }
@@ -1117,8 +1165,11 @@ export interface GarageState {
 
 /* ------------------------------------------------------------------ street hustlers */
 
-/** A trapito watches parking spaces nobody asked him to; a washer works a red light. */
-export type HustlerKind = 'trapito' | 'washer';
+/**
+ * A trapito watches parking spaces nobody asked him to; a washer works a red light; a sock seller
+ * (`medias`) walks a stretch of pavement with a box of socks round his neck.
+ */
+export type HustlerKind = 'trapito' | 'washer' | 'medias';
 
 /**
  * Where one street hustler works (`src/world/hustlerSpots.ts`). Everything is in world space;
@@ -1142,11 +1193,16 @@ export interface HustlerSpot {
    */
   approach?: { x: number; z: number; heading: number };
   signal?: { x: number; z: number; heading: number; offset: number };
+  /**
+   * Sock seller: the stretch of pavement he walks, end to end and back. `x`/`z` is its middle, so
+   * whatever keeps clear of a hustler's patch keeps clear of the middle of his walk.
+   */
+  beat?: { from: { x: number; z: number }; to: { x: number; z: number } };
   /** For debugging and QA only. */
   label: string;
 }
 
-export type HustlerLineKind = 'call' | 'ignored' | 'damaged' | 'clean' | 'regular' | 'offer' | 'cleaning' | 'thanks' | 'refused' | 'pursuit';
+export type HustlerLineKind = 'call' | 'ignored' | 'damaged' | 'clean' | 'regular' | 'offer' | 'cleaning' | 'thanks' | 'refused' | 'pursuit' | 'pitch' | 'insist';
 
 export type WasherCancelReason = 'drove' | 'light' | 'police' | 'locked';
 
@@ -1155,6 +1211,8 @@ export type WasherCancelReason = 'drove' | 'light' | 'police' | 'locked';
  *   trapito  idle -> call -> wait -> grumble -> idle
  *   washer   idle -> offer -> approach -> clean -> thanks -> retreat -> idle
  *                          \-> refused / waveOff -> idle
+ *   medias   idle (walking his beat) -> call -> wait -> grumble -> idle
+ *                                     \-> waveOff -> idle
  */
 export type HustlerPhase = 'idle' | 'call' | 'wait' | 'grumble' | 'offer' | 'approach' | 'clean' | 'thanks' | 'retreat' | 'refused' | 'waveOff';
 
@@ -1181,6 +1239,8 @@ export interface HustlerNpcState {
   carX: number;
   carZ: number;
   carHeading: number;
+  /** Sock seller: seconds he has spent walking his beat. Stands still while he is selling. */
+  beat: number;
 }
 
 /**
@@ -1542,6 +1602,12 @@ export interface GameState {
   streetProps: StreetPropsState | null;
   /** Trapitos and windshield washers (`src/sim/hustlers.ts`), in worlds that carry their spots. Local only. */
   hustlers: HustlerState | null;
+  /**
+   * The urban micro-scenes (`src/microScenes/`), in worlds that carry anchors
+   * (`ArenaLayout.microSceneAnchors`). Local only, and pure scenery: it reads the police, the
+   * activities and the car, and writes nothing but its own events.
+   */
+  microScenes: MicroSceneRuntime | null;
   /** Automatic or manual gearbox. A player setting that lives in the state because the sim reads it. */
   transmission: Transmission;
   events: GameEvent[];
@@ -1784,6 +1850,12 @@ export interface ArenaLayout {
   sewerVents?: SewerVentDef[] | null;
   /** Where the trapitos and windshield washers work (`src/world/hustlerSpots.ts`). The open world only. */
   hustlerSpots?: HustlerSpot[] | null;
+  /**
+   * Places a micro-scene may stand (`src/world/microSceneAnchors.ts`). An anchor describes the
+   * PLACE — a shelter, a wide kerb, a dark arch under the viaduct — and never a scene; the
+   * director matches the two. The open world only.
+   */
+  microSceneAnchors?: MicroSceneAnchor[] | null;
   minimap: MinimapData;
 }
 
@@ -2153,3 +2225,7 @@ export interface MusicBands {
 
 /** All bands at rest. Used wherever music is unavailable or not wired up. */
 export const SILENT_MUSIC: MusicBands = { bass: 0, mid: 0, high: 0, energy: 0 };
+
+
+/** Why a micro-scene came down. `driven-away` is the ordinary one. */
+export type MicroSceneEndReason = 'driven-away' | 'conditions' | 'preempted' | 'cleared' | 'disabled';

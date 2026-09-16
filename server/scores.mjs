@@ -49,9 +49,15 @@ export function readRun(board, body) {
     const bestChain = count(body.bestChain, 1000);
     const styleBonus = count(body.styleBonus, spec.max);
     if (score === null || disabled === null || bestChain === null || styleBonus === null) return { error: 'badScore' };
-    // Points cannot appear without kills, and the style bonus is part of the score.
-    if (disabled === 0 && score > 0) return { error: 'badScore' };
-    if (styleBonus > score) return { error: 'badScore' };
+    // Crashes take points off the score after the style bonus was paid into it (absent = 0).
+    const crashPenalty = body.crashPenalty === undefined ? 0 : count(body.crashPenalty, spec.max);
+    if (crashPenalty === null) return { error: 'badScore' };
+    // Near misses pay without a kill (absent = 0).
+    const nearMissPoints = body.nearMissPoints === undefined ? 0 : count(body.nearMissPoints, spec.max);
+    if (nearMissPoints === null) return { error: 'badScore' };
+    // Points cannot appear without kills beyond what near misses paid, and the style bonus is part of the score.
+    if (disabled === 0 && score > nearMissPoints) return { error: 'badScore' };
+    if (styleBonus > score + crashPenalty) return { error: 'badScore' };
     return { value: score, stats: { disabled, bestChain, styleBonus } };
   }
   const ms = count(body.ms, spec.max);

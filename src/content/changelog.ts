@@ -27,6 +27,13 @@ export interface ChangelogEntry {
 /** Newest first. The tab shows them in this order. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-09-16',
+    items: [
+      'Micro-scenes: small moments happening around the city as you drive past — two or three people, one conversation.',
+      'Crash penalties and near misses now count toward Rayo Rush scores.',
+    ],
+  },
+  {
     date: '2026-09-15',
     items: [
       'Wet roads now really mirror the city\'s neon, signs and lit windows, not just a generic sheen.',

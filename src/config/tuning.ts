@@ -467,7 +467,7 @@ export const NITRO = {
   /** Units consumed per second while boosting. */
   drainPerSecond: 28,
   /** Units restored per second while moving and not boosting. */
-  rechargePerSecond: 9,
+  rechargePerSecond: 18,
   /** Delay before recharging resumes after boost ends (s). */
   rechargeDelay: 0.6,
   /** Minimum speed to recharge (m/s). No recharge while stationary. */
@@ -1803,12 +1803,15 @@ export const RUSH = {
    * A world that ships fewer sites than there are levels simply reuses its last one.
    *
    * WHY THESE NUMBERS. A kill is 100 before the streak multiplier, a drift-charged shot pays
-   * 50-150 on top and a bolt thrown the length of a street up to `longShotBonus` more, so a run
+   * 50-170 on top by how sideways the drift went, crashes take 50-300 off, and a bolt thrown the length of a street up to `longShotBonus` more, so a run
    * is roughly `kills x (100 x average multiplier + style)`:
    *
-   *   ~5 kills, barely chained              ~720   <- level 1 is "you have understood the loop"
-   *   ~7 kills, streaks held               ~1,800   <- level 2 needs the chain window respected
-   *   ~11 kills, streaks AND clean drifts  ~3,600   <- level 3 needs both at once
+   *   ~5 kills, barely chained              ~720   <- the loop understood
+   *   ~7 kills, streaks held               ~1,800   <- the chain window respected
+   *   ~11 kills, streaks AND deep drifts   ~3,600   <- both at once
+   *
+   * 2026-09-16: every target DOUBLED on request (1,440 / 3,600 / 7,200). Near misses now score
+   * too, so the doubled numbers are met with kills AND the driving between them.
    *
    * The reach bonus is deliberately not written into those figures: it is the newest of the
    * habits and the one a player picks up last, so it reads as a run going better than expected
@@ -1818,7 +1821,7 @@ export const RUSH = {
    * is per browser and lives in localStorage (`src/core/progress.ts`); it is deliberately NOT
    * the global board, which keeps ranking whole runs however far through the chain you are.
    */
-  levels: [{ target: 720 }, { target: 1800 }, { target: 3600 }],
+  levels: [{ target: 1440 }, { target: 3600 }, { target: 7200 }],
 
   /**
    * The activity marker in the world, and the prompt it raises.
@@ -1876,12 +1879,28 @@ export const RUSH = {
      * paid for the shot is usually over by the time the car is pointed at anything.
      */
     driftChargeGrace: 1.2,
-    /** Extra points per second of that drift, on top of the flat bonus. */
-    driftBonusPerSecond: 15,
-    /** Seconds of drift past which the length bonus stops growing. */
-    driftBonusMaxSeconds: 4,
-    /** Extra on top again when the drift was clean: held from start to finish without a hit. */
-    cleanDriftBonus: 40,
+    /**
+     * THE ANGLE. The more sideways the drift that charged the shot, the more it pays: nothing
+     * extra at `driftAngleFrom`, ramped to the full `driftAngleBonus` at `driftAngleFull`. Judged
+     * on the deepest slip the drift reached, because that is the moment the player remembers.
+     * Capped, so a spin-out is paid like a committed drift and not like more than one.
+     */
+    driftAngleFrom: (12 * Math.PI) / 180,
+    driftAngleFull: (45 * Math.PI) / 180,
+    driftAngleBonus: 120,
+
+    /**
+     * CRASHING COSTS. The crash the car is charged for in the city (`CRASH_DAMAGE`, one per
+     * accident, judged on the same speed) also comes off the run's score, by severity. The score
+     * never goes below zero.
+     */
+    crashPenalty: { light: 50, medium: 150, heavy: 300 },
+
+    /**
+     * NEAR MISSES. A close pass at speed (`src/sim/nearMiss.ts`, 10-50 by closeness and speed)
+     * scores this many times its own points during a run. Not multiplied by the kill streak.
+     */
+    nearMissScale: 2,
 
     /**
      * THE LONG SHOT. A bolt that crosses the street is worth more than one fired into the car
@@ -2695,7 +2714,8 @@ export const CROWD = {
 
 /**
  * Street hustlers (`src/sim/hustlers.ts`): the trapitos who offer to watch a space nobody is
- * parking in, and the windshield washers who work a red light. Client-local; nobody is solid.
+ * parking in, the windshield washers who work a red light, and the sock sellers who walk the
+ * pavement with a box round their neck. Client-local; nobody is solid.
  * Distances in metres, speeds in m/s, times in seconds.
  */
 export const HUSTLERS = {
@@ -2765,6 +2785,33 @@ export const HUSTLERS = {
     standSide: 1.2,
     /** Nothing more from him for this long after. */
     cooldown: 30,
+  },
+  medias: {
+    /** His beat: a stroll, and a stand at each end of it hawking at the street before he turns back. */
+    walkSpeed: 1.05,
+    restSeconds: 3.5,
+    /** Within this of where he is, a car under `slowSpeed` for `noticeSeconds` is a customer. */
+    noticeRadius: 14,
+    slowSpeed: 6,
+    noticeSeconds: 0.6,
+    /** Anywhere within this for `lingerSeconds`, whatever the speed, and he is on it too. */
+    lingerRadius: 9,
+    lingerSeconds: 2.5,
+    /** The pitch: stops, turns, socks up. Then he waits on the car. */
+    callSeconds: 4.5,
+    /** While the car stays he tries again every `insistEvery`, `insists` times, and gives up at `waitSeconds`. */
+    insistEvery: 5,
+    insists: 2,
+    waitSeconds: 16,
+    /** Past this the car has left him; he says so this often. */
+    leaveRadius: 22,
+    followChance: 0.75,
+    grumbleSeconds: 2.4,
+    waveOffSeconds: 2.2,
+    /** Nothing more from him for this long after a car has left. */
+    cooldown: 40,
+    /** Share of pitches to a clean car that start with the car instead. */
+    cleanChance: 0.35,
   },
 };
 
@@ -2924,4 +2971,122 @@ export const AERIAL_TRAFFIC = {
   beam: { every: 3, length: 30, radius: 4.5, intensity: 0.06, sweep: 0.22, distance: 300 },
   /** The one faint cone under the nearest drone. `high` quality only. */
   cone: { enabled: true, maxDistance: 45, length: 3.2, radius: 1.1, opacity: 0.06 },
+};
+
+/**
+ * URBAN MICRO-SCENES (`src/microScenes/`): the short situations the city is already having when
+ * the player drives past. Global limits live here; per-scene distances, weights and budgets live
+ * in the scene definitions, which is what makes a scene addable without touching the director.
+ *
+ * Distances in metres, speeds in m/s, times in seconds.
+ */
+export const MICRO_SCENES = {
+  /** Off switch for the whole system, for A/B measurement (`__rb.microScenes.enabled`). */
+  enabled: true,
+  /** Never more than this many standing at once, however many anchors are in range. */
+  maxActive: 2,
+  /** Never more than one environmental conversation audible at a time. */
+  maxTalking: 1,
+  /** Animated people the system may add near the player, across every active scene. */
+  maxAnimatedActors: 6,
+  /** Particles the system may have alive, across every active scene. */
+  maxParticles: 40,
+  /** A car higher than this above the street is on a deck, not on the scene's road. */
+  streetY: 2.5,
+
+  scan: {
+    /** Anchors are looked at this often, never per frame. */
+    interval: 0.75,
+    /** Anchors within this of the player are considered at all (m). The widest `spawnDistance`. */
+    radius: 240,
+    /**
+     * A scene only goes up on an anchor the player is APPROACHING: the dot of the car's heading
+     * with the direction to the anchor must beat this. Behind the camera is not a discovery.
+     */
+    approachDot: 0.35,
+    /** Anchors closer than this are never taken up: the scene would pop into an occupied frame (m). */
+    minSpawn: 55,
+    /** Least distance between two scenes standing at once (m). */
+    sceneSpacing: 140,
+    /** A scene is not built while the car is going faster than this: it would be gone before it arrived. */
+    maxSpawnSpeed: 55,
+    /**
+     * Weight of NOTHING HAPPENING, thrown into the draw beside the eligible scenes. Empty anchors
+     * are what keeps the city from feeling like a set of trigger volumes: most of the places a
+     * scene could stand are places nothing is going on today.
+     */
+    nothingWeight: 16,
+  },
+
+  /** How long a scene holds still before anybody moves, so nothing is seen snapping into a pose. */
+  prewarmSeconds: 0.8,
+  /** Seconds a scene stays up after it has said its piece, before it is allowed to be taken down. */
+  cooldownSeconds: 12,
+  /** The fade in and out of a whole scene (s). Long enough that nothing pops. */
+  fadeSeconds: 0.45,
+
+  dialogue: {
+    /** Least gap between two spoken micro-scenes anywhere (s), rolled in this range. */
+    spacing: [25, 40] as const,
+    /** Silence between two lines of one conversation, unless the line asks for its own. */
+    gap: 0.35,
+    /** Line length from its text, the way the street's other subtitles are timed. */
+    minSeconds: 1.1,
+    secondsPerChar: 0.055,
+    maxSeconds: 7,
+    /**
+     * A conversation only starts when the player will still be in earshot for this much of it.
+     * Judged from the car's speed and the direction it is going, not from hope.
+     */
+    minHeard: 0.55,
+    /** Scenes remember this many recent ids, and variants this many, so nothing repeats at once. */
+    recentScenes: 3,
+    recentVariants: 2,
+  },
+
+  audio: {
+    /** Loudness at `near`; clips are RMS-normalized on decode like the street's other voices. */
+    volume: 0.8,
+    /** Full loudness within this (m): a conversation you are beside. */
+    near: 9,
+    /** Attenuating out to here (m), and silent past `max`. */
+    far: 32,
+    max: 40,
+    /** The lowpass with distance: open at the speaker, darker at `far` (Hz). Never below speech. */
+    brightHz: 11000,
+    darkHz: 3600,
+    /** Playback variation per line, so a repeat is not a copy. */
+    volumeJitter: 0.06,
+    rateJitter: 0.02,
+    /** Fade of a line cut short by higher-priority audio or by the player leaving (s). */
+    fadeSeconds: 0.22,
+  },
+
+  police: {
+    /** A police car inside this of a scene alarms it (m). */
+    radius: 55,
+    /** Seconds the alarm takes to come on and to let go. */
+    attack: 0.35,
+    release: 1.6,
+    /** Proximity is only tested this often (s): a chase does not need a per-frame answer. */
+    interval: 0.4,
+  },
+
+  reactions: {
+    /** A pass counts as aggressive inside this (m) at this closing speed (m/s). */
+    aggressiveRadius: 16,
+    aggressiveSpeed: 22,
+    /** A slow pass: inside this (m), under this speed (m/s), and actually moving. */
+    slowRadius: 20,
+    slowSpeed: 11,
+    /** The horn is heard inside this (m). */
+    hornRadius: 30,
+    /** Being watched: this close (m), this slow (m/s), pointed within this (rad), for this long (s). */
+    observeRadius: 26,
+    observeSpeed: 3.5,
+    observeCone: 0.9,
+    observeSeconds: 2.2,
+    /** How long the observation reading takes to let go once the player drives on (s). */
+    observeRelease: 1.2,
+  },
 };

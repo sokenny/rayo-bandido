@@ -14,6 +14,7 @@ import { createWindGusts } from './windGust';
 import { createHorns } from './horns';
 import type { PassByGust } from './passBy';
 import { createAmbientVoices } from './ambientVoice';
+import { createMicroSceneVoices } from './microSceneVoice';
 import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
 import type { BusStopCrowd } from '../world/busStopCrowds';
 import { skidIntensity } from './dsp';
@@ -73,6 +74,12 @@ export interface AudioSystem {
   lightningCharging(charging: boolean): void;
   reset(): void;
   setMuted(muted: boolean): void;
+  /**
+   * Whether audio the micro-scenes must give way to is on right now: a voiced character line, the
+   * police radio, or the mute. The composition root copies it onto `MicroSceneRuntime.externalAudio`
+   * once a frame, so the rules can hold a conversation back without knowing what an AudioContext is.
+   */
+  microScenesBlocked(): boolean;
   /** AudioContext state for QA/automation: 'suspended' | 'running' | 'closed' | 'unavailable'. */
   status(): string;
   dispose(): void;
@@ -85,6 +92,7 @@ const SILENT: AudioSystem = {
   backfire() {},
   passBy() {},
   lightningCharging() {},
+  microScenesBlocked: () => false,
   reset() {},
   setMuted() {},
   status: () => 'unavailable',
@@ -110,10 +118,25 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
   // The chasers' radio barks (`audio/policeRadio.ts`), fed from what `update` already reads.
   const radio = createPoliceRadio(core);
   const radioFrame: PoliceRadioFrame = { listener: null!, speed: 0, drifting: false, units: [] };
+  /**
+   * THE SPEECH PRIORITY LADDER, top to bottom, written here because this is the one place that can
+   * see all of it:
+   *
+   *   cinematics and story dialogue   (`audio/dialogueVoice.ts`)
+   *   mission dialogue                (the same voice)
+   *   police and gameplay audio       (`audio/policeRadio.ts`)
+   *   urban micro-scenes              (`audio/microSceneVoice.ts`)
+   *   ambient one-liners              (`audio/ambientVoice.ts`)
+   *
+   * Each rung is blocked by every rung above it, and by nothing below it.
+   */
+  const priorityTalking = (): boolean => radio.busy || dialogueSpeaking() || dialogueHooks().isMuted();
+  // Conversations the city is having with itself (`audio/microSceneVoice.ts`).
+  const micro = createMicroSceneVoices(core, { blocked: priorityTalking });
   // Drivers and bus-stop people yelling at the car (`audio/ambientVoice.ts`): never over the story's
-  // voices or the radio.
+  // voices, the radio, or a micro-scene conversation already in the air.
   const ambient = createAmbientVoices(core, busStops, {
-    blocked: () => radio.busy || dialogueSpeaking() || dialogueHooks().isMuted(),
+    blocked: () => priorityTalking() || micro.speaking(),
   });
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
@@ -144,10 +167,14 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
         radio.update(dt, radioFrame);
       }
       ambient.update(dt, listener, targets, skid.drifting, !!policeInput?.siren);
+      micro.update(dt, listener);
     },
+
+    microScenesBlocked: priorityTalking,
 
     onEvent(ev) {
       radio.onEvent(ev);
+      micro.onEvent(ev);
       ambient.onEvent(ev);
       switch (ev.type) {
         case 'lightningFired':
@@ -272,6 +299,7 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
       evDown.reset();
       radio.reset();
       ambient.reset();
+      micro.reset();
     },
 
     setMuted(muted) {
@@ -292,6 +320,7 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
       police.dispose();
       radio.dispose();
       ambient.dispose();
+      micro.dispose();
       rain.dispose();
       nitro.dispose();
       rayo.dispose();

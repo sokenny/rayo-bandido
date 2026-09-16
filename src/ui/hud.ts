@@ -118,7 +118,7 @@ export const PAD_CONTROLS = [
 ];
 
 export const CONTROLS = [
-  ['WASD', 'manejar'],
+  ['FLECHAS o WASD', 'manejar'],
   ['ESPACIO o /', 'freno de mano'],
   ['SHIFT', 'nitro'],
   ['E', 'mantener: apuntar'],

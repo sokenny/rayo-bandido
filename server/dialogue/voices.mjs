@@ -69,9 +69,15 @@ const shoutVoice = (voiceId) => ({
 
 export const CHARACTER_VOICES = {
   'npc-masculino-1': shoutVoice('9JOGcDYAYTmowtTJuqVV'),
+  // Micro-scene conversations (`src/microScenes/voices.ts`): overheard, not shouted, so the natural
+  // v3 settings rather than the street's creative ones. Rendered ahead of time like the shouts.
+  'npc-femenino-1': voice('dvhhbmWu6suM0Vq99t7I'),
   badkala: voice('iHaDFejiMLsI0XjCnQVt'),
   buho: voice('bew2VwXQAJqJ81jujT8j'),
   'loco-mustang': voice('tRJ3Kfo9sezJtxC5JySt'),
-  trapito: voice('vJzdJ8zgnM2pmrSLXSPG'),
+  // The street hustlers (`src/ui/hustlerOverlay.ts`): trapitos and washers in one voice, and the
+  // villero cast — the sock sellers first — in another that talks the same way.
+  trapito: voice('hcoTXwGtTbk7rmbQW4G0'),
+  villero: voice('JmUKrnhUnPYfwSKGSEFT'),
   policia: radioVoice('mZTof7eSbESeUWP6fuMw'),
 };

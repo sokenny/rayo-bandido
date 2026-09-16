@@ -38,6 +38,11 @@ export interface CrashRules {
   atGarage: boolean;
   /** A race world: stall the car instead of fining it. */
   stall: boolean;
+  /**
+   * RAYO RUSH on its own (`?mode=rush`): judge the crash and return it — the run takes it off the
+   * score — but no fine, no marks, no card. Ignored when `stall` is set.
+   */
+  judgeOnly?: boolean;
 }
 
 export function createCrashDamageState(): CrashDamageState {
@@ -163,6 +168,8 @@ export function stepCrashDamage(
       s.cooldown = seconds + CRASH_DAMAGE.race.graceSeconds;
       s.stats.stalls++;
       events.push({ type: 'crashStall', severity, speed: hardest, seconds, x, y, z });
+    } else if (rules.judgeOnly) {
+      s.cooldown = CRASH_DAMAGE.cooldownSeconds;
     } else {
       const tier = CRASH_DAMAGE.tiers[severity];
       const paid = chargeCrashFine(economy, tier.fine);

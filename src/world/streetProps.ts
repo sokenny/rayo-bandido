@@ -149,7 +149,18 @@ export function placeStreetProps(world: World): StreetPropDef[] {
   if (layout.garageSite) markers.push({ x: layout.garageSite.x, z: layout.garageSite.z, r: P.markerClear });
   for (const st of plan.busStops ?? []) markers.push({ x: st.x, z: st.z, r: 12 });
   // A trapito's patch and a washer's corner, with his light on it: nothing to trip over while he works.
-  for (const h of layout.hustlerSpots ?? []) markers.push({ x: h.x, z: h.z, r: 7 });
+  for (const h of layout.hustlerSpots ?? []) {
+    markers.push({ x: h.x, z: h.z, r: 7 });
+    // A sock seller's whole walk, end to end: he would stroll straight through a bin left on it.
+    const b = h.beat;
+    if (!b) continue;
+    const steps = Math.ceil(Math.hypot(b.to.x - b.from.x, b.to.z - b.from.z) / 5);
+    for (let k = 0; k <= steps; k++) markers.push({ x: b.from.x + ((b.to.x - b.from.x) * k) / steps, z: b.from.z + ((b.to.z - b.from.z) * k) / steps, r: 4 });
+  }
+  // Where a micro-scene may stand (`src/world/microSceneAnchors.ts`): a folding table of parts or
+  // a car with its bonnet up needs the pavement it was measured for, not a dumpster in the middle
+  // of it. The anchors are laid before this pass for exactly that reason.
+  for (const a of layout.microSceneAnchors ?? []) markers.push({ x: a.transform.x, z: a.transform.z, r: 6 });
 
   const placed: StreetPropDef[] = [];
   const propCells = new Map<number, number[]>();

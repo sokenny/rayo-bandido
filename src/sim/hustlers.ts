@@ -11,16 +11,16 @@ import type {
   WasherCancelReason,
 } from '../core/types';
 import { HUSTLERS } from '../config/tuning';
-import { HUSTLER_NICKNAMES, HUSTLER_TRADE, TRAPITO_LINES, WASHER_LINES } from '../content/hustlers';
+import { HUSTLER_NICKNAMES, HUSTLER_TRADE, MEDIAS_LINES, TRAPITO_LINES, WASHER_LINES } from '../content/hustlers';
 import { payStreetService } from './economy';
 import { lineSeconds } from './passenger';
 
 /**
- * STREET HUSTLERS: the trapitos and the windshield washers.
+ * STREET HUSTLERS: the trapitos, the windshield washers and the sock sellers.
  *
  * WHAT IT IS. A handful of people on the pavement at places worth remembering, each working a
- * few metres of it (`src/world/hustlerSpots.ts`). Nobody walks the city, nobody is solid, and
- * nothing here moves, holds or steers the car. Like the other activities this module only WATCHES:
+ * few metres of it (`src/world/hustlerSpots.ts`). Nobody leaves their stretch, nobody is solid,
+ * and nothing here moves, holds or steers the car. Like the other activities this module only WATCHES:
  * the car's pose and speed, the key, whether the police are on it and whether it is dented.
  *
  * A TRAPITO notices a car that slows or lingers near him, calls it into a space it is plainly not
@@ -35,6 +35,13 @@ import { lineSeconds } from './passenger';
  * shares), and walks back. An offer only goes up with enough red left for a whole clean, and a yes
  * is only taken while that is still true — so the light never interrupts a clean it let start.
  * The car driving off does, and he gets out of its way at once.
+ *
+ * A SOCK SELLER walks his beat end to end and back (`beatAt`, a pure function of how long he has
+ * walked, so it needs no path state and the picture reads the same point). A car that slows by him
+ * stops him: he pitches, tries again while it stays, gives up if it just sits there, and — if it
+ * drives off — may tell it he is not stealing from anybody. Talk only, like a trapito: no button,
+ * no price. With the police on the car he wants nothing to do with it. His clock stands still
+ * while he sells, so he walks on from exactly where he stopped.
  *
  * ONE VOICE AT A TIME for the whole cast, and never over a passenger, El Búho or Loco Mustang
  * (`othersTalking`). A washer's lines take the strip from a trapito's; nobody else's do. Lines
@@ -51,7 +58,7 @@ export interface HustlerContext {
   pursued: boolean;
 }
 
-function createNpc(): HustlerNpcState {
+function createNpc(spot: HustlerSpot): HustlerNpcState {
   return {
     phase: 'idle',
     since: 0,
@@ -66,12 +73,14 @@ function createNpc(): HustlerNpcState {
     carX: 0,
     carZ: 0,
     carHeading: 0,
+    // Somewhere along his walk from the start, so two sellers never turn round in step.
+    beat: (Math.abs(Math.sin(spot.seed * 12.9898) * 43758.5453) % 1) * 60,
   };
 }
 
 export function createHustlerState(spots: readonly HustlerSpot[]): HustlerState {
   return {
-    npcs: spots.map(() => createNpc()),
+    npcs: spots.map((spot) => createNpc(spot)),
     locked: false,
     keyBusy: false,
     othersTalking: false,
@@ -189,6 +198,70 @@ export function foamCleared(t: number, u: number, v: number): boolean {
   return row % 2 === 0 ? u <= q.u : u >= q.u;
 }
 
+/* ================================================================== the beat */
+
+/** Where a sock seller is on his beat. */
+export interface BeatPoint {
+  x: number;
+  z: number;
+  /** Which way he faces: along the walk while walking, at the street while he stands at an end. */
+  heading: number;
+  /** 0 standing, 1 in his stride, eased across the turnarounds. */
+  moving: number;
+  /** Metres walked in all, for the legs. */
+  stride: number;
+}
+
+/**
+ * A sock seller `walked` seconds into his beat: stand at `from` hawking, walk to `to`, stand, walk
+ * back, round and round. Anybody without a beat is simply on his spot. Pure, so the rules, the
+ * picture and a test all put him in the same place.
+ */
+export function beatAt(spot: HustlerSpot, walked: number, out: BeatPoint = { x: 0, z: 0, heading: 0, moving: 0, stride: 0 }): BeatPoint {
+  const b = spot.beat;
+  const dx = b ? b.to.x - b.from.x : 0;
+  const dz = b ? b.to.z - b.from.z : 0;
+  const len = Math.hypot(dx, dz);
+  if (!b || len < 0.01) {
+    out.x = spot.x;
+    out.z = spot.z;
+    out.heading = spot.heading;
+    out.moving = 0;
+    out.stride = 0;
+    return out;
+  }
+  const M = HUSTLERS.medias;
+  const walk = len / M.walkSpeed;
+  const rest = M.restSeconds;
+  const cycle = 2 * (walk + rest);
+  const u = ((walked % cycle) + cycle) % cycle;
+  let f: number;
+  // Seconds into the walk he is on, or -1 while he stands at an end.
+  let into = -1;
+  if (u < rest) {
+    f = 0;
+  } else if (u < rest + walk) {
+    into = u - rest;
+    f = into / walk;
+  } else if (u < 2 * rest + walk) {
+    f = 1;
+  } else {
+    into = u - 2 * rest - walk;
+    f = 1 - into / walk;
+  }
+  out.x = b.from.x + dx * f;
+  out.z = b.from.z + dz * f;
+  out.heading = into < 0 ? spot.heading : u < rest + walk ? Math.atan2(dx, -dz) : Math.atan2(-dx, dz);
+  out.moving = into < 0 ? 0 : Math.min(1, into / 0.35, (walk - into) / 0.35);
+  out.stride = walked * M.walkSpeed;
+  return out;
+}
+
+/** Where a hustler is right now, in world space: his spot, or — for a sock seller — his place on his beat. */
+export function hustlerAt(spot: HustlerSpot, n: HustlerNpcState, out: BeatPoint = { x: 0, z: 0, heading: 0, moving: 0, stride: 0 }): BeatPoint {
+  return beatAt(spot, n.beat, out);
+}
+
 /* ================================================================== who he is */
 
 /** What the subtitle calls npc `i`: his trade, until he has worked your car `nicknameAfter` times. */
@@ -261,6 +334,7 @@ function setPhase(n: HustlerNpcState, phase: HustlerPhase, time: number): void {
 
 /** Scratch, reused every tick. */
 const LIGHT: SignalReading = { color: 'green', left: 0 };
+const AT: BeatPoint = { x: 0, z: 0, heading: 0, moving: 0, stride: 0 };
 const SQUEEGEE: SqueegeePose = { wiping: 0, stroke: 0, u: 0, v: 0 };
 
 /**
@@ -285,7 +359,9 @@ export function stepHustlers(
   // Somebody else's activity started talking, or the car is out of earshot: the strip is cut clean.
   if (s.speaker >= 0) {
     const sp = spots[s.speaker];
-    if (s.othersTalking || !sp || Math.hypot(v.x - sp.x, v.z - sp.z) > HUSTLERS.hearRadius) hush(s);
+    const n = s.npcs[s.speaker];
+    const at = sp && n ? hustlerAt(sp, n, AT) : null;
+    if (s.othersTalking || !at || Math.hypot(v.x - at.x, v.z - at.z) > HUSTLERS.hearRadius) hush(s);
   }
 
   const onStreet = v.y < HUSTLERS.streetY;
@@ -293,6 +369,7 @@ export function stepHustlers(
     const spot = spots[i];
     const n = s.npcs[i];
     if (spot.kind === 'trapito') stepTrapito(s, i, spot, n, v, onStreet, ctx, time, dt, events);
+    else if (spot.kind === 'medias') stepMedias(s, i, spot, n, v, onStreet, ctx, time, dt, events);
     else stepWasher(s, i, spot, n, v, onStreet, cmd, economy, ctx, time, dt, events);
   }
 }
@@ -364,6 +441,113 @@ function stepTrapito(
     }
     case 'grumble':
       if (time - n.since >= T.grumbleSeconds) setPhase(n, 'idle', time);
+      return;
+    default:
+      setPhase(n, 'idle', time);
+      return;
+  }
+}
+
+/* ------------------------------------------------------------------ sock sellers */
+
+function stepMedias(
+  s: HustlerState,
+  i: number,
+  spot: HustlerSpot,
+  n: HustlerNpcState,
+  v: VehicleState,
+  onStreet: boolean,
+  ctx: HustlerContext,
+  time: number,
+  dt: number,
+  events: GameEvent[],
+): void {
+  const M = HUSTLERS.medias;
+  const at = beatAt(spot, n.beat, AT);
+  const d = onStreet ? Math.hypot(v.x - at.x, v.z - at.z) : Infinity;
+  const speed = Math.abs(v.speed);
+  const t = time - n.since;
+
+  switch (n.phase) {
+    case 'idle': {
+      // Walking his beat; the clock only runs while he is.
+      n.beat += dt;
+      if (s.locked || time < n.cooldownUntil || d > M.noticeRadius) {
+        n.dwell = 0;
+        return;
+      }
+      if (speed < M.slowSpeed) n.dwell += dt;
+      else if (d < M.lingerRadius) n.dwell += dt * (M.noticeSeconds / M.lingerSeconds);
+      else n.dwell = 0;
+      if (n.dwell < M.noticeSeconds) return;
+      n.dwell = 0;
+      n.encounters += 1;
+      s.stats.calls += 1;
+      n.mood = 'plain';
+      if (ctx.pursued) {
+        // Hands up and a step back: he sells socks, and he never saw this car.
+        say(s, i, MEDIAS_LINES.pursuit, 'pursuit', events);
+        setPhase(n, 'waveOff', time);
+        n.cooldownUntil = time + M.cooldown;
+        return;
+      }
+      setPhase(n, 'call', time);
+      if (ctx.damaged) {
+        n.mood = 'damaged';
+        say(s, i, MEDIAS_LINES.damaged, 'damaged', events);
+      } else if (n.encounters > HUSTLERS.nicknameAfter && nextRandom(s) < HUSTLERS.regularChance) {
+        say(s, i, MEDIAS_LINES.regular, 'regular', events);
+      } else if (nextRandom(s) < M.cleanChance) {
+        n.mood = 'clean';
+        say(s, i, MEDIAS_LINES.clean, 'clean', events);
+      } else {
+        say(s, i, MEDIAS_LINES.pitch, 'pitch', events);
+      }
+      return;
+    }
+    case 'call':
+    case 'wait': {
+      if (s.locked || d > M.leaveRadius) {
+        n.cooldownUntil = time + M.cooldown;
+        if (!s.locked && nextRandom(s) < M.followChance && say(s, i, MEDIAS_LINES.ignored, 'ignored', events)) {
+          setPhase(n, 'grumble', time);
+        } else {
+          setPhase(n, 'idle', time);
+        }
+        return;
+      }
+      if (ctx.pursued) {
+        say(s, i, MEDIAS_LINES.pursuit, 'pursuit', events, true);
+        setPhase(n, 'waveOff', time);
+        n.cooldownUntil = time + M.cooldown;
+        return;
+      }
+      if (n.phase === 'call') {
+        if (t >= M.callSeconds) {
+          setPhase(n, 'wait', time);
+          // `dwell` counts his second tries while he waits.
+          n.dwell = 0;
+        }
+        return;
+      }
+      if (t >= M.waitSeconds) {
+        // It just sits there. Fine: he says so, and walks on.
+        n.dwell = 0;
+        n.cooldownUntil = time + M.cooldown;
+        if (say(s, i, MEDIAS_LINES.ignored, 'ignored', events)) setPhase(n, 'grumble', time);
+        else setPhase(n, 'idle', time);
+        return;
+      }
+      if (n.dwell < M.insists && t >= M.insistEvery * (n.dwell + 1) && s.lineTimeLeft <= 0) {
+        if (say(s, i, MEDIAS_LINES.insist, 'insist', events)) n.dwell += 1;
+      }
+      return;
+    }
+    case 'grumble':
+      if (t >= M.grumbleSeconds) setPhase(n, 'idle', time);
+      return;
+    case 'waveOff':
+      if (t >= M.waveOffSeconds) setPhase(n, 'idle', time);
       return;
     default:
       setPhase(n, 'idle', time);

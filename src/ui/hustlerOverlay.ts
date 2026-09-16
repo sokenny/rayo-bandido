@@ -1,5 +1,5 @@
 import type { GameEvent, HustlerHudSnapshot } from '../core/types';
-import { TRAPITO_LINES, WASHER_CHOICES, WASHER_LINES, streetPrice } from '../content/hustlers';
+import { HUSTLER_VOICE, MEDIAS_LINES, TRAPITO_LINES, WASHER_CHOICES, WASHER_LINES, streetPrice } from '../content/hustlers';
 import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 
 /**
@@ -60,8 +60,9 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
   };
   yesEl.addEventListener('click', onYes);
   noEl.addEventListener('click', onNo);
-  // The whole cast is voiced, trapitos and washers alike, with the one street voice.
+  // The whole cast is voiced: trapitos and washers with the one street voice, the sock sellers with the villero one.
   void prepareDialogue('trapito', [...Object.values(TRAPITO_LINES).flat(), ...Object.values(WASHER_LINES).flat()]);
+  void prepareDialogue('villero', Object.values(MEDIAS_LINES).flat());
 
   let shownLineId = -1;
   let shownTalking = false;
@@ -114,7 +115,7 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
           speakerEl.textContent = h.speaker.toUpperCase();
           textEl.textContent = h.line;
           // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence.
-          void speakDialogue({ characterId: 'trapito', text: h.line, interrupt: true });
+          void speakDialogue({ characterId: HUSTLER_VOICE[h.kind], text: h.line, interrupt: true });
           play(
             subtitleEl,
             [
@@ -136,11 +137,13 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         setOffer(false);
         shownLineId = -1;
         stopDialogue('trapito');
+        stopDialogue('villero');
       }
     },
 
     dispose() {
       stopDialogue('trapito');
+      stopDialogue('villero');
       yesEl.removeEventListener('click', onYes);
       noEl.removeEventListener('click', onNo);
       for (const animation of animations.values()) animation.cancel();

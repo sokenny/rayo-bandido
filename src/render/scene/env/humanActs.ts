@@ -59,7 +59,12 @@ export type HumanAct =
    */
   | 'trapito'
   /** A windshield washer: watches his light, offers, walks to the car, cleans, walks back. Needs `Actor.cue`. */
-  | 'washer';
+  | 'washer'
+  /**
+   * A sock seller: walks his beat with the box round his neck, holds a pair up at the street from
+   * either end, and — cued — stops for a car, pitches it, shrugs when it goes. Needs `Actor.cue`.
+   */
+  | 'medias';
 
 export interface ActorSpec {
   act: HumanAct;
@@ -117,12 +122,19 @@ export interface HustlerCue {
   wiping: number;
   /** A washer's light is red. */
   red: boolean;
+  /** A sock seller: where he is on his beat, which way it has him face, how far into his stride, and metres walked. */
+  atX: number;
+  atZ: number;
+  facing: number;
+  striding: number;
+  stride: number;
 }
 
 export function createHustlerCue(): HustlerCue {
   return {
     phase: 'idle', t: 0, mood: 'plain', carX: 0, carZ: 0, spaceX: 0, spaceZ: 0, fromX: 0, fromZ: 0, toX: 0, toZ: 0,
     walk: 0, glassX: 0, glassZ: 0, acrossX: 1, acrossZ: 0, u: 0, v: 0, wiping: 0, red: false,
+    atX: 0, atZ: 0, facing: 0, striding: 0, stride: 0,
   };
 }
 
@@ -191,6 +203,13 @@ export function createActor(spec: ActorSpec): Actor {
   const faceFocus = spec.focus && (spec.act === 'warm' || spec.act === 'inspect' || spec.act === 'vibe');
   const face = faceFocus ? bearing(spec.x, spec.z, spec.focus!.x, spec.focus!.z) : spec.heading;
   const toward = spec.to ? bearing(spec.x, spec.z, spec.to.x, spec.to.z) : face;
+  const cue = spec.act === 'trapito' || spec.act === 'washer' || spec.act === 'medias' ? createHustlerCue() : null;
+  if (cue) {
+    // Where he stands until anybody says otherwise, so the first pose is never at the origin.
+    cue.atX = spec.x;
+    cue.atZ = spec.z;
+    cue.facing = spec.heading;
+  }
   return {
     spec,
     phase: hash(spec.seed, 7.3) * 20,
@@ -206,7 +225,7 @@ export function createActor(spec: ActorSpec): Actor {
     gait: 0,
     stride: 0,
     facing: toward,
-    cue: spec.act === 'trapito' || spec.act === 'washer' ? createHustlerCue() : null,
+    cue,
   };
 }
 
@@ -251,6 +270,9 @@ export function stepActor(a: Actor, time: number, dt: number, subject: CrowdSubj
       break;
     case 'washer':
       washer(a, t, out);
+      break;
+    case 'medias':
+      medias(a, t, dt, out);
       break;
     default:
       break;
@@ -759,6 +781,83 @@ function washer(a: Actor, t: number, p: BodyPose): void {
     default:
       return;
   }
+}
+
+/** Both hands on the sides of the box hung at his belly. */
+function holdBox(p: BodyPose, t: number, w: number): void {
+  const sway = 0.04 * Math.sin(t * 1.1);
+  arm(p, false, 0.42 + sway, -0.05, 1.05, 0.45, w);
+  arm(p, true, 0.42 - sway, -0.05, 1.05, 0.45, w);
+}
+
+function medias(a: Actor, t: number, dt: number, p: BodyPose): void {
+  const s = a.spec.seed * 13;
+  const c = a.cue;
+  if (!c) return;
+  p.x = c.atX - a.spec.x;
+  p.z = c.atZ - a.spec.z;
+  const k = c.t;
+  const selling = c.phase === 'call' || c.phase === 'wait' || c.phase === 'waveOff';
+  // Round to the car while he sells it something, and otherwise the way his beat has him face.
+  const want = selling ? bearing(c.atX, c.atZ, c.carX, c.carZ) : c.facing;
+  const turnStep = (selling ? 5 : 2.6) * dt;
+  a.facing += clamp(wrap(want - a.facing), -turnStep, turnStep);
+  p.turn = wrap(a.facing - a.spec.heading);
+  holdBox(p, t, 1);
+
+  if (c.phase === 'idle') {
+    const gait = c.striding;
+    const swing = Math.sin(c.stride * 4.5) * 0.42 * gait;
+    p.legL = p.legL * (1 - gait) + swing;
+    p.legR = p.legR * (1 - gait) - swing;
+    p.lift += gait * (-0.02 + 0.03 * Math.abs(Math.cos(c.stride * 4.5)));
+    p.lean += 0.05 * gait;
+    p.tilt *= 1 - gait;
+    p.look *= 1 - 0.6 * gait;
+    // Standing at an end of his beat: a pair held up at the street, now and then.
+    const show = spell(t, 3.2, 0.55, s + 50) * (1 - gait);
+    p.item = show;
+    arm(p, true, 0.85 + 0.08 * Math.sin(t * 5), 0.3, 1.55 + 0.12 * Math.sin(t * 5 + 0.6), 0.1, show);
+    return;
+  }
+
+  if (c.phase === 'grumble') {
+    // Turns off the car, shrugs, and gets back to it.
+    p.item = 0;
+    shrug(p, t, envelope(k, 0.15, 0.45, 1.7, 2.2));
+    p.nod += 0.08 * envelope(k, 1.2, 1.6, 2.0, 2.4);
+    return;
+  }
+
+  if (c.phase === 'waveOff') {
+    // Palms out at the car and a shake of the head: nothing to do with him.
+    p.item = 0;
+    const go = envelope(k, 0, 0.2, 1.7, 2.1);
+    arm(p, false, 1.25, 0.45, 0.85, 0, go);
+    arm(p, true, 1.25, 0.45, 0.85, 0, go);
+    p.look += 0.32 * Math.sin(t * 10) * go;
+    p.lean -= 0.12 * go;
+    return;
+  }
+
+  // Pitching: a step off his line towards the car, a pair held up at it, the other hand talking.
+  faceAndStep(a, p, c.carX, c.carZ, 0, c.phase === 'call' ? 0.8 * ease(k / 1.1) : 0.8);
+  const startle = c.phase === 'call' ? envelope(k, 0, 0.3, 1.0, 1.4) : 0;
+  if (c.mood === 'damaged') {
+    // A hand to his head at the state of it.
+    arm(p, false, 2.1, 0.55, 2.2, 0.5, startle);
+  } else if (c.mood === 'clean') {
+    // "Mirá vos, qué nave."
+    arm(p, false, 0.45, 1.0, 0.35, 0, startle);
+    p.lean -= 0.06 * startle;
+  }
+  const up = c.phase === 'call' ? ease((k - 0.3) / 0.4) : spell(t, 2.8, 0.6, s + 51);
+  p.item = up;
+  // Forearm up, so the pair stands up out of his fist at the driver, shaken a little.
+  arm(p, true, 0.95 + 0.08 * Math.sin(t * 7), 0.2, 1.5 + 0.15 * Math.sin(t * 7 + 0.6), 0.1, up);
+  const talk = c.phase === 'wait' ? spell(t, 2.2, 0.6, s + 52) : envelope(k, 1.3, 1.6, 3.8, 4.3);
+  arm(p, false, 0.6 + 0.2 * Math.sin(t * 2.7), 0.2, 1.1 + 0.4 * Math.sin(t * 3.4 + 1), 0.2, talk * (1 - startle));
+  p.nod -= 0.05;
 }
 
 /* ================================================================== the car */

@@ -111,6 +111,9 @@ import { LOCO_MUSTANG } from './content/garage';
 import { garageOpenToTalk } from './sim/garage';
 import { hustlerName, washerOfferOpen } from './sim/hustlers';
 import { createHustlersVisual } from './render/scene/hustlersVisual';
+import { createMicroSceneVisual } from './render/scene/microSceneVisual';
+import { createMicroSceneDebug } from './microScenes/debug';
+import { reportCatalogIssues } from './microScenes/validate';
 import { createMoogulTrip } from './render/scene/moogulTrip';
 import { createLeaderboard, fetchBoard, submitRaceTime } from './net/leaderboard';
 import type { LeaderboardKind } from './content/leaderboards';
@@ -647,6 +650,18 @@ export function createGame(
     scene.add(hustlersVisual.root);
     car.chassis.add(hustlersVisual.foam);
   }
+  /**
+   * THE URBAN MICRO-SCENES (`src/microScenes/`), in the world that carries anchors. Scenery and
+   * nothing else: the rules are stepped by the orchestrator, the art is one group of pooled
+   * bodies and merged props, and the voices go out through the audio system's own priority ladder.
+   * Null in every world without anchors, exactly like the hustlers.
+   */
+  const microSceneAnchors = layout.microSceneAnchors ?? null;
+  const hasMicroScenes = !!(microSceneAnchors && microSceneAnchors.length > 0 && state.microScenes);
+  const microSceneVisual = hasMicroScenes ? createMicroSceneVisual() : null;
+  if (microSceneVisual) scene.add(microSceneVisual.root);
+  if (import.meta.env.DEV && hasMicroScenes && microSceneAnchors) reportCatalogIssues(microSceneAnchors);
+
   /** A tap on the washer's "No, gracias": the G key by another route, like `activateQueued`. */
   let declineQueued = false;
   const moogul = hasBuho
@@ -682,7 +697,7 @@ export function createGame(
     streetGate: hasStreetGate,
     police: !!state.police,
     // The fine's AURA line is the open world's; a race stall is said by the HUD's own message.
-    crashDamage: !!state.crash && !state.race,
+    crashDamage: !!state.crash && !state.race && !!layout.garageSite,
     quickRush: mode === 'rush' && !net,
     escToCity: params.get('from') === 'city',
   });
@@ -1615,6 +1630,8 @@ export function createGame(
             disabled: ev.results.disabled,
             bestChain: ev.results.bestChain,
             styleBonus: ev.results.styleBonus,
+            crashPenalty: ev.results.crashPenalty,
+            nearMissPoints: ev.results.nearMissPoints,
           };
           void leaderboard.submit(run).then((result) => {
             // The server may know a better previous best than this browser did (the same
@@ -1989,6 +2006,22 @@ export function createGame(
     }
     if (hustlersVisual && state.hustlers) {
       hustlersVisual.update(state.hustlers, simTime, frameDt, chase.camera.position.x, chase.camera.position.z, crowdSubject);
+    }
+    if (microSceneVisual && state.microScenes) {
+      // What the rules cannot see: whether a voiced line or the radio has the speakers. Read here
+      // and carried into the next tick's signals, so the director holds a conversation back for
+      // exactly the same reasons the voice fades one out.
+      state.microScenes.externalAudio = audio.microScenesBlocked();
+      microSceneVisual.update(
+        state.microScenes,
+        simTime,
+        frameDt,
+        chase.camera.position.x,
+        chase.camera.position.z,
+        crowdSubject,
+        v.vx,
+        v.vz,
+      );
     }
     chase.update(cameraPose, frameDt);
     hearing.x = pose.x;
@@ -2573,6 +2606,7 @@ export function createGame(
         garageFigure.dispose();
       }
       hustlersVisual?.dispose();
+      microSceneVisual?.dispose();
       environment.dispose();
       if (pickupMarker) {
         scene.remove(pickupMarker.group);
@@ -2913,6 +2947,47 @@ export function createGame(
           },
         }
       : null,
+    /**
+     * THE URBAN MICRO-SCENES (`src/microScenes/`), for authoring and QA. Development only, and the
+     * whole surface is documented in `src/microScenes/debug.ts`:
+     *
+     *   __rb.microScenes.list()                      every scene, and how many there are
+     *   __rb.microScenes.spawn('bridge-smoke-circle')            force one up on the nearest anchor
+     *   __rb.microScenes.spawn('bus-stop-conversation', null, 'cheating-boyfriend')
+     *   __rb.microScenes.status()                    what is standing, in what state, at what cost
+     *   __rb.microScenes.validate()                  everything the catalogue complains about
+     */
+    microScenes:
+      import.meta.env.DEV && hasMicroScenes && microSceneAnchors
+        ? {
+            ...createMicroSceneDebug({
+              runtime: () => state.microScenes,
+              anchors: () => microSceneAnchors,
+              events: () => state.events,
+              player: () => ({ x: state.vehicle.x, z: state.vehicle.z }),
+            }),
+            /** What the art is actually drawing this frame. */
+            drawn: () => microSceneVisual?.stats() ?? null,
+            /** Stop the car beside an anchor, so a scene can be watched without driving there. */
+            goTo(id: string, back = 11) {
+              const anchor = microSceneAnchors.find((a) => a.id === id);
+              if (!anchor) return false;
+              const v = state.vehicle;
+              // An anchor faces the road, so out along its facing is the lane; the car stands there
+              // looking back at it, which is what the player would be doing.
+              const h = anchor.transform.heading;
+              v.x = v.prevX = anchor.transform.x + Math.sin(h) * back;
+              v.z = v.prevZ = anchor.transform.z - Math.cos(h) * back;
+              v.y = v.prevY = 0;
+              v.pitch = 0;
+              v.heading = v.prevHeading = h + Math.PI;
+              v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
+              fillCameraPose(1);
+              chase.snap(cameraPose);
+              return true;
+            },
+          }
+        : null,
     buho: hasBuho
       ? {
           config: MOOGUL,

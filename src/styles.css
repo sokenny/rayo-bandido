@@ -3950,6 +3950,10 @@ body.rb-touch-pad .rb-minimap {
   color: var(--rb-cyan);
 }
 
+.rb-rush__line.is-crash {
+  color: var(--rb-red);
+}
+
 /* ----------------------------------------------------------------- results card */
 
 .rb-rush__results {

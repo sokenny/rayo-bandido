@@ -64,6 +64,10 @@ export interface RushSubmission {
   disabled: number;
   bestChain: number;
   styleBonus: number;
+  /** Points crashes took off `score`, so the board can tell style bonus from the score it survived. */
+  crashPenalty: number;
+  /** Points near misses paid into `score`: a run can score without a single kill. */
+  nearMissPoints: number;
 }
 
 /** What came back from filing a run. */

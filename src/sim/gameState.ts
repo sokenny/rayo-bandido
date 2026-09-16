@@ -25,10 +25,16 @@ import { createNearMissState, resetNearMissState, stepNearMiss } from './nearMis
 import { applyPassengerFare, applyPoliceFine, applyRewards } from './economy';
 import { createRaceState, resetRaceState, stepRace } from './race';
 import { createTimeAttackState, resetTimeAttackState, stepTimeAttack } from './timeAttack';
-import { createRushState, resetRushState, rushSiteFor, stepRush } from './rush';
+import { createRushState, penalizeRushCrash, resetRushState, rushSiteFor, stepRush } from './rush';
 import { createFlairState, resetFlairState, stepFlair } from './flair';
 import { canBoard, canDropOff, cancelRide, createPassengerState, resetPassengerState, stepPassenger } from './passenger';
 import { createHustlerState, resetHustlerState, stepHustlers, type HustlerContext } from './hustlers';
+import {
+  createMicroSceneRuntime,
+  createMicroSceneSignals,
+  resetMicroSceneRuntime,
+  stepMicroScenes,
+} from '../microScenes/runtime/director';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
 import { createGarageState, resetGarageState, stepGarage } from './garage';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
@@ -155,13 +161,16 @@ export function createInitialGameState(
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length, layout.passengerTrip ?? undefined) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     garage: layout.garageSite ? createGarageState() : null,
-    crash: layout.garageSite || layout.race ? createCrashDamageState() : null,
+    // RAYO RUSH on its own has no garage, but its runs still pay for crashes in points.
+    crash: layout.garageSite || layout.race || (layout.rushSites && layout.rushSites.length > 0) ? createCrashDamageState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
     streetGate: layout.streetSites && layout.streetSites.length > 0 ? createStreetGateState(options.streetRaceCleared ?? 0) : null,
     police: options.police ? createPoliceState(layout) : null,
     intro: options.intro ? createIntroState() : null,
     streetProps: createStreetPropsState(layout),
     hustlers: layout.hustlerSpots && layout.hustlerSpots.length > 0 ? createHustlerState(layout.hustlerSpots) : null,
+    microScenes:
+      layout.microSceneAnchors && layout.microSceneAnchors.length > 0 ? createMicroSceneRuntime(layout.microSceneAnchors) : null,
     events: [],
   };
   return state;
@@ -197,6 +206,7 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.intro) resetIntroState(state.intro);
   if (state.streetProps) resetStreetPropsState(state.streetProps);
   if (state.hustlers) resetHustlerState(state.hustlers);
+  if (state.microScenes) resetMicroSceneRuntime(state.microScenes);
   state.events.length = 0;
 }
 
@@ -260,10 +270,13 @@ export interface StepOptions {
 const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true };
 
 /** What `stepCrashDamage` is told about the tick. One object, never reallocated. */
-const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false };
+const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false, judgeOnly: false };
 
 /** What `stepHustlers` is told about the car. One object, never reallocated. */
 const HUSTLER_CONTEXT: HustlerContext = { damaged: false, pursued: false };
+
+/** What the micro-scene director is told about the world. One object, never reallocated. */
+const MICRO_SCENE_SIGNALS = createMicroSceneSignals();
 
 /**
  * Whether another activity's prompt is up right now, so the F key is already spoken for: a washer
@@ -490,10 +503,15 @@ export function stepGame(
   let crashed = false;
   if (state.crash) {
     CRASH_RULES.stall = !!race;
+    // No garage to repair at: nothing is fined or marked, the crash only costs a run its points.
+    CRASH_RULES.judgeOnly = !race && !layout.garageSite;
     CRASH_RULES.enabled = race ? race.phase === 'racing' : !introEngaged(state.intro);
     CRASH_RULES.atGarage = !!state.garage && state.garage.atSite;
-    crashed = stepCrashDamage(state.crash, state.economy, CRASH_RULES, state.time, dt, state.events) !== null;
+    const severity = stepCrashDamage(state.crash, state.economy, CRASH_RULES, state.time, dt, state.events);
+    crashed = severity !== null;
     if (crashed) breakDriftChain(state.drift, state.events);
+    // A RAYO RUSH run pays for it in points as well (`src/sim/rush.ts`).
+    if (severity && state.rush) penalizeRushCrash(state.rush, severity, state.events);
   }
   // The trapitos and the washers (`src/sim/hustlers.ts`), once the tick has decided whether the car
   // is dented and whether the police are on it. Never an activity that holds the car: they go quiet
@@ -507,6 +525,55 @@ export function stepGame(
     HUSTLER_CONTEXT.pursued = !!state.police && (state.police.phase === 'pursuit' || state.police.phase === 'escaping');
     // `input`, not `cmd`: a hold (the grid, an arrest, a stall) has already taken the key away.
     stepHustlers(h, layout.hustlerSpots, state.vehicle, input, state.economy, HUSTLER_CONTEXT, state.time, dt, state.events);
+  }
+  // The urban micro-scenes (`src/microScenes/`), after everything that could have changed what
+  // they are allowed to see: the police phase, the activity locks, the crash. Pure scenery — it
+  // reads this state and writes nothing but its own events, which is why it is stepped last and
+  // why nothing above it has to know it exists.
+  if (state.microScenes && layout.microSceneAnchors) {
+    const m = MICRO_SCENE_SIGNALS;
+    const v = state.vehicle;
+    m.x = v.x;
+    m.y = v.y;
+    m.z = v.z;
+    m.heading = v.heading;
+    m.speed = Math.abs(v.speed);
+    m.vx = v.vx;
+    m.vz = v.vz;
+    // There is no horn input in this build, and micro-scenes are not allowed to add one: the
+    // reaction that wants it stays written down and unheard until the game has a horn.
+    m.horn = false;
+    // One playable car, and it is the petrol one.
+    m.combustionCar = true;
+    m.pursuit = !!state.police && (state.police.phase === 'pursuit' || state.police.phase === 'escaping');
+    m.stars = state.police ? state.police.stars : 0;
+    m.policeDistance = Infinity;
+    if (state.police) {
+      // The nearest police car on the road. The scenes only ever READ this.
+      for (const unit of state.police.units) {
+        if (unit.status !== 'active') continue;
+        const d = Math.hypot(unit.x - v.x, unit.z - v.z);
+        if (d < m.policeDistance) {
+          m.policeDistance = d;
+          m.policeX = unit.x;
+          m.policeZ = unit.z;
+        }
+      }
+    }
+    m.activity = lockOtherActivities(state) !== null || introEngaged(state.intro);
+    // Priority speech the rules can see, plus whatever the audio layer reported last frame
+    // (`MicroSceneRuntime.externalAudio`): a voiced character line, the police radio, the mute.
+    m.storyAudio =
+      state.microScenes.externalAudio ||
+      introEngaged(state.intro) ||
+      (!!state.passenger && state.passenger.lineTimeLeft > 0) ||
+      (!!state.buho && state.buho.lineTimeLeft > 0) ||
+      (!!state.garage && state.garage.lineTimeLeft > 0) ||
+      (!!state.hustlers && state.hustlers.lineTimeLeft > 0);
+    m.session = state.time;
+    // Bandido Metro is a night city; there is no clock to ask yet.
+    m.timeOfDay = 'night';
+    stepMicroScenes(state.microScenes, m, dt, state.events);
   }
   // The phrases (`src/sim/flair.ts`). Last of the things that watch the driving, and the most
   // thoroughly a watcher of them all: it reads the drift, the near misses, the collisions and the

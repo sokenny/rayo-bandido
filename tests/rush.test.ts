@@ -6,6 +6,7 @@ import {
   dismissRush,
   isRushTarget,
   markRushTargets,
+  penalizeRushCrash,
   resetRushState,
   rushAllClear,
   rushLevelCount,
@@ -277,27 +278,47 @@ describe('rayo rush: scoring', () => {
     expect(scored?.points).toBe(RUSH.scoring.disable);
   });
 
-  it('pays a style bonus for a shot charged out of a drift, and scales it with the drift', () => {
+  it('pays a style bonus for a shot charged out of a drift, and scales it with the angle', () => {
     const r = rig();
     r.begin();
-    // A clean four-second drift held right up to the shot.
+    // A drift that went 30 degrees sideways at its deepest, then straightened a little.
+    const deg = Math.PI / 180;
     r.drift.active = true;
-    r.drift.duration = 4;
+    r.vehicle.slipAngle = 20 * deg;
     r.tick();
+    r.vehicle.slipAngle = -30 * deg;
+    r.tick();
+    r.vehicle.slipAngle = 15 * deg;
     const events = r.tick([0]);
     const scored = events.find((e) => e.type === 'rushScore') as
-      | { points: number; driftBonus: number; cleanDrift: boolean }
+      | { points: number; driftBonus: number; driftAngle: number }
       | undefined;
-    expect(scored?.cleanDrift).toBe(true);
-    expect(scored?.driftBonus).toBe(styleBonusFor(4, true));
-    expect(scored?.points).toBe(RUSH.scoring.disable + styleBonusFor(4, true));
-    // A longer drift is worth more than a short one, up to the cap.
-    expect(styleBonusFor(3, true)).toBeGreaterThan(styleBonusFor(1, true));
-    expect(styleBonusFor(RUSH.scoring.driftBonusMaxSeconds + 5, true)).toBe(
-      styleBonusFor(RUSH.scoring.driftBonusMaxSeconds, true),
+    expect(scored?.driftAngle).toBe(30);
+    expect(scored?.driftBonus).toBe(styleBonusFor(30 * deg));
+    expect(scored?.points).toBe(RUSH.scoring.disable + styleBonusFor(30 * deg));
+    // More angle pays more, from the flat bonus at the bottom of the ramp to a cap at the top.
+    expect(styleBonusFor(RUSH.scoring.driftAngleFrom)).toBe(RUSH.scoring.driftChargeBonus);
+    expect(styleBonusFor(35 * deg)).toBeGreaterThan(styleBonusFor(20 * deg));
+    expect(styleBonusFor(RUSH.scoring.driftAngleFull + 40 * deg)).toBe(
+      RUSH.scoring.driftChargeBonus + RUSH.scoring.driftAngleBonus,
     );
-    // And a drift that took a hit is worth less than one that did not.
-    expect(styleBonusFor(4, false)).toBeLessThan(styleBonusFor(4, true));
+  });
+
+  it('judges each drift on its own peak, not on an earlier deeper one', () => {
+    const r = rig();
+    r.begin();
+    const deg = Math.PI / 180;
+    r.drift.active = true;
+    r.vehicle.slipAngle = 44 * deg;
+    r.tick();
+    r.drift.active = false;
+    r.idle(RUSH.scoring.driftChargeGrace + 0.2);
+    r.drift.active = true;
+    r.vehicle.slipAngle = 14 * deg;
+    r.tick();
+    const events = r.tick([0]);
+    const scored = events.find((e) => e.type === 'rushScore') as { driftAngle: number } | undefined;
+    expect(scored?.driftAngle).toBe(14);
   });
 
   it('pays more for a long shot than a close one, ramped by the distance', () => {
@@ -344,20 +365,53 @@ describe('rayo rush: scoring', () => {
     expect(scored?.driftBonus).toBe(0);
   });
 
-  it('voids the clean bonus when the drift took a hit', () => {
+  it('pays near misses into the score during a run, outside the streak, and never outside one', () => {
     const r = rig();
+    const pass: GameEvent = { type: 'nearMiss', targetId: 0, x: 0, y: 0, z: 0, points: 30, quality: 0.5 };
+    // Not before the clock.
+    const before: GameEvent[] = [pass];
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, before);
+    expect(r.rush.score).toBe(0);
+
     r.begin();
-    r.drift.active = true;
-    r.drift.duration = 1;
-    r.vehicle.collided = true;
-    r.tick();
-    r.vehicle.collided = false;
-    r.drift.duration = 2;
-    r.tick();
-    const events = r.tick([0]);
-    const scored = events.find((e) => e.type === 'rushScore') as { cleanDrift: boolean; driftBonus: number } | undefined;
-    expect(scored?.cleanDrift).toBe(false);
-    expect(scored?.driftBonus).toBeGreaterThan(0);
+    const events: GameEvent[] = [pass];
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, events);
+    const paid = 30 * RUSH.scoring.nearMissScale;
+    expect(r.rush.score).toBe(paid);
+    expect(r.rush.chain).toBe(0);
+    expect(events.find((e) => e.type === 'rushNearMiss')).toMatchObject({ points: paid, score: paid });
+
+    r.rush.timeLeft = DT;
+    const end = r.tick().find((e) => e.type === 'rushEnd') as { results: { nearMisses: number; nearMissPoints: number } } | undefined;
+    expect(end?.results).toMatchObject({ nearMisses: 1, nearMissPoints: paid });
+  });
+
+  it('takes a crash off the score by severity, never below zero, and only while running', () => {
+    const r = rig();
+    // Nothing outside the clock.
+    const idleEvents: GameEvent[] = [];
+    expect(penalizeRushCrash(r.rush, 'heavy', idleEvents)).toBe(0);
+    expect(idleEvents).toHaveLength(0);
+
+    r.begin();
+    r.tick([0]);
+    r.tick([1]);
+    const before = r.rush.score;
+    const events: GameEvent[] = [];
+    expect(penalizeRushCrash(r.rush, 'light', events)).toBe(RUSH.scoring.crashPenalty.light);
+    expect(r.rush.score).toBe(before - RUSH.scoring.crashPenalty.light);
+    expect(events[0]).toMatchObject({ type: 'rushCrash', severity: 'light', points: RUSH.scoring.crashPenalty.light });
+
+    // A heavy crash with less than its penalty on the board takes what is there.
+    const left = r.rush.score;
+    expect(penalizeRushCrash(r.rush, 'heavy', events)).toBe(Math.min(left, RUSH.scoring.crashPenalty.heavy));
+    expect(r.rush.score).toBe(Math.max(0, left - RUSH.scoring.crashPenalty.heavy));
+    expect(r.rush.crashes).toBe(2);
+
+    r.rush.timeLeft = DT;
+    const end = r.tick().find((e) => e.type === 'rushEnd') as { results: { crashes: number; crashPenalty: number } } | undefined;
+    expect(end?.results.crashes).toBe(2);
+    expect(end?.results.crashPenalty).toBe(before - r.rush.score);
   });
 
   it('never pays twice for the same electric car, even after it respawns', () => {
@@ -399,7 +453,7 @@ describe('rayo rush: the clock', () => {
     const r = rig(20);
     r.begin();
     r.drift.active = true;
-    r.drift.duration = 2;
+    r.vehicle.slipAngle = 0.4;
     r.tick();
     r.tick([0]);
     r.tick([1]);

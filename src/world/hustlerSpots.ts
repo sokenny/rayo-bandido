@@ -27,8 +27,17 @@ import type { World } from './arenaWorld';
  *     - av-central northbound at blvd-ring-s: the way into downtown, straight up from the spawn,
  *     - av-e1 southbound at st-south, on the OCTANO station's corner in the industrial east.
  *
- * Every spot stands on pavement, every washer's car waits on his approach's lane, and none of them
- * is inside anything solid (`tests/hustlers.test.ts`). The coordinates were read off the built
+ *   SOCK SELLERS, each walking 36 m of a straight pavement mid-block and back, clear of every
+ *   corner, bus stop, micro-scene and other hustler —
+ *     - av-central's east pavement, a hundred metres up from the spawn on the way into downtown,
+ *     - st-oldtown's west pavement, south of the ring,
+ *     - st-w3's east pavement, a block south of Loco Mustang's garage and the meet,
+ *     - blvd-ring-w's east pavement, on the ring's west side,
+ *     - st-e3's east pavement, out in the industrial east.
+ *   A seller's `x`/`z` is the middle of his walk.
+ *
+ * Every spot stands on pavement, every washer's car waits on his approach's lane, every seller's
+ * whole walk is pavement, and none of them is inside anything solid (`tests/hustlers.test.ts`). The coordinates were read off the built
  * world, not the spec: kerb lines, lot edges and the ramp are where the assembler put them.
  *
  * Headings follow the game's convention: 0 faces north (-z), π/2 faces east.
@@ -370,6 +379,56 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     seed: 83,
     space: { x: 163.7, z: 28.5 },
     signal: { x: 166.8, z: 17.3, heading: S, offset: 35 },
+  },
+  {
+    id: 'medias-av-central',
+    kind: 'medias',
+    label: 'AV CENTRAL · SOCKS',
+    x: -46.3,
+    z: 327.5,
+    heading: W,
+    seed: 101,
+    beat: { from: { x: -46.3, z: 309.5 }, to: { x: -46.3, z: 345.5 } },
+  },
+  {
+    id: 'medias-oldtown',
+    kind: 'medias',
+    label: 'ST OLDTOWN · SOCKS',
+    x: 151.3,
+    z: 249.5,
+    heading: E,
+    seed: 102,
+    beat: { from: { x: 151.3, z: 231.5 }, to: { x: 151.3, z: 267.5 } },
+  },
+  {
+    id: 'medias-garage',
+    kind: 'medias',
+    label: 'ST WEST 3 · SOCKS',
+    x: -470.8,
+    z: 320.5,
+    heading: W,
+    seed: 103,
+    beat: { from: { x: -470.8, z: 302.5 }, to: { x: -470.8, z: 338.5 } },
+  },
+  {
+    id: 'medias-ring-w',
+    kind: 'medias',
+    label: 'RING WEST · SOCKS',
+    x: -327.3,
+    z: 56.5,
+    heading: W,
+    seed: 104,
+    beat: { from: { x: -327.3, z: 38.5 }, to: { x: -327.3, z: 74.5 } },
+  },
+  {
+    id: 'medias-east',
+    kind: 'medias',
+    label: 'ST EAST 3 · SOCKS',
+    x: 489.3,
+    z: 38.5,
+    heading: W,
+    seed: 105,
+    beat: { from: { x: 489.3, z: 20.5 }, to: { x: 489.3, z: 56.5 } },
   },
 ];
 

@@ -1,4 +1,4 @@
-import type { ActivitySite, DriftState, GameEvent, PlayerCommand, RushResults, RushState, TargetState, VehicleState } from '../core/types';
+import type { ActivitySite, CrashSeverity, DriftState, GameEvent, PlayerCommand, RushResults, RushState, TargetState, VehicleState } from '../core/types';
 import { LIGHTNING, RUSH } from '../config/tuning';
 
 /**
@@ -16,7 +16,8 @@ import { LIGHTNING, RUSH } from '../config/tuning';
  * points it scores are decided independently of each other. The run's score is NOT money:
  * `src/sim/economy.ts` is untouched and keeps paying the same ¥ it always did.
  *
- * WHAT COUNTS. Only a `targetDestroyed` raised by this tick's own lightning, which in this
+ * WHAT COUNTS. A `nearMiss` pays `nearMissScale` times its own points, outside the streak.
+ * For kills, only a `targetDestroyed` raised by this tick's own lightning, which in this
  * game is the only thing that raises one at all (`src/sim/collision.ts` shoves electric cars,
  * it never destroys them; a kill made by ANOTHER player in the open world arrives through
  * `src/sim/traffic.ts` and never becomes an event here). And only once per car: `scored` keeps
@@ -30,14 +31,17 @@ import { LIGHTNING, RUSH } from '../config/tuning';
  * STYLE. All lightning charge comes from drifting (`src/sim/drift.ts`), so "charged through
  * drifting" cannot mean "had charge". It means the shot was fired out of a drift: during one,
  * or within `driftChargeGrace` of one ending — which is what actually happens, because the
- * slide is over by the time the nose is pointed at anything. The drift's own length and
- * whether it survived without a collision are what the extra points are scaled by.
+ * slide is over by the time the nose is pointed at anything. How sideways that drift went —
+ * the deepest slip angle it reached — is what the extra points are scaled by.
  *
  * REACH. The other half of style is the shot itself: a bolt that crosses the street pays more
  * than one fired into the bumper in front, ramped by the distance it travelled. That is not a
  * flourish, it is what keeps the weapon honest — reaching that far costs a long hold, and a
  * long hold costs charge (`src/sim/lightning.ts`), so without it the cheapest shot would also
  * be the most efficient one and the whole activity would be tailgating.
+ *
+ * CRASHES. The city already judges every accident once (`src/sim/crashDamage.ts`); the
+ * orchestrator hands that verdict to `penalizeRushCrash`, which takes points off by severity.
  *
  * THE MISSION CHAIN. Three runs in order (`RUSH.levels`), each asking for a bigger score than
  * the last and each driven at its own site. `RushState.cleared` is the whole of it: which
@@ -115,10 +119,12 @@ export function createRushState(targetCount: number, cleared = 0): RushState {
     rearmed: true,
     resultsHold: 0,
     scored: new Uint8Array(targetCount),
-    driftSeconds: 0,
-    driftClean: false,
+    driftAngle: 0,
     driftCredit: 0,
-    driftHeldClean: true,
+    crashes: 0,
+    crashPenalty: 0,
+    nearMisses: 0,
+    nearMissPoints: 0,
     results: null,
   };
 }
@@ -161,10 +167,12 @@ export function resetRushState(r: RushState): void {
   r.rearmed = true;
   r.resultsHold = 0;
   r.scored.fill(0);
-  r.driftSeconds = 0;
-  r.driftClean = false;
+  r.driftAngle = 0;
   r.driftCredit = 0;
-  r.driftHeldClean = true;
+  r.crashes = 0;
+  r.crashPenalty = 0;
+  r.nearMisses = 0;
+  r.nearMissPoints = 0;
   r.results = null;
 }
 
@@ -176,14 +184,32 @@ export function chainMultiplier(chain: number): number {
 }
 
 /**
- * Style points for one shot, given the drift that charged it. `seconds` is the length of that
- * drift and `clean` whether it ran from start to finish without a collision. 0 when the shot
- * was not drift-charged at all, which is the only case that pays nothing.
+ * Style points for a drift-charged shot, given the deepest slip angle (rad) of the drift that
+ * charged it: the flat `driftChargeBonus`, plus a ramp from nothing at `driftAngleFrom` to the
+ * full `driftAngleBonus` at `driftAngleFull`. A shot that was not drift-charged is paid nothing,
+ * and the caller does not ask.
  */
-export function styleBonusFor(seconds: number, clean: boolean): number {
+export function styleBonusFor(angle: number): number {
   const s = RUSH.scoring;
-  const held = Math.min(seconds, s.driftBonusMaxSeconds);
-  return Math.round(s.driftChargeBonus + held * s.driftBonusPerSecond + (clean ? s.cleanDriftBonus : 0));
+  const span = s.driftAngleFull - s.driftAngleFrom;
+  const a = Math.abs(angle);
+  const t = span > 0 && a > s.driftAngleFrom ? Math.min(1, (a - s.driftAngleFrom) / span) : 0;
+  return Math.round(s.driftChargeBonus + s.driftAngleBonus * t);
+}
+
+/**
+ * Take a crash off the run. Called by the orchestrator with the verdict `stepCrashDamage` gave
+ * this tick, so it is exactly one charge per accident, judged the way the city judges it. Does
+ * nothing outside the clock. Returns the points actually taken: the score floors at zero.
+ */
+export function penalizeRushCrash(rush: RushState, severity: CrashSeverity, events: GameEvent[]): number {
+  if (rush.phase !== 'running') return 0;
+  const points = Math.min(rush.score, RUSH.scoring.crashPenalty[severity]);
+  rush.score -= points;
+  rush.crashes += 1;
+  rush.crashPenalty += points;
+  events.push({ type: 'rushCrash', severity, points, score: rush.score });
+  return points;
 }
 
 /**
@@ -321,6 +347,10 @@ function launchRush(rush: RushState, ranked: boolean, countdown: number, events:
   rush.chainWindow = 0;
   rush.bestChain = 0;
   rush.styleBonus = 0;
+  rush.crashes = 0;
+  rush.crashPenalty = 0;
+  rush.nearMisses = 0;
+  rush.nearMissPoints = 0;
   rush.ranked = ranked;
   rush.rearmed = false;
   rush.results = null;
@@ -372,6 +402,10 @@ function endRun(rush: RushState, site: ActivitySite, events: GameEvent[]): void 
     disabled: rush.disabled,
     bestChain: rush.bestChain,
     styleBonus: rush.styleBonus,
+    crashes: rush.crashes,
+    crashPenalty: rush.crashPenalty,
+    nearMisses: rush.nearMisses,
+    nearMissPoints: rush.nearMissPoints,
     ranked: rush.ranked,
     level,
     targetScore,
@@ -447,16 +481,14 @@ export function stepRush(
   /* ------------------------------------------------------------ drift credit */
 
   if (drift.active) {
-    if (v.collided) rush.driftHeldClean = false;
-    rush.driftSeconds = drift.duration;
-    rush.driftClean = rush.driftHeldClean;
+    // A new slide starts its own peak; the one before it was already paid or has lapsed.
+    if (rush.driftCredit < RUSH.scoring.driftChargeGrace) rush.driftAngle = 0;
+    const slip = Math.abs(v.slipAngle);
+    if (slip > rush.driftAngle) rush.driftAngle = slip;
     // Held, not counting down: a shot fired mid-slide is always drift-charged.
     rush.driftCredit = RUSH.scoring.driftChargeGrace;
-  } else {
-    if (rush.driftCredit > 0) rush.driftCredit = Math.max(0, rush.driftCredit - dt);
-    // Armed for the next slide. Done here rather than on `driftStart` because by the time
-    // that event is seen the drift is already active and may already have been hit.
-    rush.driftHeldClean = true;
+  } else if (rush.driftCredit > 0) {
+    rush.driftCredit = Math.max(0, rush.driftCredit - dt);
   }
 
   /* ------------------------------------------------------------ the clock */
@@ -508,6 +540,16 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
   const incoming = events.length;
   for (let i = 0; i < incoming; i++) {
     const ev = events[i];
+    if (ev.type === 'nearMiss') {
+      // A close pass pays into the run, outside the kill streak.
+      const points = Math.round(ev.points * RUSH.scoring.nearMissScale);
+      if (points <= 0) continue;
+      rush.score += points;
+      rush.nearMisses += 1;
+      rush.nearMissPoints += points;
+      events.push({ type: 'rushNearMiss', points, score: rush.score });
+      continue;
+    }
     if (ev.type !== 'targetDestroyed') continue;
     const id = ev.targetId;
     if (id < 0 || id >= rush.scored.length) continue;
@@ -523,9 +565,8 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
     if (rush.chain > rush.bestChain) rush.bestChain = rush.chain;
 
     const driftCharged = rush.driftCredit > 0;
-    const driftSeconds = driftCharged ? rush.driftSeconds : 0;
-    const cleanDrift = driftCharged && rush.driftClean;
-    const driftBonus = driftCharged ? styleBonusFor(driftSeconds, cleanDrift) : 0;
+    const driftBonus = driftCharged ? styleBonusFor(rush.driftAngle) : 0;
+    const driftAngle = driftCharged ? Math.round((rush.driftAngle * 180) / Math.PI) : 0;
     // How far the bolt crossed to get there, carried on the event by the weapon that fired it.
     const shotDistance = ev.distance;
     const rangeBonus = rangeBonusFor(shotDistance);
@@ -548,8 +589,7 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
       chain: rush.chain,
       multiplier: rush.multiplier,
       driftBonus,
-      driftSeconds,
-      cleanDrift,
+      driftAngle,
       rangeBonus,
       shotDistance,
     });

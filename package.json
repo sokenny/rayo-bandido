@@ -21,7 +21,10 @@
     "qa:mp:lag": "node scripts/qa-mp.mjs --lag 80 --jitter 20 --chaos",
     "perf": "node scripts/perf-probe.mjs",
     "perf:headed": "node scripts/perf-probe.mjs --headed",
-    "perf:check": "npm run build && node scripts/perf-probe.mjs --check"
+    "perf:check": "npm run build && node scripts/perf-probe.mjs --check",
+    "scenes:catalog": "node scripts/scene-catalog.mjs",
+    "scenes:catalog:check": "node scripts/scene-catalog.mjs --check",
+    "scenes:voices": "node scripts/generate-scene-voices.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1132.0",

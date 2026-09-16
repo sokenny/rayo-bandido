@@ -43,17 +43,21 @@ export type HumanPose =
   /** Flagging a car down. */
   | 'hail';
 
-/** What is on the head. `crop` is hair alone; the rest add to it. `bucket` is a bucket hat, brim all round. */
-export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'hood' | 'bucket';
+/**
+ * What is on the head. `crop` is hair alone; the rest add to it. `bucket` is a bucket hat, brim all
+ * round; `capBack` is the cap worn with its peak at the back.
+ */
+export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'capBack' | 'hood' | 'bucket';
 
 /** The one thing about a face that is visible at night, if anything is. */
 export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
 
 /**
  * What they brought. `camera`, `cloth` (a trapito's fluorescent rag) and `squeegee` are held in the
- * hand; the rest stand on the ground beside them.
+ * hand; `sockBox` is a sock seller's cardboard box hung from the neck, with a pair of socks for the
+ * hand that only shows while he holds it up; the rest stand on the ground beside them.
  */
-export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera' | 'cloth' | 'squeegee';
+export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera' | 'cloth' | 'squeegee' | 'sockBox';
 
 /**
  * One person's whole appearance. Only the colours are required: everything else has a default
@@ -78,6 +82,12 @@ export interface HumanLook {
   boots: number;
   /** A sleeveless shirt: the arms are bare from the shoulder, in `skin`. */
   sleeveless?: boolean;
+  /** Short sleeves, a football shirt's: the arms are bare from above the elbow, in `skin`. */
+  shortSleeves?: boolean;
+  /** A band of this colour right round the chest, over `coat`: Boca's gold across the blue. */
+  shirtBand?: number;
+  /** A sash of this colour from the right shoulder to the left hip, front and back: River's red across the white. */
+  shirtSash?: number;
   /**
    * A hi-vis vest over whatever `coat` is, open down the front so the shirt shows: a trapito's or a
    * washer's. Pair it with `band` for the reflective strip across it.
@@ -189,6 +199,10 @@ const GRIP_JOINT = 0.86;
 const LEG_X = 0.15;
 /** Where shorts end. */
 const KNEE = 0.5;
+/** Where a short sleeve ends. */
+const SHORT_SLEEVE = 1.34;
+/** A sock seller's box, hung from the neck: its middle, its size, and how far in front of the chest. */
+const SOCK_BOX = { y: 1.02, w: 0.56, h: 0.2, d: 0.3, gap: 0.02 } as const;
 /** How far a body's normals lean towards the sky by default. See `HumanLook.skyBias`. */
 const SKY_BIAS = 0.5;
 /**
@@ -241,6 +255,24 @@ class Body {
   panel(cx: number, cy: number, cz: number, w: number, h: number, back = false): void {
     const k = this.k;
     this.b.panel(cx * k, cy * k, cz * k, w * k, h * k, back ? 0 : Math.PI);
+    this.tag();
+  }
+
+  /**
+   * A band running up the front (-z) or the back (+z) of the figure at a slant: `hw` either side of
+   * `xb` at `y0`, and of `xt` at `y1`. A sash, drawn as one quad instead of a staircase of boxes.
+   */
+  slant(xb: number, y0: number, xt: number, y1: number, z: number, hw: number, back = false): void {
+    const k = this.k;
+    const zz = z * k;
+    // Wound so the normal faces out of whichever side it is on.
+    const s = back ? -1 : 1;
+    this.b.quad(
+      (xb + s * hw) * k, y0 * k, zz,
+      (xb - s * hw) * k, y0 * k, zz,
+      (xt - s * hw) * k, y1 * k, zz,
+      (xt + s * hw) * k, y1 * k, zz,
+    );
     this.tag();
   }
 
@@ -392,6 +424,18 @@ function buildTorso(f: Body, look: HumanLook, w: number, d: number): void {
     f.box(-w / 2 - 0.014, mid, 0, 0.026, h, d + 0.028);
     f.box(w / 2 + 0.014, mid, 0, 0.026, h, d + 0.028);
   }
+  if (look.shirtBand !== undefined) {
+    // Right round the chest, a shade proud of the shirt.
+    f.color(look.shirtBand, 1.05);
+    f.box(0, 1.25, 0, w + 0.014, 0.15, d + 0.014);
+  }
+  if (look.shirtSash !== undefined) {
+    // Facing -z their right is +x: from the right shoulder down across to the left hip, and the
+    // same line across the back.
+    f.color(look.shirtSash, 1.05);
+    f.slant(-w * 0.3, HIP + 0.02, w * 0.3, SHOULDER - 0.1, -d / 2 - 0.005, 0.075);
+    f.slant(-w * 0.3, HIP + 0.02, w * 0.3, SHOULDER - 0.1, d / 2 + 0.005, 0.075, true);
+  }
   // A stub of a neck, so the head is not sitting straight on the collar.
   f.color(look.skin, 0.9);
   f.box(0, (SHOULDER + NECK_TOP) / 2, 0, 0.16, NECK_TOP - SHOULDER, 0.16);
@@ -406,16 +450,25 @@ function buildArms(f: Body, look: HumanLook, armX: number): void {
     const x = side * armX;
     const sleeve = look.sleeveless ? look.skin : look.coat;
     f.bone(side < 0 ? BONE.upperArmL : BONE.upperArmR);
-    f.color(sleeve, 1);
-    f.box(x, (ELBOW_JOINT + 1.56) / 2, 0, look.sleeveless ? 0.14 : 0.17, 1.56 - ELBOW_JOINT, look.sleeveless ? 0.16 : 0.2);
+    if (look.shortSleeves && !look.sleeveless) {
+      // The sleeve to a hand's width above the elbow, and the arm bare below it.
+      f.color(look.coat, 1);
+      f.box(x, (SHORT_SLEEVE + 1.56) / 2, 0, 0.17, 1.56 - SHORT_SLEEVE, 0.2);
+      f.color(look.skin, 1);
+      f.box(x, (ELBOW_JOINT + SHORT_SLEEVE) / 2, 0, 0.13, SHORT_SLEEVE - ELBOW_JOINT + 0.01, 0.15);
+    } else {
+      f.color(sleeve, 1);
+      f.box(x, (ELBOW_JOINT + 1.56) / 2, 0, look.sleeveless ? 0.14 : 0.17, 1.56 - ELBOW_JOINT, look.sleeveless ? 0.16 : 0.2);
+    }
     if (look.sleeveless && look.tattoo !== undefined) {
       // A band of ink round the upper arm, a shade proud of the skin so it never z-fights it.
       f.color(look.tattoo, 1);
       f.box(x, 1.34, 0, 0.15, 0.16, 0.17);
     }
     f.bone(side < 0 ? BONE.foreArmL : BONE.foreArmR);
-    f.color(sleeve, look.sleeveless ? 1 : 0.94);
-    f.box(x, (WRIST + ELBOW_JOINT + 0.05) / 2, 0, look.sleeveless ? 0.125 : 0.155, ELBOW_JOINT + 0.05 - WRIST, look.sleeveless ? 0.15 : 0.185);
+    const bare = look.sleeveless || look.shortSleeves;
+    f.color(bare ? look.skin : sleeve, bare ? 1 : 0.94);
+    f.box(x, (WRIST + ELBOW_JOINT + 0.05) / 2, 0, bare ? 0.125 : 0.155, ELBOW_JOINT + 0.05 - WRIST, bare ? 0.15 : 0.185);
     if (look.sleeveless && look.tattoo !== undefined) {
       f.color(look.tattoo, 1);
       f.box(x, 1.06, 0, 0.135, 0.18, 0.16);
@@ -465,6 +518,12 @@ function buildHead(f: Body, look: HumanLook): void {
       f.box(0, HEAD_Y + 0.19, 0.02, 0.33, 0.12, 0.33);
       f.box(0, HEAD_Y + 0.13, -0.19, 0.3, 0.05, 0.14);
       break;
+    case 'capBack':
+      // The same cap with the peak round the back of the neck.
+      f.color(headwear, 1.05);
+      f.box(0, HEAD_Y + 0.19, 0.02, 0.33, 0.12, 0.33);
+      f.box(0, HEAD_Y + 0.13, 0.21, 0.3, 0.05, 0.14);
+      break;
     case 'bucket':
       // A soft crown and a brim that droops all the way round: Loco Mustang's hat.
       f.color(headwear, 1);
@@ -505,6 +564,14 @@ function buildHeld(f: Body, look: HumanLook, armX: number): void {
     f.box(armX, GRIP_JOINT - 0.46, -0.02, 0.36, 0.05, 0.05);
     f.color(0x8fd14f, 0.9);
     f.box(armX, GRIP_JOINT - 0.46, -0.06, 0.34, 0.07, 0.035);
+  } else if (look.prop === 'sockBox') {
+    // A pair of socks hanging from the fist, held up at whoever is in the car.
+    f.color(0xe9e6de, 1);
+    f.box(armX - 0.03, GRIP_JOINT - 0.17, -0.02, 0.055, 0.3, 0.03);
+    f.box(armX + 0.03, GRIP_JOINT - 0.17, -0.02, 0.055, 0.3, 0.03);
+    f.color(0x2c3e8c, 1);
+    f.box(armX, GRIP_JOINT - 0.06, -0.02, 0.125, 0.04, 0.035);
+    buildSockBox(f, look);
   } else if ((look.prop ?? 'none') === 'camera') {
     f.color(look.propColor ?? 0x1a1a22, 1);
     f.box(armX, GRIP_JOINT - 0.1, -0.02, 0.16, 0.24, 0.22);
@@ -521,6 +588,38 @@ function buildHeld(f: Body, look: HumanLook, armX: number): void {
     f.box(-armX, WRIST - 0.24, -0.02, 0.09, 0.22, 0.09);
     f.color(0xe8eef2, 1);
     f.box(-armX, WRIST - 0.11, -0.02, 0.04, 0.05, 0.04);
+  }
+}
+
+/**
+ * The box itself, on the spine so it swings with the body: cardboard, rows of rolled socks on top,
+ * a hand-written sign on the front, and the strap up over both shoulders.
+ */
+function buildSockBox(f: Body, look: HumanLook): void {
+  f.bone(BONE.spine);
+  const d = TORSO_D * (look.build ?? 1);
+  const B = SOCK_BOX;
+  const z = -d / 2 - B.gap - B.d / 2;
+  f.color(look.propColor ?? 0xb08450, 1);
+  f.box(0, B.y, z, B.w, B.h, B.d);
+  // Three rows of rolled pairs: white, black, and the loud ones.
+  const top = B.y + B.h / 2 + 0.025;
+  f.color(0xe9e6de, 1);
+  f.box(0, top, z - B.d * 0.3, B.w - 0.06, 0.05, 0.08);
+  f.color(0x1b1c20, 1);
+  f.box(0, top, z, B.w - 0.06, 0.05, 0.08);
+  f.color(0xd2335a, 1);
+  f.box(0, top, z + B.d * 0.3, B.w - 0.06, 0.05, 0.08);
+  // The sign, and the price scrawled across it.
+  f.color(0xf1ece0, 1);
+  f.panel(0, B.y - 0.01, z - B.d / 2 - 0.004, 0.34, 0.12);
+  f.color(0xc0182a, 1);
+  f.panel(0, B.y - 0.01, z - B.d / 2 - 0.007, 0.24, 0.035);
+  // The strap: up the chest either side and over the shoulders.
+  f.color(0x2a2622, 1);
+  for (const side of [-1, 1]) {
+    f.box(side * 0.17, (B.y + SHOULDER) / 2 + 0.05, -d / 2 - 0.012, 0.04, SHOULDER - B.y + 0.02, 0.018);
+    f.box(side * 0.17, SHOULDER + 0.015, 0, 0.04, 0.02, d + 0.03);
   }
 }
 
@@ -606,6 +705,13 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number, armX: numb
       f.bone(BONE.hand);
       f.panel(armX + 0.04, GRIP_JOINT - 0.3, -0.036, 0.28, 0.05);
       break;
+    case 'sockBox': {
+      // A strip of battery LEDs taped along the box's top edge: how anyone sees him after dark.
+      f.bone(BONE.spine);
+      const d = TORSO_D * (look.build ?? 1);
+      f.panel(0, SOCK_BOX.y + SOCK_BOX.h / 2 - 0.02, -d / 2 - SOCK_BOX.gap - SOCK_BOX.d - 0.006, SOCK_BOX.w - 0.04, 0.025);
+      break;
+    }
     case 'camera':
       // The dot that says it is recording, on the face that is on top while they film.
       f.bone(BONE.hand);

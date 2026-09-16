@@ -9,7 +9,7 @@
  */
 
 /** Mirrors the keys of `CHARACTER_VOICES` in `server/dialogue/voices.mjs`. */
-export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito' | 'policia' | 'npc-masculino-1';
+export type DialogueCharacterId = 'badkala' | 'buho' | 'loco-mustang' | 'trapito' | 'villero' | 'policia' | 'npc-masculino-1' | 'npc-femenino-1';
 
 export interface SpeakDialogueOptions {
   characterId: DialogueCharacterId;

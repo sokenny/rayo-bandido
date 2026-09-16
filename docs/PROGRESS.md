@@ -2935,3 +2935,82 @@ budget and finite poses through every phase. Checked in the browser (`__rb.hustl
 
 **Open questions for Juan.** The price is 2,000 as asked, against a ¥100 kill and a ¥250 Moogul,
 and the button shows it as `$2.000`. The AI traffic runs the washers' red lights.
+
+## Urban micro-scenes (2026-09-15)
+
+Short situations the city is already having when the player drives past: two or three people, one
+conversation, and at most one reaction to the car. Never a mission, never a reward, never a prompt.
+The ask was a SCALABLE system plus eight scenes, so the shape matters more than the eight:
+**adding a scene is a definition file and a line in the registry, and no runtime file moves.**
+
+**The split.** `src/microScenes/types.ts` is the vocabulary and imports nothing at runtime;
+`scenes/*.ts` are eight declarative definitions that import only types; `registry.ts` is the
+catalogue; `runtime/director.ts` decides what stands where and who talks, and knows about no
+particular scene. Because the content modules are import-free, Node loads them straight, which is
+how `scripts/scene-catalog.mjs` writes `src/microScenes/SCENE_CATALOG.md` and
+`scripts/generate-scene-voices.mjs` renders the clips — nothing in the catalogue is kept by hand.
+
+**Shared behaviour blocks** (`behaviors.ts`) are the reuse that makes eight scenes cheap: fifteen
+pure functions of (context → drives), each implemented once, composed by name. The bus stop's glance
+down the avenue and the smoke circle's glance at a passing motor are the same glance. Seven scenes
+use `alternateSpeakerGestures`, seven `lookAtPlayer`, six `lookAtPassingVehicle`. It is deliberately
+NOT a scripting engine: a fixed typed table, no branching, no expressions.
+
+**Anchors** (`src/world/microSceneAnchors.ts`, layered over the metro like the hustlers and the race
+doors) describe a PLACE, never a scene. Bandido Metro yields **155**: bus shelters the waiting
+crowds left empty (`busStopCrowds` populates ~70%, so a scene and a crowd never share one), spots
+beside the viaduct's columns, and kerb stations walked exactly the way the street props are placed.
+Each is checked against the streets at all levels, every collider, the lots, the activity markers and
+the hustlers' patches. `anchorPlacementStats` says why candidates were refused, which is how "the
+alleys give me nothing" gets a number instead of a guess.
+
+**The director** says no far more often than yes: a slow scan (0.75 s) of one randomly chosen usable
+anchor, with NOTHING HAPPENING weighted into the draw beside the eligible scenes; at most two scenes
+and ONE conversation anywhere; 25–40 s of quiet between spoken scenes; a conversation only starts if
+the player will still be in earshot for enough of it (`earshotSeconds` reads the car's velocity, not
+its position); `dialogueDone` and `playerReacted` are remembered for the whole appearance, so driving
+back and forth over a trigger hears nothing. It reads the police and the activity locks; it can write
+neither.
+
+**Voices.** Profiles sit between an actor and a recording, so a part with no voice keeps its lines.
+`npc-masculino-2` and `npc-policia-1` borrow the one male clone at different rates — honest
+placeholders. `npc-femenina-1` and `npc-femenina-2` have NO stand-in on purpose: the bus stop's
+infidelity conversation is written, cast and kept, is flagged every run by the generator and by
+`reportCatalogIssues`, and is never selected until the recordings exist. Audio is one spatial emitter
+per speaker (`src/audio/microSceneVoice.ts`), below the radio and story dialogue and above the
+street's one-liners — `src/audio/index.ts` now writes that ladder down in one place.
+
+**Picture** (`src/render/scene/microSceneVisual.ts`): one skinned crowd and three merged geometries
+per scene DEFINITION, built on first use and moved to the anchor afterwards, so a scene going up
+costs nothing at the moment it would be noticed. The city's own bodies and acts do the animating; the
+behaviour drives are laid over the pose through a new `edit` hook on `HumanCrowd.update`, and a new
+`handAt` puts a carried prop in a hand. Measured in the city with one scene standing: **+3 draw
+calls, +2.9k triangles, no measurable frame cost.** The two one-time costs a scene used to charge a
+frame of the game are both paid behind the loading screen now: an invisible primer carries one of
+each of the three material families so the warm-up compiles them (`render/warmup.ts`), and the car
+shells are lofted once at construction and cloned per scene. What is left is the first build of each
+scene type — 16–26 ms, once, at 150 m and off-screen — and no mid-play shader compile at all.
+
+`tests/microScenes.test.ts` (36): the catalogue validates clean, clip ids are unique, behaviours are
+shared, the rare scene is rare and alone, the two female profiles are unvoiced and their variant is
+never selected, one conversation per appearance across repeated crossings, one player reaction per
+appearance, story dialogue cuts a line and it does not come back, a fast departure is refused rather
+than clipped, the joint is never in two hands and never in none, the parts stand packs up for a
+patrol and picks up only after it has gone, and the 155 anchors are deterministic, off the street and
+out of the walls. Checked in the browser: all eight scenes stand up and play
+(`__rb.microScenes.spawn`), the bonnet, hazards and steam land on the car's nose, and the joint goes
+round the circle.
+
+**Known gaps.** The two female recordings. The `horn` trigger has no input — this build has no horn
+and a micro-scene may not add one — so `double-parking-argument`'s reply is written and generated but
+only reachable from the debug tools. Micro-scene cars are not solid (the street cast never has been);
+they park with two wheels on the kerb so the lane stays clear, which is the rule that matters.
+`dark-corner`, `industrial-alley` and `dark-service-road` are supported types that Bandido Metro's
+back lanes, which carry no measured pavement, currently lay none of.
+
+**Update (2026-09-16).** Juan supplied the female clone (`npc-femenino-1`, `dvhhbmWu6suM0Vq99t7I`).
+`npc-femenina-1` uses it; `npc-femenina-2` borrows it at rate 0.92 — never a male voice. All 87 clips
+are rendered into `public/npc-voice/scenes/`. The generator now measures them into
+`src/microScenes/clipDurations.ts`, and the director times each line from its recording (divided by
+the profile's playback rate) instead of estimating from text, so a long take is never cut off by the
+next speaker; an uncut line is left to finish on its own.

@@ -296,6 +296,8 @@ describe('boards', () => {
       { score: 1e12, disabled: 1, bestChain: 1, styleBonus: 0 },
       { score: 500, disabled: 0, bestChain: 1, styleBonus: 0 },
       { score: 500, disabled: 1, bestChain: 1, styleBonus: 900 },
+      { score: 500, disabled: 1, bestChain: 1, styleBonus: 900, crashPenalty: 300 },
+      { score: 500, disabled: 0, bestChain: 1, styleBonus: 0, nearMissPoints: 200 },
       { score: 'lots', disabled: 1, bestChain: 1, styleBonus: 0 },
     ]) {
       expect((await b.post<Submit>('/api/boards/rush/runs', run)).body.accepted).toBe(false);

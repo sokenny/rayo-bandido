@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { CRASH_DAMAGE, TARGETS } from '../src/config/tuning';
+import { CRASH_DAMAGE, RUSH, TARGETS } from '../src/config/tuning';
 import { crashSeverity, crashStalled, createCrashDamageState, stallSeconds, stepCrashDamage } from '../src/sim/crashDamage';
 import { createFlairState, stepFlair } from '../src/sim/flair';
 import { resolveTargetCollisions } from '../src/sim/collision';
 import { createInitialGameState, createVehicleState, stepGame } from '../src/sim/gameState';
 import { createOpenWorld } from '../src/world/openWorld';
 import { createCircuitWorld } from '../src/world/circuitWorld';
+import { createRushWorld } from '../src/world/rushWorld';
+import { beginRush } from '../src/sim/rush';
+
+import type { ArenaLayout } from '../src/core/types';
+import type { CityPlan } from '../src/world/cityPlan';
 import type { CrashDamageState, DriftState, EconomyState, GameEvent, PlayerCommand, TargetState } from '../src/core/types';
 
 /**
@@ -240,6 +245,61 @@ describe('the streak and the line', () => {
     const ev = events[0] as Extract<GameEvent, { type: 'collision' }>;
     expect(ev.impact).toBeGreaterThan(TARGETS.knock.minImpact);
     expect(ev.closing).toBeCloseTo(4, 5);
+  });
+});
+
+/** Park the car 3 m short of a tall building face with open road in front, doing 22 m/s at it. */
+function aimAtWall(layout: ArenaLayout, plan: CityPlan, v: ReturnType<typeof createVehicleState>): void {
+  const box = layout.colliders.find((b) => {
+    if (b.minY !== undefined || b.maxY !== undefined || b.maxZ - b.minZ < 8) return false;
+    const x = b.minX - 3;
+    const z = (b.minZ + b.maxZ) / 2;
+    return plan.isRoad(x, z) && !layout.colliders.some((o) => o !== b && x > o.minX - 2 && x < o.maxX + 2 && z > o.minZ - 2 && z < o.maxZ + 2);
+  })!;
+  expect(box).toBeTruthy();
+  v.x = v.prevX = box.minX - 3;
+  v.z = v.prevZ = (box.minZ + box.maxZ) / 2;
+  v.heading = v.prevHeading = Math.PI / 2;
+  v.vx = 22;
+  v.speed = 22;
+}
+
+describe('in a RAYO RUSH run', () => {
+  it('takes the crash off the score in the city, on top of the fine', () => {
+    const { layout, plan } = createOpenWorld();
+    const state = createInitialGameState(layout);
+    state.economy.money = 500;
+    beginRush(state.rush!, false, 0, state.events);
+    state.rush!.score = 1000;
+    aimAtWall(layout, plan, state.vehicle);
+    const seen: GameEvent[] = [];
+    for (let i = 0; i < 90; i++) {
+      stepGame(state, idle, layout, DT);
+      seen.push(...state.events);
+    }
+    expect(seen.filter((e) => e.type === 'crashDamage')).toHaveLength(1);
+    expect(seen.filter((e) => e.type === 'rushCrash')).toHaveLength(1);
+    expect(state.rush!.score).toBe(1000 - RUSH.scoring.crashPenalty.heavy);
+  });
+
+  it('judges crashes in RAYO RUSH on its own without fining or marking the car', () => {
+    const { layout, plan } = createRushWorld();
+    const state = createInitialGameState(layout);
+    expect(state.crash).not.toBeNull();
+    state.economy.money = 500;
+    beginRush(state.rush!, false, 0, state.events);
+    state.rush!.score = 1000;
+    aimAtWall(layout, plan, state.vehicle);
+    const seen: GameEvent[] = [];
+    for (let i = 0; i < 90; i++) {
+      stepGame(state, idle, layout, DT);
+      seen.push(...state.events);
+    }
+    expect(seen.some((e) => e.type === 'crashDamage')).toBe(false);
+    expect(seen.filter((e) => e.type === 'rushCrash')).toHaveLength(1);
+    expect(state.rush!.score).toBe(1000 - RUSH.scoring.crashPenalty.heavy);
+    expect(state.economy.money).toBe(500);
+    expect(state.crash!.marks).toBe(0);
   });
 });
 

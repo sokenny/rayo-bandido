@@ -151,6 +151,8 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     `<div><dt>ELÉCTRICOS APAGADOS</dt><dd class="rb-rush__r-disabled">0</dd></div>` +
     `<div><dt>MEJOR CADENA</dt><dd class="rb-rush__r-chain">x1</dd></div>` +
     `<div><dt>BONUS DE DERRAPE / ESTILO</dt><dd class="rb-rush__r-style">0</dd></div>` +
+    `<div><dt>ROCES CERCANOS</dt><dd class="rb-rush__r-near">0</dd></div>` +
+    `<div><dt>CHOQUES</dt><dd class="rb-rush__r-crash">0</dd></div>` +
     `<div><dt>MEJOR ANTERIOR</dt><dd class="rb-rush__r-prev">—</dd></div>` +
     `</dl>` +
     (options.quickPlay
@@ -182,6 +184,8 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   const rDisabledEl = pick<HTMLElement>(root, '.rb-rush__r-disabled');
   const rChainEl = pick<HTMLElement>(root, '.rb-rush__r-chain');
   const rStyleEl = pick<HTMLElement>(root, '.rb-rush__r-style');
+  const rCrashEl = pick<HTMLElement>(root, '.rb-rush__r-crash');
+  const rNearEl = pick<HTMLElement>(root, '.rb-rush__r-near');
   const rPrevEl = pick<HTMLElement>(root, '.rb-rush__r-prev');
   const dismissEl = pick<HTMLButtonElement>(root, '.rb-rush__dismiss');
 
@@ -222,7 +226,7 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   }
 
   /** One line of the kill feed, in the next pool slot. */
-  function pushLine(text: string, tone: 'score' | 'chain' | 'style'): void {
+  function pushLine(text: string, tone: 'score' | 'chain' | 'style' | 'crash'): void {
     const el = feedEls[feedIndex];
     feedIndex = (feedIndex + 1) % feedEls.length;
     el.textContent = text;
@@ -366,6 +370,8 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
         rDisabledEl.textContent = String(results.disabled);
         rChainEl.textContent = formatMultiplier(Math.max(1, results.bestChain));
         rStyleEl.textContent = `+${formatScore(results.styleBonus)}`;
+        rNearEl.textContent = results.nearMisses > 0 ? `${results.nearMisses} · +${formatScore(results.nearMissPoints)}` : '0';
+        rCrashEl.textContent = results.crashes > 0 ? `${results.crashes} · −${formatScore(results.crashPenalty)}` : '0';
         rPrevEl.textContent = rush.previousBest >= 0 ? formatScore(rush.previousBest) : '—';
         resultsBestEl.textContent = rush.newBest ? 'NUEVO RÉCORD PERSONAL' : '';
         resultsBestEl.classList.toggle('is-on', rush.newBest);
@@ -409,9 +415,9 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           pushLine(`ELÉCTRICO APAGADO +${formatScore(event.points)}`, 'score');
           // Only once the streak is actually a streak: "CHAIN x1" says nothing.
           if (event.chain > 1) pushLine(`CADENA ${formatMultiplier(event.multiplier)}`, 'chain');
+          // The angle is in the line for the same reason the distance is below: it says what paid.
           if (event.driftBonus > 0) {
-            const label = event.cleanDrift ? 'BONUS DE CARGA · DERRAPE LIMPIO' : 'BONUS DE CARGA · DERRAPE';
-            pushLine(`${label} +${formatScore(event.driftBonus)}`, 'style');
+            pushLine(`DERRAPE ${event.driftAngle}° +${formatScore(event.driftBonus)}`, 'style');
           }
           // The distance is in the line because it is the thing the player is being paid for:
           // "LONG SHOT +40" alone reads as a mystery, "62M" says what to do again.
@@ -420,6 +426,12 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           }
           break;
         }
+        case 'rushNearMiss':
+          pushLine(`ROCE CERCANO +${formatScore(event.points)}`, 'style');
+          break;
+        case 'rushCrash':
+          if (event.points > 0) pushLine(`CHOQUE −${formatScore(event.points)}`, 'crash');
+          break;
         case 'rushDismissed':
         case 'restart':
           shownResults = -1;

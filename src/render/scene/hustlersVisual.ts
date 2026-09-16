@@ -2,18 +2,28 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CROWD, HUSTLERS } from '../../config/tuning';
 import type { HustlerSpot, HustlerState } from '../../core/types';
-import { foamCleared, signalAt, squeegeeAt, walkSeconds, type SignalColor, type SignalReading, type SqueegeePose } from '../../sim/hustlers';
+import {
+  foamCleared,
+  hustlerAt,
+  signalAt,
+  squeegeeAt,
+  walkSeconds,
+  type BeatPoint,
+  type SignalColor,
+  type SignalReading,
+  type SqueegeePose,
+} from '../../sim/hustlers';
 import type { CrowdSubject } from './env/humanActs';
 import type { HumanHead, HumanLook } from './env/humanFigure';
 import { createHumanCrowd, type CrowdMember } from './env/humanRig';
 
 /**
- * THE TRAPITOS AND THE WASHERS, drawn (`src/sim/hustlers.ts` decides what they do).
+ * THE TRAPITOS, THE WASHERS AND THE SOCK SELLERS, drawn (`src/sim/hustlers.ts` decides what they do).
  *
  * THE PEOPLE are the city's shared body (`env/humanFigure.ts`) as ONE skinned crowd: two draw calls
- * for the whole cast wherever they stand, posed by the `trapito` and `washer` acts
+ * for the whole cast wherever they stand, posed by the `trapito`, `washer` and `medias` acts
  * (`env/humanActs.ts`) from a cue this file writes onto each actor from the rules' state every
- * frame. Only people near the camera are stepped; past `HUSTLERS.showWithin` nobody is drawn.
+ * frame — for a sock seller, that includes where on his beat he is (`hustlerAt`). Only people near the camera are stepped; past `HUSTLERS.showWithin` nobody is drawn.
  * One rig, cheap variations: every look is picked from short lists by the spot's seed.
  *
  * THE LIGHTS are each washer's signal: every pole and head is one merged mesh, every lamp one
@@ -53,6 +63,14 @@ const LEGS: Array<{ legs: number; stripe?: number; shorts?: boolean }> = [
 /** Old sneakers. */
 const SHOES = [0xd6d2c8, 0x3a3a40, 0x8a8f96, 0xb9b1a0];
 
+/** A sock seller's shirt: Boca's blue and gold, or River's white with the red sash. */
+const JERSEYS = [
+  { coat: 0x163a94, band: 0xf2c200 },
+  { coat: 0xecebe6, sash: 0xd3122b },
+] as const;
+/** Cardboard, from fresh to rained on. */
+const BOXES = [0xb68a52, 0xa27a48, 0xc29a62];
+
 /** One of `list` for this seed and trait: an integer mix, so neighbouring seeds dress nothing alike. */
 function pick<T>(list: readonly T[], seed: number, salt: number): T {
   let h = (Math.imul(Math.floor(seed), 374761393) + Math.imul(salt, 668265263)) | 0;
@@ -87,7 +105,24 @@ export function hustlerLook(spot: HustlerSpot): HumanLook {
     aura: 0xffb070,
     auraRadius: 1.7,
   };
-  if (spot.kind === 'trapito') {
+  if (spot.kind === 'medias') {
+    // No vest and nothing hi-vis: a football shirt, a cap, and the box. The LEDs taped along the
+    // box are what catches the eye at night, and they walk with him — a pool on the ground would not.
+    const jersey = JERSEYS[s % JERSEYS.length];
+    look.vest = undefined;
+    look.band = undefined;
+    look.aura = undefined;
+    look.coat = jersey.coat;
+    look.coatLength = 0.12;
+    look.shortSleeves = true;
+    look.shirtBand = 'band' in jersey ? jersey.band : undefined;
+    look.shirtSash = 'sash' in jersey ? jersey.sash : undefined;
+    look.head = pick(['cap', 'capBack'] as const, s, 20);
+    look.headwear = pick([0x121316, 0xe9e9e4, 0x2b2f36, jersey.coat], s, 21);
+    look.prop = 'sockBox';
+    look.propColor = pick(BOXES, s, 22);
+    look.propAccent = 0xfff0c8;
+  } else if (spot.kind === 'trapito') {
     look.prop = 'cloth';
     // A rag in a different colour from the vest, so it reads as a thing he is holding.
     look.propColor = pick(VESTS.filter((c) => c !== vest), s, 12);
@@ -213,7 +248,7 @@ export function createHustlersVisual(spots: readonly HustlerSpot[]): HustlersVis
     y: 0.03,
     z: spot.z,
     heading: spot.heading,
-    act: spot.kind === 'trapito' ? 'trapito' : 'washer',
+    act: spot.kind,
     seed: spot.seed * 7 + 3,
   }));
   const crowd = createHumanCrowd(members, 'hustlers');
@@ -222,6 +257,7 @@ export function createHustlersVisual(spots: readonly HustlerSpot[]): HustlersVis
   people.add(crowd.group);
   root.add(people);
   const awake = new Uint8Array(spots.length);
+  const at: BeatPoint = { x: 0, z: 0, heading: 0, moving: 0, stride: 0 };
   let owed = 0;
   let stride = 0;
 
@@ -339,7 +375,9 @@ export function createHustlersVisual(spots: readonly HustlerSpot[]): HustlersVis
 
       let nearest = Infinity;
       for (let i = 0; i < spots.length; i++) {
-        const d = Math.hypot(spots[i].x - camX, spots[i].z - camZ);
+        const n = state.npcs[i];
+        const p = n ? hustlerAt(spots[i], n, at) : spots[i];
+        const d = Math.hypot(p.x - camX, p.z - camZ);
         awake[i] = d < CROWD.animateWithin ? 1 : 0;
         if (d < nearest) nearest = d;
       }
@@ -381,6 +419,14 @@ export function createHustlersVisual(spots: readonly HustlerSpot[]): HustlersVis
           cue.wiping = n.phase === 'clean' ? squeegee.wiping : 0;
         }
         cue.red = spot.signal ? signalAt(spot.signal.offset, time, reading).color === 'red' : false;
+        if (spot.beat) {
+          hustlerAt(spot, n, at);
+          cue.atX = at.x;
+          cue.atZ = at.z;
+          cue.facing = at.heading;
+          cue.striding = at.moving;
+          cue.stride = at.stride;
+        }
       }
       crowd.update(time, Math.min(owed, 0.25), subject, awake);
       owed = 0;
