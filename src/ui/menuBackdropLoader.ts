@@ -24,13 +24,13 @@ function wanted(): boolean {
   return true;
 }
 
-function afterLoad(): Promise<void> {
+export function afterLoad(): Promise<void> {
   return document.readyState === 'complete'
     ? Promise.resolve()
     : new Promise((resolve) => window.addEventListener('load', () => resolve(), { once: true }));
 }
 
-function idle(): Promise<void> {
+export function idle(): Promise<void> {
   return new Promise((resolve) => {
     if ('requestIdleCallback' in window) window.requestIdleCallback(() => resolve(), { timeout: 2500 });
     else setTimeout(resolve, 300);

@@ -1,5 +1,6 @@
 import { createGamepadMenuNav } from '../core/input/gamepadMenu';
 import { frameDecor, menuHeader } from './chrome';
+import { playMenuBlip } from '../audio/menuBlip';
 
 /**
  * The shell every "pick one of these" screen is built from: a numbered list on the left, a
@@ -139,6 +140,8 @@ export function createMenuScreen<T extends string>(
   function select(index: number): void {
     const next = (index + cards.length) % cards.length;
     if (next === selected) return;
+    // The first selection is the screen drawing itself, not the player moving.
+    if (selected >= 0) playMenuBlip();
     selected = next;
     cards.forEach((c, i) => {
       c.classList.toggle('is-selected', i === selected);

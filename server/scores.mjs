@@ -5,10 +5,13 @@
  * Every run filed is a `runs` row; a player's best on each board is a `personal_bests` row, and
  * the board you see is those rows sorted the board's way.
  *
+ * EVERY RUN COUNTS. There is no allowance and no such thing as an unranked run: whatever is played
+ * is filed, and it moves the board only if it beats the player's own best.
+ *
  * TRUST MODEL, SAME AS EVER (`src/net/protocol.ts`). A run is the client's report of a simulation
  * the server does not run. What is enforced here is the shape, a plausible range, a little
- * internal consistency, and RAYO RUSH's daily ranked allowance — which is what stops one browser
- * flooding the board. Nothing valuable should sit behind these numbers.
+ * internal consistency. One row per player per board means a flood of runs from one browser is
+ * still one row. Nothing valuable should sit behind these numbers.
  */
 
 /**
@@ -20,9 +23,9 @@
  * recalculated when the run is retuned. The two races are 2 laps; nobody laps either in 10 s.
  */
 export const BOARDS = {
-  rush: { better: 'higher', min: 0, max: 250_000, ranked: true },
-  circuit: { better: 'lower', min: 20_000, max: 3_600_000, ranked: false },
-  street: { better: 'lower', min: 20_000, max: 3_600_000, ranked: false },
+  rush: { better: 'higher', min: 0, max: 250_000 },
+  circuit: { better: 'lower', min: 20_000, max: 3_600_000 },
+  street: { better: 'lower', min: 20_000, max: 3_600_000 },
 };
 
 /** Boards where a larger value wins, for SQL that has to know. */
@@ -72,9 +75,8 @@ export function readRun(board, body) {
 
 /**
  * @param {import('./db/index.mjs').Database} db
- * @param {{ dailyAttempts: number }} options
  */
-export function createScores(db, { dailyAttempts }) {
+export function createScores(db) {
   const order = (board) => (BOARDS[board].better === 'higher' ? 'desc' : 'asc');
 
   async function top(board, limit = 10, q = db) {
@@ -95,18 +97,7 @@ export function createScores(db, { dailyAttempts }) {
     return rows.map((row, i) => ({ rank: i + 1, name: row.name, value: row.value, at: row.at, ...(row.stats || {}) }));
   }
 
-  /** Ranked attempts spent today (UTC), the day every player's allowance turns over together. */
-  async function attemptsUsed(userId, q = db) {
-    const [row] = await q.query(
-      `select count(*)::int as n from runs
-        where user_id = $1 and board = 'rush' and ranked
-          and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`,
-      [userId],
-    );
-    return row.n;
-  }
-
-  /** A player's best and position on a board, and (for rush) what is left of today's allowance. */
+  /** A player's best and position on a board. */
   async function standing(board, userId, q = db) {
     if (!BOARDS[board]) return null;
     const [mine] = await q.query(`select value, achieved_at from personal_bests where user_id = $1 and board = $2`, [userId, board]);
@@ -120,18 +111,12 @@ export function createScores(db, { dailyAttempts }) {
       );
       rank = row.n + 1;
     }
-    const out = { board, best: mine ? mine.value : -1, rank };
-    if (BOARDS[board].ranked) {
-      out.dailyAttempts = dailyAttempts;
-      out.attemptsLeft = Math.max(0, dailyAttempts - (await attemptsUsed(userId, q)));
-    }
-    return out;
+    return { board, best: mine ? mine.value : -1, rank };
   }
 
   /**
-   * File a run. Rush spends one of the day's attempts and is refused once they are gone; a race
-   * is always filed. A worse run is still recorded, and still spends the attempt, but leaves the
-   * personal best where it was.
+   * File a run. Every plausible run is recorded; one that does not beat the player's best leaves
+   * the personal best where it was.
    */
   async function submit(board, userId, body) {
     const spec = BOARDS[board];
@@ -139,14 +124,11 @@ export function createScores(db, { dailyAttempts }) {
     const run = readRun(board, body);
     if (run.error) return { accepted: false, reason: run.error };
     return db.tx(async (q) => {
-      // One player's submissions are taken one at a time, so two tabs cannot both spend the last attempt.
+      // One player's submissions are taken one at a time, so two tabs cannot race on the personal best.
       await q.query(`select id from users where id = $1 for update`, [userId]);
-      if (spec.ranked && (await attemptsUsed(userId, q)) >= dailyAttempts) {
-        return { accepted: false, reason: 'noAttempts', attemptsLeft: 0, dailyAttempts };
-      }
       const [inserted] = await q.query(
-        `insert into runs (user_id, board, value, stats, ranked) values ($1, $2, $3, $4, $5) returning id, created_at`,
-        [userId, board, run.value, JSON.stringify(run.stats), spec.ranked],
+        `insert into runs (user_id, board, value, stats) values ($1, $2, $3, $4) returning id, created_at`,
+        [userId, board, run.value, JSON.stringify(run.stats)],
       );
       const [previous] = await q.query(`select value from personal_bests where user_id = $1 and board = $2`, [userId, board]);
       const improved = !previous || (spec.better === 'higher' ? run.value > previous.value : run.value < previous.value);

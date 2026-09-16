@@ -1,9 +1,8 @@
 import { BOARDS_PATH, type BoardId } from './protocol';
-import { RUSH } from '../config/tuning';
 
 /**
- * The high-score boards, from the client's side: RAYO RUSH's global board with its daily ranked
- * attempts, and the two timed boards (TIME ATTACK on the Bandido Grid, STREET RACE at La Curva).
+ * The high-score boards, from the client's side: RAYO RUSH's global board, and the two timed
+ * boards (TIME ATTACK on the Bandido Grid, STREET RACE at La Curva).
  *
  * THE RULE THIS MODULE EXISTS TO KEEP: the activity must never wait on the network. A player
  * driving the city with the server down, or on a build served from a file, still gets the
@@ -12,17 +11,15 @@ import { RUSH } from '../config/tuning';
  * `standing()` returns what localStorage knows immediately and refreshes from the server in the
  * background, and `submit()` records the personal best locally before the request is even sent.
  *
+ * EVERY RUN COUNTS. Whatever is played is filed; the board keeps each player's best, so a worse
+ * run is recorded and changes nothing on it.
+ *
  * IDENTITY is the account (`src/net/account.ts`): a session cookie the server hands every browser
  * on its first request, guest or signed in. Nothing here names the player — the server knows who
  * is asking, and the name on the board is the account's.
- *
- * THE DAILY ALLOWANCE is the server's to enforce and the client's to display. The local mirror
- * exists so the prompt can say a number before the network answers, and so an offline session
- * cannot silently bank unlimited ranked runs to file later — it cannot file them at all.
  */
 
 const BEST_KEY = 'rb.rush.best';
-const ATTEMPTS_KEY = 'rb.rush.attempts';
 
 /** How long a cached standing is trusted before another fetch is worth making (ms). */
 const REFRESH_MS = 60_000;
@@ -48,9 +45,6 @@ export interface LeaderboardRow {
 
 /** What the marker's prompt and the results card need to know. */
 export interface RushStanding {
-  /** Ranked attempts left today. `RUSH.dailyRankedAttempts` when nothing is known yet. */
-  attemptsLeft: number;
-  dailyAttempts: number;
   /** Best score this player has ever posted, or -1. */
   best: number;
   /** Position on the global board, or -1 when unplaced or unknown. */
@@ -79,7 +73,6 @@ export interface RushSubmitResult {
   /** The best that stood BEFORE this run, or -1. This is what the results card compares against. */
   previousBest: number;
   rank: number;
-  attemptsLeft: number;
   online: boolean;
 }
 
@@ -91,8 +84,6 @@ export interface Leaderboard {
   standing(): RushStanding;
   /** Force a refresh from the server. Resolves with whatever is known afterwards. */
   refresh(): Promise<RushStanding>;
-  /** Whether starting a run now would be a ranked attempt. */
-  canRank(): boolean;
   /** File a finished run. Never rejects: an unreachable board is a result, not an error. */
   submit(run: RushSubmission): Promise<RushSubmitResult>;
   /** The top of the board, or an empty list when it cannot be reached. */
@@ -119,18 +110,11 @@ function write(key: string, value: string): void {
 
 /** Forget the local mirror of the rush board: a signed-out browser is a different player. */
 export function clearBoardMirror(): void {
-  for (const key of [BEST_KEY, ATTEMPTS_KEY]) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      /* nothing to forget */
-    }
+  try {
+    localStorage.removeItem(BEST_KEY);
+  } catch {
+    /* nothing to forget */
   }
-}
-
-/** Today, in the same UTC day the server counts attempts by. */
-export function localDayKey(at = Date.now()): string {
-  return new Date(at).toISOString().slice(0, 10);
 }
 
 /* --------------------------------------------------------------------- http */
@@ -182,27 +166,6 @@ export async function submitRaceTime(board: Exclude<BoardId, 'rush'>, seconds: n
 
 /* --------------------------------------------------------------------- the rush board */
 
-interface StoredAttempts {
-  day: string;
-  used: number;
-}
-
-function readAttempts(): StoredAttempts {
-  const raw = read(ATTEMPTS_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as StoredAttempts;
-      // A record from another day is not this day's allowance; it is simply spent.
-      if (parsed && parsed.day === localDayKey() && Number.isFinite(parsed.used)) {
-        return { day: parsed.day, used: Math.max(0, Math.floor(parsed.used)) };
-      }
-    } catch {
-      /* corrupt record: start the day over */
-    }
-  }
-  return { day: localDayKey(), used: 0 };
-}
-
 function readBest(): number {
   const raw = Number(read(BEST_KEY));
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : -1;
@@ -210,7 +173,6 @@ function readBest(): number {
 
 export function createLeaderboard(): Leaderboard {
   let best = readBest();
-  let attempts = readAttempts();
   let rank = -1;
   let online = false;
   /** When the server last answered, so a stale standing is refreshed and a fresh one is not. */
@@ -218,29 +180,13 @@ export function createLeaderboard(): Leaderboard {
   let inFlight: Promise<RushStanding> | null = null;
 
   function current(): RushStanding {
-    // Rolled over at midnight UTC while the tab stayed open.
-    if (attempts.day !== localDayKey()) attempts = { day: localDayKey(), used: 0 };
-    return {
-      attemptsLeft: Math.max(0, RUSH.dailyRankedAttempts - attempts.used),
-      dailyAttempts: RUSH.dailyRankedAttempts,
-      best,
-      rank,
-      online,
-    };
+    return { best, rank, online };
   }
 
-  function saveAttempts(): void {
-    write(ATTEMPTS_KEY, JSON.stringify(attempts));
-  }
-
-  /** Fold a server answer into the mirror. The server's count wins; the higher best wins. */
-  function absorb(body: { attemptsLeft?: number; best?: number; rank?: number }): void {
+  /** Fold a server answer into the mirror. The higher best wins. */
+  function absorb(body: { best?: number; rank?: number }): void {
     online = true;
     checkedAt = Date.now();
-    if (Number.isFinite(body.attemptsLeft)) {
-      attempts = { day: localDayKey(), used: Math.max(0, RUSH.dailyRankedAttempts - (body.attemptsLeft as number)) };
-      saveAttempts();
-    }
     // Whichever best is higher, so a run posted from another device is not lost and neither is
     // one made offline since.
     if (Number.isFinite(body.best) && (body.best as number) > best) {
@@ -251,7 +197,7 @@ export function createLeaderboard(): Leaderboard {
   }
 
   async function fetchStanding(): Promise<RushStanding> {
-    const body = await getJson<{ attemptsLeft?: number; best?: number; rank?: number }>(`${BOARDS_PATH}/rush/standing`);
+    const body = await getJson<{ best?: number; rank?: number }>(`${BOARDS_PATH}/rush/standing`);
     checkedAt = Date.now();
     if (!body) {
       online = false;
@@ -279,10 +225,6 @@ export function createLeaderboard(): Leaderboard {
 
     refresh,
 
-    canRank() {
-      return current().attemptsLeft > 0;
-    },
-
     async submit(run) {
       const previousBest = best;
       const localNewBest = run.score > previousBest;
@@ -292,32 +234,13 @@ export function createLeaderboard(): Leaderboard {
         best = run.score;
         write(BEST_KEY, String(best));
       }
-      // The attempt is spent locally the moment it is filed, so the prompt's count goes down
-      // even when the response is lost. A server answer below corrects it either way.
-      if (attempts.day !== localDayKey()) attempts = { day: localDayKey(), used: 0 };
-      const wasRankable = attempts.used < RUSH.dailyRankedAttempts;
-      if (wasRankable) {
-        attempts.used += 1;
-        saveAttempts();
-      }
-      if (!wasRankable) {
-        return { accepted: false, newBest: localNewBest, previousBest, rank, attemptsLeft: 0, online };
-      }
-
-      const body = await postJson<{ accepted?: boolean; rank?: number; best?: number; attemptsLeft?: number }>(`${BOARDS_PATH}/rush/runs`, run);
+      const body = await postJson<{ accepted?: boolean; rank?: number; best?: number }>(`${BOARDS_PATH}/rush/runs`, run);
       if (!body) {
         online = false;
-        return { accepted: false, newBest: localNewBest, previousBest, rank, attemptsLeft: current().attemptsLeft, online };
+        return { accepted: false, newBest: localNewBest, previousBest, rank, online };
       }
       absorb(body);
-      return {
-        accepted: !!body.accepted,
-        newBest: localNewBest,
-        previousBest,
-        rank,
-        attemptsLeft: current().attemptsLeft,
-        online,
-      };
+      return { accepted: !!body.accepted, newBest: localNewBest, previousBest, rank, online };
     },
 
     async top(limit = 10) {

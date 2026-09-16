@@ -125,7 +125,8 @@ export interface CitySpec {
   garage?: GarageSpec;
   /**
    * Parks (`park.ts`): land given up for grass, lakes and trees. No blocks are generated on a
-   * park's land, the ground is held level there, its lakes sink the surface field, and its
+   * park's land, the ground is held level there unless the park draws its own hills
+   * (`ParkSpec.relief`, `parkRelief.ts`), its lakes sink the surface field, and its
    * walls, podium and people are solid. The park's own roads are ordinary entries of `roads`
    * (and `elevated`, for a bridge). Missing: none.
    */

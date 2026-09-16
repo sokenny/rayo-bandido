@@ -24,6 +24,7 @@ import { installMobileShell } from './ui/mobileShell';
 import { account } from './net/account';
 import { createAccountBadge } from './ui/accountBadge';
 import { scheduleMenuBackdrop } from './ui/menuBackdropLoader';
+import { playMenuAmbience } from './audio/menuAmbience';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 const hudRoot = document.getElementById('hud-root');
@@ -504,6 +505,7 @@ function storedName(): string {
 
 /** The room browser for one game: pick or open a room, then reload into it. */
 function rooms(): void {
+  playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   const game = gameFromUrl();
@@ -540,6 +542,7 @@ function rooms(): void {
 }
 
 function menu(): void {
+  playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   // Who is playing, and the way to sign in: on the main menu only, never over a world.
@@ -561,6 +564,7 @@ function menu(): void {
 
 /** The changelog tab: a screen to read, and ESC back to the menu. Nothing is loaded from here. */
 function changelog(): void {
+  playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   createChangelogScreen(menuRoot!, () => {
@@ -570,6 +574,7 @@ function changelog(): void {
 
 /** QUICK PLAY, first step: RAYO RUSH, STREET RACE or TIME ATTACK. */
 function quickPlayMenu(): void {
+  playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   scheduleMenuBackdrop(canvas!);
@@ -589,6 +594,7 @@ function quickPlayMenu(): void {
  * reached — so the progress is one and the same.
  */
 function quickPlayModeMenu(game: RoomGame): void {
+  playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   scheduleMenuBackdrop(canvas!);

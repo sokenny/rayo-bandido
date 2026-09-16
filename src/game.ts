@@ -1160,8 +1160,6 @@ export function createGame(
     styleBonus: 0,
     atMarker: false,
     canStart: false,
-    attemptsLeft: -1,
-    ranked: true,
     previousBest: -1,
     results: null,
     newBest: false,
@@ -1647,15 +1645,15 @@ export function createGame(
         // afterwards, and never waited on. A run that cannot be filed is still a run.
         rushPreviousBest = leaderboard ? leaderboard.standing().best : -1;
         rushNewBest = ev.results.score > rushPreviousBest;
-        // The per-mission record is this browser's alone and is kept whatever the network is
-        // doing, and whether or not the run was one of the day's ranked attempts: clearing a
-        // mission is a fact about the driving. `advanced` is false here for a mission already
+        // The per-mission record is kept whatever the network is doing: clearing a mission is a
+        // fact about the driving. `advanced` is false here for a mission already
         // cleared, so a replay updates the score and leaves the chain where it is.
         if (rushProgress) {
           rushProgress = recordRushRun(rushProgress, ev.results.level, ev.results.score, ev.results.advanced);
           writeRushProgress(rushProgress);
         }
-        if (leaderboard && ev.results.ranked) {
+        // Every run is filed: the board keeps each player's best, so a worse one changes nothing.
+        if (leaderboard) {
           const run = {
             score: ev.results.score,
             disabled: ev.results.disabled,
@@ -1862,10 +1860,6 @@ export function createGame(
       command.decline = true;
       declineQueued = false;
     }
-    // Asked every tick rather than captured: the day's allowance is spent by finishing runs,
-    // and the answer can also change when the board finally reports in.
-    if (leaderboard) stepOptions.rushRanked = leaderboard.canRank();
-
     if (command.pov) chase.cycleView();
     if (command.cruise) setCruise(!cruising);
     if (cruising) {
@@ -1911,7 +1905,7 @@ export function createGame(
       rushBeginPending = false;
       const countdown = rushMatch && net ? net.countdownSeconds() : RUSH.countdownSeconds;
       if (!rushMatch || !rushMatchStarted) {
-        const began = beginRush(state.rush, leaderboard ? leaderboard.canRank() : false, countdown < 0 ? RUSH.countdownSeconds : countdown, state.events);
+        const began = beginRush(state.rush, countdown < 0 ? RUSH.countdownSeconds : countdown, state.events);
         rushMatchStarted = rushMatchStarted || began;
         // The marker offered the run on this same tick, to a car put down on it; the offer was
         // taken before anybody could see it, so its chime is not raised.
@@ -2189,7 +2183,6 @@ export function createGame(
       rushSnapshot.styleBonus = rush.styleBonus;
       rushSnapshot.atMarker = rush.atMarker;
       rushSnapshot.canStart = canStartRush(rush);
-      rushSnapshot.ranked = rush.ranked;
       rushSnapshot.results = rush.results;
       rushSnapshot.previousBest = rushPreviousBest;
       rushSnapshot.newBest = rushNewBest;
@@ -2211,8 +2204,6 @@ export function createGame(
       rushSnapshot.targetScore = rushTargetScore(rush.cleared);
       rushSnapshot.levelLabel = site.label ?? '';
       rushSnapshot.allClear = rushAllClear(rush.cleared);
-      // The board answers on its own schedule; the prompt shows whatever is known by now.
-      rushSnapshot.attemptsLeft = leaderboard ? leaderboard.standing().attemptsLeft : -1;
 
       // The marker in the world answers the car before the prompt does: it warms and quickens
       // over the last stretch of the approach.

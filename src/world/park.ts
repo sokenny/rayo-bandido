@@ -72,7 +72,7 @@ export interface TunnelSpec {
 export interface PathSpec {
   points: Pt[];
   width?: number;
-  /** Small lamps along it, every so often. */
+  /** Lamps along it, every so often: a post now and then, and bollards between. */
   lit?: boolean;
 }
 
@@ -178,11 +178,58 @@ export interface ParkEncounterSpec {
   props: ParkPropSpec[];
 }
 
+/** A rise of the park's ground: a raised cosine `height` metres high at (x, z), 0 at `rx` / `rz` (`terrain.ts`, `HillDef`). */
+export interface ParkRiseSpec {
+  x: number;
+  z: number;
+  rx: number;
+  rz: number;
+  height: number;
+}
+
+/**
+ * The lie of a park's land (`parkRelief.ts`). Two kinds of rise, because a road and a lawn
+ * want different ones:
+ *
+ *  - SWELLS are broad and gentle — a few metres over a hundred and more — and the roads ride
+ *    them: the loop climbs away from the water and comes back down to it,
+ *  - KNOLLS are the lawn's own hillocks, steeper and a few tens of metres across, and they die
+ *    away before they reach an asphalt edge or its pavement, so a road never leans on one.
+ *
+ * Both are held level at the water, round the planetarium, at every meeting place and bench,
+ * and along the land's edge. A park without one is level, as parks were before.
+ */
+export interface ParkReliefSpec {
+  swells: ParkRiseSpec[];
+  knolls: ParkRiseSpec[];
+}
+
+/**
+ * A pavement along a park road (`parkBuilder.ts`): flush concrete from the asphalt's edge out
+ * `width` metres, a bright kerb line on the road side, and a row of bollard lamps along the
+ * back. `from` / `to` pick a stretch by the stations nearest them (missing: the whole road);
+ * `side` +1 is the right of the road's direction of travel — the inside, on a clockwise loop.
+ * Art only: the car feels the ground it stands on, which is the terrain, as on every street.
+ */
+export interface ParkSidewalkSpec {
+  road: string;
+  side: 1 | -1;
+  width: number;
+  from?: Pt;
+  to?: Pt;
+  /** Bollard lamps along the back edge every so many metres. Missing: none. */
+  bollards?: number;
+}
+
 export interface ParkSpec {
   tag: string;
   label: string;
-  /** The land: no blocks are generated on it, the ground is level, the grass is drawn over it. */
+  /** The land: no blocks are generated on it, and the grass is drawn over it. Level, unless `relief` rolls it. */
   land: Rect;
+  /** The hills of the land (`parkRelief.ts`). Missing: level. */
+  relief?: ParkReliefSpec;
+  /** Pavements along the park's roads. Missing: none, the grass runs to the asphalt. */
+  sidewalks?: ParkSidewalkSpec[];
   lakes: LakeSpec[];
   masses: TreeMassSpec[];
   tunnels: TunnelSpec[];

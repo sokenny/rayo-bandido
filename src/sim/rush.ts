@@ -50,9 +50,8 @@ import { LIGHTNING, RUSH } from '../config/tuning';
  * from that one number, so there is nothing to keep in step. The rules move it forward by
  * exactly one, at the end of a run that met the target, and never in any other circumstance —
  * they do not know how to write it down, how to read it back or what a browser is. Persisting
- * it is the caller's job (`src/core/progress.ts`), which is why a run made offline, or with the
- * day's ranked attempts already spent, still advances the chain: clearing a mission is a fact
- * about the driving, not about the network.
+ * it is the caller's job (`src/core/progress.ts`), which is why a run made offline still advances
+ * the chain: clearing a mission is a fact about the driving, not about the network.
  *
  * Pure data in, pure data out. No Three.js, no DOM, no clock of its own, and nothing here
  * allocates per tick.
@@ -116,7 +115,6 @@ export function createRushState(targetCount: number, cleared = 0): RushState {
     styleBonus: 0,
     atMarker: false,
     locked: false,
-    ranked: false,
     rearmed: true,
     resultsHold: 0,
     scored: new Uint8Array(targetCount),
@@ -164,7 +162,6 @@ export function resetRushState(r: RushState): void {
   r.bestChain = 0;
   r.styleBonus = 0;
   r.atMarker = false;
-  r.ranked = false;
   r.rearmed = true;
   r.resultsHold = 0;
   r.scored.fill(0);
@@ -326,14 +323,10 @@ export function canStartRush(rush: RushState): boolean {
 /**
  * Start a run. Returns false when there is nothing to start — not at the marker, or one is
  * already under way — so the caller can leave the key press alone.
- *
- * `ranked` is the caller's to decide: the rules have no idea what day it is or how many
- * attempts a player has left (`src/net/leaderboard.ts` does), and a run that is out of ranked
- * attempts is still a run. It plays and scores identically; it just is not submitted.
  */
-export function startRush(rush: RushState, ranked: boolean, events: GameEvent[]): boolean {
+export function startRush(rush: RushState, events: GameEvent[]): boolean {
   if (!canStartRush(rush)) return false;
-  launchRush(rush, ranked, RUSH.countdownSeconds, events);
+  launchRush(rush, RUSH.countdownSeconds, events);
   return true;
 }
 
@@ -346,13 +339,13 @@ export function startRush(rush: RushState, ranked: boolean, events: GameEvent[])
  * run at once, with `countdown` set to however long is left until the server's GO — so the clock
  * starts on the same instant for everybody, wherever each car was put down.
  */
-export function beginRush(rush: RushState, ranked: boolean, countdown: number, events: GameEvent[]): boolean {
+export function beginRush(rush: RushState, countdown: number, events: GameEvent[]): boolean {
   if (rush.phase !== 'idle') return false;
-  launchRush(rush, ranked, Math.max(0, countdown), events);
+  launchRush(rush, Math.max(0, countdown), events);
   return true;
 }
 
-function launchRush(rush: RushState, ranked: boolean, countdown: number, events: GameEvent[]): void {
+function launchRush(rush: RushState, countdown: number, events: GameEvent[]): void {
   rush.phase = countdown > 0 ? 'countdown' : 'running';
   rush.countdown = countdown;
   rush.timeLeft = RUSH.durationSeconds;
@@ -367,11 +360,10 @@ function launchRush(rush: RushState, ranked: boolean, countdown: number, events:
   rush.crashPenalty = 0;
   rush.nearMisses = 0;
   rush.nearMissPoints = 0;
-  rush.ranked = ranked;
   rush.rearmed = false;
   rush.results = null;
   rush.scored.fill(0);
-  events.push({ type: 'rushStart', ranked });
+  events.push({ type: 'rushStart' });
   // The first number of the count-in shows on the tick the run is taken up, not a tick later.
   events.push({ type: 'rushCountdown', seconds: Math.ceil(countdown) });
 }
@@ -422,7 +414,6 @@ function endRun(rush: RushState, site: ActivitySite, events: GameEvent[]): void 
     crashPenalty: rush.crashPenalty,
     nearMisses: rush.nearMisses,
     nearMissPoints: rush.nearMissPoints,
-    ranked: rush.ranked,
     level,
     targetScore,
     levelLabel: site.label ?? '',
@@ -451,12 +442,6 @@ export function stepRush(
   drift: DriftState,
   cmd: PlayerCommand,
   targets: TargetState[],
-  /**
-   * Whether a run started on this tick would count towards the global board. The rules have
-   * no idea what day it is or how many attempts a player has left — `src/net/leaderboard.ts`
-   * does — so the caller supplies the fact and the rules record it.
-   */
-  ranked: boolean,
   dt: number,
   events: GameEvent[],
 ): void {
@@ -491,7 +476,7 @@ export function stepRush(
 
   if (cmd.activate) {
     if (rush.phase === 'results') dismissRush(rush, events);
-    else if (rush.phase === 'idle') startRush(rush, ranked, events);
+    else if (rush.phase === 'idle') startRush(rush, events);
   }
 
   /* ------------------------------------------------------------ drift credit */

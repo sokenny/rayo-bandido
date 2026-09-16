@@ -159,7 +159,7 @@ export const TEXTURES = {
     files: ['nature/grass.webp', 'nature/grass.png', 'nature/grass.jpg'],
     tiling: true,
     anisotropy: 8,
-    normalize: 0.72,
+    normalize: 0.66,
     // The photograph is soft; at night and at a grazing angle it flattens to a plain green without this.
     contrast: 2.2,
   },

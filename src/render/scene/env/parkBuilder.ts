@@ -13,6 +13,7 @@ import {
   type Contour,
   type LakeField,
   type ParkPropSpec,
+  type ParkSidewalkSpec,
   type ParkSpec,
   type Pt,
 } from '../../../world/park';
@@ -40,6 +41,9 @@ import type { GraffitiSurface, ReclaimProfile } from './reclaim';
  * roads and paths with dark between them, broad canopies in irregular masses, willows at
  * the water, the lake a dark mirror with the skyline's colour smeared across it, and one
  * landmark, the planetarium's saucer with its ring lit cyan, to steer by. No neon on a tree.
+ * The ground rolls (`parkRelief.ts`): the lawn is laid over the terrain cell by cell and shaded
+ * a little by its slope, and the loop has a pavement with a row of bollard lamps along it —
+ * short warm posts every few metres, the light a driver sees down the lake road at night.
  *
  * COST. Trees are the whole budget: about a thousand of them at ~100 triangles each. They
  * land in the greenery batches, which the metro splits into chunks and culls by distance
@@ -52,8 +56,8 @@ const Y = { grass: -0.02, path: 0.012, island: 0.02, glow: 0.05 } as const;
 /** Grass cells (m): the floor is these, split four ways at a shore. */
 const GRASS_CELL = 8;
 const SHORE_CELL = 2;
-/** Grass: darker and bluer than a leaf, the lawn in the reference under a night sky. */
-const GRASS = 0x5f9068;
+/** Grass: darker and bluer than a leaf, the lawn in the reference under a night sky, after rain. */
+const GRASS = 0x4a7053;
 const BANK = 0x1f2a1c;
 const BED = 0x0b171e;
 const WOOD = 0x6a4a2e;
@@ -67,8 +71,25 @@ const TREE_WATER_CLEAR = 2.5;
 /** Tunnels: a tree this far outside the edge every this far along, both sides. */
 const TUNNEL_OUT = 2.6;
 const TUNNEL_STEP = 8.5;
-/** Leaf tint lift for everything planted here (`PlantOptions.lit`): the park has fewer lamps than a street and its trees still have to read. */
-const LIT = 1.45;
+/** Bollards along a lit footpath (m): between its taller lamps, alternating sides. */
+const PATH_BOLLARD_STEP = 13;
+/** A bollard lamp: post height and section, the lit head on top (m). */
+const BOLLARD = { post: 0.72, section: 0.18, head: 0.16, headSection: 0.24, cap: 0.05, capSection: 0.3, pool: 4.6 } as const;
+/** The pavement: its kerb line on the road side, and the darker edging where it meets the lawn (m). */
+const SIDEWALK_KERB = 0.45;
+const SIDEWALK_EDGING = 0.3;
+/** Stations along a pavement (m): short enough to follow the loop's arcs and the ground's roll. */
+const SIDEWALK_STEP = 3;
+/**
+ * The walk's concrete: paler and warmer than a city pavement (`PAL.sidewalk`), which at night is
+ * nearly the asphalt's colour. In the reference the lake road's pavement is the pale band that
+ * separates the road from the dark lawn, and the bollards' pools land on it.
+ */
+const WALK = 0x5d6266;
+const WALK_KERB = 0x858b8e;
+const WALK_EDGING = 0x34393c;
+/** Leaf tint for everything planted here (`PlantOptions.lit`): under 1, so the woods stand darker than the street trees, dark masses against the skyline. */
+const LIT = 0.82;
 
 /** Painted like a wall the city forgot: heavy paint, some grime. */
 const PAINTED: ReclaimProfile = {
@@ -99,9 +120,15 @@ function buildPark(b: EnvBuilders, park: ParkSpec): void {
   buildGrass(b, park, field);
   for (const lake of park.lakes) buildLake(b, lake.shore, lake.islands, field, rng);
   for (const p of paths) buildPath(b, p.points, p.width ?? 2.6, !!p.lit, rng);
+  const sidewalks = (park.sidewalks ?? []).flatMap((sw) => buildSidewalk(b, sw, field, rng));
+  // What the trees keep off besides the roads: the footpaths, and the pavements beside the roads.
+  const keepOff: Keepout[] = [
+    ...paths.map((p) => ({ points: p.points, clear: (p.width ?? 2.6) / 2 + 1.1 })),
+    ...sidewalks.map((run) => ({ points: run.points, clear: run.width / 2 + 1.2 })),
+  ];
   const placed = new Placed();
-  buildTunnels(b, park, roads, field, placed, rng);
-  buildMasses(b, park, roads, field, paths, placed, rng);
+  buildTunnels(b, park, roads, field, keepOff, placed, rng);
+  buildMasses(b, park, roads, field, keepOff, placed, rng);
   for (const w of park.walls) buildWall(b, w, rng);
   for (const f of park.footbridges) buildFootbridge(b, f);
   for (const l of park.lamps) {
@@ -164,11 +191,22 @@ function upQuad(mb: MeshBuilder, a: Pt, ay: number, c: Pt, cy: number, d: Pt, dy
 function buildGrass(b: EnvBuilders, park: ParkSpec, field: LakeField): void {
   const l = park.land;
   const cell = GRASS_CELL;
-  b.grass.color(GRASS, 1.0);
+  const padY = b.plan.padY;
   const wet = (x: number, z: number): boolean => field.inWater(x, z);
   const lay = (x0: number, z0: number, x1: number, z1: number): void => {
+    const y00 = padY(x0, z0);
+    const y10 = padY(x1, z0);
+    const y01 = padY(x0, z1);
+    const y11 = padY(x1, z1);
+    // A little light on the rises and a little dark in the hollows and on the steep faces, so
+    // the roll of the land reads at night from the road and not only in silhouette.
+    // The faces toward the city (south, +z) catch its glow; the ones away from it are in shade.
+    const rise = (y00 + y10 + y01 + y11) / 4;
+    const gx = (y10 + y11 - y00 - y01) / (2 * (x1 - x0));
+    const gz = (y01 + y11 - y00 - y10) / (2 * (z1 - z0));
+    b.grass.color(GRASS, Math.max(0.6, Math.min(1.3, 0.97 + rise * 0.03 - Math.hypot(gx, gz) * 1.2 - gz * 2.2)));
     b.grass.quad(
-      x0, Y.grass, z1, x1, Y.grass, z1, x1, Y.grass, z0, x0, Y.grass, z0,
+      x0, y01 + Y.grass, z1, x1, y11 + Y.grass, z1, x1, y10 + Y.grass, z0, x0, y00 + Y.grass, z0,
       x0 / GRASS_TILE, z0 / GRASS_TILE, x1 / GRASS_TILE, z1 / GRASS_TILE,
     );
   };
@@ -352,7 +390,24 @@ function buildPath(b: EnvBuilders, points: readonly Pt[], width: number, lit: bo
     upQuad(b.concrete, al, padY(al.x, al.z) + Y.path, ar, padY(ar.x, ar.z) + Y.path, cr, padY(cr.x, cr.z) + Y.path, cl, padY(cl.x, cl.z) + Y.path);
   }
   if (!lit) return;
-  // Lamps: short posts alternating sides, the first one a little way in.
+  // Bollards: a low warm light every few metres, alternating sides, between the taller posts.
+  let next = PATH_BOLLARD_STEP * 0.5;
+  let walked = 0;
+  let bSide = 1;
+  for (let i = 0; i < n - 1; i++) {
+    const a = points[i];
+    const c = points[i + 1];
+    const len = Math.hypot(c.x - a.x, c.z - a.z);
+    for (; next < walked + len; next += PATH_BOLLARD_STEP) {
+      bSide = -bSide;
+      const u = (next - walked) / (len || 1);
+      const x = a.x + (c.x - a.x) * u + nxs[i] * bSide * (hw + 0.35);
+      const z = a.z + (c.z - a.z) * u + nzs[i] * bSide * (hw + 0.35);
+      if (!b.plan.isRoad(x, z, 1)) bollard(b, x, z, rng);
+    }
+    walked += len;
+  }
+  // Lamps: taller posts alternating sides, the first one a little way in.
   let since = PATH_LAMP_STEP * 0.4;
   let side = 1;
   for (let i = 0; i < n - 1; i++) {
@@ -369,6 +424,116 @@ function buildPath(b: EnvBuilders, points: readonly Pt[], width: number, lit: bo
     if (b.plan.isRoad(x, z, 1.2)) continue;
     lampPost(b, x, z, padY(x, z), -nxs[i] * side, -nzs[i] * side, 0.9, 4.4, PAL.lampWarm, 5.5, rollLampFault(rng));
   }
+}
+
+/* ------------------------------------------------------------------ pavements and bollards */
+
+/** One continuous stretch of a pavement as drawn: its centreline, for what keeps off it. */
+interface SidewalkRun {
+  points: Pt[];
+  width: number;
+}
+
+/**
+ * A pavement along a park road (`ParkSidewalkSpec`): flush concrete from the asphalt's edge out,
+ * the way the city's are (`trackBuilder.ts`, `buildShoulders`) — a bright kerb line at the road,
+ * the slab, a darker edging where it meets the lawn — each corner on the ground under it, so it
+ * rides the swells with the road. It breaks where another road crosses and where the bank of a
+ * lake would have it over the water, and a bollard stands at its back every so often.
+ */
+function buildSidewalk(b: EnvBuilders, sw: ParkSidewalkSpec, field: LakeField, rng: () => number): SidewalkRun[] {
+  const rb = b.plan.ribbons.find((r) => r.tag === sw.road);
+  if (!rb) return [];
+  const path = rb.path;
+  const L = path.length;
+  let s0 = 0;
+  let s1 = L;
+  if (sw.from) s0 = projectOntoPath(path, sw.from.x, sw.from.z, PROJ).s;
+  if (sw.to) s1 = projectOntoPath(path, sw.to.x, sw.to.z, PROJ).s;
+  if (path.closed && sw.to && s1 <= s0) s1 += L;
+  const steps = Math.max(1, Math.round((s1 - s0) / SIDEWALK_STEP));
+  const ds = (s1 - s0) / steps;
+  const lift = (rb.lift ?? 0) + 0.012;
+  const padY = b.plan.padY;
+  const side = sw.side;
+  const W = sw.width;
+
+  // Every station: the edge of the asphalt and the way out from it, or null where the pavement breaks.
+  type Station = { x: number; z: number; ox: number; oz: number };
+  const stations: Array<Station | null> = [];
+  for (let k = 0; k <= steps; k++) {
+    const s = path.closed ? (((s0 + k * ds) % L) + L) % L : Math.min(L, s0 + k * ds);
+    const c = offsetAtStation(path, s, 0);
+    const ox = -c.tz * side;
+    const oz = c.tx * side;
+    const ex = c.x + ox * c.halfWidth;
+    const ez = c.z + oz * c.halfWidth;
+    const mx = ex + ox * (W / 2);
+    const mz = ez + oz * (W / 2);
+    const bx = ex + ox * W;
+    const bz = ez + oz * W;
+    const broken = b.plan.isRoad(mx, mz, 0.6) || b.plan.isRoad(bx, bz, 0.2) || field.inWater(bx, bz) || field.shoreDistance(bx, bz) < 0.8;
+    stations.push(broken ? null : { x: ex, z: ez, ox, oz });
+  }
+
+  const band = (a: Station, c: Station, o0: number, o1: number): void => {
+    const p = (st: Station, o: number): Pt => ({ x: st.x + st.ox * o, z: st.z + st.oz * o });
+    const a0 = p(a, o0);
+    const a1 = p(a, o1);
+    const c0 = p(c, o0);
+    const c1 = p(c, o1);
+    upQuad(b.concrete, a0, padY(a0.x, a0.z) + lift, a1, padY(a1.x, a1.z) + lift, c1, padY(c1.x, c1.z) + lift, c0, padY(c0.x, c0.z) + lift);
+  };
+
+  const runs: SidewalkRun[] = [];
+  let current: Pt[] | null = null;
+  let sinceBollard = sw.bollards ? sw.bollards * 0.5 : 0;
+  for (let k = 0; k < steps; k++) {
+    const a = stations[k];
+    const c = stations[k + 1];
+    if (!a || !c) {
+      current = null;
+      continue;
+    }
+    b.concrete.color(WALK_KERB, 1);
+    band(a, c, -0.02, SIDEWALK_KERB);
+    b.concrete.color(WALK, 1);
+    band(a, c, SIDEWALK_KERB, W - SIDEWALK_EDGING);
+    b.concrete.color(WALK_EDGING, 1);
+    band(a, c, W - SIDEWALK_EDGING, W + 0.08);
+    if (!current) {
+      current = [{ x: a.x + a.ox * (W / 2), z: a.z + a.oz * (W / 2) }];
+      runs.push({ points: current, width: W });
+    }
+    current.push({ x: c.x + c.ox * (W / 2), z: c.z + c.oz * (W / 2) });
+    if (sw.bollards) {
+      sinceBollard += Math.abs(ds);
+      if (sinceBollard >= sw.bollards) {
+        sinceBollard = 0;
+        bollard(b, c.x + c.ox * (W - 0.55), c.z + c.oz * (W - 0.55), rng);
+      }
+    }
+  }
+  return runs;
+}
+
+/**
+ * A bollard lamp, Palermo's: a dark square post not quite knee-high on a man, a warm lit head
+ * under a flat cap, and the pool of light it throws on the ground round its foot. A handful of
+ * triangles in the props, neon and glow batches: hundreds of them cost less than one tree stand.
+ */
+function bollard(b: EnvBuilders, x: number, z: number, rng: () => number): void {
+  const y = b.plan.padY(x, z);
+  const B = BOLLARD;
+  b.props.color(PAL.metalDark, 1.2);
+  b.props.box(x, y + B.post / 2, z, B.section, B.post, B.section);
+  // A lamp or two in a long row is out, the way the street lamps' faults have it: dark head, no pool.
+  const out = rng() < 0.06;
+  b.neon.color(PAL.lampWarm, out ? 0.12 : 0.95);
+  b.neon.box(x, y + B.post + B.head / 2, z, B.headSection, B.head, B.headSection);
+  b.props.color(PAL.metalDark, 1.45);
+  b.props.box(x, y + B.post + B.head + B.cap / 2, z, B.capSection, B.cap, B.capSection);
+  if (!out) groundGlow(b, x, z, B.pool, B.pool, PAL.lampWarm, 0.075);
 }
 
 /* ------------------------------------------------------------------ trees */
@@ -402,12 +567,18 @@ class Placed {
   }
 }
 
+/** A strip the trees keep off: a footpath or a pavement, as its centreline and how far either side of it. */
+interface Keepout {
+  points: readonly Pt[];
+  clear: number;
+}
+
 /** Somewhere a tree may stand: on the land, off the water and its bank, off every road, path, lamp, clearing, wall, podium and meeting place. */
 function treeAllowed(
   park: ParkSpec,
   roads: readonly RibbonDef[],
   field: LakeField,
-  paths: ReadonlyArray<{ points: Pt[] }>,
+  keepOff: readonly Keepout[],
   x: number,
   z: number,
   waterClear: number,
@@ -418,7 +589,7 @@ function treeAllowed(
   if (field.inWater(x, z) || field.shoreDistance(x, z) < waterClear) return no;
   const road = roadClearance(roads, x, z);
   if (road.d < TREE_ROAD_CLEAR) return no;
-  for (const p of paths) if (polylineDistance(p.points, x, z) < 2.4) return no;
+  for (const k of keepOff) if (polylineDistance(k.points, x, z) < k.clear) return no;
   for (const c of park.clearings) if (Math.hypot(c.x - x, c.z - z) < c.r) return no;
   for (const e of park.encounters) if (Math.hypot(e.x - x, e.z - z) < e.clear) return no;
   for (const lp of park.lamps) if (Math.hypot(lp.x - x, lp.z - z) < 2.5) return no;
@@ -475,7 +646,7 @@ function buildMasses(
   park: ParkSpec,
   roads: readonly RibbonDef[],
   field: LakeField,
-  paths: ReadonlyArray<{ points: Pt[] }>,
+  keepOff: readonly Keepout[],
   placed: Placed,
   rng: () => number,
 ): void {
@@ -492,7 +663,7 @@ function buildMasses(
       const z = m.z + Math.sin(a) * m.rz * rr;
       if (m.kind === 'willow' && field.shoreDistance(x, z) > 9) continue;
       if (!placed.clear(x, z, spacing)) continue;
-      const where = treeAllowed(park, roads, field, paths, x, z, waterClear);
+      const where = treeAllowed(park, roads, field, keepOff, x, z, waterClear);
       if (!where.ok) continue;
       placed.add(x, z);
       planted++;
@@ -515,7 +686,7 @@ function buildMasses(
       const rr = i % 2 === 0 ? 0.6 + mr() * 0.5 : Math.sqrt(mr());
       const x = m.x + Math.cos(a) * m.rx * rr;
       const z = m.z + Math.sin(a) * m.rz * rr;
-      const where = treeAllowed(park, roads, field, paths, x, z, 1.5);
+      const where = treeAllowed(park, roads, field, keepOff, x, z, 1.5);
       if (!where.ok) continue;
       const y = b.plan.padY(x, z);
       if (mr() < 0.65) shrub(b, x, y, z, mr, { scale: 1.0 + mr() * 0.8, dry: 0.08, room: where.room, lit: LIT, dense: true });
@@ -526,7 +697,15 @@ function buildMasses(
 }
 
 /** Crowns over the road: big canopy trees close to both edges, leaning in, their spread allowed out over the lanes above a bus's height. */
-function buildTunnels(b: EnvBuilders, park: ParkSpec, roads: readonly RibbonDef[], field: LakeField, placed: Placed, rng: () => number): void {
+function buildTunnels(
+  b: EnvBuilders,
+  park: ParkSpec,
+  roads: readonly RibbonDef[],
+  field: LakeField,
+  keepOff: readonly Keepout[],
+  placed: Placed,
+  rng: () => number,
+): void {
   for (const t of park.tunnels) {
     const rb = b.plan.ribbons.find((r) => r.tag === t.road);
     if (!rb) continue;
@@ -537,8 +716,14 @@ function buildTunnels(b: EnvBuilders, park: ParkSpec, roads: readonly RibbonDef[
     for (let s = s0; s <= s1; s += TUNNEL_STEP) {
       side = -side;
       const c = offsetAtStation(rb.path, ((s % rb.path.length) + rb.path.length) % rb.path.length, 0);
-      const out = c.halfWidth + TUNNEL_OUT + rng() * 1.2;
-      const p = offsetAtStation(rb.path, ((s % rb.path.length) + rb.path.length) % rb.path.length, side * out);
+      let out = c.halfWidth + TUNNEL_OUT + rng() * 1.2;
+      let p = offsetAtStation(rb.path, ((s % rb.path.length) + rb.path.length) % rb.path.length, side * out);
+      // Where the road has a pavement on this side, the row stands behind it.
+      const walk = keepOff.find((k) => polylineDistance(k.points, p.x, p.z) < k.clear);
+      if (walk) {
+        out += walk.clear * 2 - 1.2;
+        p = offsetAtStation(rb.path, ((s % rb.path.length) + rb.path.length) % rb.path.length, side * out);
+      }
       if (field.inWater(p.x, p.z) || field.shoreDistance(p.x, p.z) < 2) continue;
       if (roadClearance(roads, p.x, p.z).d < 1.6) continue;
       if (!placed.clear(p.x, p.z, 5)) continue;
@@ -546,7 +731,7 @@ function buildTunnels(b: EnvBuilders, park: ParkSpec, roads: readonly RibbonDef[
       // Away from the road: the opposite of the offset direction.
       const ox = side * -c.tz;
       const oz = side * c.tx;
-      canopyTree(b, p.x, b.plan.padY(p.x, p.z), p.z, rng, { scale: 1.35 + rng() * 0.35, room: TUNNEL_OUT - 0.6, canopyRoom: c.halfWidth + 8, outX: -ox, outZ: -oz, lit: LIT, dense: true });
+      canopyTree(b, p.x, b.plan.padY(p.x, p.z), p.z, rng, { scale: 1.35 + rng() * 0.35, room: out - c.halfWidth - 0.6, canopyRoom: out + 8, outX: -ox, outZ: -oz, lit: LIT, dense: true });
     }
   }
 }

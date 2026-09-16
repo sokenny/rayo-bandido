@@ -29,7 +29,7 @@ import { createRooms } from './rooms.mjs';
 import { createDatabase } from './db/index.mjs';
 import { createApi } from './api.mjs';
 import { createDialogueSpeech, createFsSpeechCache, layeredSpeechCache } from './dialogue/speech.mjs';
-import { RUSH_DAILY_ATTEMPTS, SNAPSHOT_HZ } from './protocol.mjs';
+import { SNAPSHOT_HZ } from './protocol.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(here, '..');
@@ -84,7 +84,7 @@ try {
 } catch (err) {
   log(`database: could not open (${err.message}); accounts and boards are off`);
 }
-const api = createApi({ db, dailyAttempts: RUSH_DAILY_ATTEMPTS, log });
+const api = createApi({ db, log });
 // Spoken dialogue (`server/dialogue/speech.mjs`). Needs no database, so it answers ahead of `api`.
 const dialogue = createDialogueSpeech({
   // The clips baked into the build first (`public/dialogue/`, copied into `dist/`), then what this

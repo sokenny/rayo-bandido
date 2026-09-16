@@ -467,8 +467,6 @@ export interface RushResults {
   /** Near misses during the run, and the points they paid (already in `score`). */
   nearMisses: number;
   nearMissPoints: number;
-  /** Whether this run was one of the day's ranked attempts. */
-  ranked: boolean;
   /**
    * Which mission this run was for (0-based), what it asked for, and where it was driven —
    * frozen here rather than read back off `RushState`, because by the time the card is up the
@@ -518,11 +516,6 @@ export interface RushState {
    * it is set the marker offers nothing, so the two activities cannot overlap.
    */
   locked: boolean;
-  /**
-   * False once the marker has been used up for the day: the run still plays and still scores,
-   * it just is not submitted anywhere. Set by the caller before `activate`, never by the rules.
-   */
-  ranked: boolean;
   /**
    * True once the player has left the marker since the last run, so dismissing the results
    * does not drop them straight back into a live prompt.
@@ -856,7 +849,7 @@ export type GameEvent =
    * lets the audio hear the EDGE rather than poll a boolean.
    */
   | { type: 'rushPrompt'; on: boolean }
-  | { type: 'rushStart'; ranked: boolean }
+  | { type: 'rushStart' }
   /** One tick of the count-in. `seconds` 0 is the GO beat, drawn as RAYO RUSH. */
   | { type: 'rushCountdown'; seconds: number }
   | {
@@ -2140,9 +2133,9 @@ export interface PassengerHudSnapshot {
 }
 
 /**
- * What the Rayo Rush overlay needs. A flattened read-only view of `RushState` plus the two
- * things the rules cannot know: how many ranked attempts are left today and what the player's
- * previous personal best was, both of which live outside the simulation (`src/net/leaderboard.ts`).
+ * What the Rayo Rush overlay needs. A flattened read-only view of `RushState` plus the one thing
+ * the rules cannot know: the player's previous personal best, which lives outside the simulation
+ * (`src/net/leaderboard.ts`).
  */
 export interface RushHudSnapshot {
   phase: RushPhase;
@@ -2177,10 +2170,6 @@ export interface RushHudSnapshot {
    * back, and the prompt follows this rather than `atMarker` so it never offers nothing.
    */
   canStart: boolean;
-  /** Ranked attempts left today, or -1 while that is still unknown. */
-  attemptsLeft: number;
-  /** True when starting now would be a ranked attempt. */
-  ranked: boolean;
   /** Personal best before this run, or -1 when there is none. */
   previousBest: number;
   /** The finished run, or null. */

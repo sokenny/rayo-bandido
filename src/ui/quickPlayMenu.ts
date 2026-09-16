@@ -209,7 +209,7 @@ export function showQuickPlayModeMenu(
           spec: [
             ['MISSION', lines.mission],
             ['TARGET', lines.target],
-            ['BOARD', 'RANKED RUNS COUNT'],
+            ['BOARD', 'EVERY RUN COUNTS'],
           ],
         }
       : game === 'street'

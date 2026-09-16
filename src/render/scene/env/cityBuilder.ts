@@ -137,7 +137,10 @@ function buildTerrainFloor(b: EnvBuilders, extent: Rect2, holes: readonly Rect2[
         flush(run, x0, z0, z1);
         run = -Infinity;
       }
-      // A cell off level is never over the water: the shore is held level for a band inland.
+      // A cell off level is never over the water: the shore is held level for a band inland. It
+      // can be inside a park that rolls (`parkRelief.ts`), which draws its own lawn there; the
+      // park holds its edge level for further than a cell, so no off-level cell straddles one.
+      if (holes.some((h) => x0 >= h.minX && x1 <= h.maxX && z0 >= h.minZ && z1 <= h.maxZ)) continue;
       b.concrete.quad(x0, y01 + GROUND_Y, z1, x1, y11 + GROUND_Y, z1, x1, y10 + GROUND_Y, z0, x0, y00 + GROUND_Y, z0);
     }
     if (run !== -Infinity) flush(run, extent.maxX, z0, z1);

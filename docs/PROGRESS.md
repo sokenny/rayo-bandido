@@ -3126,3 +3126,55 @@ green, typecheck clean; `scripts/metro-preview.mjs` still loads the spec under p
 so on a slope he floats or sinks a few decimetres at the ends of it; micro-scene actors likewise
 stand at their anchor's height. The car does not roll with a cross-slope (the road leans, the body
 stays level: 2.5° at most). The plinths are bare concrete.
+
+## The park rolls: hills, a lake walk and bollard lamps (2026-09-16, later)
+
+Juan, on the park (`metroPark.ts`) against its two references (Palermo's lake road at night):
+flat, basic, far from them. What the references have and the park did not: ground that rises
+away from the water, a pale pavement along the lake road, and rows of short lamps.
+
+**Hills** (`ParkSpec.relief`, `src/world/parkRelief.ts`). The park's land is no longer a lot the
+terrain holds level; its relief is added to the city's (`createCityWorld` composes the two, and
+only a park without a relief stays in the terrain's level lots). Two kinds of rise: SWELLS, broad
+and gentle, that the loop rides (the west woods on a 7 m rise, the east leg climbing past the
+lay-by), and KNOLLS, 3-9 m hillocks a few tens of metres across on the lawns. Everything is held
+level at the water (9 m from every shore and island, back over 40), round the planetarium's
+podium, at every meeting place (the people stand at y 0), round every bench and the footbridge's
+feet, and for 22 m inside the land's edge — further than a cell of the city's terrain floor, which
+would otherwise draw an off-level cell across the edge onto the lawn (`buildTerrainFloor` now also
+skips off-level cells inside a park; that was the black patches of the first pass). Near a road
+the ground blends to the height of the road's centreline straight across, so a road is cut level
+into a hillside rather than tilted by it. All of it is a 4 m grid baked once and read bilinearly.
+Measured: highest ground 12.9 m; steepest park road 5.9 %; worst cross-slope over the asphalt 4.2 %.
+
+**The walk.** `ParkSpec.sidewalks`: a 3.2 m flush pavement on the inside of the whole loop and on
+the city side of the south leg — a pale kerb line, the slab, a dark edging at the lawn — in its
+own paler concrete (`PAL.sidewalk` is nearly asphalt at night), draped with the road, breaking at
+crossings and at the water. The trees and the tunnels of crowns stand behind it. The lake parapet
+moved out to its back edge.
+
+**Bollards.** A dark square post with a warm lit head and a pool of light, every 15 m along the
+back of the walk and every 13 m along the lit footpaths (alternating sides, between the taller
+path lamps); one in sixteen is out. About 470 of them, a few thousand triangles.
+
+**The lawn** is laid over the terrain cell by cell and shaded by it: lighter on rises and on faces
+toward the city, darker on steep faces away from it, so the roll reads at night.
+
+**Tests.** `tests/park.test.ts`: the park rolls (hills over 8 m), park roads under 7 % along and
+6 % across; level (under a millimetre) at every shore and island point, round the podium, under
+every person, prop and bench, at the footbridge and along the edges; the walk and its bollards
+are drawn. Full suite 71 files / 1097 tests green, typecheck clean.
+
+**Known limits.** The bollards are art: nothing solid. The walk is flush (colour, not a kerb
+step, as the city's pavements are). Tuning shots: `artifacts/park/park-shots.mjs` (local).
+
+**Grass, second pass (same day).** New turf photograph (`nature/grass.webp`, from a dark lawn
+shot: vignette divided out per channel, made seamless). Its blades mip away to a flat green past
+a few metres, so the lawn material (`environment.ts`, `grassMat`) darkens it in world-space value
+noise patches metres across, plus clumps under a metre, and adds DRIZZLE: roughness 0.92 dry to
+0.62 in wetter patches (darker there), a low environment sheen, and the wet road's mirror at 16 %
+(`wetRoad.patch(material, { scale })`, new `WET_SCALE` define) so the lamps and neon glint in it.
+The noise hash avoids `sin()` of a large argument: at metro coordinates it came back constant on
+the test GPU, which is why the first attempt showed no patches at all. Darker overall: grass tint
+`0x4a7053`, grade `normalize` 0.66, and park plants at `LIT` 0.82 (was 1.45) for gloomier woods.
+

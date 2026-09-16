@@ -2,7 +2,7 @@ import type { CityRoadSpec, ElevatedRoadSpec } from './cityDef';
 import type { Rect } from './cityPlan';
 // Value imports spelt with their extension, so `scripts/metro-preview.mjs` can load the metro's
 // spec under plain Node (see `metroSpec.ts`).
-import { blobContour, smoothContour, windUp, type Contour, type LowWallSpec, type ParkEncounterSpec, type ParkSpec, type Pt } from './park.ts';
+import { blobContour, smoothContour, windUp, type Contour, type LowWallSpec, type ParkEncounterSpec, type ParkReliefSpec, type ParkSpec, type Pt } from './park.ts';
 import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath, type TrackNode, type TrackSpec } from './track.ts';
 
 /**
@@ -34,6 +34,9 @@ import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath, typ
  *     so each junction is a real crossing for the road graph and the lane paint runs through.
  *   - THE PLANETARIUM stands on the east lawn, ringed by palms, its ring lit cyan: the landmark
  *     seen from the east leg, the north leg and across the small lobe.
+ *   - THE LAND ROLLS (`PARK_RELIEF`): swells the roads ride, knolls on the lawns, level at the
+ *     water. The loop has a pavement on its lake side all the way round, and on both sides of
+ *     the south leg, with bollard lamps along it (`sidewalks`).
  *   - THE PEOPLE (`PARK_ENCOUNTERS`): four meeting places, each a few named characters with a
  *     pose and something to do, as ambience — no lines yet. Who they are is written by each one.
  *
@@ -341,12 +344,69 @@ export const PARK_ENCOUNTERS: ParkEncounterSpec[] = [
   },
 ];
 
+/* ------------------------------------------------------------------ the lie of the land */
+
+/**
+ * THE HILLS (2026-09-16, second pass): the park was a sheet of grass at y 0, and Palermo's
+ * woods are not. Broad swells the loop rides — up through the west woods, over the north
+ * leg, up the east leg and down again to the lake — and knolls on the lawns between the roads
+ * and the water, a few metres high, that the paths climb over and the benches look out from.
+ * Everything falls level to the water, the planetarium's lawn, the meeting places and the wall
+ * (`parkRelief.ts`); none of the swells is steeper than about seven per cent where a road
+ * crosses it.
+ */
+export const PARK_RELIEF: ParkReliefSpec = {
+  swells: [
+    // The west woods, on a rise: the west leg climbs into them from both ends.
+    { x: -500, z: -880, rx: 175, rz: 200, height: 7 },
+    // Behind the big lobe's north shore, under the north leg.
+    { x: -440, z: -1050, rx: 150, rz: 95, height: 4 },
+    { x: 130, z: -1040, rx: 190, rz: 95, height: 4.5 },
+    // The east leg climbs past the lay-by and comes down to the south-east corner.
+    { x: 520, z: -820, rx: 130, rz: 165, height: 6.5 },
+    // The south leg's lawns toward the city: a long low swell each side of the central avenue.
+    { x: 190, z: -735, rx: 190, rz: 80, height: 3.4 },
+    { x: -300, z: -700, rx: 160, rz: 70, height: 3 },
+  ],
+  knolls: [
+    // The west side: hillocks either side of the path Mili watches, and behind the north-west corner.
+    { x: -500, z: -790, rx: 48, rz: 36, height: 8.7 },
+    { x: -470, z: -965, rx: 50, rz: 40, height: 9.4 },
+    { x: -600, z: -1085, rx: 40, rz: 34, height: 6.5 },
+    { x: -420, z: -1030, rx: 36, rz: 26, height: 5.8 },
+    // Between the lay-by and the big lobe's path.
+    { x: -330, z: -752, rx: 34, rz: 26, height: 5.1 },
+    // Between the south wall and the loop, either side of the central avenue.
+    { x: -170, z: -690, rx: 70, rz: 26, height: 4.3 },
+    { x: 200, z: -690, rx: 70, rz: 26, height: 4.3 },
+    // North of the small lobe, where the shrubs are.
+    { x: 100, z: -1012, rx: 55, rz: 32, height: 7.2 },
+    { x: 5, z: -1045, rx: 34, rz: 28, height: 5.8 },
+    { x: 250, z: -1020, rx: 60, rz: 38, height: 7.2 },
+    // The lawns between the small lobe and the east leg.
+    { x: 330, z: -800, rx: 60, rz: 40, height: 8.7 },
+    { x: 330, z: -920, rx: 36, rz: 30, height: 5.8 },
+    { x: 530, z: -880, rx: 40, rz: 46, height: 6.5 },
+    { x: 625, z: -1100, rx: 36, rz: 30, height: 5.1 },
+  ],
+};
+
+/** The loop's pavement (m): wide enough for a bench and a bollard, like the lake road in Palermo. */
+export const PARK_SIDEWALK_W = 3.2;
+
 /* ------------------------------------------------------------------ the spec */
 
 export const METRO_PARK: ParkSpec = {
   tag: 'parque-norte',
   label: 'BOSQUES DEL NORTE',
   land: PARK_LAND,
+  relief: PARK_RELIEF,
+  sidewalks: [
+    // The inside of the whole loop, the lake side: the walk round the water.
+    { road: 'park-loop', side: 1, width: PARK_SIDEWALK_W, bollards: 15 },
+    // And the city side of the south leg, from the south-east corner to the south-west one.
+    { road: 'park-loop', side: -1, width: PARK_SIDEWALK_W, from: { x: 520, z: -700 }, to: { x: -560, z: -690 }, bollards: 15 },
+  ],
   lakes: [{ tag: 'lago', shore: PARK_SHORE, islands: PARK_ISLANDS }],
   masses: [
     // The belt along the north wall, so the towers of the perimeter stand behind trees.
@@ -456,7 +516,7 @@ export const METRO_PARK: ParkSpec = {
   walls: [
     ...southWall(),
     // The parapet on the curve that reveals the lake: the south leg's swing up to the water, lake side.
-    ...roadsideWall(PARK_LOOP.spec, { x: 40, z: -790 }, 150, 1, 2.0, { height: 0.55, rail: true }),
+    ...roadsideWall(PARK_LOOP.spec, { x: 40, z: -790 }, 150, 1, PARK_SIDEWALK_W + 0.5, { height: 0.55, rail: true }),
     // The painted wall behind the veterans' bench.
     { ax: -222, az: -764, bx: -206, bz: -764, height: 0.95, graffiti: true },
     // Behind the east lay-by's bench, facing the road.

@@ -26,12 +26,17 @@ import { WET_ROAD, type WetRoadTier } from '../../../config/tuning';
  * - Puddles are one tiling noise texture sampled in world space; ripples are a jittered grid of
  *   rings with an analytic gradient, faded out past the distance where they would only shimmer.
  *
- * Cost: one extra scene render of the tagged meshes into the small buffer, plus a few texture
- * reads on road pixels. `?wet=off|low|medium|high` overrides the tier for A/B.
+ * Cost: one extra scene render of the tagged meshes into the small buffer — skipped on alternate
+ * frames while the view holds still enough to re-project the last one (`WET_ROAD.refresh`) —
+ * plus a few texture reads on road pixels. `?wet=off|low|medium|high` overrides the tier for A/B.
  */
 export interface WetRoad {
-  /** Adds the reflection to the road material. Call once, before it first compiles. */
-  patch(material: THREE.MeshStandardMaterial): void;
+  /**
+   * Adds the reflection to the road material. Call once, before it first compiles. `scale`
+   * weakens it for a surface that is damp rather than paved and standing in water (the park's
+   * lawn, `environment.ts`): the same mirror, a fraction of the light.
+   */
+  patch(material: THREE.MeshStandardMaterial, opts?: { scale?: number }): void;
   /**
    * Put a mesh on the mirror's guest list. `emissiveOnly` walks a subtree and tags only the
    * unlit lamp/neon meshes (the car's lights, not its bodywork).
@@ -109,6 +114,13 @@ export function createWetRoad(tier: WetRoadTier | 'off'): WetRoad {
   const q = new THREE.Vector4();
   const clearColor = new THREE.Color();
   const UP = new THREE.Vector3(0, 1, 0);
+  const camDir = new THREE.Vector3();
+  /** The view the buffer was last drawn for. A NaN `drawnGroundY` means nothing is reusable. */
+  const drawnPos = new THREE.Vector3();
+  const drawnDir = new THREE.Vector3();
+  let drawnGroundY = Number.NaN;
+  let framesSinceDraw = 0;
+  const cosMaxTurn = Math.cos(WET_ROAD.refresh.maxTurn);
 
   let drawCalls = 0;
   let enabled = true;
@@ -134,13 +146,14 @@ export function createWetRoad(tier: WetRoadTier | 'off'): WetRoad {
     },
     strength: WET_ROAD.strength,
 
-    patch(material) {
+    patch(material, opts) {
       if (!settings) return;
+      const scale = opts?.scale ?? 1;
       const previous = material.onBeforeCompile;
       material.onBeforeCompile = (shader, renderer) => {
         previous.call(material, shader, renderer);
         Object.assign(shader.uniforms, uniforms);
-        shader.defines = { ...(shader.defines ?? {}), WET_TAPS: settings.taps };
+        shader.defines = { ...(shader.defines ?? {}), WET_TAPS: settings.taps, WET_SCALE: scale.toFixed(3) };
         shader.vertexShader = shader.vertexShader
           .replace(
             '#include <common>',
@@ -156,7 +169,7 @@ export function createWetRoad(tier: WetRoadTier | 'off'): WetRoad {
       };
       // Distinct from any other patched standard material that happens to share its parameters.
       const key = material.customProgramCacheKey;
-      material.customProgramCacheKey = () => `${key.call(material)}|wet${settings.taps}`;
+      material.customProgramCacheKey = () => `${key.call(material)}|wet${settings.taps}x${scale}`;
       material.needsUpdate = true;
     },
 
@@ -184,22 +197,46 @@ export function createWetRoad(tier: WetRoadTier | 'off'): WetRoad {
       if (!settings) return false;
       if (!enabled) {
         uniforms.uWetStrength.value = 0;
+        drawnGroundY = Number.NaN;
         return false;
       }
       camera.getWorldPosition(camPos);
       // Under the mirror (a lower street while the player is on a deck, say): nothing to see.
       if (camPos.y <= groundY + 0.05) {
         uniforms.uWetStrength.value = 0;
+        drawnGroundY = Number.NaN;
         return false;
       }
 
       const buffer = renderer.getDrawingBufferSize(SIZE);
       const h = Math.max(90, Math.round(settings.height * Math.min(1, Math.max(0.5, scale))));
       const w = Math.max(160, Math.round((h * buffer.x) / Math.max(1, buffer.y)));
-      if (target.width !== w || target.height !== h) {
+      const resized = target.width !== w || target.height !== h;
+      if (resized) {
         target.setSize(w, h);
         uniforms.uWetTexel.value.set(1 / w, 1 / h);
       }
+
+      // Reuse the last buffer while the view has barely changed. `uWetMatrix` and `uWetPlaneY`
+      // keep the values it was drawn with, so the road re-projects it from the new camera.
+      const { every, maxMove, maxRise } = WET_ROAD.refresh;
+      camera.getWorldDirection(camDir);
+      framesSinceDraw++;
+      if (
+        !resized &&
+        framesSinceDraw < every &&
+        Math.abs(groundY - drawnGroundY) < maxRise &&
+        camPos.distanceToSquared(drawnPos) < maxMove * maxMove &&
+        camDir.dot(drawnDir) > cosMaxTurn
+      ) {
+        uniforms.uWetTime.value = time;
+        uniforms.uWetStrength.value = this.strength;
+        return false;
+      }
+      framesSinceDraw = 0;
+      drawnGroundY = groundY;
+      drawnPos.copy(camPos);
+      drawnDir.copy(camDir);
 
       // The mirrored camera (three's `Reflector`, specialised to a horizontal plane).
       mirror.position.set(camPos.x, 2 * groundY - camPos.y, camPos.z);
@@ -366,7 +403,7 @@ vec2 wetRipple(vec2 p, float t, float cell) {
 
 const FRAGMENT_BODY = /* glsl */ `
 {
-  float wetLevel = uWetStrength * (1.0 - smoothstep(0.35, 1.1, abs(vWetWorld.y - uWetPlaneY)));
+  float wetLevel = uWetStrength * WET_SCALE * (1.0 - smoothstep(0.35, 1.1, abs(vWetWorld.y - uWetPlaneY)));
   // Mipmapped reads stay outside the branch: derivatives are undefined in non-uniform control flow.
   vec2 P = vWetWorld.xz;
   vec2 n1 = texture2D(uWetNoise, P * 0.019).rg;

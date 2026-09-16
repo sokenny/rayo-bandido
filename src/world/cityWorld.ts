@@ -30,7 +30,8 @@ import { reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
 import { createRectIndex } from './spatialIndex';
 import { createSurfaceField } from './surface';
-import { createTerrain } from './terrain';
+import { createParkRelief } from './parkRelief';
+import { createTerrain, type TerrainSpec } from './terrain';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
 /**
@@ -162,11 +163,13 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const garage = spec.garage ?? null;
   const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : [])];
   // A park takes its land whole, like a meet, but the block generator never runs on it in the
-  // first place (`blockInner`): it is a lot for the terrain (level), the kerbs (no pavement on
-  // its roads: the grass runs to the asphalt), the cables and the fences.
+  // first place (`blockInner`): it is a lot for the kerbs (no city pavement on its roads: the
+  // park draws its own), the cables and the fences. For the terrain it is a lot only when it
+  // is level; a park with a relief (`parkRelief.ts`) adds its hills to the city's instead.
   const parks = spec.parks ?? [];
   const parkLands = parks.map((p) => p.land);
   const lots = [...meetLots, ...cornerLots, ...parkLands];
+  const levelLots = [...meetLots, ...cornerLots, ...parks.filter((p) => !p.relief).map((p) => p.land)];
   // The water on the land: one depth field over every park's lakes (`park.ts`), dry without one.
   const lakes: LakeField = parks.length === 0 ? DRY_FIELD : parks.length === 1 ? lakeFieldOf(parks[0]) : joinLakeFields(parks.map(lakeFieldOf));
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
@@ -175,7 +178,19 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   // below is laid out on flat ground the way it always was — the blocks, the kerbs, the rails,
   // the pillars — and the ground roads are draped over the terrain last of all, so nothing at
   // build time mistakes a street on a hill for a ramp. Flat, in a spec that draws no relief.
-  const terrain = createTerrain(spec.terrain, bounds, elevated.map((rb) => rb.path), lots, quayZ);
+  const parkReliefs = parks.filter((p) => p.relief).map((p) => createParkRelief(p, ground.map((rb) => rb.path)));
+  const terrainSpec: TerrainSpec | undefined =
+    parkReliefs.length === 0
+      ? spec.terrain
+      : {
+          ...spec.terrain,
+          relief: (x, z) => {
+            let y = spec.terrain ? spec.terrain.relief(x, z) : 0;
+            for (const r of parkReliefs) y += r(x, z);
+            return y;
+          },
+        };
+  const terrain = createTerrain(terrainSpec, bounds, elevated.map((rb) => rb.path), levelLots, quayZ);
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   const blocks = clipBlocksToLots(
     reserveMegastructurePlots(generateBlocks(blockInner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
@@ -349,9 +364,10 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     // driven round the loop backwards. Lanes are offset half a gap from each other so the
     // files interleave rather than driving in pairs. Each waypoint carries the deck's height
     // there, so a car on a loop that climbs (or on one merged from a ramp) spawns on it.
-    // A closed ground loop takes its traffic the same way (a park's ring road): the deck's height
-    // is then 0 everywhere, and the ground roads are still flat here (draped last, below).
-    const rb = elevated.find((e) => e.tag === deck.tag) ?? ground.find((e) => e.tag === deck.tag);
+    // A closed ground loop takes its traffic the same way (a park's ring road): the ground roads
+    // are still flat here (draped last, below), so its waypoints take the terrain's height.
+    const deckRb = elevated.find((e) => e.tag === deck.tag);
+    const rb = deckRb ?? ground.find((e) => e.tag === deck.tag);
     if (!rb || !rb.path.closed) throw new Error(`${spec.name}: deck traffic wants a closed loop tagged ${deck.tag}`);
     const samples = rb.path.samples;
     const lanes: Array<Array<{ x: number; z: number; y: number }>> = [];
@@ -360,7 +376,9 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
         const lane: Array<{ x: number; z: number; y: number }> = [];
         for (let i = 0; i < samples.length; i += 3) {
           const s = samples[i];
-          lane.push({ x: s.x + -s.tz * offset * dir, z: s.z + s.tx * offset * dir, y: s.y });
+          const lx = s.x + -s.tz * offset * dir;
+          const lz = s.z + s.tx * offset * dir;
+          lane.push({ x: lx, z: lz, y: deckRb ? s.y : terrain.heightAt(lx, lz) });
         }
         lanes.push(dir > 0 ? lane : lane.reverse());
       }

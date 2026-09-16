@@ -1110,16 +1110,29 @@ export type WetRoadTier = 'low' | 'medium' | 'high';
 export const WET_ROAD = {
   quality: 'auto' as 'auto' | 'off' | WetRoadTier,
   tiers: {
-    low: { height: 256, taps: 3 },
-    medium: { height: 360, taps: 5 },
-    high: { height: 540, taps: 5 },
-  } satisfies Record<WetRoadTier, { height: number; taps: number }>,
+    // `facades`: whether the lit-window walls are on the mirror's guest list. Off at `low`: they
+    // are the only lit guests, and the neon still reads without the windows behind it.
+    low: { height: 256, taps: 3, facades: false },
+    medium: { height: 360, taps: 5, facades: true },
+    high: { height: 540, taps: 5, facades: true },
+  } satisfies Record<WetRoadTier, { height: number; taps: number; facades: boolean }>,
   /** How much reflected light lands on the road at a grazing angle in standing water. */
   strength: 1.1,
   /** The mirror ignores everything lower than this over the road (m): lifts, kerbs, light pools. */
   clipLift: 0.25,
-  /** The mirror camera's far plane (m). Shorter culls more of the metro's chunks out of the pass. */
+  /**
+   * The mirror camera's far plane (m). Pulling it in to 180 m saved no draws in the city: the
+   * chunk culling in `environment.ts` has already hidden what lies past it.
+   */
   far: 260,
+  /**
+   * The mirror is redrawn every `every` frames and reused in between, re-projected with the
+   * matrix it was drawn with — exact for the static city, a frame late for moving lights.
+   * It is redrawn sooner when the camera has moved `maxMove` metres, turned `maxTurn` radians
+   * or the road under the player has risen or dropped `maxRise` metres since, so the buffer's
+   * edges never lag into view at speed, through a drift or over a crest.
+   */
+  refresh: { every: 2, maxMove: 1.5, maxTurn: 0.05, maxRise: 0.15 },
 };
 
 export const RENDER = {
@@ -1228,6 +1241,14 @@ export const AUDIO = {
    * driving into rain takes more drops per second, and harder ones.
    */
   rainSpeedRate: 0.6,
+  /**
+   * The thunderstorm bed mixed under the rain (`audio/rain.ts`, the recording at `thunderSrc`) at
+   * full `ATMOSPHERE.rain.intensity`. Distant rumble and downpour: it sets the weather, the rain
+   * layer above it is what hits the car.
+   */
+  thunderVolume: 1.1,
+  /** The thunderstorm recording (served from public/), looped under the rain by `audio/rain.ts`. */
+  thunderSrc: '/thunderstorm.mp3',
   /** Lightning zap one-shot level. */
   lightningVolume: 0.55,
   /** The Rayo's recordings (served from public/), played by `audio/lightningCharge.ts`. */
@@ -1510,6 +1531,20 @@ export const PASS_BY = {
 };
 
 /**
+ * Every song in the game, all served from `public/songs/`. `startAt` is where a song begins
+ * (seconds), so a long intro can be skipped; it applies on every pass of a loop too.
+ */
+export const SONGS = {
+  theme: { src: '/songs/rayo-bandido-theme.mp3', startAt: 0 },
+  whiteboyRick: { src: '/songs/whiteboy-rick.mp3', startAt: 10 },
+  kloudbug: { src: '/songs/kloudbug-hailstones.mp3', startAt: 0 },
+  ekstrak: { src: '/songs/ekstrak-belt.mp3', startAt: 0 },
+};
+
+/** One entry of `SONGS`. */
+export type Song = (typeof SONGS)[keyof typeof SONGS];
+
+/**
  * Background theme song + music-reactive lighting. The track loops quietly under the game and
  * its spectrum is split into three bands, each with its own envelope, so different families of
  * lights move to different parts of the song instead of all flashing together:
@@ -1523,8 +1558,11 @@ export const PASS_BY = {
  * the mood, it does not run the light show.
  */
 export const THEME = {
-  /** Path (served from public/) of the looping theme track. */
-  src: '/rayo-bandido-theme.mp3',
+  /**
+   * The in-game radio: played in this order, one after the other, back to the first after the
+   * last. M turns the radio off and on.
+   */
+  playlist: [SONGS.theme, SONGS.whiteboyRick, SONGS.kloudbug, SONGS.ekstrak] as Song[],
   /** Playback gain (0..1). Background level — sits under the engine and effects. */
   volume: 0.32,
   /** Seconds to fade the track in when it first starts, so it does not stab in. */
@@ -1591,6 +1629,40 @@ export const THEME = {
   energyRise: 0.01,
   /** How fast `energy` sags in a quiet section. Slower than the rise, so it holds a chorus. */
   energyFall: 0.004,
+};
+
+/**
+ * The menu's sound (`audio/menuAmbience.ts`): no music, just the thunderstorm, looped behind every
+ * menu screen. Each menu screen is its own page load, so the storm's position is carried across
+ * them in sessionStorage and it keeps rolling instead of restarting on every step deeper.
+ */
+export const MENU_AUDIO = {
+  /** The storm recording: the same one that plays under the rain in game. */
+  thunderSrc: AUDIO.thunderSrc,
+  /** Playback gain (0..1). Weather in the distance, not a downpour on the window. */
+  volume: 0.25,
+  /** Seconds the storm takes to fade in on every menu screen: a slow rise, not an entrance. */
+  fadeInSeconds: 10,
+  /** Seconds to fade out and back in on M. */
+  muteFadeSeconds: 1.5,
+  /**
+   * The blip when the cursor moves onto a menu option (`audio/menuBlip.ts`), synthesized so there
+   * is no file to fetch. Voiced like an analog synth pluck: two slightly detuned saws through a
+   * low-pass filter that closes from `filterFromHz` to `filterToHz`, the pitch sagging a little
+   * from `fromHz` to `toHz` as it dies.
+   */
+  hover: {
+    volume: 0.3,
+    fromHz: 1100,
+    toHz: 980,
+    /** Cents between the two oscillators: the slight beating that makes it sound analog. */
+    detuneCents: 9,
+    filterFromHz: 6000,
+    filterToHz: 1400,
+    /** Filter resonance: a little bite on the sweep. */
+    q: 4,
+    seconds: 0.09,
+  },
 };
 
 /**
@@ -1789,8 +1861,6 @@ export const RUSH = {
    * the moment the player is done reading; this is only the promise that they never have to.
    */
   resultsHoldSeconds: 7,
-  /** Ranked attempts one player may submit to the global board per calendar day. */
-  dailyRankedAttempts: 3,
 
   /**
    * THE MISSION CHAIN. Three of them, in order, and the ONLY thing that separates one from the

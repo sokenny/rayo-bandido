@@ -41,9 +41,43 @@ describe('the park is land the city gave up, not city', () => {
     expect(plan.walls.find((w) => w.tag === 'wall-n')!.maxZ).toBe(-1138);
   });
 
-  it('is level everywhere, lakes aside', () => {
-    for (let x = PARK_LAND.minX; x <= PARK_LAND.maxX; x += 25) {
-      for (let z = PARK_LAND.minZ; z <= PARK_LAND.maxZ; z += 25) expect(layout.groundY!(x, z), `(${x}, ${z})`).toBe(0);
+  it('rolls, with hills of several metres and roads that climb them gently and level across', () => {
+    let highest = 0;
+    for (let x = PARK_LAND.minX; x <= PARK_LAND.maxX; x += 10) {
+      for (let z = PARK_LAND.minZ; z <= PARK_LAND.maxZ; z += 10) highest = Math.max(highest, layout.groundY!(x, z));
+    }
+    expect(highest).toBeGreaterThan(8);
+    for (const rb of parkGround) {
+      const s = rb.path.samples;
+      for (let i = 0; i + 1 < s.length; i++) {
+        const run = Math.hypot(s[i + 1].x - s[i].x, s[i + 1].z - s[i].z);
+        if (run > 0.5) expect(Math.abs(s[i + 1].y - s[i].y) / run, `${rb.tag} at (${s[i].x.toFixed(0)}, ${s[i].z.toFixed(0)})`).toBeLessThan(0.07);
+        // Across the asphalt, edge to edge.
+        const q = s[i];
+        const left = layout.groundY!(q.x + q.tz * q.halfWidth, q.z - q.tx * q.halfWidth);
+        const right = layout.groundY!(q.x - q.tz * q.halfWidth, q.z + q.tx * q.halfWidth);
+        expect(Math.abs(left - right) / (2 * q.halfWidth), `${rb.tag} leans at (${q.x.toFixed(0)}, ${q.z.toFixed(0)})`).toBeLessThan(0.06);
+      }
+    }
+  });
+
+  it('is level where it has to be: the water, the podium, the meeting places, the benches, the footbridge and the edge', () => {
+    const level = (x: number, z: number, what: string): void => expect(layout.groundY!(x, z), `${what} at (${x.toFixed(0)}, ${z.toFixed(0)})`).toBeLessThan(1e-3);
+    for (const lake of park.lakes) for (const p of [...lake.shore, ...lake.islands.flat()]) level(p.x, p.z, 'shore');
+    const p = park.planetarium!;
+    for (let a = 0; a < Math.PI * 2; a += 0.3) level(p.x + Math.cos(a) * (p.radius * 1.1 + 2), p.z + Math.sin(a) * (p.radius * 1.1 + 2), 'podium');
+    for (const e of park.encounters) {
+      for (const person of e.people) level(person.x, person.z, `${e.id}/${person.name}`);
+      for (const prop of e.props) level(prop.x, prop.z, `${e.id}/${prop.kind}`);
+    }
+    for (const f of park.furniture) level(f.x, f.z, f.kind);
+    for (const f of park.footbridges) {
+      level(f.ax, f.az, 'footbridge');
+      level(f.bx, f.bz, 'footbridge');
+    }
+    for (let x = PARK_LAND.minX; x <= PARK_LAND.maxX; x += 20) {
+      level(x, PARK_LAND.maxZ - 8, 'south wall');
+      level(x, PARK_LAND.minZ + 8, 'north edge');
     }
   });
 
@@ -135,7 +169,7 @@ describe('the lake', () => {
     }
     expect(onBank).toBeGreaterThan(4);
     layout.surface!.sample(-250, -700, 0, SAMPLE);
-    expect(SAMPLE.y).toBe(0);
+    expect(SAMPLE.y).toBeCloseTo(layout.groundY!(-250, -700), 6);
     // On the bridge, the deck: over the strait the car is carried, not dropped.
     const mid = bridge.path.samples[Math.floor(bridge.path.samples.length / 2)];
     layout.surface!.sample(mid.x, mid.z, mid.y, SAMPLE);
@@ -220,6 +254,17 @@ describe('what stands in the park', () => {
     expect(drawCalls).toBeLessThanOrEqual(11);
     // Real trees: the greenery is most of it.
     expect(b.foliage.triangles + b.bark.triangles).toBeGreaterThan(triangles * 0.5);
+  });
+
+  it('walks the loop: a pavement with bollard lamps along the lake side and both sides of the south leg', () => {
+    const bare = createBuilders(plan);
+    buildParks(bare);
+    const without = createBuilders({ ...plan, parks: [{ ...park, sidewalks: [] }] });
+    buildParks(without);
+    // Roughly three kilometres of lake side and a kilometre of city side, three bands every three metres.
+    expect(bare.concrete.triangles - without.concrete.triangles).toBeGreaterThan(5_000);
+    // A lit head on every bollard, every fifteen metres or so: two hundred of them and more, ten triangles a head.
+    expect(bare.neon.triangles - without.neon.triangles).toBeGreaterThan(200 * 10);
   });
 
   it('describes the same park the spec does', () => {

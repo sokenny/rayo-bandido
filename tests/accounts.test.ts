@@ -1,8 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { RUSH_DAILY_ATTEMPTS } from '../src/net/protocol';
-import { RUSH } from '../src/config/tuning';
 
 /**
  * Accounts, saved progress and the high-score boards, end to end: a real `node server/index.mjs`
@@ -111,7 +109,6 @@ interface Submit {
   reason?: string;
   best?: number;
   rank?: number;
-  attemptsLeft?: number;
   previousBest?: number;
   entries?: Array<{ rank: number; name: string; value: number }>;
 }
@@ -258,27 +255,24 @@ describe('accounts', () => {
 });
 
 describe('boards', () => {
-  it('agrees with the game about the daily allowance', async () => {
-    expect(RUSH.dailyRankedAttempts).toBe(RUSH_DAILY_ATTEMPTS);
-    const { body } = await browser().get<{ attemptsLeft: number; dailyAttempts: number; best: number; rank: number }>('/api/boards/rush/standing');
-    expect(body.dailyAttempts).toBe(RUSH_DAILY_ATTEMPTS);
-    expect(body.attemptsLeft).toBe(RUSH_DAILY_ATTEMPTS);
+  it('starts a new player with no best and no place on a board', async () => {
+    const { body } = await browser().get<{ best: number; rank: number; attemptsLeft?: number }>('/api/boards/rush/standing');
     expect(body.best).toBe(-1);
     expect(body.rank).toBe(-1);
+    expect(body.attemptsLeft).toBeUndefined();
   });
 
-  it('files a rush run, ranks it, and spends one of the day’s attempts', async () => {
+  it('files a rush run and ranks it', async () => {
     const b = browser();
     await b.post('/api/profile', { name: 'juan' });
     const { body } = await b.post<Submit>('/api/boards/rush/runs', rushRun(4200));
     expect(body.accepted).toBe(true);
     expect(body.best).toBe(4200);
     expect(body.rank).toBeGreaterThan(0);
-    expect(body.attemptsLeft).toBe(RUSH_DAILY_ATTEMPTS - 1);
     expect(body.entries?.some((e) => e.name === 'JUAN' && e.value === 4200)).toBe(true);
   });
 
-  it('keeps one row per player — their best — and a worse run still spends an attempt', async () => {
+  it('keeps one row per player — their best — and records a worse run without moving it', async () => {
     const b = browser();
     await b.post('/api/profile', { name: 'ONE ROW' });
     await b.post<Submit>('/api/boards/rush/runs', rushRun(9000));
@@ -287,20 +281,19 @@ describe('boards', () => {
     expect(body.improved).toBe(false);
     expect(body.previousBest).toBe(9000);
     expect(body.best).toBe(9000);
-    expect(body.attemptsLeft).toBe(RUSH_DAILY_ATTEMPTS - 2);
     const board = await b.get<{ entries: Array<{ name: string }> }>('/api/boards/rush?limit=50');
     expect(board.body.entries.filter((e) => e.name === 'ONE ROW')).toHaveLength(1);
   });
 
-  it('refuses a rush run once the day’s attempts are spent', async () => {
+  it('counts every rush run: there is no daily limit', async () => {
     const b = browser();
-    for (let i = 0; i < RUSH_DAILY_ATTEMPTS; i++) expect((await b.post<Submit>('/api/boards/rush/runs', rushRun(100 + i))).body.accepted).toBe(true);
-    const { body } = await b.post<Submit>('/api/boards/rush/runs', rushRun(9999));
-    expect(body.accepted).toBe(false);
-    expect(body.reason).toBe('noAttempts');
+    for (let i = 0; i < 6; i++) expect((await b.post<Submit>('/api/boards/rush/runs', rushRun(100 + i * 100))).body.accepted).toBe(true);
+    const { body } = await b.post<Submit>('/api/boards/rush/runs', rushRun(9900));
+    expect(body.accepted).toBe(true);
+    expect(body.best).toBe(9900);
   });
 
-  it('refuses runs that are not plausible, without spending an attempt', async () => {
+  it('refuses runs that are not plausible', async () => {
     const b = browser();
     for (const run of [
       { score: -5, disabled: 1, bestChain: 1, styleBonus: 0 },
@@ -315,14 +308,14 @@ describe('boards', () => {
     }
     expect((await b.post<Submit>('/api/boards/circuit/runs', { ms: 500 })).body.accepted).toBe(false);
     expect((await b.post<Submit>('/api/boards/street/runs', { ms: 'fast' })).body.accepted).toBe(false);
-    const standing = await b.get<{ attemptsLeft: number }>('/api/boards/rush/standing');
-    expect(standing.body.attemptsLeft).toBe(RUSH_DAILY_ATTEMPTS);
+    const standing = await b.get<{ best: number }>('/api/boards/rush/standing');
+    expect(standing.body.best).toBe(-1);
   });
 
   it('ranks the timed boards fastest first, and never limits their runs', async () => {
     for (const ms of [131_000, 125_500, 140_250]) {
       const b = browser();
-      for (let i = 0; i < RUSH_DAILY_ATTEMPTS + 2; i++) expect((await b.post<Submit>('/api/boards/street/runs', { ms: ms + i * 10 })).body.accepted).toBe(true);
+      for (let i = 0; i < 5; i++) expect((await b.post<Submit>('/api/boards/street/runs', { ms: ms + i * 10 })).body.accepted).toBe(true);
     }
     const board = await browser().get<{ entries: Array<{ rank: number; value: number }> }>('/api/boards/street?limit=50');
     const values = board.body.entries.map((e) => e.value);

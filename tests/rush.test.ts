@@ -73,21 +73,21 @@ function rig(targetCount = 8, cleared = 0) {
    * One tick. `kills` are target ids destroyed by the lightning on this very tick, all of them
    * shot from `distance` metres away — 0, a point-blank shot, unless a test is about the reach.
    */
-  function tick(kills: number[] = [], ranked = true, distance = 0): GameEvent[] {
+  function tick(kills: number[] = [], distance = 0): GameEvent[] {
     events = [];
     for (const id of kills) {
       targets[id].status = 'destroyed';
       events.push({ type: 'targetDestroyed', targetId: id, x: targets[id].x, y: 0, z: targets[id].z, reward: 0, distance });
     }
-    stepRush(rush, SITE, vehicle, drift, cmd, targets, ranked, DT, events);
+    stepRush(rush, SITE, vehicle, drift, cmd, targets, DT, events);
     cmd.activate = false;
     return events;
   }
 
   /** Run the count-in out so the next tick is inside a live run. */
-  function begin(ranked = true): void {
+  function begin(): void {
     cmd.activate = true;
-    tick([], ranked);
+    tick([]);
     for (let i = 0; i < Math.ceil(RUSH.countdownSeconds / DT) + 2 && rush.phase === 'countdown'; i++) tick();
   }
 
@@ -324,7 +324,7 @@ describe('rayo rush: scoring', () => {
   it('pays more for a long shot than a close one, ramped by the distance', () => {
     const close = rig();
     close.begin();
-    const closeEvents = close.tick([0], true, 4);
+    const closeEvents = close.tick([0], 4);
     const closeScore = closeEvents.find((e) => e.type === 'rushScore') as
       | { points: number; rangeBonus: number; shotDistance: number }
       | undefined;
@@ -335,7 +335,7 @@ describe('rayo rush: scoring', () => {
 
     const far = rig();
     far.begin();
-    const farEvents = far.tick([0], true, LIGHTNING.range);
+    const farEvents = far.tick([0], LIGHTNING.range);
     const farScore = farEvents.find((e) => e.type === 'rushScore') as
       | { points: number; rangeBonus: number }
       | undefined;
@@ -370,12 +370,12 @@ describe('rayo rush: scoring', () => {
     const pass: GameEvent = { type: 'nearMiss', targetId: 0, x: 0, y: 0, z: 0, points: 30, quality: 0.5 };
     // Not before the clock.
     const before: GameEvent[] = [pass];
-    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, before);
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, DT, before);
     expect(r.rush.score).toBe(0);
 
     r.begin();
     const events: GameEvent[] = [pass];
-    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, events);
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, DT, events);
     const paid = 30 * RUSH.scoring.nearMissScale;
     expect(r.rush.score).toBe(paid);
     expect(r.rush.chain).toBe(0);
@@ -406,14 +406,14 @@ describe('rayo rush: scoring', () => {
     r.tick([3]);
     const fired = (targetId: number): GameEvent => ({ type: 'lightningFired', targetId, fromX: 0, fromY: 0, fromZ: 0, toX: 0, toY: 0, toZ: 0, distance: 10, spent: 0 });
     const miss: GameEvent[] = [fired(-1)];
-    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, miss);
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, DT, miss);
     expect(r.rush.multiplier).toBe(1);
     expect(miss.find((e) => e.type === 'rushChainBroken')).toMatchObject({ reason: 'miss' });
 
     // A bolt that lands keeps the streak going.
     r.tick([4]);
     const hit: GameEvent[] = [fired(5), { type: 'targetDestroyed', targetId: 5, x: 0, y: 0, z: 0, reward: 0, distance: 10 }];
-    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, hit);
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, DT, hit);
     expect(r.rush.chain).toBe(2);
     expect(hit.some((e) => e.type === 'rushChainBroken')).toBe(false);
 
@@ -421,7 +421,7 @@ describe('rayo rush: scoring', () => {
     r.rush.chain = 0;
     r.rush.multiplier = 1;
     const empty: GameEvent[] = [fired(-1)];
-    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, empty);
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, DT, empty);
     expect(empty.some((e) => e.type === 'rushChainBroken')).toBe(false);
   });
 
@@ -499,24 +499,12 @@ describe('rayo rush: the clock', () => {
     r.drift.active = false;
     r.rush.timeLeft = DT;
     const events = r.tick();
-    const end = events.find((e) => e.type === 'rushEnd') as { results: { score: number; disabled: number; bestChain: number; styleBonus: number; ranked: boolean } } | undefined;
+    const end = events.find((e) => e.type === 'rushEnd') as { results: { score: number; disabled: number; bestChain: number; styleBonus: number } } | undefined;
     expect(end).toBeDefined();
     expect(end?.results.disabled).toBe(2);
     expect(end?.results.bestChain).toBe(2);
     expect(end?.results.score).toBe(r.rush.score);
     expect(end?.results.styleBonus).toBeGreaterThan(0);
-    expect(end?.results.ranked).toBe(true);
-  });
-
-  it('records an unranked run identically, and only flags it as unranked', () => {
-    const r = rig();
-    r.tick();
-    r.begin(false);
-    r.tick([0]);
-    r.rush.timeLeft = DT;
-    r.tick();
-    expect(r.rush.results?.ranked).toBe(false);
-    expect(r.rush.results?.score).toBe(RUSH.scoring.disable);
   });
 
   it('hands the world back when the card is dismissed', () => {
@@ -570,7 +558,7 @@ describe('rayo rush: which cars are marked', () => {
     const targets: TargetState[] = [];
     // A line of cars marching away from the player, all inside the radius.
     for (let i = 0; i < count; i++) targets.push(makeTarget(i, 0, -(i + 1) * 2));
-    startRush(rush, true, []);
+    startRush(rush, []);
     rush.phase = 'running';
 
     const out = new Uint8Array(count);
@@ -586,7 +574,7 @@ describe('rayo rush: which cars are marked', () => {
   it('drops a car beyond the mark radius, one already scored, and one that is down', () => {
     const rush = createRushState(3);
     const targets = [makeTarget(0, 0, -5), makeTarget(1, 0, -(RUSH.targets.markRadius + 20)), makeTarget(2, 0, -8)];
-    startRush(rush, true, []);
+    startRush(rush, []);
     rush.phase = 'running';
     rush.scored[2] = 1;
     const out = new Uint8Array(3);

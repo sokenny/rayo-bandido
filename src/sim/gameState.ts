@@ -248,13 +248,6 @@ export interface StepOptions {
   /** Cruise mode is driving: a manual box shifts itself, the autopilot has no hands for it. */
   cruising?: boolean;
   /**
-   * Whether a RAYO RUSH run started this tick would be one of the day's ranked attempts. Owned
-   * by the caller because the allowance lives outside the simulation
-   * (`src/net/leaderboard.ts`); defaults to true, which is what a world with no board would
-   * want. A run is identical either way — an unranked one simply is not submitted.
-   */
-  rushRanked?: boolean;
-  /**
    * The car was put back somewhere by the caller this tick (a multiplayer rescue): a passenger
    * in it is let out with nothing paid. Consumed on the tick it is seen.
    */
@@ -426,7 +419,6 @@ export function stepGame(
       state.drift,
       cmd,
       state.targets,
-      options?.rushRanked ?? true,
       dt,
       state.events,
     );

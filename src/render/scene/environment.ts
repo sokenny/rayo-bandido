@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RENDER, STREET_RACE } from '../../config/tuning';
+import { RENDER, STREET_RACE, WET_ROAD } from '../../config/tuning';
 import type { CityPlan } from '../../world/cityPlan';
 import { applyPalette, PAL } from './env/palette';
 import { createBuilders } from './env/builders';
@@ -123,6 +123,25 @@ export interface EnvironmentVisual {
   update(frameDt: number, time: number, camX?: number, camZ?: number, people?: CrowdSubject | null): void;
   dispose(): void;
 }
+
+/** How much of the wet road's mirror the lawn gets: glints of the lamps, not a puddle. */
+const GRASS_WET_SCALE = 0.16;
+
+/** Value noise for the lawn's patches, in world metres. */
+const GRASS_NOISE = /* glsl */ `
+// Dave Hoskins' hash: no sin() of a large argument, which some GPUs flatten to a constant at metro coordinates.
+float gHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float gNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), f.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+`;
 
 export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: { wet?: string | null } = {}): EnvironmentVisual {
   // Every builder and texture below reads `PAL`; the world chooses which script fills it.
@@ -272,8 +291,31 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const barkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   const foliageArt = attachTexture(foliageMat, 'nature/foliage', null);
   const barkArt = attachTexture(barkMat, 'nature/bark', null);
-  // The parks' lawns: matte turf, the photograph multiplied into the palette's grass tint.
-  const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0 });
+  // The parks' lawns: the photograph multiplied into the palette's grass tint, darkened in
+  // patches metres across so the turf still reads at driving distance (the photograph's blades
+  // mip away to one flat green past a few metres), and damp after the drizzle: a sheen that
+  // varies from patch to patch, wetter patches darker, and a weak share of the wet road's mirror
+  // so the lamps and the neon glint in it.
+  const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, envMapIntensity: 0.16 });
+  grassMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGrassWorld;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvGrassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vGrassWorld;\n${GRASS_NOISE}`)
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        vec2 gP = vGrassWorld.xz;
+        float gPatch = gNoise(gP / 11.0) * 0.6 + gNoise(gP / 3.1 + 7.0) * 0.4;
+        float gClump = gNoise(gP / 0.8 + 3.0);
+        float gWet = smoothstep(0.38, 0.78, gNoise(gP / 7.0 + 19.0));
+        diffuseColor.rgb *= mix(0.35, 1.45, smoothstep(0.2, 0.8, gPatch)) * mix(0.72, 1.18, gClump) * mix(1.0, 0.8, gWet);`,
+      )
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.92, 0.62, gWet);');
+  };
+  grassMat.customProgramCacheKey = () => 'park-grass';
+  wetRoad.patch(grassMat, { scale: GRASS_WET_SCALE });
   const grassArt = attachTexture(grassMat, 'nature/grass', null);
   // Graffiti and grime: lit like the concrete it sits on, blended without writing depth and
   // pushed off the surface behind it, so a tag can never z-fight a wall.
@@ -405,9 +447,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   // What the wet road mirrors: the light, and the walls the lit windows are set into. Nothing
   // unlit and nothing lying on the ground. Not the halos either: in the metro they are the
   // biggest family by draw calls (40 of ~160 at the spawn) and the reflection's blur already
-  // softens every tube it mirrors.
+  // softens every tube it mirrors. The facades only on tiers that ask for them.
   const reflected = new Set<THREE.Material>([
-    facadeMat,
+    ...(wetRoad.tier !== 'off' && WET_ROAD.tiers[wetRoad.tier].facades ? [facadeMat] : []),
     neonMat,
     neonPulseMat,
     neonFlickerMat,

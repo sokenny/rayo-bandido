@@ -5,7 +5,8 @@ import { SILENT_MUSIC, type MusicBands } from '../core/types';
  * The background theme song and the music signals driven from it.
  *
  * The track is streamed through an `<audio>` element (so a multi-megabyte MP3 is not decoded
- * into memory up front) and looped quietly beneath the game. The same signal is tapped by a
+ * into memory up front) and played quietly beneath the game, the songs of `THEME.playlist` one
+ * after the other like a radio. The same signal is tapped by a
  * Web Audio `AnalyserNode` and split into three frequency bands — bass, mid, high — each with
  * its own rolling baseline and its own attack/release envelope. A fourth, much slower follower
  * tracks the loudness of the whole mix. The result is four 0..1 levels that move at genuinely
@@ -94,10 +95,23 @@ export function createThemeAudio(): ThemeAudio {
     return silentTheme();
   }
 
-  const el = new Audio(THEME.src);
-  el.loop = true;
+  // One element for the whole playlist: a media element can feed only one source node, so the
+  // radio changes station by swapping `src` rather than by building a new element per song.
+  const el = new Audio();
   el.crossOrigin = 'anonymous';
   el.preload = 'auto';
+  let track = 0;
+  function load(index: number): void {
+    const song = THEME.playlist[index];
+    el.src = song.src;
+    el.onloadedmetadata = song.startAt > 0 ? () => (el.currentTime = song.startAt) : null;
+  }
+  load(track);
+  el.onended = () => {
+    track = (track + 1) % THEME.playlist.length;
+    load(track);
+    void el.play().catch(() => {});
+  };
 
   const source = ctx.createMediaElementSource(el);
 

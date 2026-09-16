@@ -20,8 +20,8 @@ const EDGE_TRIM = 0.06;
 /** Seconds of the recording's tail crossfaded over its head, so the loop has no seam. */
 const CROSSFADE = 1.5;
 /**
- * Loudness (RMS) the recording is normalized to on decode, so `AUDIO.rainVolume` means the same
- * thing whatever file sits at `AUDIO.rainSrc`.
+ * Loudness (RMS) the recordings are normalized to on decode, so `AUDIO.rainVolume` and
+ * `AUDIO.thunderVolume` mean the same thing whatever files sit at their sources.
  */
 const TARGET_RMS = 0.22;
 
@@ -63,7 +63,8 @@ function makeLoop(ctx: BaseAudioContext, src: AudioBuffer): AudioBuffer {
 }
 
 /**
- * Rain hitting the car, from the recording at `AUDIO.rainSrc` (`public/rain.mp3`), looped.
+ * Rain hitting the car, from the recording at `AUDIO.rainSrc` (`public/rain.mp3`), looped, over a
+ * looped thunderstorm bed from `AUDIO.thunderSrc` (`public/thunderstorm.mp3`).
  *
  * It follows the weather (`ATMOSPHERE.rain.intensity`), not the drawn streaks, so it is the same
  * rain on every quality preset — `low` draws none, but it is still raining on the wet road.
@@ -82,23 +83,33 @@ export function createRainAudio(core: AudioCore): RainAudio {
   out.gain.value = 0;
   out.connect(master);
 
+  const thunderOut = ctx.createGain();
+  thunderOut.gain.value = 0;
+  thunderOut.connect(master);
+
   let source: AudioBufferSourceNode | null = null;
+  let thunderSource: AudioBufferSourceNode | null = null;
   let disposed = false;
 
-  fetchSample(ctx, AUDIO.rainSrc)
-    .then((decoded) => {
-      if (disposed) return;
-      const loop = makeLoop(ctx, decoded);
-      source = ctx.createBufferSource();
-      source.buffer = loop;
-      source.loop = true;
-      source.connect(out);
-      // Start somewhere in the loop, not always on its first drop.
-      source.start(ctx.currentTime, Math.random() * loop.duration);
-    })
-    .catch(() => {
-      /* No rain sound; everything else plays on. */
-    });
+  /** Fetches `src`, loops it into `dest` from a random point; resolves to null if it never arrives. */
+  const startLoop = (src: string, dest: GainNode): Promise<AudioBufferSourceNode | null> =>
+    fetchSample(ctx, src)
+      .then((decoded) => {
+        if (disposed) return null;
+        const loop = makeLoop(ctx, decoded);
+        const node = ctx.createBufferSource();
+        node.buffer = loop;
+        node.loop = true;
+        node.connect(dest);
+        // Start somewhere in the loop, not always on its first drop.
+        node.start(ctx.currentTime, Math.random() * loop.duration);
+        return node;
+      })
+      .catch(() => null); // No sound for this layer; everything else plays on.
+
+  void startLoop(AUDIO.rainSrc, out).then((node) => (source = node));
+  // The storm is weather, not the car: it keeps its own pitch whatever the speed.
+  void startLoop(AUDIO.thunderSrc, thunderOut).then((node) => (thunderSource = node));
 
   return {
     update(dt, speed) {
@@ -106,6 +117,7 @@ export function createRainAudio(core: AudioCore): RainAudio {
       const t = ctx.currentTime;
       const intensity = clamp01(ATMOSPHERE.rain.intensity);
       out.gain.setTargetAtTime(AUDIO.rainVolume * intensity, t, LEVEL_TC);
+      thunderOut.gain.setTargetAtTime(AUDIO.thunderVolume * intensity, t, LEVEL_TC);
       if (source) {
         const rate = 1 + AUDIO.rainSpeedRate * clamp01(Math.abs(speed) / REF_SPEED);
         source.playbackRate.setTargetAtTime(rate, t, RATE_TC);
@@ -116,12 +128,15 @@ export function createRainAudio(core: AudioCore): RainAudio {
 
     dispose() {
       disposed = true;
-      try {
-        source?.stop();
-      } catch {
-        /* never started */
+      for (const node of [source, thunderSource]) {
+        try {
+          node?.stop();
+        } catch {
+          /* never started */
+        }
       }
       out.disconnect();
+      thunderOut.disconnect();
     },
   };
 }

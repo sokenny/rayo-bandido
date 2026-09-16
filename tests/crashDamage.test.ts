@@ -269,7 +269,7 @@ describe('in a RAYO RUSH run', () => {
     const { layout, plan } = createOpenWorld();
     const state = createInitialGameState(layout);
     state.economy.money = 500;
-    beginRush(state.rush!, false, 0, state.events);
+    beginRush(state.rush!, 0, state.events);
     state.rush!.score = 1000;
     aimAtWall(layout, plan, state.vehicle);
     const seen: GameEvent[] = [];
@@ -287,7 +287,7 @@ describe('in a RAYO RUSH run', () => {
     const state = createInitialGameState(layout);
     expect(state.crash).not.toBeNull();
     state.economy.money = 500;
-    beginRush(state.rush!, false, 0, state.events);
+    beginRush(state.rush!, 0, state.events);
     state.rush!.score = 1000;
     aimAtWall(layout, plan, state.vehicle);
     const seen: GameEvent[] = [];

@@ -127,21 +127,14 @@ export const NAME_MAX = 14;
  * session is a cookie, so they are always addressed on the page's own origin.
  *
  *   GET  /api/boards/:board?limit=10   the top rows (`rush`, `circuit`, `street`)
- *   GET  /api/boards/:board/standing   this player's best, rank, and rush attempts left today
- *   POST /api/boards/:board/runs       file a run; a rush run spends one of the day's attempts
+ *   GET  /api/boards/:board/standing   this player's best and rank
+ *   POST /api/boards/:board/runs       file a run; every run counts, the board keeps the best
  *   GET  /api/me · POST /api/progress · POST /api/profile · /auth/…   (`src/net/account.ts`)
  *
  * `src/net/leaderboard.ts` and `src/net/account.ts` are the only things that speak to them.
  */
 export const BOARDS_PATH = '/api/boards';
 export type BoardId = 'rush' | 'circuit' | 'street';
-
-/**
- * Ranked attempts one player may file per UTC day. `RUSH.dailyRankedAttempts` in
- * `src/config/tuning.ts` is what the game plays by; this is the same number as the server
- * enforces it, repeated for the same reason every other constant here is.
- */
-export const RUSH_DAILY_ATTEMPTS = 3;
 
 /**
  * Where the match server listens in development, when the game is being served by Vite on a

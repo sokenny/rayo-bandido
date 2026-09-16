@@ -3,7 +3,7 @@ import { boardToRivals, placeOnLadder, type LadderPlace } from '../src/ui/rushLa
 import type { LeaderboardRow, RushStanding } from '../src/net/leaderboard';
 
 const row = (rank: number, name: string, score: number): LeaderboardRow => ({ rank, name, score, disabled: 0, bestChain: 0, at: 0 });
-const standing = (rank: number, best: number): RushStanding => ({ attemptsLeft: 3, dailyAttempts: 3, best, rank, online: true });
+const standing = (rank: number, best: number): RushStanding => ({ best, rank, online: true });
 const place = (): LadderPlace => ({ above: null, below: null, rank: -1 });
 
 describe('rush live ladder', () => {

@@ -12,7 +12,7 @@ import { BOARDS, createScores } from './scores.mjs';
  *   POST /api/progress                 save progress; answers with the record as it now stands
  *   POST /api/profile     {name}       set the display name
  *   GET  /api/boards/:board?limit=10   the top of a board
- *   GET  /api/boards/:board/standing   this player's best, rank and (rush) attempts left today
+ *   GET  /api/boards/:board/standing   this player's best and rank
  *   POST /api/boards/:board/runs       file a finished run
  *   GET  /auth/:provider/start?return= off to Google / Discord
  *   GET  /auth/:provider/callback      back from them, signed in
@@ -76,11 +76,11 @@ function withParam(path, key, value) {
 }
 
 /**
- * @param {{ db: import('./db/index.mjs').Database | null, dailyAttempts: number, log?: (msg: string) => void, env?: NodeJS.ProcessEnv }} options
+ * @param {{ db: import('./db/index.mjs').Database | null, log?: (msg: string) => void, env?: NodeJS.ProcessEnv }} options
  */
-export function createApi({ db, dailyAttempts, log = () => {}, env = process.env }) {
+export function createApi({ db, log = () => {}, env = process.env }) {
   const accounts = db ? createAccounts(db, { log }) : null;
-  const scores = db ? createScores(db, { dailyAttempts }) : null;
+  const scores = db ? createScores(db) : null;
   const providers = createProviders(env);
   const providerIds = Object.keys(providers).filter((id) => id !== 'dev');
 

@@ -149,14 +149,20 @@ async function openRds(env, log) {
 }
 
 /**
- * RDS for Postgres 15+ refuses unencrypted connections. With `RB_DB_CA_FILE` (the RDS CA bundle,
- * https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) the certificate is verified;
- * without it the connection is still encrypted but the server's certificate is not checked.
+ * RDS for Postgres 15+ refuses unencrypted connections, and the certificate it presents is signed
+ * by Amazon's own RDS CAs, which no system trust store carries. So the bundle of them ships beside
+ * this file (`rds-global-bundle.pem`, from
+ * https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) and the certificate AND the
+ * host name are verified against it. `RB_DB_CA_FILE` points somewhere else, for a newer bundle
+ * without a deploy. A bundle that cannot be read is fatal to the connection, never a quiet
+ * downgrade to an unverified one.
  */
+const RDS_CA_BUNDLE = fileURLToPath(new URL('./rds-global-bundle.pem', import.meta.url));
+
 function rdsSsl(env, log) {
-  if (env.RB_DB_CA_FILE) return { ca: readFileSync(env.RB_DB_CA_FILE, 'utf8'), rejectUnauthorized: true };
-  log('database: TLS without certificate verification (set RB_DB_CA_FILE to verify)');
-  return { rejectUnauthorized: false };
+  const file = env.RB_DB_CA_FILE || RDS_CA_BUNDLE;
+  log(`database: TLS verified against ${file === RDS_CA_BUNDLE ? 'the bundled RDS CAs' : file}`);
+  return { ca: readFileSync(file, 'utf8'), rejectUnauthorized: true };
 }
 
 async function openPg(config, log, onAuthFailure = () => {}) {
