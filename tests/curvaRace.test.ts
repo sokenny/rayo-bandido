@@ -5,13 +5,14 @@ import { createPlayerCommand } from '../src/core/input/keyboard';
 import { emptyStreetRaceProgress, recordStreetRace } from '../src/core/progress';
 import { INTRO } from '../src/content/intro';
 import { createInitialGameState, createVehicleState, stepGame } from '../src/sim/gameState';
-import { createRaceState, gateCrossing, stepRace } from '../src/sim/race';
+import { createRaceState, stepRace } from '../src/sim/race';
 import { canEnterStreetRace, createStreetGateState, stepStreetGate, streetEventCount, streetEventOpen, streetEventStandalone } from '../src/sim/streetGate';
 import { createStreetRaceState, stepStreetRace, streetEvent, streetPosition } from '../src/sim/streetRace';
 import { meetSolids } from '../src/world/carMeet';
 import { CURVA_LAPS, CURVA_SHORTCUTS, CURVA_SITE } from '../src/world/curvaSpec';
 import { createCurvaWorld } from '../src/world/curvaWorld';
 import { METRO_MEET, METRO_MEET_LOT, METRO_STREET_SITES } from '../src/world/metroSpec';
+import { barrierInput, findBarrierLeaks } from '../src/world/raceBarriers';
 import { createProjection, pointAtStation, projectOntoPath, type TrackPath } from '../src/world/track';
 
 /**
@@ -19,7 +20,7 @@ import { createProjection, pointAtStation, projectOntoPath, type TrackPath } fro
  *
  * Pinned: the ribbon is on the city's roads and decks at their own heights with nothing solid in
  * it; the lap climbs onto the viaduct over the meet and runs The Stack's deck; no straight is
- * long; the fence is closed everywhere but the branch mouths; each branch validates a lap; the
+ * long; nothing gets off the course or across it but the branches; each branch validates a lap; the
  * ring is on the lot and offers each harder event in place; and three rivals drive it home.
  */
 
@@ -65,13 +66,6 @@ function insideRibbon(x: number, z: number, lo: number, hi: number): boolean {
     if (inProj.dist < inProj.halfWidth - 0.3 && lo < inProj.y + 1.5 && hi > inProj.y + 0.3) return true;
   }
   return false;
-}
-
-/** Whether segment p0-p1 meets segment a-b. */
-function hits(p0x: number, p0z: number, p1x: number, p1z: number, ax: number, az: number, bx: number, bz: number): boolean {
-  const dx = p1x - p0x;
-  const dz = p1z - p0z;
-  return gateCrossing(p0x, p0z, p1x, p1z, ax, az, bx, bz, dx, dz) !== 0;
 }
 
 /** Only what comes within a street's width of the course is walked in detail. */
@@ -128,64 +122,18 @@ describe('the La Curva circuit', () => {
     expect(path.length).toBeGreaterThan(3000);
   });
 
-  it('is fenced shut: from anywhere on the course, the only way out of the ribbon is into a branch', () => {
+  it('is shut: from anywhere on the course, no way off it and no way across it but the branches', () => {
     const walls = world.plan.neonWalls ?? [];
-    // Walls bucketed on a 10 m grid, so every half metre of both edges can be probed.
-    const CELL = 10;
-    const buckets = new Map<string, typeof walls>();
-    for (const w of walls) {
-      for (let cx = Math.floor(Math.min(w.ax, w.bx) / CELL); cx <= Math.floor(Math.max(w.ax, w.bx) / CELL); cx++) {
-        for (let cz = Math.floor(Math.min(w.az, w.bz) / CELL); cz <= Math.floor(Math.max(w.az, w.bz) / CELL); cz++) {
-          const k = `${cx},${cz}`;
-          const list = buckets.get(k) ?? [];
-          list.push(w);
-          buckets.set(k, list);
-        }
-      }
-    }
-    const probe = createProjection();
-    const at = createProjection();
-    const gaps: string[] = [];
-    for (let r = 0; r < ribbons.length; r++) {
-      const p = ribbons[r];
-      for (let st = 0; st <= p.length; st += 0.5) {
-        const s = pointAtStation(p, st, at);
-        for (const side of [-1, 1]) {
-          const nx = -s.tz * side;
-          const nz = s.tx * side;
-          // From just inside the edge to 2.5 m past it, on three lines half a metre apart along
-          // the edge: a car only gets out where all three do, which is a hole 1.5 m wide or more.
-          // Anything that does get out has to be on another ribbon of the course.
-          const bx = s.x + nx * (s.halfWidth + 2.5);
-          const bz = s.z + nz * (s.halfWidth + 2.5);
-          const ex = s.x + nx * s.halfWidth;
-          const ez = s.z + nz * s.halfWidth;
-          const near: typeof walls = [];
-          for (let dx = -1; dx <= 1; dx++) {
-            for (let dz = -1; dz <= 1; dz++) near.push(...(buckets.get(`${Math.floor(ex / CELL) + dx},${Math.floor(ez / CELL) + dz}`) ?? []));
-          }
-          const crosses = (off: number): boolean => {
-            const ox = s.tx * off;
-            const oz = s.tz * off;
-            const x0 = s.x + nx * (s.halfWidth - 1) + ox;
-            const z0 = s.z + nz * (s.halfWidth - 1) + oz;
-            const test = (w: (typeof walls)[number]): boolean => Math.abs(Math.min(w.ay, w.by) - s.y) < 3 && hits(x0, z0, bx + ox, bz + oz, w.ax, w.az, w.bx, w.bz);
-            return near.some(test);
-          };
-          let blocked = crosses(-0.5) || crosses(0) || crosses(0.5);
-          if (!blocked) {
-            for (let o = 0; o < ribbons.length && !blocked; o++) {
-              if (o === r) continue;
-              projectOntoPath(ribbons[o], bx, bz, probe, -1, 12, s.y);
-              const pastEnd = !ribbons[o].closed && (probe.s <= 0.01 || probe.s >= ribbons[o].length - 0.01);
-              if (!pastEnd && probe.dist < probe.halfWidth && Math.abs(probe.y - s.y) < 3) blocked = true;
-            }
-          }
-          if (!blocked) gaps.push(`ribbon ${r} ${s.x.toFixed(1)},${s.z.toFixed(1)}@${s.y.toFixed(1)} side ${side}`);
-        }
-      }
-    }
-    expect(gaps).toEqual([]);
+    const leaks = findBarrierLeaks(barrierInput(world, ribbons, world.layout.walls), walls);
+    expect(leaks.map((l) => `(${l.x.toFixed(0)}, ${l.z.toFixed(0)}) h${l.y.toFixed(0)} via ${l.trail.map((p) => `${p.x.toFixed(0)},${p.z.toFixed(0)}`).join(' ')}`)).toEqual([]);
+  });
+
+  it('closes only what the city and the highways leave open: a fraction of a fence down every edge', () => {
+    let length = 0;
+    for (const w of world.plan.neonWalls ?? []) length += Math.hypot(w.bx - w.ax, w.bz - w.az);
+    const edges = ribbons.reduce((sum, p) => sum + 2 * p.length, 0);
+    expect(length).toBeGreaterThan(300);
+    expect(length / edges).toBeLessThan(0.4);
   });
 
   it('carries no other activity and no city traffic on the decks', () => {

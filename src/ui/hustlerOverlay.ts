@@ -65,6 +65,8 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
   void prepareDialogue('villero', Object.values(MEDIAS_LINES).flat());
 
   let shownLineId = -1;
+  /** Where the line on air is coming from. A fresh one per line, so the last line stays where it was said. */
+  let voiceAt = { x: 0, z: 0 };
   let shownTalking = false;
   let shownOffer = false;
   let shownPrice = -1;
@@ -114,8 +116,10 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         if (on) {
           speakerEl.textContent = h.speaker.toUpperCase();
           textEl.textContent = h.line;
-          // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence.
-          void speakDialogue({ characterId: HUSTLER_VOICE[h.kind], text: h.line, interrupt: true });
+          // Not awaited, and not stopped when the subtitle goes: a short line finishes its sentence —
+          // from where he stands, so a car that drives off leaves it behind on the corner.
+          voiceAt = { x: h.x, z: h.z };
+          void speakDialogue({ characterId: HUSTLER_VOICE[h.kind], text: h.line, interrupt: true, at: voiceAt });
           play(
             subtitleEl,
             [
@@ -128,6 +132,10 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         setTalking(on);
       } else if (h.line === '' && shownTalking) {
         setTalking(false);
+      } else if (h.line !== '') {
+        // Same line, same speaker: a sock seller walking his beat takes his voice with him.
+        voiceAt.x = h.x;
+        voiceAt.z = h.z;
       }
     },
 

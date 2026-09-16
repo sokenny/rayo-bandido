@@ -18,6 +18,7 @@ import { createMicroSceneVoices } from './microSceneVoice';
 import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
 import type { BusStopCrowd } from '../world/busStopCrowds';
 import { skidIntensity } from './dsp';
+import { chainMultiplier } from '../sim/rush';
 
 /** Slide state for the tire scrub, read each frame. */
 export interface SkidInput {
@@ -224,6 +225,11 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
         case 'crashDamage':
         case 'crashStall':
           oneShots.crash(ev.severity === 'heavy' ? 1 : ev.severity === 'medium' ? 0.65 : 0.35);
+          break;
+        case 'rushScore':
+          // The multiplier climbed. The first kill of a streak pays x1, and one past the cap pays
+          // what the last did: neither is a climb.
+          if (ev.multiplier > chainMultiplier(ev.chain - 1)) oneShots.chainUp(ev.chain - 1);
           break;
         case 'rushLevelUp':
           // A mission cleared gets the GO beat, which is the one sound in the kit that already

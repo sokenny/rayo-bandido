@@ -29,7 +29,8 @@ import type { StreetCourseSpec } from './streetSpec';
  * The two race ramps (`CURVA_RAMPS`) exist only in the race's copy of the city, built exactly like
  * the metro's own four (`METRO_RAMPS`): the viaduct had no way on or off near the meet.
  *
- * The whole lap and both branches are fenced edge to edge (`fence: 'full'`).
+ * Nothing gets off the lap or the branches: the viaduct's and the deck's rails and the blocks
+ * hold most of it, and `raceBarriers.ts` closes the rest — every mouth, lot and ramp junction.
  *
  * PURE GEOMETRY, no imports that run (the same rule as `streetSpec.ts`).
  */
@@ -55,7 +56,7 @@ const n = (x: number, z: number, r: number, width: number, tag: string, y?: numb
 const VIADUCT_Y = 15;
 const DECK_Y = 12;
 
-/** Ribbon widths (m): each is its road less room for the fence. */
+/** Ribbon widths (m): each is its road less a margin either side. */
 const W_BLVD = 15; // the 20 m ring boulevards
 const W_AVE = 13; // 18-22 m avenues
 const W_STREET = 11; // 13 m streets
@@ -160,8 +161,8 @@ export const CURVA_SPEC: TrackSpec = {
 };
 
 /**
- * The branches. Each starts and ends inside the lap's ribbon, so the fence opens exactly where
- * it leaves and joins (`layFullFence`).
+ * The branches. Each starts and ends inside the lap's ribbon, so the barrier leaves a branch's mouth
+ * open where it leaves and joins (`raceBarriers.ts`).
  *
  *   A  THE WIDE WAY BACK: on along av-sweeper past st-west and left down blvd-ring-w. The same
  *      distance as st-west and the ring, one corner instead of two, on roads half as wide again.
@@ -200,15 +201,8 @@ export const CURVA_LAPS = 1;
 export const CURVA_COURSE: StreetCourseSpec = {
   spec: CURVA_SPEC,
   shortcuts: CURVA_SHORTCUTS,
-  // Only read by the corner-barrier plan; the full fence opens its mouths from the geometry.
-  mouths: [
-    { in: 1, out: -1 },
-    { in: -1, out: 1 },
-  ],
   gates: CURVA_GATES,
-  barriers: { corners: { lead: 0 }, spans: [] },
   laps: CURVA_LAPS,
-  fence: 'full',
   // The lap races on both decks: the city's own traffic up there comes off.
   keepDeckTraffic: false,
 };

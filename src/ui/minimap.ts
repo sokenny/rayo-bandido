@@ -27,7 +27,7 @@ import { slotCss } from '../core/playerColors';
  * `MINIMAP.size` CSS pixels blitting from one prepainted base.
  */
 export interface Minimap {
-  /** `targets` is accepted but not drawn; `rivals` is empty outside a multiplayer race. */
+  /** `targets` is accepted but not drawn; `rivals` are the other players (room or local race). */
   update(
     playerX: number,
     playerZ: number,
@@ -132,6 +132,7 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const half = canvas.width / 2;
   const rimR = half - 1.5 * dpr;
   const markRimR = rimR - 9 * dpr * MINIMAP.iconScale;
+  const rivalRimR = rimR - 3 * dpr;
 
   /* ------------------------------------------------------------ the full map */
 
@@ -342,19 +343,6 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       // Electric cars are deliberately not drawn: a hundred-odd white dots buried the
       // player's own arrow and the route. Hunting them is the game.
 
-      // Rivals: a slightly bigger dot in each player's own colour, so a glance at the map
-      // says who is where. Drawn under the player arrow, which always stays on top.
-      if (rivals) {
-        for (let i = 0; i < rivals.length; i++) {
-          const r = rivals[i];
-          if (!r.present) continue;
-          ctx.fillStyle = slotCss(r.slot);
-          ctx.beginPath();
-          ctx.arc(half + (r.x - playerX) * scale, half + (r.z - playerZ) * scale, dotR * 1.35, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
       // Destinations, pinned to the rim when they are off the window, pointing the way.
       for (let i = 0; i < marks.length; i++) {
         const m = marks[i];
@@ -366,6 +354,41 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
           mz *= markRimR / d;
         }
         drawActivity(ctx, half + mx, half + mz, dpr, m.kind);
+      }
+
+      // Other players, in their own colour, over the activity marks and under the player's arrow.
+      // The window is only a few hundred metres across and the city is kilometres wide, so a player
+      // off the window is pinned to the rim as a chevron pointing at them — the corner map alone
+      // says where everyone is, without opening the full map.
+      if (rivals) {
+        for (let i = 0; i < rivals.length; i++) {
+          const r = rivals[i];
+          if (!r.present) continue;
+          const rx = (r.x - playerX) * scale;
+          const rz = (r.z - playerZ) * scale;
+          const d = Math.hypot(rx, rz);
+          ctx.fillStyle = slotCss(r.slot);
+          ctx.strokeStyle = 'rgba(5, 7, 13, 0.9)';
+          ctx.lineWidth = 1.5 * dpr;
+          ctx.beginPath();
+          if (d <= rivalRimR) {
+            ctx.arc(half + rx, half + rz, dotR * 1.7, 0, Math.PI * 2);
+          } else {
+            const ux = rx / d;
+            const uz = rz / d;
+            const tipX = half + ux * rivalRimR;
+            const tipZ = half + uz * rivalRimR;
+            const len = 9 * dpr;
+            const wing = 5 * dpr;
+            ctx.moveTo(tipX, tipZ);
+            ctx.lineTo(tipX - ux * len - uz * wing, tipZ - uz * len + ux * wing);
+            ctx.lineTo(tipX - ux * len * 0.6, tipZ - uz * len * 0.6);
+            ctx.lineTo(tipX - ux * len + uz * wing, tipZ - uz * len - ux * wing);
+            ctx.closePath();
+          }
+          ctx.fill();
+          ctx.stroke();
+        }
       }
 
       drawPlayer(ctx, half, half, heading, MINIMAP.playerScale);

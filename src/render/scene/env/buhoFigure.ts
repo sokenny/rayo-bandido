@@ -123,6 +123,7 @@ export function createBuhoFigure(site: ActivitySite): BuhoFigureVisual {
     blending: THREE.AdditiveBlending,
     toneMapped: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
   const glow = new THREE.Mesh(glowGeo, glowMat);
   glow.name = 'el-buho-glow';

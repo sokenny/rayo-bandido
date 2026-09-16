@@ -1,4 +1,4 @@
-import type { GameEvent, RushHudSnapshot } from '../core/types';
+import type { GameEvent, RushHudSnapshot, RushRival } from '../core/types';
 import { RUSH } from '../config/tuning';
 
 /**
@@ -49,6 +49,9 @@ const FEED_SLOTS = 4;
 const FEED_LIFE = 1500;
 /** Steps the streak drain bar is quantised to, so it is written ~20 times a window, not 300. */
 const CHAIN_STEPS = 20;
+
+/** Height of one ladder row in px — kept equal to `.rb-rush__rung`'s in `src/styles.css`, so a swap slides exactly one row without reading geometry back. */
+const RUNG_PX = 16;
 
 const canAnimate = typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
 
@@ -134,6 +137,14 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
     // going to make it" is one glance rather than a sum.
     `<div class="rb-rush__target"><span class="rb-rush__target-label">OBJETIVO</span><span class="rb-rush__target-value">—</span></div>` +
     `<div class="rb-rush__streak"><span class="rb-rush__streak-value">x1</span><span class="rb-rush__streak-bar"></span></div>` +
+    // The live ladder: the rival just above the run, the run itself, the rival just passed.
+    // Always in score order, so overtaking someone on the global board is watching your row
+    // climb over theirs.
+    `<div class="rb-rush__ladder">` +
+    `<div class="rb-rush__rung is-above"><span class="rb-rush__rung-rank"></span><span class="rb-rush__rung-name"></span><span class="rb-rush__rung-score"></span></div>` +
+    `<div class="rb-rush__rung is-self"><span class="rb-rush__rung-rank"></span><span class="rb-rush__rung-name">VOS</span><span class="rb-rush__rung-score"></span></div>` +
+    `<div class="rb-rush__rung is-below"><span class="rb-rush__rung-rank"></span><span class="rb-rush__rung-name"></span><span class="rb-rush__rung-score"></span></div>` +
+    `</div>` +
     `</div>` +
     // The kill feed.
     `<div class="rb-rush__feed">${'<span class="rb-rush__line"></span>'.repeat(FEED_SLOTS)}</div>` +
@@ -174,6 +185,18 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   const targetEl = pick<HTMLElement>(root, '.rb-rush__target');
   const targetValueEl = pick<HTMLElement>(root, '.rb-rush__target-value');
   const feedEls = Array.from(root.querySelectorAll<HTMLElement>('.rb-rush__line'));
+  const ladderEl = pick<HTMLElement>(root, '.rb-rush__ladder');
+  const rungAboveEl = pick<HTMLElement>(root, '.rb-rush__rung.is-above');
+  const rungSelfEl = pick<HTMLElement>(root, '.rb-rush__rung.is-self');
+  const rungBelowEl = pick<HTMLElement>(root, '.rb-rush__rung.is-below');
+  const rungText = (row: HTMLElement) => ({
+    rank: pick<HTMLElement>(row, '.rb-rush__rung-rank'),
+    name: pick<HTMLElement>(row, '.rb-rush__rung-name'),
+    score: pick<HTMLElement>(row, '.rb-rush__rung-score'),
+  });
+  const rungAbove = rungText(rungAboveEl);
+  const rungSelf = rungText(rungSelfEl);
+  const rungBelow = rungText(rungBelowEl);
   const resultsEl = pick<HTMLElement>(root, '.rb-rush__results');
   const resultsScoreEl = pick<HTMLElement>(root, '.rb-rush__results-score');
   const resultsBestEl = pick<HTMLElement>(root, '.rb-rush__results-best');
@@ -214,6 +237,13 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
   let shownTarget = -1;
   let shownPassed = false;
   let feedIndex = 0;
+  // The ladder's cache. Rivals are compared by identity: the board is fetched rarely and each
+  // row is one object for as long as it is, so "the row that was above is now below" is a pass.
+  let shownLadder = false;
+  let shownAbove: RushRival | null = null;
+  let shownBelow: RushRival | null = null;
+  let shownRank = '';
+  let shownLadderScore = -1;
 
   const animations = new Map<Element, Animation>();
 
@@ -241,6 +271,72 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
       ],
       FEED_LIFE,
     );
+  }
+
+  /** A rival's row: filled when there is one, collapsed when there is not. `behind` is places the run has pushed it down. */
+  function writeRival(row: HTMLElement, text: ReturnType<typeof rungText>, rival: RushRival | null, behind: number): void {
+    row.classList.toggle('is-on', !!rival);
+    if (!rival) return;
+    text.rank.textContent = `#${rival.rank + behind}`;
+    text.name.textContent = rival.name;
+    text.score.textContent = formatScore(rival.score);
+  }
+
+  /** Slide two rows past each other by one rung: `riser` comes up from below, `faller` down from above. */
+  function swap(riser: HTMLElement, faller: HTMLElement): void {
+    play(
+      riser,
+      [
+        { transform: `translateY(${RUNG_PX}px) scale(1.12)` },
+        { transform: 'translateY(0) scale(1.12)', offset: 0.55 },
+        { transform: 'translateY(0) scale(1)' },
+      ],
+      420,
+    );
+    play(faller, [{ transform: `translateY(-${RUNG_PX}px)` }, { transform: 'translateY(0)' }], 300);
+  }
+
+  function updateLadder(rush: RushHudSnapshot): void {
+    const on = rush.liveRank > 0 && (rush.phase === 'running' || rush.phase === 'countdown');
+    if (on !== shownLadder) {
+      shownLadder = on;
+      ladderEl.classList.toggle('is-on', on);
+      if (!on) {
+        shownAbove = null;
+        shownBelow = null;
+      }
+    }
+    if (!on) return;
+
+    const above = rush.rivalAbove;
+    const below = rush.rivalBelow;
+    if (above !== shownAbove || below !== shownBelow) {
+      // Read the direction off the rows that moved, BEFORE the cache takes the new ones.
+      const passed = !!shownAbove && below === shownAbove;
+      const dropped = !!shownBelow && above === shownBelow;
+      shownAbove = above;
+      shownBelow = below;
+      writeRival(rungAboveEl, rungAbove, above, 0);
+      // The rival under the run has been pushed a place down the board by it.
+      writeRival(rungBelowEl, rungBelow, below, 1);
+      if (passed && below) {
+        swap(rungSelfEl, rungBelowEl);
+        pushLine(`PASASTE A ${below.name} · #${rush.liveRank}`, 'chain');
+      } else if (dropped && above) {
+        swap(rungAboveEl, rungSelfEl);
+        pushLine(`TE PASÓ ${above.name}`, 'crash');
+      }
+    }
+    // Past the end of the fetched page the rank is only a floor, and says so.
+    const rank = rush.ladderTruncated && !below ? `#${rush.liveRank}+` : `#${rush.liveRank}`;
+    if (rank !== shownRank) {
+      shownRank = rank;
+      rungSelf.rank.textContent = rank;
+    }
+    if (rush.score !== shownLadderScore) {
+      shownLadderScore = rush.score;
+      rungSelf.score.textContent = formatScore(rush.score);
+    }
   }
 
   return {
@@ -303,9 +399,40 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           scoreEl.textContent = formatScore(rush.score);
         }
         if (rush.multiplier !== shownMultiplier) {
+          const previous = shownMultiplier;
           shownMultiplier = rush.multiplier;
-          streakValueEl.textContent = formatMultiplier(rush.multiplier);
           streakEl.classList.toggle('is-on', rush.multiplier > 1);
+          if (rush.multiplier > previous || previous <= 1) {
+            streakValueEl.textContent = formatMultiplier(rush.multiplier);
+            // Every step up punches out and settles back, so a climb is felt, not just read.
+            if (previous > 0 && rush.multiplier > previous) {
+              play(
+                streakValueEl,
+                [
+                  { transform: 'scale(1)', filter: 'brightness(1)' },
+                  { transform: 'scale(1.75)', filter: 'brightness(1.8)', offset: 0.22 },
+                  { transform: 'scale(0.94)', filter: 'brightness(1.1)', offset: 0.6 },
+                  { transform: 'scale(1)', filter: 'brightness(1)' },
+                ],
+                420,
+              );
+            }
+          } else {
+            // Lost: the old number stays up, goes red and shakes out, so the player sees WHAT went.
+            play(
+              streakEl,
+              [
+                { opacity: 1, transform: 'translateX(0)' },
+                { opacity: 1, transform: 'translateX(-6px)', offset: 0.12 },
+                { opacity: 1, transform: 'translateX(5px)', offset: 0.26 },
+                { opacity: 1, transform: 'translateX(-3px)', offset: 0.4 },
+                { opacity: 1, transform: 'translateX(0)', offset: 0.55 },
+                { opacity: 0, transform: 'translateX(0) scale(0.8)' },
+              ],
+              520,
+            );
+            play(streakValueEl, [{ color: 'var(--rb-red)' }, { color: 'var(--rb-red)' }], 520);
+          }
         }
         // The drain bar is the only thing that would otherwise be written every frame.
         const step = Math.round(rush.chainFraction * CHAIN_STEPS);
@@ -339,6 +466,7 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
         }
         targetEl.classList.toggle('is-on', !rush.allClear);
       }
+      updateLadder(rush);
 
       /* ------------------------------------------------------------ the results */
 
@@ -404,6 +532,10 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           // that the line it is on is hidden too. Cleared here, where the run begins.
           shownPassed = false;
           targetEl.classList.remove('is-passed');
+          // A new run starts at the bottom of the ladder: no pass is announced against the last one.
+          shownAbove = null;
+          shownBelow = null;
+          shownLadderScore = -1;
           break;
         case 'rushLevelUp':
           // The chain moved on while the results card was still going up. The prompt behind it
@@ -431,6 +563,12 @@ export function createRushOverlay(options: RushOverlayOptions): RushOverlay {
           break;
         case 'rushCrash':
           if (event.points > 0) pushLine(`CHOQUE −${formatScore(event.points)}`, 'crash');
+          break;
+        case 'rushChainBroken':
+          // A lapsed window says nothing: the draining bar already told the story.
+          if (event.multiplier > 1 && event.reason !== 'timeout') {
+            pushLine(`${event.reason === 'miss' ? 'RAYO ERRADO' : 'CHOQUE'} · CADENA ${formatMultiplier(event.multiplier)} PERDIDA`, 'crash');
+          }
           break;
         case 'rushDismissed':
         case 'restart':

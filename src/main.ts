@@ -1,6 +1,6 @@
 import './styles.css';
 import type { GameMode } from './core/types';
-import { createGame, type Game } from './game';
+import type { Game } from './game';
 import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
 import { showMainMenu, type MenuChoice } from './ui/mainMenu';
 import { showQuickPlayMenu, showQuickPlayModeMenu, type QuickPlayChoice } from './ui/quickPlayMenu';
@@ -23,6 +23,7 @@ import { streetNewestEvent } from './sim/streetGate';
 import { installMobileShell } from './ui/mobileShell';
 import { account } from './net/account';
 import { createAccountBadge } from './ui/accountBadge';
+import { scheduleMenuBackdrop } from './ui/menuBackdropLoader';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 const hudRoot = document.getElementById('hud-root');
@@ -210,6 +211,8 @@ async function buildGame(
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
 
+  // The game is its own chunk, so a menu never pays to download or parse it.
+  const { createGame } = await import('./game');
   const game = createGame(canvas!, hudRoot!, debugRoot!, mode, {
     net,
     onEnterCircuit: options.onEnterCircuit,
@@ -541,6 +544,7 @@ function menu(): void {
   void loading.hide();
   // Who is playing, and the way to sign in: on the main menu only, never over a world.
   createAccountBadge(menuRoot!, account());
+  scheduleMenuBackdrop(canvas!);
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
     const url =
       choice === 'quick'
@@ -568,6 +572,7 @@ function changelog(): void {
 function quickPlayMenu(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  scheduleMenuBackdrop(canvas!);
   showQuickPlayMenu(menuRoot!, {
     onSelect(game: RoomGame) {
       setTimeout(() => location.assign(urlWith({ quick: game })), 180);
@@ -586,6 +591,7 @@ function quickPlayMenu(): void {
 function quickPlayModeMenu(game: RoomGame): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  scheduleMenuBackdrop(canvas!);
   showQuickPlayModeMenu(menuRoot!, game, {
     onSelect(choice: QuickPlayChoice) {
       const url =

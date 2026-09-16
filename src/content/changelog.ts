@@ -31,6 +31,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'Micro-scenes: small moments happening around the city as you drive past — two or three people, one conversation.',
       'Crash penalties and near misses now count toward Rayo Rush scores.',
+      'Race barriers are tall holographic chevron walls now, and only close the streets that lead off the course.',
+      'The main menu now sits over a live 3D view of La Curva and the car meet, not a flat backdrop.',
+      'Rayo Rush now shows a live ladder against other players\' best scores while you run.',
     ],
   },
   {

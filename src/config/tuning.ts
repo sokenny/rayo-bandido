@@ -465,7 +465,7 @@ export const DRIFT = {
 export const NITRO = {
   capacity: 100,
   /** Units consumed per second while boosting. */
-  drainPerSecond: 28,
+  drainPerSecond: 18.2,
   /** Units restored per second while moving and not boosting. */
   rechargePerSecond: 18,
   /** Delay before recharging resumes after boost ends (s). */
@@ -1201,6 +1201,8 @@ export const AUDIO = {
    * finished animating in.
    */
   pickupVolume: 0.5,
+  /** RAYO RUSH's streak multiplier going up (`oneShots.chainUp`). */
+  chainUpVolume: 0.42,
   /**
    * BadKala's call in the intro ringing. It has to cut through the engine and the theme on the
    * first drive — it was 0.35 (pickup × 0.7) and got lost under both.
@@ -2723,6 +2725,16 @@ export const HUSTLERS = {
   streetY: 2.5,
   /** The subtitle is cut once the car is this far from whoever is saying it. */
   hearRadius: 45,
+  /**
+   * The voice comes out of him, not out of the HUD: full loudness within `near`, fading to silence
+   * at `max`, and darker with distance — drive off mid-line and it is left behind on the corner.
+   */
+  voice: {
+    near: 5,
+    max: 55,
+    brightHz: 12000,
+    darkHz: 2500,
+  },
   /** Encounters before the subtitle calls him by his nickname. */
   nicknameAfter: 3,
   /** Share of lines, once he knows you, that are "you again" lines. */

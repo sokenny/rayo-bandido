@@ -386,6 +386,45 @@ describe('rayo rush: scoring', () => {
     expect(end?.results).toMatchObject({ nearMisses: 1, nearMissPoints: paid });
   });
 
+  it('loses the streak on a crash and on a bolt that hits nothing, but not on a hit', () => {
+    const r = rig();
+    r.begin();
+    r.tick([0]);
+    r.tick([1]);
+    expect(r.rush.multiplier).toBeGreaterThan(1);
+
+    // A crash ends it, and says what was lost.
+    const crash: GameEvent[] = [];
+    penalizeRushCrash(r.rush, 'light', crash);
+    expect(r.rush.chain).toBe(0);
+    expect(r.rush.multiplier).toBe(1);
+    expect(r.rush.chainWindow).toBe(0);
+    expect(crash.find((e) => e.type === 'rushChainBroken')).toMatchObject({ reason: 'crash', multiplier: chainMultiplier(2) });
+
+    // A miss ends it too.
+    r.tick([2]);
+    r.tick([3]);
+    const fired = (targetId: number): GameEvent => ({ type: 'lightningFired', targetId, fromX: 0, fromY: 0, fromZ: 0, toX: 0, toY: 0, toZ: 0, distance: 10, spent: 0 });
+    const miss: GameEvent[] = [fired(-1)];
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, miss);
+    expect(r.rush.multiplier).toBe(1);
+    expect(miss.find((e) => e.type === 'rushChainBroken')).toMatchObject({ reason: 'miss' });
+
+    // A bolt that lands keeps the streak going.
+    r.tick([4]);
+    const hit: GameEvent[] = [fired(5), { type: 'targetDestroyed', targetId: 5, x: 0, y: 0, z: 0, reward: 0, distance: 10 }];
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, hit);
+    expect(r.rush.chain).toBe(2);
+    expect(hit.some((e) => e.type === 'rushChainBroken')).toBe(false);
+
+    // With no streak there is nothing to lose, and nothing is announced.
+    r.rush.chain = 0;
+    r.rush.multiplier = 1;
+    const empty: GameEvent[] = [fired(-1)];
+    stepRush(r.rush, SITE, r.vehicle, r.drift, r.cmd, r.targets, true, DT, empty);
+    expect(empty.some((e) => e.type === 'rushChainBroken')).toBe(false);
+  });
+
   it('takes a crash off the score by severity, never below zero, and only while running', () => {
     const r = rig();
     // Nothing outside the clock.

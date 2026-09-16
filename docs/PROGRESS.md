@@ -3014,3 +3014,57 @@ are rendered into `public/npc-voice/scenes/`. The generator now measures them in
 `src/microScenes/clipDurations.ts`, and the director times each line from its recording (divided by
 the profile's playback rate) instead of estimating from text, so a long take is never cut off by the
 next speaker; an uncut line is left to finish on its own.
+
+## Metro frame profiled; single-pass additive transparents (2026-09-16)
+
+Juan asked for a dramatic smoothness win, so the metro was profiled properly for the first time
+(headless Chrome, 1600x900, `?scale=1`, CDP sampling profiler, a `renderBufferDirect` draw census
+and a trace on `Material.needsUpdate`). The result overturns the earlier "fill-rate bound" reading:
+**the metro is main-thread bound.** Stationary at spawn: 8.3 ms a frame of which 7.4 ms is render
+JavaScript and 4.0 ms GPU; the pixel ratio from 1.5 down to 0.7 moves the frame by under 0.1 ms, so
+the resolution governor has no lever here. The cost is the electric fleet — 614 cars, each its own
+scene graph of six objects and four cloned materials, about 3,700 of the 5,339 objects three walks
+per frame and about 860 of the 1,200 draws. Hiding it takes the frame to 4.3 ms (render JS 3.5,
+draws 367). Instancing the fleet is the win that is still owed; it is a day of work with a visual
+contract (per-car colour, the hit sag, the beacon flash, the dead tint) and was not started here.
+
+What did land is the safe part. three r170 draws a `transparent` + `DoubleSide` material in two
+passes (back faces, then front) and sets `needsUpdate` on each, so every visible lamp-halo chunk,
+hologram, marker chevron, rush ring and beam cost two draw calls and two shader-program lookups a
+frame — about 54 `needsUpdate` bumps and 0.47 ms of `getProgram`/`getParameters` per frame. Additive
+blending is order-independent, so `forceSinglePass: true` is exact; it is now set on all fourteen
+additive double-sided materials and on the skid-mark strip (a flat decal, one face ever visible).
+Measured after: bumps 0, lookups 0.12 ms, metro render JS 7.36 → 7.04 ms, draws 1208 → 1179,
+programs 85 → 80; a same-pose pixel diff with the flag on and off differs in 170 of 1.44 M pixels
+by at most 2/255. The `env-glow` comment claiming "each quad still draws once" was wrong and is
+fixed. Not touched: the car glass and windscreen foam (normal blending, both faces visible). The
+wet-road mirror costs ~2 ms of CPU per frame (a second scene walk), not GPU; it shrinks with the
+fleet and could render every other frame if more is needed. Typecheck clean, 1060 tests pass.
+
+## Race barriers only where the city is open, NFSU2 style (2026-09-16)
+
+Juan asked for the race modes to keep closing the course but only where a player could actually
+leave it — the blocks and the highway rails already hold the rest — and for the barrier to look
+like Need for Speed Underground 2's: tall holographic walls you crash into, with big chevrons.
+
+No course authors its barrier any more. `src/world/raceBarriers.ts` works it out for the versus /
+Time Attack circuit, the Quay and La Curva alike: probes walk out from both edges of the lap and
+its branches every half metre looking for a hold (building boxes, megastructure feet, rails, the
+quay, the meet's and gas stations' walls — never pillars, shelters or fences with open bays);
+each run without one gets a closure from the last hold to the next (corner to corner across a
+side street, a sweep round the outside of a junction, the ribbon's edge along open ground). The
+plan is then flooded at car width, in levels (ground and two deck bands), from the ribbon: any way
+clear of the course or across to a stretch of lap much further along (a shortcut) opens the
+stations it slipped past and the barrier is laid again; spans with only a closed pocket behind
+them are pruned and the result re-proved. `StreetCourseSpec.fence/mouths/barriers` and the Quay's
+hand-drawn spans are gone. Barrier length: circuit 3.1 → 1.3 km, La Curva 8.5 → 2.2 km; the Quay
+goes from 1.35 km with 52 ways out to 1.31 km with none. Build cost ~0.1–0.3 s at 1 m resolution;
+the tests prove every shipped course at 0.5 m (`findBarrierLeaks`), and check the proof itself
+finds ways out with the barrier down. A first cut left a small cluster on the inside apex of La
+Curva's tight ramp-foot corner that stranded a HARD rival; pruning removed it and the rival test
+passes again.
+
+The art (`env/neonWalls.ts`) is a red additive pane per span fading up from the foot, neon rails
+top and bottom, filled chevrons every 2.6 m pointing the way the race runs (so they read ">" on
+the left wall and "<" on the right, as in the reference), dark posts and a red wash on the road —
+all in existing builders, no new draw call. Typecheck clean, full suite passes.

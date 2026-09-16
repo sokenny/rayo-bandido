@@ -270,6 +270,7 @@ function getShared(): SharedResources {
         opacity: 0,
         depthWrite: false,
         side: THREE.DoubleSide,
+        forceSinglePass: true,
         blending: THREE.AdditiveBlending,
         toneMapped: false,
       }),

@@ -1,11 +1,11 @@
-import type { ObstacleWall, RaceCourse, RaceGate, SpawnPoint, SurfaceSample } from '../core/types';
+import type { ObstacleWall, RaceCourse, RaceGate, SpawnPoint } from '../core/types';
 import { BUSES, RACE } from '../config/tuning';
-import type { NeonWallDef } from './cityPlan';
 import type { World } from './arenaWorld';
 import { createCityWorld } from './cityWorld';
 import { createRandom } from './cityGen';
 import { CIRCUIT_GATES, CIRCUIT_LAPS, CIRCUIT_SPEC } from './circuitSpec';
-import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath, segmentCount } from './track';
+import { layRaceBarriers } from './raceBarriers';
+import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath } from './track';
 
 /**
  * THE CITY CIRCUIT ("VERSUS"): the open world with a race drawn inside it.
@@ -13,11 +13,11 @@ import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath, seg
  * This builds an INSTANCE of the city — `createCityWorld()` is called unchanged, and nothing
  * in `citySpec.ts` or `cityWorld.ts` knows this file exists — and then edits that instance:
  *
- *  - THE BARRIER goes up along the two edges of the racing ribbon (`circuitSpec.ts`), segment
- *    by segment. Two continuous curves round the whole lap: no branch, no stub, nothing
- *    standing across the road. Every side street the lap passes is closed simply because the
- *    barrier sweeps past its mouth, and the ribbon is checked edge to edge against the city's
- *    own roads, so no span can end up in a building or off the deck.
+ *  - THE BARRIER goes up only where the city would let a car off the racing ribbon
+ *    (`circuitSpec.ts`): across the mouth of every side street, the open ground beside the
+ *    lap, a ramp peeling off the deck. The blocks and the viaduct's rails hold the rest, the
+ *    way a Need for Speed street race closes a city (`raceBarriers.ts`), and a flood from
+ *    the ribbon proves there is no way out left.
  *  - THE RACE goes in: the start/finish line on the downtown straight, five checkpoints, the
  *    grid and two laps.
  *  - THE CITY'S STREET TRAFFIC comes out, and the buses with it: both follow fixed routes and
@@ -32,10 +32,6 @@ import { buildTrackPath, createProjection, offsetAtStation, projectOntoPath, seg
  * the surface field — is the city's, untouched.
  */
 
-/** How far above the road a barrier stops the car (m). Low, but nothing drives over it. */
-const BARRIER_HEIGHT = 2.2;
-/** How far below it the collider still bites, so a deck above a street is not a wall in it (m). */
-const BARRIER_DROP = 3.2;
 /** Cars on the lap, and the lane they patrol, offset from the racing line (m). */
 const TARGET_COUNT = 10;
 const PATROL_LANE = 2.8;
@@ -58,59 +54,17 @@ export function createCircuitWorld(seed: number = (Math.random() * 0xffffffff) >
   const { layout, plan } = createCityWorld();
   const path = buildTrackPath(CIRCUIT_SPEC);
   const samples = path.samples;
-  const segs = segmentCount(path);
 
   /* ---------------------------------------------------------- the barrier */
-
-  /**
-   * Heights come from the city's own surface field rather than from the ribbon, so a span on
-   * the on-ramp sits on the on-ramp however the two paths' grades happen to differ. `sample`
-   * takes the ribbon's height as the hint, which is what picks the deck over the street
-   * fifteen metres under it.
-   */
-  const probe: SurfaceSample = { y: 0, gx: 0, gz: 0 };
-  const roadY = (x: number, z: number, hint: number): number => {
-    if (!layout.surface) return 0;
-    layout.surface.sample(x, z, hint, probe);
-    return probe.y;
-  };
-
-  const neonWalls: NeonWallDef[] = [];
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < segs; i++) {
-      const a = samples[i];
-      const b = samples[(i + 1) % samples.length];
-      const ax = a.x + -a.tz * a.halfWidth * side;
-      const az = a.z + a.tx * a.halfWidth * side;
-      const bx = b.x + -b.tz * b.halfWidth * side;
-      const bz = b.z + b.tx * b.halfWidth * side;
-      neonWalls.push({
-        ax,
-        az,
-        ay: roadY(ax, az, a.y),
-        bx,
-        bz,
-        by: roadY(bx, bz, b.y),
-        // In at the track: the inward normal is the outward one flipped by which side this is.
-        nx: -side * -a.tz,
-        nz: -side * a.tx,
-        side,
-        curvature: a.curvature,
-        zone: a.zone,
-      });
-    }
-  }
 
   // The buses go first, and their wall slots with them: `src/sim/buses.ts` finds a bus's
   // segments by counting back from the END of the list, so anything appended after them
   // would move them. Nothing is appended until they are gone.
   const busCount = (layout.busRoutes ?? []).length * BUSES.perRoute;
   const walls: ObstacleWall[] = busCount > 0 ? layout.walls.slice(0, layout.walls.length - busCount * 4) : [...layout.walls];
-  for (const w of neonWalls) {
-    const lo = Math.min(w.ay, w.by);
-    const hi = Math.max(w.ay, w.by);
-    walls.push({ ax: w.ax, az: w.az, bx: w.bx, bz: w.bz, minY: lo - BARRIER_DROP, maxY: hi + BARRIER_HEIGHT, tag: 'neon-wall' });
-  }
+  // Only where the city would let a car off the lap: across the side streets, the gaps between
+  // blocks and the ramps off the deck. The buildings and the viaduct's rails are the rest of it.
+  const neonWalls = layRaceBarriers({ layout, plan }, [path], walls);
 
   /* ---------------------------------------------------------- the race */
 

@@ -1,10 +1,15 @@
+import { AUDIO, HUSTLERS } from '../config/tuning';
+import { distanceGain, stereoPan } from './dsp';
+
 /**
  * Spoken dialogue from the server's text-to-speech (`server/dialogue/speech.mjs`).
  *
  * Fire and forget beside a subtitle: `speakDialogue` never throws and never waits on anything the
  * game needs. The newest request always wins — a clip that arrives after a newer line has been
- * asked for, or after `stopDialogue`, is dropped unheard. Plain non-positional `<audio>` for
- * everyone: BadKala is on the phone, and the street cast only talks when the car is beside them. Playback relies on the page already having had a gesture
+ * asked for, or after `stopDialogue`, is dropped unheard. BadKala is on the phone, so hers is plain
+ * `<audio>`; a line given `at` comes out of whoever says it — attenuated, panned and darkened from
+ * the listener every frame (`placeDialogueListener`), so driving off mid-line leaves it on the
+ * corner. Playback relies on the page already having had a gesture
  * (the same one that starts the theme); a refused `play()` is simply silence.
  */
 
@@ -18,6 +23,16 @@ export interface SpeakDialogueOptions {
   interrupt?: boolean;
   /** Loudness multiplier. Above 1 goes through a limiter so a boosted line never clips. Default 1. */
   gain?: number;
+  /**
+   * Where the speaker stands (world m), read again every frame so a walking speaker carries his
+   * voice with him. Missing = not in the world: heard at full level, dead centre.
+   */
+  at?: DialogueEmitter;
+}
+
+export interface DialogueEmitter {
+  readonly x: number;
+  readonly z: number;
 }
 
 /** The bits of `HTMLAudioElement` this uses, so tests can hand in a fake. */
@@ -29,7 +44,7 @@ export interface VoiceClip {
 
 export interface DialogueVoiceDeps {
   request(characterId: DialogueCharacterId, text: string, signal: AbortSignal): Promise<{ audioUrl: string; cached: boolean }>;
-  createClip(src: string, gain: number): VoiceClip;
+  createClip(src: string, gain: number, at?: DialogueEmitter): VoiceClip;
   /** The game's mute (the `M` key). Checked before playing and while playing. */
   isMuted(): boolean;
   /** Music level while a line is audible; restored to 1 after. */
@@ -72,7 +87,7 @@ export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
     if (!characterId || currentWho === characterId) silence();
   }
 
-  async function speak({ characterId, text, interrupt = false, gain = 1 }: SpeakDialogueOptions): Promise<VoiceClip | null> {
+  async function speak({ characterId, text, interrupt = false, gain = 1, at }: SpeakDialogueOptions): Promise<VoiceClip | null> {
     const mine = ++session;
     pending?.abort();
     const controller = new AbortController();
@@ -86,7 +101,7 @@ export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
         if (!interrupt) return null;
         silence();
       }
-      const clip = deps.createClip(audioUrl, gain);
+      const clip = deps.createClip(audioUrl, gain, at);
       current = clip;
       currentWho = characterId;
       const done = (): void => {
@@ -143,6 +158,97 @@ function boost(a: HTMLAudioElement, gain: number): void {
   }
 }
 
+/* ------------------------------------------------------------------ voices in the world */
+
+/** A line playing from somewhere in the world, re-placed every frame until it stops. */
+interface Placed {
+  a: HTMLAudioElement;
+  at: DialogueEmitter;
+  gain: number;
+  /** Null when there was no Web Audio to route it through: then only `volume` follows distance. */
+  filter: BiquadFilterNode | null;
+  amp: GainNode | null;
+  pan: StereoPannerNode | null;
+}
+
+const placed: Placed[] = [];
+let ear: { x: number; z: number; heading: number } | null = null;
+
+function place(p: Placed, smooth: boolean): void {
+  const cfg = HUSTLERS.voice;
+  const dx = ear ? p.at.x - ear.x : 0;
+  const dz = ear ? p.at.z - ear.z : 0;
+  const dist = Math.hypot(dx, dz);
+  const level = distanceGain(dist, cfg.near, cfg.max);
+  if (!p.amp || !p.pan || !p.filter || !boostCtx) {
+    p.a.volume = Math.min(1, level * p.gain);
+    return;
+  }
+  const t = boostCtx.currentTime;
+  const tc = smooth ? 0.04 : 0.005;
+  p.amp.gain.setTargetAtTime(level * p.gain, t, tc);
+  p.pan.pan.setTargetAtTime(ear ? stereoPan(dx, dz, ear.heading, AUDIO.maxPan) : 0, t, tc);
+  const dark = Math.min(1, dist / cfg.max);
+  p.filter.frequency.setTargetAtTime(cfg.brightHz - (cfg.brightHz - cfg.darkHz) * dark, t, tc);
+}
+
+/**
+ * element → lowpass → gain → pan → limiter → speakers, placed before the first sample so the line
+ * starts at the speaker instead of sweeping there. Without Web Audio (or before a gesture) it is
+ * the plain element with its volume following distance, which still leaves it behind.
+ */
+function positional(a: HTMLAudioElement, gain: number, at: DialogueEmitter): void {
+  const p: Placed = { a, at, gain, filter: null, amp: null, pan: null };
+  if (typeof AudioContext !== 'undefined' && navigator.userActivation?.hasBeenActive) {
+    try {
+      boostCtx ??= new AudioContext();
+      if (boostCtx.state !== 'running') void boostCtx.resume();
+      const filter = boostCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 0.5;
+      const amp = boostCtx.createGain();
+      amp.gain.value = 0;
+      const pan = boostCtx.createStereoPanner();
+      const limiter = boostCtx.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.15;
+      boostCtx.createMediaElementSource(a).connect(filter).connect(amp).connect(pan).connect(limiter).connect(boostCtx.destination);
+      p.filter = filter;
+      p.amp = amp;
+      p.pan = pan;
+    } catch {
+      /* no Web Audio: volume only */
+    }
+  }
+  place(p, false);
+  placed.push(p);
+}
+
+/** Where the player hears from, every frame (`src/game.ts`). Lines placed in the world follow it. */
+export function placeDialogueListener(listener: { x: number; z: number; heading: number }): void {
+  if (ear) {
+    ear.x = listener.x;
+    ear.z = listener.z;
+    ear.heading = listener.heading;
+  } else {
+    ear = { x: listener.x, z: listener.z, heading: listener.heading };
+  }
+  for (let i = placed.length - 1; i >= 0; i--) {
+    const p = placed[i];
+    if (p.a.paused || p.a.ended) {
+      p.filter?.disconnect();
+      p.amp?.disconnect();
+      p.pan?.disconnect();
+      placed.splice(i, 1);
+      continue;
+    }
+    place(p, true);
+  }
+}
+
 let hooks: Pick<DialogueVoiceDeps, 'isMuted' | 'duckMusic' | 'duckLevel'> = {
   isMuted: () => false,
   duckMusic: () => {},
@@ -160,10 +266,11 @@ const shared = createDialogueVoice({
     if (!res.ok) throw new Error(`speech ${res.status}`);
     return (await res.json()) as { audioUrl: string; cached: boolean };
   },
-  createClip(src, gain) {
+  createClip(src, gain, at) {
     const a = new Audio(src);
     a.preload = 'auto';
-    if (gain > 1) boost(a, gain);
+    if (at) positional(a, gain, at);
+    else if (gain > 1) boost(a, gain);
     return a;
   },
   isMuted: () => hooks.isMuted(),

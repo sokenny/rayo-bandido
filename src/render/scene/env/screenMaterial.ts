@@ -168,6 +168,7 @@ export function createScreenMaterials(atlas: THREE.Texture, layout: ScreenLayout
     depthWrite: false,
     // A projection is light in the air: it is there from behind too.
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
   holograms.color.setScalar(gain);
   patch(holograms, layout, time, true);

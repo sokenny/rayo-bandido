@@ -141,6 +141,7 @@ export function createDestinationArrow(): DestinationArrowVisual {
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
   });
   const body = new THREE.Mesh(geo, bodyMat);

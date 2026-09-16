@@ -33,7 +33,7 @@ function zoneAt(x: number, z: number): TrackZone {
 
 const n = (x: number, z: number, r: number, width: number, tag: string): TrackNode => ({ x, z, r, width, zone: zoneAt(x, z), tag });
 
-/** Ribbon widths (m): each is its street less room for the barriers. */
+/** Ribbon widths (m): each is its street less a margin either side. */
 const W_STREET = 11;
 const W_NARROW = 10;
 const W_DIAG = 13;
@@ -101,20 +101,9 @@ export const STREET_LAPS = 2;
 export interface StreetCourseSpec {
   spec: TrackSpec;
   shortcuts: TrackSpec[];
-  /** Which side of the lap each shortcut leaves and rejoins on (-1 left, +1 right): where the barrier opens. */
-  mouths: Array<{ in: -1 | 1; out: -1 | 1 }>;
   /** `y` is the height of the road the gate stands on, where the course is elevated (a deck, a ramp). */
   gates: Array<{ x: number; z: number; y?: number; alt?: { shortcut: number; x: number; z: number; y?: number } }>;
-  barriers: {
-    corners: { lead: number };
-    spans: Array<{ a: { x: number; z: number }; b: { x: number; z: number }; side: -1 | 1 }>;
-  };
   laps: number;
-  /**
-   * `corners` (the Quay): the barrier stands at corners and named spans only. `full`: both edges
-   * of the lap and every branch are fenced end to end, open only where a branch leaves or joins.
-   */
-  fence?: 'corners' | 'full';
   /** False to take the city's elevated traffic off too, for a course that races on the decks. */
   keepDeckTraffic?: boolean;
   /** Electric cars patrolling the lap; `STREET_RACE.trafficCount` when omitted. */
@@ -122,59 +111,13 @@ export interface StreetCourseSpec {
 }
 
 /**
- * The barrier plan. The versus circuit is fenced on both sides for the whole lap; this one is a
- * street race in an open city, so the barrier stands only where it says something:
- *
- *   `corners`   every fillet arc, both sides, extended `lead` metres either way — the corner
- *               is legible before its geometry is, and the exit cannot be overshot into a side
- *               street.
- *   `spans`     explicit runs, one side each, projected onto the lap: the mouths of side streets
- *               on the straights, and the framing either side of each shortcut entrance and exit,
- *               which is what makes an alley read as an invitation rather than a gap in the fence.
- *
- * Nothing stands across a shortcut mouth. Sides are the ribbon's own: -1 left of the direction
- * of travel, +1 right.
+ * The Quay Circuit as one course. Its barrier is not written here: `raceBarriers.ts` closes
+ * whatever the city leaves open round the lap and both alleys.
  */
-export const STREET_BARRIERS: {
-  corners: { lead: number };
-  spans: Array<{ a: { x: number; z: number }; b: { x: number; z: number }; side: -1 | 1 }>;
-} = {
-  corners: { lead: 14 },
-  spans: [
-    // Shortcut A entrance: av-east southbound, the alley is on the left. Framed both sides of it.
-    { a: { x: 110, z: 130 }, b: { x: 110, z: 144 }, side: -1 },
-    { a: { x: 110, z: 156 }, b: { x: 110, z: 170 }, side: -1 },
-    // Shortcut A exit: st-far-east northbound, the alley comes in from the left.
-    { a: { x: 210, z: 172 }, b: { x: 210, z: 156 }, side: -1 },
-    { a: { x: 210, z: 144 }, b: { x: 210, z: 126 }, side: -1 },
-    // st-far-east crossing st-south: the other mouth closed too.
-    { a: { x: 210, z: 128 }, b: { x: 210, z: 112 }, side: 1 },
-    // blvd-center westbound past the mouth of alley-d (on the right).
-    { a: { x: 172, z: 60 }, b: { x: 148, z: 60 }, side: 1 },
-    // Shortcut B entrance: blvd-center westbound, the alley is on the left.
-    { a: { x: -124, z: 60 }, b: { x: -145, z: 60 }, side: -1 },
-    { a: { x: -156, z: 60 }, b: { x: -166, z: 60 }, side: -1 },
-    // Shortcut B exit: st-south eastbound, the alley comes in from the left.
-    { a: { x: -166, z: 120 }, b: { x: -156, z: 120 }, side: -1 },
-    { a: { x: -145, z: 120 }, b: { x: -124, z: 120 }, side: -1 },
-    // st-south crossing av-main and st-mid: the big avenue's mouths, and the street's.
-    { a: { x: -84, z: 120 }, b: { x: -56, z: 120 }, side: -1 },
-    { a: { x: -84, z: 120 }, b: { x: -56, z: 120 }, side: 1 },
-    { a: { x: 10, z: 120 }, b: { x: 30, z: 120 }, side: -1 },
-    { a: { x: 10, z: 120 }, b: { x: 30, z: 120 }, side: 1 },
-    // av-diag crossing av-main: both mouths.
-    { a: { x: -56, z: 8 }, b: { x: -84, z: 34 }, side: -1 },
-    { a: { x: -56, z: 8 }, b: { x: -84, z: 34 }, side: 1 },
-  ],
-};
-
-/** The Quay Circuit as one course. Both alleys leave and rejoin on the left. */
 export const QUAY_COURSE: StreetCourseSpec = {
   spec: STREET_SPEC,
   shortcuts: STREET_SHORTCUTS,
-  mouths: STREET_SHORTCUTS.map(() => ({ in: -1, out: -1 })),
   gates: STREET_GATES,
-  barriers: STREET_BARRIERS,
   laps: STREET_LAPS,
 };
 

@@ -22,6 +22,7 @@ import { CURVA_SITE } from '../src/world/curvaSpec';
 import { STREET_SHORTCUTS, STREET_SPEC } from '../src/world/streetSpec';
 import { INTRO } from '../src/content/intro';
 import { createStreetWorld } from '../src/world/streetWorld';
+import { barrierInput, findBarrierLeaks } from '../src/world/raceBarriers';
 import { buildTrackPath, createProjection, pointAtStation, projectOntoPath, type TrackPath } from '../src/world/track';
 
 /**
@@ -86,11 +87,15 @@ describe('the Quay Circuit', () => {
     expect(course.grid.length).toBe(STREET_RACE.gridSlots);
   });
 
-  it('fences the corners and the mouths, not the whole lap, and never a shortcut entrance', () => {
+  it('is shut where the city is open, and nowhere across a shortcut entrance', () => {
     const walls = world.plan.neonWalls ?? [];
-    const segs = path.samples.length;
-    expect(walls.length).toBeGreaterThan(20);
-    expect(walls.length).toBeLessThan(segs * 2 * 0.7);
+    const ribbons = [path, ...course.shortcuts.map((sc) => sc.path)];
+    const leaks = findBarrierLeaks(barrierInput(world, ribbons, world.layout.walls), walls);
+    expect(leaks.map((l) => `(${l.x.toFixed(0)}, ${l.z.toFixed(0)}) via ${l.trail.map((p) => `${p.x.toFixed(0)},${p.z.toFixed(0)}`).join(' ')}`)).toEqual([]);
+    let length = 0;
+    for (const w of walls) length += Math.hypot(w.bx - w.ax, w.bz - w.az);
+    expect(length).toBeGreaterThan(100);
+    expect(length / (2 * path.length)).toBeLessThan(0.6);
     const mouths = course.shortcuts.flatMap((sc) => [sc.path.samples[0], sc.path.samples[sc.path.samples.length - 1]]);
     for (const w of walls) {
       for (const m of mouths) {

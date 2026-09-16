@@ -292,9 +292,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
     fog: true,
     // A halo is one quad and a spark is a crossed pair, so the cull decided which side of a
     // lamp got a glow at all: approach a working lamp from behind and the head was lit but
-    // the air around it was not. Each quad still draws once, so nothing gets brighter than it
-    // was from its good side — it is simply that brightness from every side now.
+    // the air around it was not. Nothing gets brighter than it was from its good side — it is
+    // simply that brightness from every side now.
     side: THREE.DoubleSide,
+    // One draw per quad. Without this, three draws a transparent double-sided material twice
+    // (back faces, then front) and marks it `needsUpdate` on each pass, so every visible glow
+    // chunk cost two draw calls and two shader-program lookups a frame. Additive blending is
+    // order-independent, so the two passes and the one pass are the same pixels.
+    forceSinglePass: true,
   });
   // Roughly a third of the street lamps are broken. The heads live in `neon` and their halos
   // and light pools in `glow`, so both materials read the per-vertex fault seed.

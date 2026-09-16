@@ -231,6 +231,7 @@ export function createLeaderboardHologram(
     opacity: 0.35,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
@@ -261,6 +262,7 @@ export function createLeaderboardHologram(
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
@@ -275,6 +277,7 @@ export function createLeaderboardHologram(
     opacity: 0.5,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });

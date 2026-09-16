@@ -33,6 +33,7 @@ export function createShockRings(parent: THREE.Object3D): ShockRings {
     opacity: 1,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
     fog: false,
   });

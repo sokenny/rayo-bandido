@@ -456,6 +456,37 @@ body {
   opacity: 0;
 }
 
+/* The 3D backdrop behind the menus (`src/render/menuBackdrop.ts`, loaded late by
+   `src/ui/menuBackdropLoader.ts`). The canvas fades up to a dim level only after its first frame;
+   the menu's flat background turns into a vignette that keeps the middle, where the text is,
+   dark, and lets the lot show round the edges. No backdrop-filter: blurring a canvas that
+   redraws thirty times a second is a compositor cost on every one of those frames. */
+/* Hidden at once, with no transition: a transition here would fade the canvas from 1 DOWN to 0,
+   and the first frame would land while it was still nearly opaque. The fade in is an animation
+   the loader plays from 0 (`FADE_MS`); `is-live` is only where it ends. */
+#game-canvas.rb-backdrop-canvas {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#game-canvas.rb-backdrop-canvas.is-live {
+  opacity: 0.8;
+}
+
+body.rb-backdrop .rb-menu {
+  /* The flat menu's red and cyan glows are kept, so the switch to this background is only the dark
+     base going away — over a canvas that is still at opacity 0 at that moment. */
+  background:
+    radial-gradient(90% 70% at 50% 108%, rgba(255, 43, 61, 0.16) 0%, transparent 60%),
+    radial-gradient(70% 60% at 50% -10%, rgba(79, 243, 255, 0.1) 0%, transparent 60%),
+    radial-gradient(60% 55% at 50% 52%, rgba(5, 6, 10, 0.55) 0%, rgba(5, 6, 10, 0.3) 60%, rgba(5, 6, 10, 0.1) 100%),
+    linear-gradient(180deg, rgba(5, 6, 10, 0.55) 0%, transparent 22%, transparent 70%, rgba(10, 5, 9, 0.8) 100%);
+}
+
+body.rb-backdrop .rb-menu .rb-panel {
+  background: rgba(9, 11, 18, 0.86);
+}
+
 /* ------------------------------------------------------- the screen framing */
 
 .rb-frame {
@@ -3880,10 +3911,86 @@ body.rb-touch-pad .rb-minimap {
   content: ' CLEARED ·';
 }
 
+/* The live ladder, under the streak: rival above, the run, rival just passed. Rows are a fixed
+   height (`RUNG_PX` in `src/ui/rushOverlay.ts`) so a pass can slide one over the other without
+   the script measuring anything. */
+.rb-rush__ladder {
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 190px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  background: rgba(5, 6, 10, 0.72);
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+}
+
+.rb-rush__ladder.is-on {
+  display: flex;
+}
+
+.rb-rush__rung {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 16px;
+  line-height: 16px;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--rb-dim);
+  white-space: nowrap;
+}
+
+.rb-rush__rung.is-above,
+.rb-rush__rung.is-below {
+  display: none;
+}
+
+.rb-rush__rung.is-above.is-on,
+.rb-rush__rung.is-below.is-on {
+  display: flex;
+}
+
+.rb-rush__rung.is-above {
+  color: var(--rb-magenta);
+}
+
+/* Beaten, but still close enough to be caught back: readable, not shouting. */
+.rb-rush__rung.is-below {
+  color: rgba(223, 232, 242, 0.78);
+}
+
+.rb-rush__rung.is-self {
+  position: relative;
+  z-index: 1;
+  color: var(--rb-yellow);
+  text-shadow: 0 0 10px rgba(252, 238, 10, 0.45);
+}
+
+.rb-rush__rung-rank {
+  min-width: 30px;
+}
+
+.rb-rush__rung-name {
+  flex: 1;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.rb-rush__rung-score {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .rb-rush__streak {
   position: relative;
-  min-width: 54px;
-  padding-bottom: 4px;
+  min-width: 84px;
+  margin-top: 4px;
+  padding-bottom: 6px;
   opacity: 0;
   text-align: center;
   transition: opacity 160ms ease;
@@ -3894,12 +4001,16 @@ body.rb-touch-pad .rb-minimap {
 }
 
 .rb-rush__streak-value {
+  display: inline-block;
   font-family: var(--rb-display);
-  font-size: 17px;
+  font-size: 34px;
   font-weight: 700;
   font-stretch: condensed;
-  letter-spacing: 0.06em;
+  line-height: 1;
+  letter-spacing: 0.04em;
   color: var(--rb-yellow);
+  text-shadow: 0 0 16px rgba(252, 238, 10, 0.5), 0 2px 0 #05060a;
+  transform-origin: 50% 60%;
 }
 
 /* The window the next kill has to land inside, draining left to right. */
@@ -3908,7 +4019,7 @@ body.rb-touch-pad .rb-minimap {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 2px;
+  height: 3px;
   background: var(--rb-yellow);
   transform-origin: 0 50%;
   transform: scaleX(0);
@@ -4129,6 +4240,10 @@ body.rb-touch-pad .rb-minimap {
 
   .rb-rush__score {
     font-size: 16px;
+  }
+
+  .rb-rush__streak-value {
+    font-size: 24px;
   }
 
   .rb-rush__feed {

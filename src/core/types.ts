@@ -881,6 +881,8 @@ export type GameEvent =
   | { type: 'rushCrash'; severity: CrashSeverity; points: number; score: number }
   /** A near miss during a run paid `points` into the score. */
   | { type: 'rushNearMiss'; points: number; score: number }
+  /** The kill streak ended: its window lapsed, the car crashed, or a bolt missed. `multiplier` is what was lost. */
+  | { type: 'rushChainBroken'; reason: 'timeout' | 'crash' | 'miss'; multiplier: number }
   /**
    * A mission was cleared for the first time and the chain moved on. Raised immediately before
    * the `rushEnd` that carries the run itself, so anything listening sees the run and the
@@ -1279,6 +1281,9 @@ export interface HustlerHudSnapshot {
   /** A washer is offering: the two buttons are up. */
   offer: boolean;
   price: number;
+  /** Where whoever is talking (or offering) stands right now (world m): his voice comes from there. */
+  x: number;
+  z: number;
 }
 
 /** What one of El Búho's lines is for. */
@@ -2161,6 +2166,27 @@ export interface RushHudSnapshot {
   results: RushResults | null;
   /** True when `results.score` beat `previousBest`. */
   newBest: boolean;
+  /**
+   * THE LIVE LADDER: the global-board rows either side of the run's live score, the player's own
+   * row left out. `rivalAbove` is the lowest best still at or over the score (a tie keeps the
+   * rival ahead, the same rule the server ranks by), `rivalBelow` the highest one under it. Both
+   * are references into a board fetched once, so the HUD can tell a pass (the row that was
+   * above is now below) by identity. Null when there is no such row or no board.
+   */
+  rivalAbove: RushRival | null;
+  rivalBelow: RushRival | null;
+  /** Where the live score would sit on the board right now (1-based), or -1 with no board. */
+  liveRank: number;
+  /** True when the fetched board was a full page, so a rank past its end is only a floor. */
+  ladderTruncated: boolean;
+}
+
+/** One other player's best on the RAYO RUSH board, as the live ladder shows it. */
+export interface RushRival {
+  name: string;
+  score: number;
+  /** Position on the board with the local player's own row taken out (1-based). */
+  rank: number;
 }
 
 /**

@@ -169,6 +169,7 @@ export function createAerialTraffic(plan: CityPlan, quality: Quality): AerialTra
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side,
+      forceSinglePass: true,
       fog: true,
     });
     applyHaze(mat, { strength: HAZE.glowStrength, additive: true });
@@ -258,7 +259,7 @@ export function createAerialTraffic(plan: CityPlan, quality: Quality): AerialTra
     const coneGeo = new THREE.ConeGeometry(T.cone.radius, T.cone.length, 10, 1, true);
     // Apex at the drone, opening downward.
     coneGeo.translate(0, -T.cone.length / 2, 0);
-    coneMat = new THREE.MeshBasicMaterial({ color: 0x3ff0e8, transparent: true, opacity: T.cone.opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    coneMat = new THREE.MeshBasicMaterial({ color: 0x3ff0e8, transparent: true, opacity: T.cone.opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
     applyHaze(coneMat, { strength: HAZE.glowStrength, additive: true });
     cone = new THREE.Mesh(coneGeo, coneMat);
     cone.name = 'aerial-drone-cone';

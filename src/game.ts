@@ -29,6 +29,7 @@ import type {
   RaceHudSnapshot,
   RivalCar,
   RushHudSnapshot,
+  RushRival,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
 import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
@@ -109,13 +110,15 @@ import { createGarageFigure } from './render/scene/env/garageFigure';
 import { GARAGE } from './world/garage';
 import { LOCO_MUSTANG } from './content/garage';
 import { garageOpenToTalk } from './sim/garage';
-import { hustlerName, washerOfferOpen } from './sim/hustlers';
+import { hustlerAt, hustlerName, washerOfferOpen } from './sim/hustlers';
 import { createHustlersVisual } from './render/scene/hustlersVisual';
 import { createMicroSceneVisual } from './render/scene/microSceneVisual';
 import { createMicroSceneDebug } from './microScenes/debug';
 import { reportCatalogIssues } from './microScenes/validate';
 import { createMoogulTrip } from './render/scene/moogulTrip';
 import { createLeaderboard, fetchBoard, submitRaceTime } from './net/leaderboard';
+import { account } from './net/account';
+import { boardToRivals, LADDER_PAGE, placeOnLadder, type LadderPlace } from './ui/rushLadder';
 import type { LeaderboardKind } from './content/leaderboards';
 import { shiftKickStrength } from './sim/drivetrain';
 import { createRenderer } from './render/renderer';
@@ -146,7 +149,7 @@ import { createOnlinePanel, type OnlinePanel } from './ui/onlinePanel';
 import { createDebugOverlay, clipboardLine, type DebugFrameInput, type WorldReadout } from './ui/debugOverlay';
 import type { LoadingScreen } from './ui/loadingScreen';
 import { createThemeAudio } from './audio/theme';
-import { configureDialogueVoice, speakDialogue } from './audio/dialogueVoice';
+import { configureDialogueVoice, placeDialogueListener, speakDialogue } from './audio/dialogueVoice';
 import { busStopCrowds } from './world/busStopCrowds';
 import { createAudio, type PoliceAudioInput } from './audio';
 import { createBackfireTrigger } from './audio/backfire';
@@ -544,6 +547,19 @@ export function createGame(
   /** What the last finished run was compared against, frozen before the board is told about it. */
   let rushPreviousBest = -1;
   let rushNewBest = false;
+  /**
+   * The live ladder's board (`src/ui/rushLadder.ts`): the other players' bests, fetched at boot,
+   * again as each run starts and once a run lands on the board. Empty offline, which hides it.
+   */
+  let rushRivals: RushRival[] = [];
+  const rushPlace: LadderPlace = { above: null, below: null, rank: -1 };
+  function refreshRushRivals(): void {
+    if (!leaderboard) return;
+    void Promise.all([leaderboard.refresh(), leaderboard.top(LADDER_PAGE)]).then(([standing, rows]) => {
+      if (disposed || rows.length === 0) return;
+      rushRivals = boardToRivals(rows, standing, account().state.user?.name ?? null);
+    });
+  }
   /**
    * The circuit mission's own version of the same pair: the best time on the mission that just
    * finished, frozen BEFORE the run is folded into the record, so the card can say whether it
@@ -1082,7 +1098,8 @@ export function createGame(
     lineId: 0,
   };
   if (hasGarage) snapshot.garage = garageSnapshot;
-  const hustlerSnapshot: HustlerHudSnapshot = { speaker: '', kind: 'trapito', line: '', lineId: 0, offer: false, price: HUSTLERS.washer.price };
+  const hustlerSnapshot: HustlerHudSnapshot = { speaker: '', kind: 'trapito', line: '', lineId: 0, offer: false, price: HUSTLERS.washer.price, x: 0, z: 0 };
+  const hustlerVoiceAt = { x: 0, z: 0, heading: 0, moving: 0, stride: 0 };
   if (hasHustlers) snapshot.hustlers = hustlerSnapshot;
   const buhoSnapshot: BuhoHudSnapshot = {
     name: BUHO.name,
@@ -1145,6 +1162,10 @@ export function createGame(
     previousBest: -1,
     results: null,
     newBest: false,
+    rivalAbove: null,
+    rivalBelow: null,
+    liveRank: -1,
+    ladderTruncated: false,
   };
   if (state.rush) snapshot.rush = rushSnapshot;
   const raceSnapshot: RaceHudSnapshot = {
@@ -1322,6 +1343,9 @@ export function createGame(
       });
     }
   }
+
+  // Down here, after `disposed` exists: the answer is awaited and its callback reads it.
+  refreshRushRivals();
 
   /** The transmission choice outlives the session: a player who learned manual keeps it. */
   function readTransmission(): Transmission {
@@ -1594,6 +1618,10 @@ export function createGame(
         // than joined. Two numbers over one car is one too many.
         effects.rushPopup(ev.x, ev.y, ev.z, ev.points);
         break;
+      case 'rushStart':
+        // The ladder is climbed against the board as it stands now, not as it stood at boot.
+        refreshRushRivals();
+        break;
       case 'rushLevelUp':
         // QUICK PLAY puts the car down on the marker, and R puts it back there: the next mission's.
         if (quickRush && !rushMatch) {
@@ -1640,7 +1668,10 @@ export function createGame(
             rushPreviousBest = result.previousBest;
             rushNewBest = result.newBest;
             // The hologram beside the ring shows the run the moment it is on the board.
-            if (result.accepted) refreshHolograms('rush');
+            if (result.accepted) {
+              refreshHolograms('rush');
+              refreshRushRivals();
+            }
           });
         }
         break;
@@ -2030,6 +2061,7 @@ export function createGame(
     hearing.heading = pose.heading;
     hearing.vx = v.vx;
     hearing.vz = v.vz;
+    placeDialogueListener(hearing);
     audio.update(
       frameDt,
       {
@@ -2135,6 +2167,17 @@ export function createGame(
       rushSnapshot.results = rush.results;
       rushSnapshot.previousBest = rushPreviousBest;
       rushSnapshot.newBest = rushNewBest;
+      if (rushRivals.length > 0) {
+        placeOnLadder(rushRivals, rush.score, rushPlace);
+        rushSnapshot.rivalAbove = rushPlace.above;
+        rushSnapshot.rivalBelow = rushPlace.below;
+        rushSnapshot.liveRank = rushPlace.rank;
+        rushSnapshot.ladderTruncated = rushRivals.length >= LADDER_PAGE - 1;
+      } else {
+        rushSnapshot.rivalAbove = null;
+        rushSnapshot.rivalBelow = null;
+        rushSnapshot.liveRank = -1;
+      }
       // The mission on offer. All four are derived from the one progress count, so the sign
       // over the road, the target on the clock and the site under the wheels always agree.
       rushSnapshot.level = rushLevelIndex(rush.cleared);
@@ -2283,6 +2326,9 @@ export function createGame(
       if (speaker >= 0) {
         hustlerSnapshot.speaker = hustlerName(hustlers, hustlerSpots, speaker);
         hustlerSnapshot.kind = hustlerSpots[speaker].kind;
+        hustlerAt(hustlerSpots[speaker], hustlers.npcs[speaker], hustlerVoiceAt);
+        hustlerSnapshot.x = hustlerVoiceAt.x;
+        hustlerSnapshot.z = hustlerVoiceAt.z;
       }
       hustlerSnapshot.line = hustlers.line;
       hustlerSnapshot.lineId = hustlers.lineId;

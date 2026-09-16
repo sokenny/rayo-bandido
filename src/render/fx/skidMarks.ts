@@ -60,6 +60,7 @@ export function createSkidMarks(parent: THREE.Object3D): SkidMarks {
     opacity: 0.55,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -4,

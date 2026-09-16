@@ -25,7 +25,8 @@ import { LIGHTNING, RUSH } from '../config/tuning';
  * seconds later and is shot again is worth nothing the second time.
  *
  * THE STREAK. Kills inside `chainWindow` of each other build a multiplier; letting the window
- * lapse drops it back to nothing. The window is not a grace on the clock — when the run ends
+ * lapse drops it back to nothing, and so does a crash or a bolt that hits nothing
+ * (`breakRushChain`) — the multiplier pays for clean, accurate driving, not just for pace. The window is not a grace on the clock — when the run ends
  * mid-streak the streak simply ends with it.
  *
  * STYLE. All lightning charge comes from drifting (`src/sim/drift.ts`), so "charged through
@@ -209,7 +210,22 @@ export function penalizeRushCrash(rush: RushState, severity: CrashSeverity, even
   rush.crashes += 1;
   rush.crashPenalty += points;
   events.push({ type: 'rushCrash', severity, points, score: rush.score });
+  breakRushChain(rush, 'crash', events);
   return points;
+}
+
+/**
+ * Ends the kill streak: the window lapsed, the car crashed, or a bolt hit nothing. Raises
+ * `rushChainBroken` only when there was a streak to lose, carrying the multiplier it was at so
+ * the HUD can tell a lost x3 from a lost first link.
+ */
+export function breakRushChain(rush: RushState, reason: 'timeout' | 'crash' | 'miss', events: GameEvent[]): void {
+  if (rush.chain === 0) return;
+  const multiplier = rush.multiplier;
+  rush.chain = 0;
+  rush.multiplier = 1;
+  rush.chainWindow = 0;
+  events.push({ type: 'rushChainBroken', reason, multiplier });
 }
 
 /**
@@ -527,10 +543,7 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
   if (rush.chainWindow > 0) {
     rush.chainWindow = Math.max(0, rush.chainWindow - dt);
     // Too long between eliminations: the streak is gone.
-    if (rush.chainWindow === 0) {
-      rush.chain = 0;
-      rush.multiplier = 1;
-    }
+    if (rush.chainWindow === 0) breakRushChain(rush, 'timeout', events);
   }
 
   /* ------------------------------------------------------------ scoring */
@@ -548,6 +561,11 @@ function stepRunningRush(rush: RushState, site: ActivitySite, targets: TargetSta
       rush.nearMisses += 1;
       rush.nearMissPoints += points;
       events.push({ type: 'rushNearMiss', points, score: rush.score });
+      continue;
+    }
+    // A bolt that hit nothing costs the streak. A hit on a car already paid for is not a miss.
+    if (ev.type === 'lightningFired') {
+      if (ev.targetId < 0) breakRushChain(rush, 'miss', events);
       continue;
     }
     if (ev.type !== 'targetDestroyed') continue;

@@ -14,6 +14,7 @@ import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { buildTransit } from '../src/render/scene/env/transitBuilder';
 import { createCityWorld } from '../src/world/cityWorld';
 import { createCircuitWorld } from '../src/world/circuitWorld';
+import { BARRIER_HEIGHT, barrierInput, findBarrierLeaks } from '../src/world/raceBarriers';
 import {
   CIRCUIT_BORROWED,
   CIRCUIT_DECK_Y,
@@ -34,8 +35,8 @@ import { buildTrackPath, createProjection, projectOntoPath, type TrackPath } fro
  *     nodes it borrows, as plain data so the design tool can load it in Node; if that copy
  *     drifts from `citySpec.ts` the lap is drawn on a road that is not there.
  *  2. it stands on DRIVABLE GROUND, edge to edge, at its own height — including where it is
- *     fifteen metres up on the viaduct — and the barrier that follows those edges is a pair of
- *     continuous curves with no branch and no gap.
+ *     fifteen metres up on the viaduct — and it is SHUT: the barrier stands only where the city
+ *     leaves an opening, and with it up a car can neither leave the lap nor cut across it.
  *  3. it is DRIVEABLE, and it is a two-minute race. The last block drives the whole thing
  *     through the real simulation, against the real barrier.
  */
@@ -156,30 +157,32 @@ describe('the circuit stands on the city', () => {
 });
 
 describe('the barrier', () => {
-  it('is two continuous curves round the lap, one per side, with no gap', () => {
-    for (const side of [-1, 1]) {
-      const run = barriers.filter((w) => w.side === side);
-      expect(run.length, `side ${side} has spans`).toBeGreaterThan(100);
-      // Consecutive spans meet exactly, and the last one closes back onto the first.
-      for (let i = 0; i < run.length; i++) {
-        const a = run[i];
-        const b = run[(i + 1) % run.length];
-        expect(Math.hypot(b.ax - a.bx, b.az - a.bz), `side ${side} span ${i} joins the next`).toBeLessThan(1e-6);
-      }
-    }
+  it('shuts the lap: no way off it and no way across it, for a car', () => {
+    const leaks = findBarrierLeaks(barrierInput({ layout, plan }, [course.path], layout.walls), barriers);
+    const shown = leaks.map((l) => `(${l.x.toFixed(0)}, ${l.z.toFixed(0)}) via ${l.trail.map((p) => `${p.x.toFixed(0)},${p.z.toFixed(0)}`).join(' ')}`);
+    expect(shown).toEqual([]);
+    // And the proof is a proof: with the barrier down, the city has plenty of ways out.
+    const open = findBarrierLeaks(barrierInput({ layout, plan }, [course.path], layout.walls), []);
+    expect(open.length).toBeGreaterThan(10);
   });
 
-  it('never stands in a building and never leaves the road it edges', () => {
+  it('stands only where the city leaves an opening: well under half a fence down both sides', () => {
+    let length = 0;
+    for (const w of barriers) length += Math.hypot(w.bx - w.ax, w.bz - w.az);
+    expect(length, 'some of the lap does need closing').toBeGreaterThan(200);
+    expect(length / (2 * course.path.length)).toBeLessThan(0.5);
+  });
+
+  it('never stands on the racing ribbon', () => {
+    const proj = createProjection();
     for (const w of barriers) {
-      const points: Array<[number, number, number]> = [
-        [w.ax, w.az, w.ay],
-        [(w.ax + w.bx) / 2, (w.az + w.bz) / 2, (w.ay + w.by) / 2],
-      ];
-      for (const [x, z, y] of points) {
-        expect(roadAt(x, z, y), `barrier at (${x.toFixed(1)}, ${z.toFixed(1)}) is on a road`).not.toBeNull();
-        if (y < 1) {
-          expect(plan.isSolid(x, z, 0.4), `barrier at (${x.toFixed(1)}, ${z.toFixed(1)}) is clear of the blocks`).toBe(false);
-        }
+      for (const t of [0, 0.5, 1]) {
+        const x = w.ax + (w.bx - w.ax) * t;
+        const z = w.az + (w.bz - w.az) * t;
+        const y = w.ay + (w.by - w.ay) * t;
+        projectOntoPath(course.path, x, z, proj, -1, 12, y);
+        if (Math.abs(proj.y - y) > 3) continue;
+        expect(proj.dist, `barrier at (${x.toFixed(1)}, ${z.toFixed(1)}) is clear of the ribbon`).toBeGreaterThan(proj.halfWidth);
       }
     }
   });
@@ -194,8 +197,8 @@ describe('the barrier', () => {
     const neon = layout.walls.filter((w) => w.tag === 'neon-wall');
     expect(neon).toHaveLength(barriers.length);
     for (const w of neon) {
-      expect(w.maxY! - w.minY!, 'the collider brackets the road it stands on').toBeGreaterThan(VEHICLE.collisionRadius);
-      // Low: a barrier, not a wall. It stops the car and nothing else reaches over it.
+      expect(w.maxY! - w.minY!, 'the collider brackets the road it stands on').toBeGreaterThan(VEHICLE.collisionRadius + BARRIER_HEIGHT);
+      // A barrier, not a wall: it stops the car and nothing on another level.
       expect(w.maxY! - w.minY!, 'and never reaches the deck fifteen metres up').toBeLessThan(VIADUCT_Y);
     }
   });
@@ -271,6 +274,8 @@ describe('the city instance the race is run in', () => {
     expect(a.layout.targetSpawns.map((s) => [s.x.toFixed(3), s.z.toFixed(3)])).toEqual(
       b.layout.targetSpawns.map((s) => [s.x.toFixed(3), s.z.toFixed(3)]),
     );
+    // Every client lays its own barrier, so it has to come out the same, span for span.
+    expect(a.plan.neonWalls!.map((w) => [w.ax, w.az, w.bx, w.bz])).toEqual(b.plan.neonWalls!.map((w) => [w.ax, w.az, w.bx, w.bz]));
     const city = createCityWorld();
     expect(city.layout.race, 'the open world still has no race in it').toBeNull();
     expect(city.layout.busRoutes!.length, 'the open world still runs its buses').toBeGreaterThan(0);

@@ -498,6 +498,7 @@ export function createActivityMarker(
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
   });
   const chevrons: THREE.Mesh[] = [];
   for (const sign of [-1, 1]) {

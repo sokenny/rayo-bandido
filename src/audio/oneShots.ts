@@ -15,6 +15,11 @@ export interface OneShots {
    * animating in, which is the whole job — it is a "you are standing on it", not a fanfare.
    */
   pickup(): void;
+  /**
+   * RAYO RUSH's streak multiplier went up: a bright major arpeggio with a sparkle on top, pitched
+   * higher the higher the multiplier (`step` 1 = x1.5, 2 = x2, ...), so a long chain climbs.
+   */
+  chainUp(step: number): void;
   /** A new wanted star: a police-scanner blip, two clipped tones and a crackle of static. */
   scanner(): void;
   /** The arrest: a falling stack and a thud. */
@@ -177,6 +182,24 @@ export function createOneShots(core: AudioCore): OneShots {
       }
       // A bright tick on the leading edge, so the first note has something to land on.
       playNoise(t, t + 0.05, 'highpass', 5200, 5200, 0.8, 0.2 * v, 0.002);
+    },
+
+    chainUp(step) {
+      // A beat behind the kill's own power-down, so the two land as cause and reward.
+      const t = ctx.currentTime + 0.06;
+      const v = AUDIO.chainUpVolume;
+      // Two semitones a step, capped at an octave and a bit: past that it turns into a whistle.
+      const root = 784 * Math.pow(2, (Math.min(Math.max(step, 1), 8) - 1) * 2 / 12);
+      const notes = [root, root * 1.26, root * 1.498, root * 2];
+      for (let i = 0; i < notes.length; i++) {
+        const at = t + i * 0.05;
+        const f = notes[i];
+        const last = i === notes.length - 1;
+        playOsc('square', at, at + (last ? 0.34 : 0.12), f, f, (last ? 0.34 : 0.26) * v, 0.003, 4200);
+        playOsc('triangle', at, at + (last ? 0.4 : 0.14), f * 2, f * 2, 0.16 * v, 0.003, 9000);
+      }
+      // Sparkle: a high shimmer under the top note.
+      playNoise(t + 0.15, t + 0.45, 'bandpass', 8000, 11000, 4, 0.18 * v, 0.01);
     },
 
     scanner() {

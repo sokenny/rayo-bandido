@@ -89,6 +89,7 @@ export function createPassengerMarker(): PassengerMarkerVisual {
     opacity: 0.4,
     depthWrite: false,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     blending: THREE.AdditiveBlending,
   });
   const column = new THREE.Mesh(columnGeo, columnMat);
