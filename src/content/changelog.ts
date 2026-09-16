@@ -37,6 +37,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Bandido Metro has hills now: streets that climb and fall, with a couple of higher districts.',
       'A new park on the metro\'s north edge: two lakes, a planetarium, ducks and people out at night.',
       'Cars catch the light better now — streetlight and neon reflect properly across the paint.',
+      'Every spoken line now plays instantly — no more waiting a beat for a voice to generate.',
     ],
   },
   {

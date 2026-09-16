@@ -100,6 +100,6 @@ export function carPaintMaterial(params: THREE.MeshStandardMaterialParameters): 
     clearcoatRoughness: 0.08,
     ...params,
     envMap: env,
-    envMapIntensity: 3,
+    envMapIntensity: 2.3,
   });
 }

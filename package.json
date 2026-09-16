@@ -24,7 +24,8 @@
     "perf:check": "npm run build && node scripts/perf-probe.mjs --check",
     "scenes:catalog": "node scripts/scene-catalog.mjs",
     "scenes:catalog:check": "node scripts/scene-catalog.mjs --check",
-    "scenes:voices": "node scripts/generate-scene-voices.mjs"
+    "scenes:voices": "node scripts/generate-scene-voices.mjs",
+    "dialogue:voices": "vite-node scripts/bake-dialogue-voices.ts"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1132.0",

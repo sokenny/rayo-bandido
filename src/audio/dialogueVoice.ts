@@ -51,7 +51,17 @@ export interface DialogueVoiceDeps {
   duckMusic(level: number): void;
   duckLevel: number;
   log?(msg: string): void;
+  /** Clock for `maxLateMs`, in ms. Default `performance.now`. */
+  now?(): number;
+  /**
+   * A clip ready later than this after its line was asked for is dropped: the subtitle has moved
+   * on, and a line that starts half-way through it only gets cut off. Default `MAX_LATE_MS`.
+   */
+  maxLateMs?: number;
 }
+
+/** Baked clips answer in tens of milliseconds; only a line being generated is ever this late. */
+const MAX_LATE_MS = 1500;
 
 export interface DialogueVoice {
   speak(options: SpeakDialogueOptions): Promise<VoiceClip | null>;
@@ -62,6 +72,8 @@ export interface DialogueVoice {
 }
 
 export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
+  const now = deps.now ?? (() => performance.now());
+  const maxLateMs = deps.maxLateMs ?? MAX_LATE_MS;
   /** Bumped by every speak and stop; a request only plays if it is still the latest. */
   let session = 0;
   let pending: AbortController | null = null;
@@ -93,10 +105,15 @@ export function createDialogueVoice(deps: DialogueVoiceDeps): DialogueVoice {
     const controller = new AbortController();
     pending = controller;
     pendingWho = characterId;
+    const asked = now();
     try {
       const { audioUrl, cached } = await deps.request(characterId, text, controller.signal);
       deps.log?.(`[TTS] cache ${cached ? 'hit' : 'miss'}: ${characterId}`);
       if (mine !== session || deps.isMuted()) return null;
+      if (now() - asked > maxLateMs) {
+        deps.log?.(`[TTS] too late, dropped: ${characterId}`);
+        return null;
+      }
       if (current) {
         if (!interrupt) return null;
         silence();

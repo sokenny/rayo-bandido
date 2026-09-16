@@ -28,7 +28,7 @@ import { WebSocketServer } from 'ws';
 import { createRooms } from './rooms.mjs';
 import { createDatabase } from './db/index.mjs';
 import { createApi } from './api.mjs';
-import { createDialogueSpeech, createFsSpeechCache } from './dialogue/speech.mjs';
+import { createDialogueSpeech, createFsSpeechCache, layeredSpeechCache } from './dialogue/speech.mjs';
 import { RUSH_DAILY_ATTEMPTS, SNAPSHOT_HZ } from './protocol.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -87,7 +87,13 @@ try {
 const api = createApi({ db, dailyAttempts: RUSH_DAILY_ATTEMPTS, log });
 // Spoken dialogue (`server/dialogue/speech.mjs`). Needs no database, so it answers ahead of `api`.
 const dialogue = createDialogueSpeech({
-  cache: createFsSpeechCache(join(root, '.cache', 'generated-dialogue')),
+  // The clips baked into the build first (`public/dialogue/`, copied into `dist/`), then what this
+  // server generated itself — which only happens with `DIALOGUE_GENERATE=1`.
+  cache: layeredSpeechCache([
+    createFsSpeechCache(join(dist, 'dialogue')),
+    createFsSpeechCache(join(root, 'public', 'dialogue')),
+    createFsSpeechCache(join(root, '.cache', 'generated-dialogue')),
+  ]),
   log,
 });
 // The open world is a room like any other, except that it is always there: opened before the

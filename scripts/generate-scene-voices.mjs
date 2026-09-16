@@ -150,7 +150,7 @@ if (durationsOnly) {
 /* ------------------------------------------------------------------ render */
 
 const cacheDir = await mkdtemp(join(tmpdir(), 'scene-voice-'));
-const speech = createDialogueSpeech({ cache: createFsSpeechCache(cacheDir), log: (m) => console.log(m), dev: true });
+const speech = createDialogueSpeech({ cache: createFsSpeechCache(cacheDir), log: (m) => console.log(m), dev: true, generate: true });
 await mkdir(outDir, { recursive: true });
 
 let failed = 0;

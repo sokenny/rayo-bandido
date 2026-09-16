@@ -36,6 +36,7 @@ artifacts/
 *.log
 .DS_Store
 
-# Local secrets: on AWS the environment supplies them. Generated dialogue is regenerated on demand.
+# Local secrets: on AWS the environment supplies them. Dialogue ships baked in `dist/dialogue/`
+# (`npm run dialogue:voices`); the local generation cache stays here.
 .env
 .cache/

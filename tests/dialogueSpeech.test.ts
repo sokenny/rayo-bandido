@@ -57,7 +57,7 @@ describe('dialogue speech service', () => {
     const { createDialogueSpeech } = await loadSpeech();
     const fetchImpl = vi.fn(async () => audioResponse());
     const cache = memoryCache();
-    const speech = createDialogueSpeech({ env, cache, fetchImpl });
+    const speech = createDialogueSpeech({ env, generate: true, cache, fetchImpl });
 
     const first = await speech.synthesize('badkala', 'Mirá quién decidió volver al radar.');
     expect(first.cached).toBe(false);
@@ -75,15 +75,40 @@ describe('dialogue speech service', () => {
   it('shares one generation between concurrent identical requests', async () => {
     const { createDialogueSpeech } = await loadSpeech();
     const fetchImpl = vi.fn(async () => audioResponse());
-    const speech = createDialogueSpeech({ env, cache: memoryCache(), fetchImpl });
+    const speech = createDialogueSpeech({ env, generate: true, cache: memoryCache(), fetchImpl });
     await Promise.all([speech.synthesize('badkala', 'Hola.'), speech.synthesize('badkala', 'Hola.')]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('never calls ElevenLabs unless generation is switched on: a missing line is a 404', async () => {
+    const { createDialogueSpeech } = await loadSpeech();
+    const fetchImpl = vi.fn(async () => audioResponse());
+    const speech = createDialogueSpeech({ env, cache: memoryCache(), fetchImpl });
+    await expect(speech.synthesize('badkala', 'Hola.')).rejects.toMatchObject({ status: 404 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('serves a baked clip ahead of the runtime cache, and writes only to the runtime one', async () => {
+    const { createDialogueSpeech, layeredSpeechCache } = (await loadSpeech()) as SpeechModule & {
+      layeredSpeechCache(layers: ReturnType<typeof memoryCache>[]): ReturnType<typeof memoryCache>;
+    };
+    const baked = memoryCache();
+    const runtime = memoryCache();
+    const fetchImpl = vi.fn(async () => audioResponse());
+    const speech = createDialogueSpeech({ env, generate: true, cache: layeredSpeechCache([baked, runtime]), fetchImpl });
+    const first = await speech.synthesize('badkala', 'Hola.');
+    expect(runtime.files.size).toBe(1);
+    expect(baked.files.size).toBe(0);
+    runtime.files.clear();
+    baked.files.set((first as unknown as { audioUrl: string }).audioUrl.slice(20, -4), Buffer.from([9]));
+    expect(await speech.synthesize('badkala', 'Hola.')).toMatchObject({ cached: true });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('rejects unknown characters, empty and overlong text before calling out', async () => {
     const { createDialogueSpeech } = await loadSpeech();
     const fetchImpl = vi.fn(async () => audioResponse());
-    const speech = createDialogueSpeech({ env, cache: memoryCache(), fetchImpl });
+    const speech = createDialogueSpeech({ env, generate: true, cache: memoryCache(), fetchImpl });
     await expect(speech.synthesize('nobody', 'Hola.')).rejects.toMatchObject({ status: 400 });
     await expect(speech.synthesize('__proto__', 'Hola.')).rejects.toMatchObject({ status: 400 });
     await expect(speech.synthesize('badkala', '   ')).rejects.toMatchObject({ status: 400 });
@@ -115,6 +140,25 @@ describe('dialogue voice (client)', () => {
     resolvers.get('old')!({ audioUrl: '/old.mp3', cached: false });
     expect(await old).toBeNull();
     expect(played).toEqual(['/new.mp3']);
+  });
+
+  it('drops a clip that is ready too late to go with its subtitle', async () => {
+    let t = 0;
+    const played: string[] = [];
+    const voiceOut = createDialogueVoice({
+      request: async (_c, text) => {
+        t += text === 'slow' ? 4000 : 50;
+        return { audioUrl: `/${text}.mp3`, cached: false };
+      },
+      createClip: (src): VoiceClip => ({ play: () => void played.push(src), pause: () => {}, addEventListener: () => {} }),
+      isMuted: () => false,
+      duckMusic: () => {},
+      duckLevel: 0.5,
+      now: () => t,
+    });
+    expect(await voiceOut.speak({ characterId: 'badkala', text: 'slow', interrupt: true })).toBeNull();
+    expect(await voiceOut.speak({ characterId: 'badkala', text: 'fast', interrupt: true })).not.toBeNull();
+    expect(played).toEqual(['/fast.mp3']);
   });
 
   it("stopping one character leaves another's line playing", async () => {
