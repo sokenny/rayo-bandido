@@ -7,6 +7,7 @@ import { createLiveryTexture } from './vehicles/livery';
 import { slotColor, slotCss } from '../../core/playerColors';
 import { buildWheelGeometry } from './vehicles/wheel';
 import { createCabinInterior } from './vehicles/interior';
+import { carPaintMaterial } from './vehicles/paintEnv';
 
 /**
  * Player car visual: a stylized low-poly GT86-like drift coupe.
@@ -374,15 +375,17 @@ export function createCarVisual(options: CarVisualOptions = {}): CarVisual {
   // alone, and the player has to be that same colour to themselves.
   const livery = slotTint ? null : createLiveryTexture();
   if (livery) disposables.push(livery);
-  const bodyMat = new THREE.MeshStandardMaterial({
+  // Self-lit only a touch: the livery used to glow at 0.14, which lit every facet alike and
+  // flattened the body. The shape now comes from what the paint reflects (`vehicles/paintEnv.ts`).
+  const bodyMat = carPaintMaterial({
     color: livery ? 0xffffff : 0x141834,
     map: livery,
     emissive: livery ? 0xffffff : 0x000000,
     emissiveMap: livery,
-    emissiveIntensity: livery ? 0.14 : 0,
+    emissiveIntensity: livery ? 0.04 : 0,
     vertexColors: true,
-    roughness: 0.38,
-    metalness: 0.28,
+    roughness: 0.26,
+    metalness: 0.62,
   });
   if (slotTint) tintBody(bodyMat, slotTint);
   const bodyGeo = buildBodyGeometry(true);

@@ -1770,6 +1770,8 @@ export interface MinimapData {
   ribbons: Array<{ points: Array<{ x: number; z: number }>; width: number; closed: boolean; hidden: boolean; elevated?: boolean }>;
   /** Water, drawn under the roads. */
   water?: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
+  /** Lakes (`src/world/park.ts`): irregular contours, drawn as water under the roads too. */
+  lakes?: Array<Array<{ x: number; z: number }>>;
   /**
    * Things to go and do, marked on the map so they can be found rather than stumbled on. Today
    * that is the RAYO RUSH marker — one entry, wherever the mission chain currently has it
@@ -1809,6 +1811,13 @@ export interface ArenaLayout {
    * a deck without assuming the street is at 0.
    */
   groundY?: (x: number, z: number) => number;
+  /**
+   * How deep the water is under a point (m), in a world with lakes (`src/world/park.ts`): 0 on
+   * land, the bed's depth in the middle of a lake. The surface field already lowers the ground
+   * by it; this is for the game to know the car is in the water and pull it out
+   * (`ArenaLayout.surface` alone cannot tell a lake bed from a dip in the road).
+   */
+  waterDepth?: (x: number, z: number) => number;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
   /**

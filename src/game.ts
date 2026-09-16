@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { cityRecovery } from './world/cityRecovery';
+import { LAKE } from './world/park';
 import { createArenaWorld } from './world/arenaWorld';
 import { createCityWorld } from './world/cityWorld';
 import { STACK_SPEC } from './world/stackSpec';
@@ -201,6 +202,8 @@ export interface GameOptions {
 
 /** Metres past the last gate a multiplayer respawn puts the car (see `rescue`). */
 const RESPAWN_AHEAD = 6;
+/** How long a car sits in a lake before the recovery pulls it out (s). */
+const LAKE_RESCUE_AFTER = 1.6;
 
 /** How often the hologram high-score boards ask the server for their rows again (ms). */
 const BOARD_REFRESH_MS = 60_000;
@@ -1809,6 +1812,9 @@ export function createGame(
     cameraPose.pitch = car.chassis.rotation.x;
   }
 
+  /** Seconds the car has been in a lake (`ArenaLayout.waterDepth`): past `LAKE_RESCUE_AFTER` it is pulled out. */
+  let submerged = 0;
+
   function simulate(dt: number): void {
     input.poll(command);
 
@@ -1879,6 +1885,26 @@ export function createGame(
     // card. F still puts the card away.
     if (rushMatch && state.rush && state.rush.phase !== 'results') command.activate = false;
     stepGame(state, command, layout, dt, stepOptions);
+    // A car in a lake (the parks, `src/world/park.ts`): the surface field has already rolled it
+    // down the bank; the water drags it to a stop, and after a moment the recovery puts it back
+    // on the nearest road, as R would. There is nothing to do in a lake, and no way to drive out.
+    // The depth is the bed's under the car whatever it stands on, so a car crossing a bridge over
+    // the water has deep water under it too: it is only in the lake when it is down in it.
+    if (layout.waterDepth) {
+      const v = state.vehicle;
+      if (v.y < -LAKE.swim && layout.waterDepth(v.x, v.z) > LAKE.swim) {
+        const drag = Math.exp(-dt * 2.4);
+        v.vx *= drag;
+        v.vz *= drag;
+        v.speed *= drag;
+        v.lateralSpeed *= drag;
+        submerged += dt;
+        if (submerged > LAKE_RESCUE_AFTER) {
+          submerged = 0;
+          rescue();
+        }
+      } else submerged = 0;
+    }
     // QUICK PLAY's run, taken up for the player. After the tick, so the events it raises are
     // this tick's and reach the HUD and the audio below; a room's count-in ends on the server's GO.
     if (rushBeginPending && state.rush && !command.restart) {

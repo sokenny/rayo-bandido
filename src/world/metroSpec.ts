@@ -10,6 +10,7 @@ import { inRect } from './cityPlan.ts';
 import { CURVA_SITE } from './curvaSpec.ts';
 import { PAL } from '../render/scene/env/palette.ts';
 import { metroTerrain } from './metroTerrain.ts';
+import { METRO_PARK, PARK_BRIDGE, PARK_ENTRIES, PARK_LAND, PARK_NORTH, PARK_ROADS } from './metroPark.ts';
 import { planStackMassing } from './stackMassing.ts';
 import {
   STACK_ART,
@@ -34,7 +35,11 @@ import type { TrackNode, TrackSpec } from './track';
  * a world, the same assembler Bandido Bay and The Stack go through, and neither of those two
  * specs is touched: they stay on the menu as they are.
  *
- * Read with north up (x east, z south). 1,400 x 1,950 m, water along the south edge:
+ * Read with north up (x east, z south). 1,400 x 1,950 m of city, water along the south edge,
+ * and since 2026-09-16 a 500 m park across the whole north edge (`metroPark.ts`): the city's
+ * grid, its wall bands and its streets are exactly what they were; the park is land added
+ * beyond the old north wall, entered through three of the avenues, and the north wall band
+ * now stands behind its trees.
  *
  *   - DOWNTOWN is The Stack (`stackSpec.ts`), every road, level, ramp, megastructure and
  *     traffic loop of it, moved as one piece to `STACK_OFFSET` (the north end of the map, so
@@ -60,8 +65,12 @@ import type { TrackNode, TrackSpec } from './track';
  * district and the shore. `METRO_BOUNDS` is where to grow it again.
  */
 
-export const METRO_BOUNDS: Rect = { minX: -700, maxX: 700, minZ: -650, maxZ: 1300 };
+export const METRO_BOUNDS: Rect = { minX: -700, maxX: 700, minZ: PARK_NORTH, maxZ: 1300 };
 export const METRO_WALL_BAND = 12;
+/** The city's own north edge, where its wall stood before the park: its grid and its streets still stop here. */
+export const METRO_CITY_NORTH = -650;
+/** Where the blocks are generated: the city inside its wall bands, above the quay (`CitySpec.blockBounds`). */
+export const METRO_CITY: Rect = { minX: METRO_BOUNDS.minX + METRO_WALL_BAND, maxX: METRO_BOUNDS.maxX - METRO_WALL_BAND, minZ: METRO_CITY_NORTH + METRO_WALL_BAND, maxZ: 1200 };
 /** The quay: land ends here, water begins. */
 export const METRO_QUAY_Z = 1200;
 /** Where the Stack is put down, as a translation of its own coordinates. */
@@ -86,7 +95,7 @@ export const METRO_VIADUCT_Y = 15;
 const EDGE = METRO_WALL_BAND + 2.5;
 const X_MIN = METRO_BOUNDS.minX + EDGE;
 const X_MAX = METRO_BOUNDS.maxX - EDGE;
-const Z_MIN = METRO_BOUNDS.minZ + EDGE;
+const Z_MIN = METRO_CITY_NORTH + EDGE;
 /** Where the north-south roads stop: inside the waterfront boulevard. */
 const Z_SHORE = METRO_QUAY_Z - 8;
 /** The Stack's own edge, in its own coordinates: where its roads used to stop. */
@@ -120,6 +129,8 @@ function edgeness(x: number, z: number): number {
  * lamps, greenery and rooftop clutter before downtown was counted; this is the knob.
  */
 export function densityAt(x: number, z: number): number {
+  // The park: its roads keep fewer of the street lamps, so there is dark between the lit places.
+  if (inRect(PARK_LAND, x, z)) return 0.55;
   if (inRect(STACK_RECT, x, z)) return 1;
   if (inRect(MIDTOWN, x, z)) return 0.85;
   return 0.7;
@@ -215,9 +226,11 @@ function stackRoad(r: CityRoadSpec): CityRoadSpec {
   const lead = (ax: number, az: number, node: TrackNode): TrackNode[] => straightNodes(ax, az, node.x, node.z, width).slice(0, -1);
   const trail = (node: TrackNode, bx: number, bz: number): TrackNode[] => straightNodes(node.x, node.z, bx, bz, width).slice(1);
   let out = nodes;
+  // A street that runs on into the park (`PARK_ENTRIES`) starts past the loop it crosses there.
+  const north = PARK_ENTRIES[r.tag] ?? Z_MIN;
   if (near(first.x, edgeW)) out = [...lead(alley ? RING.west : X_MIN, first.z, first), ...out];
   else if (near(first.x, edgeE)) out = [...lead(alley ? RING.east : X_MAX, first.z, first), ...out];
-  else if (near(first.z, edgeN)) out = [...lead(first.x, alley ? RING.north : Z_MIN, first), ...out];
+  else if (near(first.z, edgeN)) out = [...lead(first.x, alley ? RING.north : north, first), ...out];
   else if (near(first.z, edgeS)) out = [...lead(first.x, alley ? RING.south : Z_SHORE, first), ...out];
   if (near(last.x, edgeW)) out = [...out, ...trail(last, alley ? RING.west : X_MIN, last.z)];
   else if (near(last.x, edgeE)) out = [...out, ...trail(last, alley ? RING.east : X_MAX, last.z)];
@@ -257,7 +270,8 @@ export const OUTER_ROADS: CityRoadSpec[] = [
   straight('blvd-ring-s', 20, X_MIN, RING.south, X_MAX, RING.south),
   straight('blvd-ring-w', 20, RING.west, Z_MIN, RING.west, Z_SHORE),
   straight('blvd-ring-e', 20, RING.east, Z_MIN, RING.east, Z_SHORE),
-  ...OUTER_NS.map(([x, w, tag]) => straight(tag, w, x, Z_MIN, x, Z_SHORE)),
+  // Two of these run on into the park, across its loop (`PARK_ENTRIES`).
+  ...OUTER_NS.map(([x, w, tag]) => straight(tag, w, x, PARK_ENTRIES[tag] ?? Z_MIN, x, Z_SHORE)),
   ...OUTER_EW.map(([z, w, tag]) => straight(tag, w, X_MIN, z, X_MAX, z)),
   // The waterfront boulevard, along the quay.
   straight('blvd-water', 16, X_MIN, METRO_QUAY_Z - 14, X_MAX, METRO_QUAY_Z - 14),
@@ -729,12 +743,17 @@ export const METRO_SPEC: CitySpec = {
   wallBand: METRO_WALL_BAND,
   water: { quayZ: METRO_QUAY_Z },
   zoneOf,
-  roads: [...DOWNTOWN_ROADS, ...OUTER_ROADS],
+  roads: [...DOWNTOWN_ROADS, ...OUTER_ROADS, ...PARK_ROADS],
   elevated: [
     ...DOWNTOWN_ELEVATED,
     { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },
     ...METRO_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 })),
+    // The park's bridge over the strait (`metroPark.ts`).
+    PARK_BRIDGE,
   ],
+  // The park (`metroPark.ts`): the north edge, beyond the city's own rectangle.
+  parks: [METRO_PARK],
+  blockBounds: METRO_CITY,
   blockOptions: METRO_BLOCK_OPTIONS,
   // The hills (`metroTerrain.ts`): downtown and the meet district stay level, the rest rolls.
   terrain: metroTerrain(STACK_RECT),
@@ -745,7 +764,9 @@ export const METRO_SPEC: CitySpec = {
   pillarStep: 12,
   fenceBays: 'most',
   art: { ...STACK_ART, finish: 'glass', setback: 3.4 },
-  finishAt: (x, z) => (inRect(STACK_RECT, x, z) ? 'concrete' : 'glass'),
+  // The park counts as concrete for the one thing it changes there: sodium lamps, warm, and
+  // quiet concrete parapets on its bridge (`propsBuilder.lampColor`, `trackBuilder`).
+  finishAt: (x, z) => (inRect(STACK_RECT, x, z) || inRect(PARK_LAND, x, z) ? 'concrete' : 'glass'),
   setbackAt: (x, z) => (inRect(STACK_RECT, x, z) ? STACK_ART.setback : 3.4),
   densityAt,
   palette: 'bay',
@@ -788,7 +809,8 @@ export const METRO_SPEC: CitySpec = {
     ['blvd-ring-w', 1500, PAL.neonCyan, PAL.neonBlue],
   ],
   trafficLoops: METRO_TRAFFIC_LOOPS,
-  deckTraffic: [...METRO_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }],
+  // A few cars lapping the park's loop, so its curves are driven and its lamps light somebody.
+  deckTraffic: [...METRO_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }, { tag: 'park-loop', cars: 8, lanes: [3.5] }],
   cruiseLoop: METRO_BUS_LOOPS[0],
   busRoutes: METRO_BUS_ROUTES,
   busRouteLoops: METRO_BUS_LOOPS,

@@ -23,6 +23,7 @@ import { buildRails, generateBlocks, hash01, onRibbonAtLevel, pathBox, pointRect
 import { meetColliders } from './carMeet';
 import { clipBlocksToLots, stationColliders } from './gasStation';
 import { garageColliders, garageParts, garageSite } from './garage';
+import { DRY_FIELD, lakeFieldOf, parkColliders, type LakeField } from './park';
 import type { CitySpec } from './cityDef';
 import { BAY_SPEC } from './citySpec';
 import { reserveMegastructurePlots } from './cityMegastructures';
@@ -90,6 +91,9 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     minZ: bounds.minZ + wallBand,
     maxZ: quayZ ?? bounds.maxZ - wallBand,
   };
+  // Where the blocks grow: the whole land, unless the spec keeps its grid to its own rectangle
+  // and gives the rest to a park (`CitySpec.blockBounds`).
+  const blockInner: Rect = spec.blockBounds ? { ...spec.blockBounds } : inner;
   const blockOptions = spec.blockOptions;
   const pillarStep = spec.pillarStep ?? PILLAR_STEP;
 
@@ -157,7 +161,14 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   // Loco Mustang's garage takes a corner the same way.
   const garage = spec.garage ?? null;
   const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : [])];
-  const lots = [...meetLots, ...cornerLots];
+  // A park takes its land whole, like a meet, but the block generator never runs on it in the
+  // first place (`blockInner`): it is a lot for the terrain (level), the kerbs (no pavement on
+  // its roads: the grass runs to the asphalt), the cables and the fences.
+  const parks = spec.parks ?? [];
+  const parkLands = parks.map((p) => p.land);
+  const lots = [...meetLots, ...cornerLots, ...parkLands];
+  // The water on the land: one depth field over every park's lakes (`park.ts`), dry without one.
+  const lakes: LakeField = parks.length === 0 ? DRY_FIELD : parks.length === 1 ? lakeFieldOf(parks[0]) : joinLakeFields(parks.map(lakeFieldOf));
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
   // The lie of the land (`terrain.ts`): the relief the spec draws, held level under every
   // elevated road, on every lot, along the shore and wherever else the spec says. Everything
@@ -167,7 +178,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const terrain = createTerrain(spec.terrain, bounds, elevated.map((rb) => rb.path), lots, quayZ);
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   const blocks = clipBlocksToLots(
-    reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
+    reserveMegastructurePlots(generateBlocks(blockInner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
     cornerLots,
   );
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
@@ -311,7 +322,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   // Built here rather than at the layout: a ground spawn at the foot of a ramp sits a few
   // centimetres above zero, and the car has to start on the road, not under it.
-  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, terrain);
+  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, terrain, lakes);
   const GROUND_SAMPLE = { y: 0, gx: 0, gz: 0 };
 
   const targetSpawns: SpawnPoint[] = [];
@@ -338,8 +349,10 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     // driven round the loop backwards. Lanes are offset half a gap from each other so the
     // files interleave rather than driving in pairs. Each waypoint carries the deck's height
     // there, so a car on a loop that climbs (or on one merged from a ramp) spawns on it.
-    const rb = elevated.find((e) => e.tag === deck.tag);
-    if (!rb || !rb.path.closed) throw new Error(`${spec.name}: deck traffic wants a closed elevated loop tagged ${deck.tag}`);
+    // A closed ground loop takes its traffic the same way (a park's ring road): the deck's height
+    // is then 0 everywhere, and the ground roads are still flat here (draped last, below).
+    const rb = elevated.find((e) => e.tag === deck.tag) ?? ground.find((e) => e.tag === deck.tag);
+    if (!rb || !rb.path.closed) throw new Error(`${spec.name}: deck traffic wants a closed loop tagged ${deck.tag}`);
     const samples = rb.path.samples;
     const lanes: Array<Array<{ x: number; z: number; y: number }>> = [];
     for (const dir of [1, -1]) {
@@ -417,6 +430,13 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   }
   // The garage: the block round its mouth and the van backed into it (`garage.ts`).
   if (garage) colliders.push(...garageColliders(garage));
+  // The parks: their low walls, the planetarium's podium, the footbridges' feet, the people and
+  // what they brought (`park.ts`). The lakes are not colliders: a car drives into one and sinks.
+  for (const p of parks) {
+    const c = parkColliders(p);
+    colliders.push(...c.boxes);
+    walls.push(...c.walls);
+  }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -438,6 +458,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     walls,
     surface,
     groundY: (x, z) => terrain.heightAt(x, z),
+    ...(parks.length > 0 ? { waterDepth: (x: number, z: number) => lakes.depthAt(x, z) } : {}),
     race: null,
     // The free-world activity markers, one per mission and in mission order. Points and
     // headings; the rules read them (`src/sim/rush.ts`) and the art stands on whichever is
@@ -468,6 +489,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
         elevated: !!rb.elevated,
       })),
       ...(quayZ !== null ? { water: { minX: inner.minX, maxX: inner.maxX, minZ: quayZ, maxZ: bounds.maxZ - 20 } } : {}),
+      ...(parks.length > 0 ? { lakes: parks.flatMap((p) => p.lakes.map((l) => l.shore.map((pt) => ({ x: pt.x, z: pt.z })))) } : {}),
       // The FIRST site only: the map marks where the marker actually is, and the marker is
       // only ever at one of these at a time. `Minimap.setActivities` moves the mark when a
       // cleared mission moves the marker, so the map cannot send the player somewhere it is not.
@@ -530,6 +552,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     ...(meets.length > 0 ? { meets: meets.map((m) => ({ ...m })) } : {}),
     ...(gasStations.length > 0 ? { gasStations: gasStations.map((g) => ({ ...g })) } : {}),
     ...(garage ? { garage: { ...garage, streets: garage.streets.slice() } } : {}),
+    ...(parks.length > 0 ? { parks: parks.map((p) => ({ ...p })) } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),
@@ -562,6 +585,35 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/** The depth fields of several parks as one: the deepest answer wins, which is the only one when the lakes never overlap. */
+function joinLakeFields(fields: readonly LakeField[]): LakeField {
+  const scratch = { y: 0, gx: 0, gz: 0 };
+  return {
+    bounds: {
+      minX: Math.min(...fields.map((f) => f.bounds.minX)),
+      maxX: Math.max(...fields.map((f) => f.bounds.maxX)),
+      minZ: Math.min(...fields.map((f) => f.bounds.minZ)),
+      maxZ: Math.max(...fields.map((f) => f.bounds.maxZ)),
+    },
+    depthAt: (x, z) => fields.reduce((d, f) => Math.max(d, f.depthAt(x, z)), 0),
+    sample(x, z, out) {
+      out.y = 0;
+      out.gx = 0;
+      out.gz = 0;
+      for (const f of fields) {
+        f.sample(x, z, scratch);
+        if (scratch.y > out.y) {
+          out.y = scratch.y;
+          out.gx = scratch.gx;
+          out.gz = scratch.gz;
+        }
+      }
+    },
+    inWater: (x, z) => fields.some((f) => f.inWater(x, z)),
+    shoreDistance: (x, z) => fields.reduce((d, f) => Math.min(d, f.shoreDistance(x, z)), Infinity),
+  };
+}
 
 /**
  * A point `fraction` of the way round a closed loop of waypoints, the heading along the leg

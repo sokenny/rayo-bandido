@@ -1,4 +1,5 @@
 import type { SurfaceField, SurfaceSample } from '../core/types';
+import { DRY_FIELD, type LakeField } from './park';
 import { FLAT_TERRAIN, type Terrain } from './terrain';
 import { createProjection, projectOntoPath, segmentCount, type TrackPath } from './track';
 
@@ -27,6 +28,10 @@ import { createProjection, projectOntoPath, segmentCount, type TrackPath } from 
  * its own cell. The answer is the exhaustive one: a point near enough a ribbon to stand on it
  * is within reach of that ribbon's nearest segment, which is therefore filed in its cell.
  *
+ * LAKES (`park.ts`): where a world has water on the land, the ground candidate is the terrain
+ * LESS the lake's depth there, gradient and all, so a car that leaves the road by a lake rolls
+ * down the bank into the water instead of driving across it. Dry everywhere in a world without.
+ *
  * Allocation-free per sample: one scratch projection, the index built once up front.
  */
 /** Largest rise a body takes in its stride (m). A ramp climbs a few centimetres per tick. */
@@ -35,9 +40,11 @@ export const STEP_UP = 0.6;
 /** Side of a cell of the segment index (m). */
 const CELL = 16;
 
-export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terrain: Terrain = FLAT_TERRAIN): SurfaceField {
+export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terrain: Terrain = FLAT_TERRAIN, lakes: LakeField = DRY_FIELD): SurfaceField {
   const proj = createProjection();
   const flat = terrain.flat;
+  const dry = lakes === DRY_FIELD;
+  const basin: SurfaceSample = { y: 0, gx: 0, gz: 0 };
   const reaches = paths.map((path) => {
     let reach = 0;
     for (const s of path.samples) if (s.halfWidth > reach) reach = s.halfWidth;
@@ -92,6 +99,12 @@ export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terra
         out.gx = 0;
         out.gz = 0;
       } else terrain.sample(x, z, out);
+      if (!dry) {
+        lakes.sample(x, z, basin);
+        out.y -= basin.y;
+        out.gx -= basin.gx;
+        out.gz -= basin.gz;
+      }
       let bestY = out.y;
       let bestGx = out.gx;
       let bestGz = out.gz;

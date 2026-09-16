@@ -82,14 +82,22 @@ function buildGround(b: EnvBuilders, bounds: Rect2): void {
   // beyond the terrain's extent, and everywhere in a flat world, it is the one plane it was.
   const terrain = b.plan.terrain;
   const extent = terrain && !terrain.flat && terrain.extent ? terrain.extent : null;
-  // The bay takes its own share: the ground plane is cut around it (the water is its own mesh).
-  const water = b.plan.water ? b.plan.water.rect : null;
+  // The bay and the parks take their own share: the ground plane is cut around them (the
+  // water is its own mesh; a park draws its own grass and lake beds, `env/parkBuilder.ts`).
+  const holes: Rect2[] = [...(b.plan.water ? [b.plan.water.rect] : []), ...(b.plan.parks ?? []).map((p) => p.land)];
   const flat = extent ? subtractRect(ground, extent) : [ground];
-  for (const piece of flat) for (const p of water ? subtractRect(piece, water) : [piece]) {
+  for (const piece of flat) for (const p of cutOut(piece, holes)) {
     if (p.maxX - p.minX < 1 || p.maxZ - p.minZ < 1) continue;
     b.concrete.planeY((p.minX + p.maxX) / 2, GROUND_Y, (p.minZ + p.maxZ) / 2, p.maxX - p.minX, p.maxZ - p.minZ);
   }
-  if (extent) buildTerrainFloor(b, extent, water);
+  if (extent) buildTerrainFloor(b, extent, holes);
+}
+
+/** `r` less every hole, as rectangles. */
+function cutOut(r: Rect2, holes: readonly Rect2[]): Rect2[] {
+  let out = [r];
+  for (const h of holes) out = out.flatMap((p) => subtractRect(p, h));
+  return out;
 }
 
 /**
@@ -98,12 +106,12 @@ function buildGround(b: EnvBuilders, bounds: Rect2): void {
  * water. Most of a city is level (its downtown, its lots, everything under its decks), so this
  * is a few thousand triangles, not a grid over the whole map.
  */
-function buildTerrainFloor(b: EnvBuilders, extent: Rect2, water: Rect2 | null): void {
+function buildTerrainFloor(b: EnvBuilders, extent: Rect2, holes: readonly Rect2[]): void {
   const padY = b.plan.padY;
   const step = GROUND_STEP;
   const flush = (x0: number, x1: number, z0: number, z1: number): void => {
     const piece: Rect2 = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
-    for (const p of water ? subtractRect(piece, water) : [piece]) {
+    for (const p of cutOut(piece, holes)) {
       if (p.maxX - p.minX < 0.01 || p.maxZ - p.minZ < 0.01) continue;
       b.concrete.planeY((p.minX + p.maxX) / 2, GROUND_Y, (p.minZ + p.maxZ) / 2, p.maxX - p.minX, p.maxZ - p.minZ);
     }

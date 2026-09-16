@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { buildTrackPath, createProjection, maxGrade, projectOntoPath, pointAtStation } from '../src/world/track.ts';
 import { METRO_BOUNDS, METRO_QUAY_Z, METRO_SPEC, STACK_RECT, RING, MIDTOWN, SOUTHWEST, METRO_DOWNTOWN } from '../src/world/metroSpec.ts';
+import { lakeFieldOf } from '../src/world/park.ts';
 
 const DRIVE_UNDER = 5.5;
 const MERGE = 3;
@@ -84,6 +85,22 @@ svg += rect(B, '#101a24', '#3a4b5c');
 svg += `<rect x="${sx(B.minX)}" y="${sz(METRO_QUAY_Z)}" width="${(B.maxX - B.minX) * SCALE}" height="${(B.maxZ - METRO_QUAY_Z) * SCALE}" fill="#0f2a3a"/>`;
 for (let x = Math.ceil(B.minX / 200) * 200; x <= B.maxX; x += 200) svg += `<line x1="${sx(x)}" y1="${pad}" x2="${sx(x)}" y2="${H - pad}" stroke="#1a2530"/><text x="${sx(x) + 2}" y="${pad - 4}" fill="#5a6b7c" font-size="9">${x}</text>`;
 for (let z = Math.ceil(B.minZ / 200) * 200; z <= B.maxZ; z += 200) svg += `<line x1="${pad}" y1="${sz(z)}" x2="${W - pad}" y2="${sz(z)}" stroke="#1a2530"/><text x="${pad - 30}" y="${sz(z) + 3}" fill="#5a6b7c" font-size="9">${z}</text>`;
+// The parks: the land in green, the lakes in water, the islands back in green, the planetarium, the meeting places.
+for (const p of METRO_SPEC.parks ?? []) {
+  svg += rect(p.land, '#14261a', '#2f6e44');
+  const poly = (c, fill) => `<polygon points="${c.map((q) => `${sx(q.x).toFixed(1)},${sz(q.z).toFixed(1)}`).join(' ')}" fill="${fill}"/>`;
+  for (const lake of p.lakes) {
+    svg += poly(lake.shore, '#0f2a3a');
+    for (const isl of lake.islands) svg += poly(isl, '#14261a');
+  }
+  for (const path of p.paths) svg += `<polyline points="${path.points.map((q) => `${sx(q.x).toFixed(1)},${sz(q.z).toFixed(1)}`).join(' ')}" fill="none" stroke="#4a5a4a" stroke-width="1"/>`;
+  for (const m of p.masses) svg += `<ellipse cx="${sx(m.x)}" cy="${sz(m.z)}" rx="${m.rx * SCALE}" ry="${m.rz * SCALE}" fill="#1d3a24" opacity="0.6"/>`;
+  if (p.planetarium) svg += `<circle cx="${sx(p.planetarium.x)}" cy="${sz(p.planetarium.z)}" r="${p.planetarium.radius * SCALE}" fill="none" stroke="#5fe0ff" stroke-width="1.5"/>`;
+  for (const e of p.encounters) svg += `<circle cx="${sx(e.x)}" cy="${sz(e.z)}" r="3" fill="#ff8ad0"/><text x="${sx(e.x) + 5}" y="${sz(e.z) + 3}" fill="#ff8ad0" font-size="7">${e.label}</text>`;
+  for (const w of p.walls) svg += `<line x1="${sx(w.ax)}" y1="${sz(w.az)}" x2="${sx(w.bx)}" y2="${sz(w.bz)}" stroke="#9aa" stroke-width="1"/>`;
+  const field = lakeFieldOf(p);
+  console.log(`park ${p.tag}: ${p.masses.reduce((a, m) => a + m.count, 0)} trees planned, lake field ${(field.bounds.maxX - field.bounds.minX).toFixed(0)} x ${(field.bounds.maxZ - field.bounds.minZ).toFixed(0)} m`);
+}
 svg += rect(SOUTHWEST, '#1e2a3a', 'none');
 svg += rect(MIDTOWN, '#1a2432', 'none');
 svg += rect(STACK_RECT, '#2a2418', '#c9a86a', '6 3');

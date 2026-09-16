@@ -1,6 +1,7 @@
 import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
+import type { ParkSpec } from './park';
 import type { Terrain } from './terrain';
 import type { TrackPath } from './track';
 
@@ -460,6 +461,8 @@ export interface CityPlan {
   gasStations?: GasStationSpec[];
   /** Loco Mustang's garage (`garage.ts`): its lot and the building on it. */
   garage?: GarageSpec;
+  /** The parks (`park.ts`): the land, the lakes, the trees, the walls and the people, drawn by `env/parkBuilder.ts`. */
+  parks?: ParkSpec[];
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.

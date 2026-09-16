@@ -719,6 +719,18 @@ function drawBase(
     ctx.fillStyle = 'rgba(36, 92, 140, 0.35)';
     ctx.fillRect(px(w.minX), pz(w.minZ), (w.maxX - w.minX) * scale, (w.maxZ - w.minZ) * scale);
   }
+  // The lakes, the same water: a park's shore is a contour rather than a rectangle.
+  if (data.lakes) {
+    ctx.fillStyle = 'rgba(36, 92, 140, 0.45)';
+    for (const lake of data.lakes) {
+      if (lake.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(px(lake[0].x), pz(lake[0].z));
+      for (let i = 1; i < lake.length; i++) ctx.lineTo(px(lake[i].x), pz(lake[i].z));
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   // Road body, then a thin cold outline so the network reads against the dark panel.
   // Viaducts and the skyway are drawn last, in a muted magenta, so they read as a layer above

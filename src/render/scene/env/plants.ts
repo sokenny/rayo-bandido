@@ -168,9 +168,9 @@ function leafCard(
  * a canopy disappears into the asphalt. Between this and `MeshBuilder.normalUp` the greenery
  * sits where the concept art has it: clearly a plant, still a night-time one.
  */
-function leafTint(b: EnvBuilders, rng: () => number, dry: number, mul = 1): void {
+function leafTint(b: EnvBuilders, rng: () => number, dry: number, mul = 1, lit = 1): void {
   const dead = rng() < dry;
-  b.foliage.color(dead ? PAL.foliageDry : PAL.foliage, (dead ? 1.0 : 1.25) * mul + rng() * 0.45);
+  b.foliage.color(dead ? PAL.foliageDry : PAL.foliage, ((dead ? 1.0 : 1.25) * mul + rng() * 0.45) * lit);
 }
 
 /* ------------------------------------------------------------------ archetypes */
@@ -193,6 +193,17 @@ export interface PlantOptions {
   /** Direction the plant leans and reaches, usually away from the wall behind it. */
   outX?: number;
   outZ?: number;
+  /**
+   * Multiplier on the leaf tint, 1 by default. The parks plant under fewer lamps than a street
+   * and want their canopies read from the road all the same, so they lift it a little.
+   */
+  lit?: number;
+  /**
+   * A full crown instead of the street's thin one: more limbs, a lump on every one of them and a
+   * core filling the middle, so a stand of them closes into one canopy. About half as many
+   * triangles again a tree; the parks use it, the streets cannot afford it.
+   */
+  dense?: boolean;
 }
 
 /**
@@ -279,8 +290,9 @@ export function canopyTree(b: EnvBuilders, x: number, y0: number, z: number, rng
 
   // Limbs out of the crotch, each carrying its own lump of canopy. The crown may spread past
   // the pavement only when it is genuinely over the traffic rather than in it.
-  const limbs = 3;
-  const spread = Math.min(Math.max(room, o.canopyRoom ?? room), (2.2 + rng() * 2.2) * s);
+  const dense = !!o.dense;
+  const limbs = dense ? 5 : 3;
+  const spread = Math.min(Math.max(room, o.canopyRoom ?? room), (2.2 + rng() * 2.2) * s * (dense ? 1.15 : 1));
   const phase = rng() * Math.PI * 2;
   /** One lump of canopy, pulled back onto the pavement if it is not yet over the traffic. */
   const lump = (cx: number, cy: number, cz: number, rx: number, ry: number, sides: number): void => {
@@ -298,10 +310,10 @@ export function canopyTree(b: EnvBuilders, x: number, y0: number, z: number, rng
     // One lump a limb, and a smaller one under about half of them: the silhouette has to be
     // lumpy or the canopy reads as a handful of kites hanging in the air, but a second lump
     // on every limb is twelve triangles nobody sees.
-    leafTint(b, rng, dry);
-    lump(ex, ey + 0.3 * s, ez, spread * (0.5 + rng() * 0.35), (0.8 + rng() * 0.5) * s, 6);
-    if (rng() < 0.5) {
-      leafTint(b, rng, dry, 0.82);
+    leafTint(b, rng, dry, 1, o.lit);
+    lump(ex, ey + 0.3 * s, ez, spread * (0.5 + rng() * 0.35) * (dense ? 1.12 : 1), (0.8 + rng() * 0.5) * s * (dense ? 1.2 : 1), 6);
+    if (rng() < 0.5 || dense) {
+      leafTint(b, rng, dry, 0.82, o.lit);
       lump(
         ex + Math.cos(a + 1.3) * spread * 0.4, ey - (0.3 + rng() * 0.5) * s, ez + Math.sin(a + 1.3) * spread * 0.4,
         spread * (0.34 + rng() * 0.26), (0.55 + rng() * 0.35) * s, 5,
@@ -309,8 +321,13 @@ export function canopyTree(b: EnvBuilders, x: number, y0: number, z: number, rng
     }
   }
   // One more lump over the crown, so the silhouette closes at the top.
-  leafTint(b, rng, dry, 1.12);
+  leafTint(b, rng, dry, 1.12, o.lit);
   lump(topX, y0 + h + 0.75 * s, topZ, spread * 0.8, (0.9 + rng() * 0.5) * s, 6);
+  if (dense) {
+    // The core: a broad, darker lump inside the limbs' ring, so no sky shows through the crown.
+    leafTint(b, rng, dry, 0.78, o.lit);
+    lump(topX, y0 + h - 0.1 * s, topZ, spread * 0.95, (1.3 + rng() * 0.4) * s, 7);
+  }
 }
 
 /**
@@ -337,7 +354,7 @@ export function crookedTree(b: EnvBuilders, x: number, y0: number, z: number, rn
   shaft(b, x, y0 - 0.2, z, r * 1.6, m1x, y0 + h * 0.55, m1z, r);
   shaft(b, m1x, y0 + h * 0.55, m1z, r, topX, y0 + h, topZ, r * 0.55);
   const spread = Math.min(Math.max(room, o.canopyRoom ?? room), (1.5 + rng() * 1.4) * s);
-  const lumps = 2 + (rng() < 0.45 ? 1 : 0);
+  const lumps = 2 + (rng() < 0.45 ? 1 : 0) + (o.dense ? 2 : 0);
   for (let i = 0; i < lumps; i++) {
     const a = rng() * Math.PI * 2;
     const d = spread * (0.15 + rng() * 0.55);
@@ -345,7 +362,7 @@ export function crookedTree(b: EnvBuilders, x: number, y0: number, z: number, rn
     const rx = spread * (0.5 + rng() * 0.45);
     const ry = (0.55 + rng() * 0.4) * s;
     const [px, pz] = clampOut(topX + Math.cos(a) * d, topZ + Math.sin(a) * d, x, z, outX, outZ, rx, reachAt(cy - ry - y0, room, o.canopyRoom));
-    leafTint(b, rng, dry, i === 0 ? 1 : 0.85);
+    leafTint(b, rng, dry, i === 0 ? 1 : 0.85, o.lit);
     canopyBlob(b, px, cy, pz, rx, ry, rx, i === 0 ? 6 : 5, rng);
   }
 }
@@ -466,10 +483,10 @@ export function palm(b: EnvBuilders, x: number, y0: number, z: number, rng: () =
     const u0 = rng() * (1 - wu);
     const v0 = rng() * (1 - wv);
     const tint = dead ? PAL.foliageDry : PAL.foliage;
-    b.foliage.color(tint, shade * (dead ? 0.8 : 1));
+    b.foliage.color(tint, shade * (dead ? 0.8 : 1) * (o.lit ?? 1));
     blade(b, topX + fx * 0.22, cy, topZ + fz * 0.22, 0.14 * s, mx, my, mz, 0.5 * s, nx, nz, u0, v0, u0 + wu, v0 + wv * 0.55);
     // The drooping half catches more of the sky, so it sits a touch brighter.
-    b.foliage.color(tint, shade * (dead ? 0.8 : 1) + 0.2);
+    b.foliage.color(tint, (shade * (dead ? 0.8 : 1) + 0.2) * (o.lit ?? 1));
     blade(b, mx, my, mz, 0.5 * s, ex, ey, ez, 0.1 * s, nx, nz, u0, v0 + wv * 0.55, u0 + wu, v0 + wv);
   }
 }
@@ -486,7 +503,7 @@ export function sapling(b: EnvBuilders, x: number, y0: number, z: number, rng: (
   const topZ = z + outZ * lean + (rng() - 0.5) * 0.4;
   b.bark.color(PAL.bark, 0.75 + rng() * 0.35);
   shaft(b, x, y0 - 0.1, z, 0.05 * s, topX, y0 + h, topZ, 0.025 * s);
-  leafTint(b, rng, o.dry ?? 0.1);
+  leafTint(b, rng, o.dry ?? 0.1, 1, o.lit);
   const sr = Math.min((0.32 + rng() * 0.24) * s, Math.max(0.12, cap - lean));
   canopyBlob(b, topX, y0 + h + 0.12 * s, topZ, sr, (0.28 + rng() * 0.2) * s, sr, 4, rng);
 }
@@ -500,16 +517,16 @@ export function shrub(b: EnvBuilders, x: number, y0: number, z: number, rng: () 
   const cap = o.room ?? Infinity;
   const w = Math.min((0.55 + rng() * 0.75) * s, cap);
   const h = (0.4 + rng() * 0.55) * s;
-  leafTint(b, rng, dry);
+  leafTint(b, rng, dry, 1, o.lit);
   canopyBlob(b, x, y0 + h * 0.8, z, w, h, Math.min(w * (0.7 + rng() * 0.5), cap), 6, rng);
   // One satellite at most. The city grows thousands of these, and the difference between one
   // lump and three is twenty triangles a shrub — which is tens of thousands across the map.
-  const extra = rng() < 0.55 ? 1 : 0;
+  const extra = (rng() < 0.55 ? 1 : 0) + (o.dense ? 2 : 0);
   for (let i = 0; i < extra; i++) {
     const a = rng() * Math.PI * 2;
     const r2 = w * 0.6;
     const d = Math.min(w * (0.5 + rng() * 0.55), Math.max(0, cap - r2));
-    leafTint(b, rng, dry, i === 0 ? 1.15 : 0.8);
+    leafTint(b, rng, dry, i === 0 ? 1.15 : i === 1 ? 0.8 : 0.95, o.lit);
     canopyBlob(b, x + Math.cos(a) * d, y0 + h * (0.45 + rng() * 0.4), z + Math.sin(a) * d, r2, h * 0.7, r2, 5, rng);
   }
 }
@@ -525,7 +542,7 @@ export function fern(b: EnvBuilders, x: number, y0: number, z: number, rng: () =
     const a = phase + (i / n) * Math.PI;
     const lean = Math.min((0.18 + rng() * 0.3) * s, cap * 0.5);
     const w = Math.min((0.4 + rng() * 0.4) * s, Math.max(0.12, (cap - lean) * 2));
-    leafTint(b, rng, o.dry ?? 0.1);
+    leafTint(b, rng, o.dry ?? 0.1, 1, o.lit);
     leafCard(b, x, y0, z, w, h * (0.7 + rng() * 0.6), a, Math.cos(a + 1.2) * lean, Math.sin(a + 1.2) * lean, rng);
   }
 }
@@ -547,7 +564,7 @@ export function weeds(b: EnvBuilders, x: number, y0: number, z: number, rng: () 
     const a = phase + (i / 2) * Math.PI;
     const lean = (rng() - 0.5) * 0.28 * s;
     const w = Math.min((0.26 + rng() * 0.34) * s, Math.max(0.1, (cap - Math.abs(lean) - 0.07) * 2));
-    leafTint(b, rng, dry);
+    leafTint(b, rng, dry, 1, o.lit);
     leafCard(b, x + (rng() - 0.5) * 0.14, y0, z + (rng() - 0.5) * 0.14, w, h * (0.7 + rng() * 0.7), a, Math.cos(a) * lean, Math.sin(a) * lean, rng);
   }
 }
@@ -618,7 +635,7 @@ export function vine(
     const tipX = sx + nx * outLean + tx * sideLean;
     const tipZ = sz + nz * outLean + tz * sideLean;
     const uv = leafUv(rng, 0.4);
-    leafTint(b, rng, dry);
+    leafTint(b, rng, dry, 1, o.lit);
     // A tapering ribbon down the wall, drawn from both sides.
     const bottomX = climbing ? sx : tipX;
     const bottomZ = climbing ? sz : tipZ;
@@ -649,7 +666,7 @@ export function vine(
       const across = w * 2.2;
       const off = w * 0.45;
       const alongX = Math.abs(nx) > Math.abs(nz);
-      leafTint(b, rng, dry, 1.05);
+      leafTint(b, rng, dry, 1.05, o.lit);
       canopyBlob(b, sx + nx * 0.05, ly, sz + nz * 0.05, alongX ? off : across, 0.22 + rng() * 0.24, alongX ? across : off, 4, rng);
     }
   }
@@ -679,11 +696,61 @@ export function weedLine(
   }
 }
 
+/**
+ * A willow (the parks, `parkBuilder.ts`): a thick trunk leaning out over the water, a low
+ * wide crown, and a curtain of strands hanging from it nearly to the ground. The strands are
+ * the cheapest thing in the kit — the same two-sided leaf cards the weeds are made of, tall
+ * and narrow — so a willow costs about what a canopy tree does and is the one silhouette a
+ * lakeshore has to have. `room` caps the crown and the lean; there is no `canopyRoom` case,
+ * because a willow never stands over a road.
+ */
+export function willow(b: EnvBuilders, x: number, y0: number, z: number, rng: () => number, o: PlantOptions = {}): void {
+  const s = o.scale ?? 1;
+  const room = o.room ?? 6;
+  const outX = o.outX ?? 0;
+  const outZ = o.outZ ?? 0;
+  const h = (5 + rng() * 2.5) * s;
+  const lean = Math.min((0.8 + rng() * 1.2) * s, room * 0.5);
+  const topX = x + outX * lean + (rng() - 0.5) * 0.6;
+  const topZ = z + outZ * lean + (rng() - 0.5) * 0.6;
+  const r = (0.28 + rng() * 0.14) * s;
+  b.bark.color(PAL.bark, 0.8 + rng() * 0.3);
+  const midX = x + (topX - x) * 0.5;
+  const midZ = z + (topZ - z) * 0.5;
+  shaft(b, x, y0 - 0.3, z, r * 1.8, midX, y0 + h * 0.5, midZ, r * 1.1);
+  shaft(b, midX, y0 + h * 0.5, midZ, r * 1.1, topX, y0 + h, topZ, r * 0.55);
+  // The crown: two flat lumps, wider than they are tall.
+  const spread = Math.min(room, (2.6 + rng() * 1.6) * s);
+  leafTint(b, rng, 0.05, 0.95, o.lit);
+  canopyBlob(b, topX, y0 + h + 0.4 * s, topZ, spread, (0.9 + rng() * 0.4) * s, spread * 0.85, 6, rng);
+  leafTint(b, rng, 0.05, 0.8, o.lit);
+  canopyBlob(b, topX + (rng() - 0.5) * spread, y0 + h - 0.2 * s, topZ + (rng() - 0.5) * spread, spread * 0.7, 0.7 * s, spread * 0.6, 5, rng);
+  if (o.dense) {
+    leafTint(b, rng, 0.05, 0.88, o.lit);
+    canopyBlob(b, topX + (rng() - 0.5) * spread, y0 + h + 0.1 * s, topZ + (rng() - 0.5) * spread, spread * 0.8, 0.8 * s, spread * 0.75, 6, rng);
+  }
+  // The curtain: strands hung off the crown's rim, each a card standing on its lower end.
+  const strands = 9 + Math.floor(rng() * 5) + (o.dense ? 6 : 0);
+  const phase = rng() * Math.PI * 2;
+  for (let i = 0; i < strands; i++) {
+    const a = phase + (i / strands) * Math.PI * 2 + (rng() - 0.5) * 0.5;
+    const d = Math.min(room - 0.3, spread * (0.55 + rng() * 0.5));
+    const sx = topX + Math.cos(a) * d;
+    const sz = topZ + Math.sin(a) * d;
+    const top = y0 + h + (0.1 + rng() * 0.5) * s;
+    const drop = Math.min(top - y0 - 0.25, (3.2 + rng() * 2.4) * s);
+    const w = (0.5 + rng() * 0.5) * s;
+    leafTint(b, rng, 0.05, 0.75 + rng() * 0.3, o.lit);
+    leafCard(b, sx, top - drop, sz, w, drop, a + Math.PI / 2, (rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4, rng);
+  }
+}
+
 /** Every archetype by name, for the scatter tables and the tests. */
 export const PLANTS = {
   canopyTree,
   crookedTree,
   palm,
+  willow,
   sapling,
   shrub,
   fern,
@@ -698,6 +765,7 @@ export const PLANT_COST: Record<PlantKind, number> = {
   canopyTree: 120,
   crookedTree: 62,
   palm: 116,
+  willow: 90,
   sapling: 20,
   shrub: 22,
   fern: 12,

@@ -16,9 +16,11 @@ import { reliefOf, type HillDef, type TerrainSpec } from './terrain.ts';
  *     runs through, and the south-west business district sits on its western slope,
  *   - EL ALTO, the west flank north of the meet: st-w3 and av-w1 climb it toward the north
  *     boulevard, the radio mast stands on its side,
- *   - LOMA ESTE, its smaller mirror on the east flank behind the works,
- *   - LA CRESTA, a long ridge along the north wall behind downtown, so the city rises behind
- *     the skyline instead of stopping level at it.
+ *   - LOMA ESTE, its smaller mirror on the east flank behind the works.
+ *
+ * There was a fifth, LA CRESTA, a ridge along the north wall behind downtown; the park took
+ * its ground (2026-09-16, `metroPark.ts`) — a park's land is a lot, held level, and its fence
+ * would have cut the ridge to a bump — so what rises behind the skyline now is the trees.
  *
  * What stays flat is what `createTerrain` protects, plus what this world says it wants flat
  * (`METRO_FLATS`): downtown, because The Stack is carved at absolute floors and its rings and
@@ -33,7 +35,6 @@ export const METRO_HILLS: readonly HillDef[] = [
   { x: -220, z: 950, rx: 230, rz: 230, height: 6.5 },
   { x: -560, z: -200, rx: 230, rz: 250, height: 8 },
   { x: 560, z: -330, rx: 200, rz: 260, height: 7 },
-  { x: 0, z: -730, rx: 560, rz: 250, height: 6 },
 ];
 
 /**

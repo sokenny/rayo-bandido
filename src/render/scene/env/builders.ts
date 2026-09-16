@@ -66,6 +66,8 @@ export interface EnvBuilders {
   foliage: MeshBuilder;
   /** Trunks and branches, sampling the bark texture (slot `nature/bark`) tiled up the shaft. */
   bark: MeshBuilder;
+  /** Lawns (the parks, `parkBuilder.ts`): flat turf sampling the grass photograph (slot `nature/grass`), UVs in `GRASS_TILE`s. */
+  grass: MeshBuilder;
   /**
    * Graffiti and grime: every tag, piece, damp streak, stain and crack in the city, all from
    * one white-on-transparent atlas (`graffiti.ts`) tinted per quad. Alpha-blended without
@@ -237,6 +239,8 @@ export function setbackAt(b: EnvBuilders, x: number, z: number, fallback: number
 /** Metres of leaf texture per tile. Shared by every plant in the kit, so a weed tuft and a
  * palm crown are made of leaves the same size — roughly the span of the source photograph. */
 export const FOLIAGE_TILE = 1.3;
+/** Metres of lawn per tile of the grass photograph: big enough that the repeat is not a checkerboard from the road. */
+export const GRASS_TILE = 3.5;
 
 /** Metres of bark texture per tile up a trunk. A palm's old scar rings are about this far apart. */
 export const BARK_TILE = 1.6;
@@ -322,6 +326,7 @@ export function createBuilders(plan: CityPlan): EnvBuilders {
     props: new MeshBuilder(true).soft(SOFT_EDGE.props).chamfer(CHAMFER.props),
     foliage: new MeshBuilder(true).soft(SOFT_EDGE.foliage).normalUp(NORMAL_UP.foliage),
     bark: new MeshBuilder(true),
+    grass: new MeshBuilder(true),
     decal: new MeshBuilder(true).normalUp(NORMAL_UP.decal),
     neon: new MeshBuilder(true, true),
     neonPulse: new MeshBuilder(true),

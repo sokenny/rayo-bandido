@@ -5,6 +5,7 @@ import { slotColor } from '../../core/playerColors';
 import { buildBodyGeometry, buildGlassGeometry, buildMarkerGeometry, buildTailGeometry, tintBody } from './carVisual';
 import { createBodyAttitude } from './bodyAttitude';
 import { buildWheelGeometry } from './vehicles/wheel';
+import { carPaintMaterial } from './vehicles/paintEnv';
 
 /**
  * Another player's car.
@@ -52,7 +53,7 @@ interface SharedResources {
   tail: THREE.BufferGeometry;
   marker: THREE.BufferGeometry;
   wheel: THREE.BufferGeometry;
-  bodyMat: THREE.MeshStandardMaterial;
+  bodyMat: THREE.MeshPhysicalMaterial;
   glassMat: THREE.MeshStandardMaterial;
   tailMat: THREE.MeshStandardMaterial;
   markerMat: THREE.MeshBasicMaterial;
@@ -71,7 +72,7 @@ function getShared(): SharedResources {
       wheel: buildWheelGeometry(VEHICLE.wheelRadius, WHEEL_WIDTH, 12),
       // No livery map: a rival is identified by its slot colour, and a texture that reads
       // only from a metre away is not worth the upload for a car you see from behind.
-      bodyMat: new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.26 }),
+      bodyMat: carPaintMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.26, metalness: 0.62 }),
       glassMat: new THREE.MeshStandardMaterial({
         color: 0x0b1c26,
         roughness: 0.06,

@@ -71,18 +71,19 @@ function hostOf(end: { x: number; z: number; y: number; tx: number; tz: number }
 }
 
 describe('metro layout contract', () => {
-  it('is 1.4 by 1.95 km with water to the south, the Stack downtown and a viaduct round the south', () => {
+  it('is 1.4 by 2.45 km with water to the south, the park to the north, the Stack downtown and a viaduct round the south', () => {
     const b = layout.bounds;
     expect(b.maxX - b.minX).toBe(1400);
-    expect(b.maxZ - b.minZ).toBe(1950);
+    expect(b.maxZ - b.minZ).toBe(2450);
     expect(plan.water).not.toBeNull();
     expect(plan.walls.map((w) => w.tag).sort()).toEqual(['wall-e', 'wall-n', 'wall-w']);
     expect(ground.length).toBeGreaterThan(30);
     // Every one of the Stack's roads and levels, by name, then the viaduct and its ramps.
     for (const r of STACK_ROADS) expect(ground.some((rb) => rb.tag === r.tag), r.tag).toBe(true);
-    expect(elevated.map((rb) => rb.tag)).toEqual([...STACK_ELEVATED.map((r) => r.tag), 'viaduct', 'ramp-w-n', 'ramp-w-s', 'ramp-e-s', 'ramp-e-n']);
+    expect(elevated.map((rb) => rb.tag)).toEqual([...STACK_ELEVATED.map((r) => r.tag), 'viaduct', 'ramp-w-n', 'ramp-w-s', 'ramp-e-s', 'ramp-e-n', 'park-bridge']);
     expect(loops.map((rb) => rb.tag)).toEqual(['deck', 'spine', 'ring', 'viaduct']);
-    expect(ramps.length).toBe(12);
+    // The Stack's eight, the viaduct's four, and the park's bridge over the strait.
+    expect(ramps.length).toBe(13);
     expect(plan.blocks.length).toBeGreaterThan(250);
     expect(plan.pillars!.length).toBeGreaterThan(300);
     expect(layout.surface).not.toBeNull();

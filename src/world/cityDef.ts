@@ -1,6 +1,7 @@
 import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
+import type { ParkSpec } from './park';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TerrainSpec } from './terrain';
@@ -122,6 +123,19 @@ export interface CitySpec {
    * owner out front. Cuts the plots it touches back to its edge, like a station. Missing: none.
    */
   garage?: GarageSpec;
+  /**
+   * Parks (`park.ts`): land given up for grass, lakes and trees. No blocks are generated on a
+   * park's land, the ground is held level there, its lakes sink the surface field, and its
+   * walls, podium and people are solid. The park's own roads are ordinary entries of `roads`
+   * (and `elevated`, for a bridge). Missing: none.
+   */
+  parks?: ParkSpec[];
+  /**
+   * Where the block generator runs, when it is not the whole land inside the wall band: a
+   * world with a park across one edge keeps its grid exactly where it was by naming the city's
+   * own rectangle here. Missing: everything inside the wall band (and above the quay).
+   */
+  blockBounds?: Rect;
   /**
    * The lie of the land (`terrain.ts`): the relief the ground follows, and what the world wants
    * kept level besides its lots and elevated corridors. Missing: flat, everything at y 0.

@@ -13,6 +13,10 @@ import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
 import { buildGasStations } from './env/gasStationBuilder';
 import { buildGarage } from './env/garageBuilder';
+import { buildParks } from './env/parkBuilder';
+import { createParkPeopleVisual } from './parkPeopleVisual';
+import { createParkDucksVisual } from './parkDucksVisual';
+import { LAKE, triangulate } from '../../world/park';
 import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
 import { createBusStopCrowdVisual } from './busStopCrowdVisual';
@@ -268,6 +272,9 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const barkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   const foliageArt = attachTexture(foliageMat, 'nature/foliage', null);
   const barkArt = attachTexture(barkMat, 'nature/bark', null);
+  // The parks' lawns: matte turf, the photograph multiplied into the palette's grass tint.
+  const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0 });
+  const grassArt = attachTexture(grassMat, 'nature/grass', null);
   // Graffiti and grime: lit like the concrete it sits on, blended without writing depth and
   // pushed off the surface behind it, so a tag can never z-fight a wall.
   const decalMat = createDecalMaterial(graffiti.texture);
@@ -345,6 +352,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
     propsMat,
     foliageMat,
     barkMat,
+    grassMat,
     decalMat,
     neonMat,
     neonPulseMat,
@@ -379,6 +387,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   buildGasStations(b);
   // Loco Mustang's garage: the whitewashed block, the dark mouth and the van in it (`env/garageBuilder.ts`).
   buildGarage(b);
+  // The parks: grass, lake beds, trees, paths, walls, the planetarium (`env/parkBuilder.ts`).
+  buildParks(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
@@ -446,6 +456,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   add(b.props, propsMat, 'env-props');
   add(b.bark, barkMat, 'env-bark');
   add(b.foliage, foliageMat, 'env-foliage');
+  add(b.grass, grassMat, 'env-grass');
   // After every opaque surface it might sit on, before the lights.
   add(b.decal, decalMat, 'env-decals', 1);
   add(b.signs, signMat, 'env-signs', 1);
@@ -482,6 +493,64 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
     root.add(water);
     geometries.push(geo);
     materials.push(waterMat);
+  }
+
+  /* ------------------------------------------------- lakes */
+
+  // The parks' lakes (`world/park.ts`): every shore's triangles in one mesh, the bay's own
+  // material with a slow ripple on its normal, so the reflection of the sky and the
+  // environment map moves a little. One draw call for all the water on the land.
+  const lakeShores = (plan.parks ?? []).flatMap((p) => p.lakes.map((l) => l.shore));
+  const lakeTime = { value: 0 };
+  if (lakeShores.length > 0) {
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (const shore of lakeShores) {
+      const base = positions.length / 3;
+      for (const p of shore) positions.push(p.x, 0, p.z);
+      const tris = triangulate(shore);
+      // The contour is wound to face up in x-z (`windUp`), which is clockwise seen from +Y: swap.
+      for (let i = 0; i < tris.length; i += 3) indices.push(base + tris[i], base + tris[i + 2], base + tris[i + 1]);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    const lakeMat = new THREE.MeshStandardMaterial({
+      color: PAL.water,
+      roughness: 0.14,
+      metalness: 0.62,
+      envMapIntensity: 1.6,
+      // A touch of its own light: a lake under a night sky is never black, and the streaks the
+      // park lays on it need something to sit on.
+      emissive: 0x0c2230,
+      emissiveIntensity: 0.55,
+    });
+    const previous = lakeMat.onBeforeCompile;
+    lakeMat.onBeforeCompile = (shader, renderer) => {
+      previous.call(lakeMat, shader, renderer);
+      shader.uniforms.uLakeTime = lakeTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLakePos;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvLakePos = (modelMatrix * vec4( transformed, 1.0 )).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uLakeTime;\nvarying vec3 vLakePos;')
+        .replace(
+          '#include <normal_fragment_maps>',
+          '#include <normal_fragment_maps>\n{ float t = uLakeTime; vec2 p = vLakePos.xz; float wx = sin(p.x * 0.55 + p.y * 0.21 + t * 1.1) * 0.5 + sin(p.x * 1.7 - p.y * 0.9 + t * 1.9) * 0.5; float wz = sin(p.y * 0.62 - p.x * 0.17 + t * 0.9) * 0.5 + sin(p.y * 1.9 + p.x * 0.8 - t * 1.6) * 0.5; normal = normalize( normal + vec3( wx * 0.035, 0.0, wz * 0.035 ) ); }',
+        );
+    };
+    lakeMat.customProgramCacheKey = () => 'lake-ripple';
+    // The mirror lands on the lakes as it does on the bay, half a metre under the mirror plane.
+    wetRoad.patch(lakeMat);
+    const lakesMesh = new THREE.Mesh(geo, lakeMat);
+    lakesMesh.name = 'env-lakes';
+    lakesMesh.position.y = LAKE.surfaceY;
+    lakesMesh.frustumCulled = true;
+    root.add(lakesMesh);
+    geometries.push(geo);
+    materials.push(lakeMat);
   }
 
   /* ------------------------------------------------- wanted billboard */
@@ -528,6 +597,14 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const stopPeople = plan.busStops && plan.busStops.length > 0 ? createBusStopCrowdVisual(busStopCrowds(plan.busStops)) : null;
   if (stopPeople) root.add(stopPeople.root);
 
+  // The people in the parks (`parkPeopleVisual.ts`): the encounters' casts, one crowd.
+  const parkEncounters = (plan.parks ?? []).flatMap((p) => p.encounters);
+  const parkPeople = parkEncounters.length > 0 ? createParkPeopleVisual(parkEncounters) : null;
+  if (parkPeople) root.add(parkPeople.root);
+  // The ducks and swans on the parks' lakes and the grass round them (`parkDucksVisual.ts`).
+  const parkDucks = plan.parks && plan.parks.length > 0 ? createParkDucksVisual(plan.parks, plan) : null;
+  if (parkDucks) root.add(parkDucks.root);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -547,7 +624,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
     signAtlas: signTex,
     wetRoad,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
-    ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
+    ready: Promise.all([wantedBoard.ready, badkala.ready, screenAtlas.ready, roadArt.ready, foliageArt.ready, barkArt.ready, grassArt.ready, concreteArt.ready, graffiti.ready]).then(() => undefined),
     update(frameDt: number, time: number, camX?: number, camZ?: number, people: CrowdSubject | null = null) {
       if (chunks.length > 0 && camX !== undefined && camZ !== undefined) {
         const far = chunked!.cullDistance;
@@ -603,6 +680,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       // The people at the meets notice the car (`people`); the cars parked there do not move.
       meets?.update(camX, camZ, time, frameDt, people);
       if (stopPeople && camX !== undefined && camZ !== undefined) stopPeople.update(camX, camZ, time, frameDt, people);
+      if (parkPeople && camX !== undefined && camZ !== undefined) parkPeople.update(camX, camZ, time, frameDt, people);
+      if (parkDucks && camX !== undefined && camZ !== undefined) parkDucks.update(camX, camZ, time, frameDt, people);
+      // The lakes' ripple keeps the world's clock.
+      lakeTime.value = time;
     },
     dispose() {
       atmosphere.dispose();
@@ -613,12 +694,15 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       for (const b of boards) b.board.dispose();
       meets?.dispose();
       stopPeople?.dispose();
+      parkPeople?.dispose();
+      parkDucks?.dispose();
       badkala.dispose();
       screenAtlas.dispose();
       graffiti.dispose();
       roadArt.dispose();
       concreteArt.dispose();
       foliageArt.dispose();
+      grassArt.dispose();
       barkArt.dispose();
       wetRoad.dispose();
       scene.remove(root);

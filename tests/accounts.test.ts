@@ -24,7 +24,18 @@ function startServer(): Promise<number> {
   return new Promise((resolve, reject) => {
     server = spawn(process.execPath, [ENTRY, '--port', '0'], {
       cwd: ROOT,
-      env: { ...process.env, NODE_ENV: 'test', RB_DATABASE_URL: 'memory://', RB_AUTH_DEV: '1' },
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        RB_DATABASE_URL: 'memory://',
+        RB_AUTH_DEV: '1',
+        // Blank so a developer's local `.env` (real OAuth creds, for testing sign-in by hand)
+        // can never leak into this suite: `loadEnvFile` never overrides a variable already set.
+        RB_GOOGLE_CLIENT_ID: '',
+        RB_GOOGLE_CLIENT_SECRET: '',
+        RB_DISCORD_CLIENT_ID: '',
+        RB_DISCORD_CLIENT_SECRET: '',
+      },
     });
     const timer = setTimeout(() => reject(new Error('the server did not start in time')), 30_000);
     server.stdout.on('data', (chunk: Buffer) => {

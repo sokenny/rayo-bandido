@@ -154,6 +154,16 @@ export const TEXTURES = {
     normalize: 0.66,
   },
 
+  /** Lawn turf for the parks: already a night-dark green, so only lifted enough to read under the lamps. */
+  'nature/grass': {
+    files: ['nature/grass.webp', 'nature/grass.png', 'nature/grass.jpg'],
+    tiling: true,
+    anisotropy: 8,
+    normalize: 0.72,
+    // The photograph is soft; at night and at a grazing angle it flattens to a plain green without this.
+    contrast: 2.2,
+  },
+
   /**
    * Palm trunks. Warm brown bark under a cold city; tinted back towards the night and dropped
    * a little, so a row of trunks does not glow against the asphalt behind them.
