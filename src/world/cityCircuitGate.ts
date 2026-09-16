@@ -60,8 +60,11 @@ export function circuitGateSite(): ActivitySite {
  * you start a race from, and `circuitWorld.ts` explicitly clears the field this writes.
  */
 export function addCircuitGate(world: World, site: ActivitySite = circuitGateSite()): World {
-  // The rules' copy and the art's copy, made separately so neither can write through the other.
-  world.layout.circuitSite = { ...site };
-  world.plan.circuitMarker = { ...site };
+  // On the ground where the city puts its ground (the site is written at y 0; the street may be
+  // on a hill). The rules' copy and the art's copy, made separately so neither can write
+  // through the other.
+  const y = world.layout.groundY ? Math.max(site.y, world.layout.groundY(site.x, site.z)) : site.y;
+  world.layout.circuitSite = { ...site, y };
+  world.plan.circuitMarker = { ...site, y };
   return world;
 }

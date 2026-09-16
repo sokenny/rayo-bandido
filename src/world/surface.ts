@@ -1,4 +1,5 @@
 import type { SurfaceField, SurfaceSample } from '../core/types';
+import { FLAT_TERRAIN, type Terrain } from './terrain';
 import { createProjection, projectOntoPath, segmentCount, type TrackPath } from './track';
 
 /**
@@ -14,8 +15,10 @@ import { createProjection, projectOntoPath, segmentCount, type TrackPath } from 
  * `pad` widens each ribbon a little past its guardrails, so a car pressed into a rail still
  * stands on the deck rather than dropping to the ground beside it.
  *
- * Ground level itself is flat: the pavement beside the streets is laid flush with the asphalt,
- * so there is no kerb to climb and nothing to read under a car that strays off the road.
+ * Ground level is the terrain (`terrain.ts`): flat at y 0 in a world without one, a height
+ * field with its own gradient in a world with hills. The pavement beside the streets is laid
+ * flush with the asphalt, so there is no kerb to climb and nothing to read under a car that
+ * strays off the road: on and off the road alike, the ground is the terrain's height there.
  *
  * INDEXED. Every car, bus and police unit asks this every tick, and the open world's elevated
  * loops each run to thousands of segments and have bounding boxes that cover most of the map,
@@ -32,8 +35,9 @@ export const STEP_UP = 0.6;
 /** Side of a cell of the segment index (m). */
 const CELL = 16;
 
-export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5): SurfaceField {
+export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terrain: Terrain = FLAT_TERRAIN): SurfaceField {
   const proj = createProjection();
+  const flat = terrain.flat;
   const reaches = paths.map((path) => {
     let reach = 0;
     for (const s of path.samples) if (s.halfWidth > reach) reach = s.halfWidth;
@@ -82,9 +86,15 @@ export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5): Surf
 
   return {
     sample(x: number, z: number, yHint: number, out: SurfaceSample): void {
-      let bestY = 0;
-      let bestGx = 0;
-      let bestGz = 0;
+      // The ground is always a candidate, at the terrain's height and grade there.
+      if (flat) {
+        out.y = 0;
+        out.gx = 0;
+        out.gz = 0;
+      } else terrain.sample(x, z, out);
+      let bestY = out.y;
+      let bestGx = out.gx;
+      let bestGz = out.gz;
       const col = Math.floor((x - minX) / CELL);
       const row = Math.floor((z - minZ) / CELL);
       if (col >= 0 && col < nx && row >= 0 && row < nz) {

@@ -267,9 +267,12 @@ export interface BusState {
   route: number;
   x: number;
   z: number;
+  /** Road height under it (m): the ground's, since buses keep to the boulevards. */
+  y: number;
   heading: number;
   prevX: number;
   prevZ: number;
+  prevY: number;
   prevHeading: number;
   /** Distance travelled along the route loop (m). */
   station: number;
@@ -1183,6 +1186,8 @@ export interface HustlerSpot {
   /** Where he stands and waits: pavement, never a lane. */
   x: number;
   z: number;
+  /** Ground height there (m). Missing: 0. Written by the world when it has topography. */
+  y?: number;
   /** Which way he faces while he waits: at the road. */
   heading: number;
   /** Picks his clothes, his build and his nickname: any integer. */
@@ -1797,6 +1802,13 @@ export interface ArenaLayout {
   walls: ObstacleWall[];
   /** Drivable heights, when the world has roads off the ground. Null = everything at y 0. */
   surface: SurfaceField | null;
+  /**
+   * Height of the ground at a point (m), in a world with topography (`src/world/terrain.ts`).
+   * Missing: flat, everything on the ground stands at y 0. What the surface field answers off
+   * the elevated roads; asked by whoever needs to know whether a body is on the street or up on
+   * a deck without assuming the street is at 0.
+   */
+  groundY?: (x: number, z: number) => number;
   /** Race course, when this world hosts races. */
   race: RaceCourse | null;
   /**

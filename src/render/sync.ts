@@ -88,7 +88,7 @@ export function syncBuses(visuals: BusVisual[], buses: BusState[], alpha: number
   for (let i = 0; i < buses.length && i < visuals.length; i++) {
     const b = buses[i];
     const vis = visuals[i];
-    vis.root.position.set(lerp(b.prevX, b.x, alpha), 0, lerp(b.prevZ, b.z, alpha));
+    vis.root.position.set(lerp(b.prevX, b.x, alpha), lerp(b.prevY, b.y, alpha), lerp(b.prevZ, b.z, alpha));
     vis.root.rotation.y = -lerpAngle(b.prevHeading, b.heading, alpha);
     vis.setDoors(b.doors);
   }

@@ -1,7 +1,7 @@
 import type { BlockRect, Rect, RoadRect, ZoneId } from '../../../world/cityPlan';
 import { PAL, zoneAccent } from './palette';
 import { inRect, makeRng, subtractRect, type MeshBuilder, type Rect2 } from './meshBuilder';
-import { concreteAt, finishOf, groundGlow, halo, setbackAt, type EnvBuilders } from './builders';
+import { concreteAt, drapedSlab, finishOf, groundGlow, groundLevel, halo, plinth, setbackAt, type EnvBuilders } from './builders';
 import { buildBuilding, buildLink, plotSeed, skylineField, snapFloors, subdividePlot, type BuildingSpec, type Volume } from './buildingKit';
 import { buildMegastructures } from './megastructureBuilder';
 import { FLOOR } from './facadeAtlas';
@@ -65,17 +65,74 @@ export function buildCity(b: EnvBuilders): void {
 
 /* ------------------------------------------------------------------ ground + roads */
 
+/** Height the ground is drawn below the pavements and roads laid on it (m). */
+const GROUND_Y = -0.04;
+/** Cell of the terrain floor's grid (m): the same cell the draped slabs use, so the two agree. */
+const GROUND_STEP = 16;
+/** Longest run of level cells merged into one quad (m): about a render chunk, so no quad spans the map. */
+const GROUND_RUN = 320;
+
 function buildGround(b: EnvBuilders, bounds: Rect2): void {
   const size = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) * 2.2;
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cz = (bounds.minZ + bounds.maxZ) / 2;
   b.concrete.color(PAL.ground);
   const ground: Rect2 = { minX: cx - size / 2, maxX: cx + size / 2, minZ: cz - size / 2, maxZ: cz + size / 2 };
+  // Where the ground rolls (`terrain.ts`) it is a grid of quads draped over the height field;
+  // beyond the terrain's extent, and everywhere in a flat world, it is the one plane it was.
+  const terrain = b.plan.terrain;
+  const extent = terrain && !terrain.flat && terrain.extent ? terrain.extent : null;
   // The bay takes its own share: the ground plane is cut around it (the water is its own mesh).
-  const pieces = b.plan.water ? subtractRect(ground, b.plan.water.rect) : [ground];
-  for (const p of pieces) {
+  const water = b.plan.water ? b.plan.water.rect : null;
+  const flat = extent ? subtractRect(ground, extent) : [ground];
+  for (const piece of flat) for (const p of water ? subtractRect(piece, water) : [piece]) {
     if (p.maxX - p.minX < 1 || p.maxZ - p.minZ < 1) continue;
-    b.concrete.planeY((p.minX + p.maxX) / 2, -0.04, (p.minZ + p.maxZ) / 2, p.maxX - p.minX, p.maxZ - p.minZ);
+    b.concrete.planeY((p.minX + p.maxX) / 2, GROUND_Y, (p.minZ + p.maxZ) / 2, p.maxX - p.minX, p.maxZ - p.minZ);
+  }
+  if (extent) buildTerrainFloor(b, extent, water);
+}
+
+/**
+ * The ground over the terrain's extent: one quad per cell where the ground is off level, its
+ * corners on the height field; runs of level cells merged into one quad each, cut round the
+ * water. Most of a city is level (its downtown, its lots, everything under its decks), so this
+ * is a few thousand triangles, not a grid over the whole map.
+ */
+function buildTerrainFloor(b: EnvBuilders, extent: Rect2, water: Rect2 | null): void {
+  const padY = b.plan.padY;
+  const step = GROUND_STEP;
+  const flush = (x0: number, x1: number, z0: number, z1: number): void => {
+    const piece: Rect2 = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
+    for (const p of water ? subtractRect(piece, water) : [piece]) {
+      if (p.maxX - p.minX < 0.01 || p.maxZ - p.minZ < 0.01) continue;
+      b.concrete.planeY((p.minX + p.maxX) / 2, GROUND_Y, (p.minZ + p.maxZ) / 2, p.maxX - p.minX, p.maxZ - p.minZ);
+    }
+  };
+  for (let z0 = extent.minZ; z0 < extent.maxZ; z0 += step) {
+    const z1 = Math.min(extent.maxZ, z0 + step);
+    let run = -Infinity;
+    for (let x0 = extent.minX; x0 < extent.maxX; x0 += step) {
+      const x1 = Math.min(extent.maxX, x0 + step);
+      const y00 = padY(x0, z0);
+      const y10 = padY(x1, z0);
+      const y01 = padY(x0, z1);
+      const y11 = padY(x1, z1);
+      if (y00 === 0 && y10 === 0 && y01 === 0 && y11 === 0) {
+        if (run === -Infinity) run = x0;
+        if (x1 - run >= GROUND_RUN) {
+          flush(run, x1, z0, z1);
+          run = -Infinity;
+        }
+        continue;
+      }
+      if (run !== -Infinity) {
+        flush(run, x0, z0, z1);
+        run = -Infinity;
+      }
+      // A cell off level is never over the water: the shore is held level for a band inland.
+      b.concrete.quad(x0, y01 + GROUND_Y, z1, x1, y11 + GROUND_Y, z1, x1, y10 + GROUND_Y, z0, x0, y00 + GROUND_Y, z0);
+    }
+    if (run !== -Infinity) flush(run, extent.maxX, z0, z1);
   }
 }
 
@@ -273,6 +330,9 @@ interface Plot extends Module {
   dark?: boolean;
   /** The volumes actually drawn on this plot. Everything hung on the building reads these. */
   vols?: Volume[];
+  /** The ground the building stands on (its high side, `groundLevel`) and the lowest ground under it. */
+  level: number;
+  dip: number;
 }
 
 function heightFor(massing: 1 | 2 | 3 | 4, rng: () => number): number {
@@ -299,11 +359,12 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
   const cz = (blk.minZ + blk.maxZ) / 2;
 
   // Curb + sidewalk, kept 0.3 m inside the collider so the car stops before it touches art.
-  // Flat, like the pavement that runs up to it: the street is one level all the way across.
+  // Flush with the pavement that runs up to it, and draped over the same ground: the street
+  // is one surface all the way across, on the level or up a hill.
   b.concrete.color(PAL.curb);
-  b.concrete.planeY(cx, 0, cz, w - 0.6, d - 0.6);
+  drapedSlab(b, b.concrete, { minX: blk.minX + 0.3, maxX: blk.maxX - 0.3, minZ: blk.minZ + 0.3, maxZ: blk.maxZ - 0.3 }, 0);
   b.concrete.color(PAL.sidewalk, blk.zone === 'jdm' ? 0.8 : 1);
-  b.concrete.planeY(cx, 0.006, cz, w - 1.7, d - 1.7);
+  drapedSlab(b, b.concrete, { minX: blk.minX + 0.85, maxX: blk.maxX - 0.85, minZ: blk.minZ + 0.85, maxZ: blk.maxZ - 0.85 }, 0.006);
 
   const setback = blockSetback(w, d, setbackAt(b, cx, cz, SIDEWALK));
   const inner: Rect2 = {
@@ -342,6 +403,8 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
     }
     // Something passes overhead: nothing here may reach it.
     if (blk.maxHeight !== undefined) h = Math.max(4, Math.min(h, blk.maxHeight - 1));
+    // On a hill the plot is raised to its high side, and a plinth fills down to the low one.
+    const { level, dip } = groundLevel(b, r);
     plots.push({
       ...r,
       height: h,
@@ -349,7 +412,9 @@ function planBlock(b: EnvBuilders, blk: BlockRect): Plot[] {
       inner,
       pave: setback,
       seed,
-      spec: { zone: blk.zone, massing: blk.massing, height: h, base: 0.22, detail: 'near', street, ...finishOf(b, (r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2) },
+      level,
+      dip,
+      spec: { zone: blk.zone, massing: blk.massing, height: h, base: level + 0.22, detail: 'near', street, ...finishOf(b, (r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2) },
     });
   }
   return plots;
@@ -406,6 +471,7 @@ function assignLandmarks(plots: Plot[], anchors?: ReadonlyArray<{ x: number; z: 
 
 function buildPlot(b: EnvBuilders, p: Plot): void {
   const rng = makeRng(p.seed ^ 0x9e3779b9);
+  plinth(b, p, p.dip, p.level, 0.22);
   const bld = buildBuilding(b, p, p.spec, rng);
   p.top = bld.top;
   p.dark = bld.dark;
@@ -586,9 +652,13 @@ function tryFacade(
     dx === 1 ? m.maxX > inner.maxX - 1.2 : dx === -1 ? m.minX < inner.minX + 1.2 : dz === 1 ? m.maxZ > inner.maxZ - 1.2 : m.minZ < inner.minZ + 1.2;
   if (!flush) return;
 
+  // Heights below are over the building's own ground, which on a hill is its plinth's top.
+  let lvl = Infinity;
+  for (const v of vols) if (v.role !== 'link' && v.y0 < lvl) lvl = v.y0;
+  if (lvl === Infinity) return;
   // The shopfront band decides the wall: whichever volume is outermost on this side at
   // street level. Nothing above is drawn unless a volume reaches that far out at that height.
-  const bandY = 3.2 + rng() * 1.4;
+  const bandY = lvl + 3.2 + rng() * 1.4;
   const ground = faceVolume(vols, dx, dz, bandY, bandY);
   if (!ground) return;
 
@@ -649,7 +719,7 @@ function tryFacade(
     // A couple of big screens up the face, never a wall of them: the buildings behind them
     // now carry their own patterns and light, and the screens are the accents.
     const count = m.height > 30 ? BLOCKS.districtScreens.perFace : 1;
-    let sy = 8 + rng() * 6;
+    let sy = lvl + 8 + rng() * 6;
     for (let k = 0; k < count; k++) {
       const sw = Math.min(width * 0.86, 7 + rng() * 9);
       const sh = sw * (0.5 + rng() * 0.45);
@@ -680,7 +750,7 @@ function tryFacade(
   const tall = cell === 7 || cell === 13;
   const sw = tall ? 2.6 : Math.min(width * 0.7, 5 + rng() * 3.5);
   const sh = tall ? sw * 3 : sw * (0.75 + rng() * 0.4);
-  const sy = 6 + rng() * Math.max(1, Math.min(14, ground.y1 - 10));
+  const sy = lvl + 6 + rng() * Math.max(1, Math.min(14, ground.y1 - lvl - 10));
   // Same rule as the screens: the sign hangs on the wall that is there at its own height.
   const nv = faceVolume(vols, dx, dz, sy - sh / 2, sy + sh / 2);
   if (!nv) return;
@@ -713,24 +783,32 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
     const along = (t: number, off: number): [number, number] =>
       horizontal ? [t, innerEdge - inward * off] : [innerEdge - inward * off, t];
 
-    // Pavement across the whole band, flush with the road like every other stretch of it.
+    // Pavement across the whole band, flush with the road like every other stretch of it, and
+    // draped over the same ground.
     {
       const [px, pz] = along((min + max) / 2, (bandMax - bandMin) / 2);
       const w = horizontal ? max - min - 0.6 : bandMax - bandMin - 0.6;
       const d = horizontal ? bandMax - bandMin - 0.6 : max - min - 0.6;
       b.concrete.color(PAL.curb);
-      b.concrete.planeY(px, 0, pz, w, d);
+      drapedSlab(b, b.concrete, { minX: px - w / 2, maxX: px + w / 2, minZ: pz - d / 2, maxZ: pz + d / 2 }, 0);
       b.concrete.color(PAL.sidewalk);
-      b.concrete.planeY(px, 0.006, pz, w - 1.2, d - 1.2);
+      drapedSlab(b, b.concrete, { minX: px - (w - 1.2) / 2, maxX: px + (w - 1.2) / 2, minZ: pz - (d - 1.2) / 2, maxZ: pz + (d - 1.2) / 2 }, 0.006);
     }
 
-    // Low retaining wall hugging the road edge; it closes the gaps between buildings.
+    // Low retaining wall hugging the road edge; it closes the gaps between buildings. Where
+    // the ground rolls it is in pieces, each standing on the ground under it, so it climbs a
+    // hill in steps and never floats over a dip or sinks into a rise; on a flat world, one box.
     {
-      const [wx, wz] = along((min + max) / 2, 1.7);
-      const w = horizontal ? max - min - 0.8 : 3.4;
-      const d = horizontal ? 3.4 : max - min - 0.8;
       b.wall.color(PAL.concrete, 1.15);
-      b.wall.box(wx, 1.72, wz, w, 3, d);
+      const PIECE = b.plan.terrain && !b.plan.terrain.flat ? 24 : Infinity;
+      for (let t0 = min + 0.4; t0 < max - 0.4; t0 += PIECE) {
+        const t1 = Math.min(max - 0.4, t0 + PIECE);
+        const [wx, wz] = along((t0 + t1) / 2, 1.7);
+        const y0 = b.plan.padY(wx, wz);
+        const w = horizontal ? t1 - t0 : 3.4;
+        const d = horizontal ? 3.4 : t1 - t0;
+        b.wall.box(wx, y0 + 1.42, wz, w, 3.6, d);
+      }
     }
 
     const depth = 7.4;
@@ -749,10 +827,13 @@ function buildPerimeter(b: EnvBuilders, rng: () => number): void {
       // The same kit as the blocks, at the middle level of detail: massing, bands and a
       // crown, none of the street furniture. Only the face toward the city meets a street.
       const street: [boolean, boolean, boolean, boolean] = horizontal ? [false, false, inward > 0, inward < 0] : [inward > 0, inward < 0, false, false];
+      const footprint: Rect2 = { minX: x - bw / 2, maxX: x + bw / 2, minZ: z - bd / 2, maxZ: z + bd / 2 };
+      const { level, dip } = groundLevel(b, footprint);
+      plinth(b, footprint, dip, level, 0.22);
       buildBuilding(
         b,
-        { minX: x - bw / 2, maxX: x + bw / 2, minZ: z - bd / 2, maxZ: z + bd / 2 },
-        { zone, massing: massingFor(h), height: h, base: 0.22, detail: 'mid', street, ...finishOf(b, x, z) },
+        footprint,
+        { zone, massing: massingFor(h), height: h, base: level + 0.22, detail: 'mid', street, ...finishOf(b, x, z) },
         makeRng(plotSeed(x, z)),
       );
       if (rng() < 0.28) {
@@ -785,7 +866,7 @@ function buildSkyline(b: EnvBuilders, rng: () => number): void {
     buildBuilding(
       b,
       { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 },
-      { zone, massing: massingFor(h), height: h, base: 0, detail: 'far', ...(landmark !== undefined ? { landmark } : {}), ...finishOf(b, x, z) },
+      { zone, massing: massingFor(h), height: h, base: b.plan.padY(x, z), detail: 'far', ...(landmark !== undefined ? { landmark } : {}), ...finishOf(b, x, z) },
       makeRng(plotSeed(x, z) ^ 0x51ab),
     );
   };

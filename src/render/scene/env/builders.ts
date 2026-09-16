@@ -1,4 +1,5 @@
-import { MeshBuilder } from './meshBuilder';
+import { MeshBuilder, type Rect2 } from './meshBuilder';
+import { PAL } from './palette';
 import { LAMP_SPARKS, lampSparkSeed } from './lampFaults';
 import { createReclaimField, type ReclaimField } from './reclaim';
 import type { CityPlan } from '../../../world/cityPlan';
@@ -348,8 +349,9 @@ export function builderStats(b: EnvBuilders): { triangles: number; drawCalls: nu
 }
 
 /**
- * Additive pool of light on the ground (lamp spill, wet neon reflection). `fault` tags the
- * pool with a lamp's fault seed so it strobes with the head that casts it; see `lampFaults`.
+ * Additive pool of light on the ground (lamp spill, wet neon reflection). `y` is its lift over
+ * the ground there (`padY`), so a pool on a hill lies on the hill. `fault` tags the pool with a
+ * lamp's fault seed so it strobes with the head that casts it; see `lampFaults`.
  */
 export function groundGlow(
   b: EnvBuilders,
@@ -363,8 +365,99 @@ export function groundGlow(
   fault = 0,
 ): void {
   b.glow.color(color, strength).fault(fault);
-  b.glow.planeY(x, y, z, sx, sz);
+  // A fixture built on its own (the lamp tests) has no plan: its ground is 0.
+  const ground = b.plan ? b.plan.padY(x, z) : 0;
+  b.glow.planeY(x, ground + y, z, sx, sz);
   b.glow.fault(0);
+}
+
+/**
+ * A flat slab laid over the ground: one quad where the ground is level, a grid of quads that
+ * follows `padY` where it rolls (`terrain.ts`), `lift` above it. `uv` maps the whole rectangle
+ * the way `planeY` does, so world-space texture tiles stay continuous across the cells. The
+ * grid is checked vertex by vertex: a slab whose every vertex would sit at 0 is the one quad it
+ * always was, so a flat world draws exactly what it drew before the terrain existed.
+ */
+export function drapedSlab(b: EnvBuilders, mb: MeshBuilder, r: Rect2, lift: number, step = 16, uv?: [number, number, number, number]): void {
+  const w = r.maxX - r.minX;
+  const d = r.maxZ - r.minZ;
+  if (w <= 0 || d <= 0) return;
+  const [u0, v0, u1, v1] = uv ?? [0, 0, 1, 1];
+  const cx = (r.minX + r.maxX) / 2;
+  const cz = (r.minZ + r.maxZ) / 2;
+  const t = b.plan.terrain;
+  if (!t || t.flat) {
+    mb.planeY(cx, lift, cz, w, d, u0, v0, u1, v1);
+    return;
+  }
+  const padY = b.plan.padY;
+  const nx = Math.max(1, Math.ceil(w / step));
+  const nz = Math.max(1, Math.ceil(d / step));
+  let level = true;
+  for (let j = 0; j <= nz && level; j++) {
+    const z = r.minZ + (d * j) / nz;
+    for (let i = 0; i <= nx; i++) {
+      if (padY(r.minX + (w * i) / nx, z) !== 0) {
+        level = false;
+        break;
+      }
+    }
+  }
+  if (level) {
+    mb.planeY(cx, lift, cz, w, d, u0, v0, u1, v1);
+    return;
+  }
+  const uAt = (x: number): number => u0 + ((u1 - u0) * (x - r.minX)) / w;
+  const vAt = (z: number): number => v0 + ((v1 - v0) * (r.maxZ - z)) / d;
+  for (let j = 0; j < nz; j++) {
+    const z0 = r.minZ + (d * j) / nz;
+    const z1 = r.minZ + (d * (j + 1)) / nz;
+    for (let i = 0; i < nx; i++) {
+      const x0 = r.minX + (w * i) / nx;
+      const x1 = r.minX + (w * (i + 1)) / nx;
+      // `planeY`'s own winding, corner by corner, each at the ground under it.
+      mb.quad(
+        x0, padY(x0, z1) + lift, z1,
+        x1, padY(x1, z1) + lift, z1,
+        x1, padY(x1, z0) + lift, z0,
+        x0, padY(x0, z0) + lift, z0,
+        uAt(x0), vAt(z1), uAt(x1), vAt(z0),
+      );
+    }
+  }
+}
+
+/**
+ * The level a building on `r` stands at, and the lowest ground under it: on a slope the whole
+ * footprint is raised to the high side and a plinth (`plinth`) fills down to the low one, so no
+ * corner of a facade floats and no ground floor is buried.
+ */
+export function groundLevel(b: EnvBuilders, r: Rect2): { level: number; dip: number } {
+  const padY = b.plan.padY;
+  let level = -Infinity;
+  let dip = Infinity;
+  for (let j = 0; j <= 2; j++) {
+    const z = r.minZ + ((r.maxZ - r.minZ) * j) / 2;
+    for (let i = 0; i <= 2; i++) {
+      const y = padY(r.minX + ((r.maxX - r.minX) * i) / 2, z);
+      if (y > level) level = y;
+      if (y < dip) dip = y;
+    }
+  }
+  return { level, dip };
+}
+
+/**
+ * The concrete under a raised footprint, from below the lowest ground up to the building's
+ * base (`level` + the base the kit leaves under its ground floor). Nothing on level ground: a
+ * flat world draws no plinths at all.
+ */
+export function plinth(b: EnvBuilders, r: Rect2, dip: number, level: number, base: number): void {
+  if (level - dip < 0.02) return;
+  const y0 = dip - 0.5;
+  const top = level + base;
+  b.wall.color(PAL.concrete, 1.05);
+  b.wall.box((r.minX + r.maxX) / 2, (y0 + top) / 2, (r.minZ + r.maxZ) / 2, r.maxX - r.minX, top - y0, r.maxZ - r.minZ);
 }
 
 /**

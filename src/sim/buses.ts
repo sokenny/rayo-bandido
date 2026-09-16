@@ -47,9 +47,11 @@ export function createBuses(layout: ArenaLayout): BusState[] {
         route: r,
         x: 0,
         z: 0,
+        y: 0,
         heading: 0,
         prevX: 0,
         prevZ: 0,
+        prevY: 0,
         prevHeading: 0,
         station,
         speed: BUSES.cruiseSpeed,
@@ -58,8 +60,10 @@ export function createBuses(layout: ArenaLayout): BusState[] {
         doors: 0,
       };
       placeOnRoute(bus, routes[r], Infinity);
+      settleBus(bus, layout);
       bus.prevX = bus.x;
       bus.prevZ = bus.z;
+      bus.prevY = bus.y;
       bus.prevHeading = bus.heading;
       bus.nextStop = firstStopAfter(routes[r], station);
       buses.push(bus);
@@ -91,6 +95,7 @@ export function stepBuses(buses: BusState[], layout: ArenaLayout, dt: number): v
     if (!route) continue;
     bus.prevX = bus.x;
     bus.prevZ = bus.z;
+    bus.prevY = bus.y;
     bus.prevHeading = bus.heading;
     const length = routeLength(route);
 
@@ -128,8 +133,17 @@ export function stepBuses(buses: BusState[], layout: ArenaLayout, dt: number): v
       }
     }
     placeOnRoute(bus, route, dt);
+    settleBus(bus, layout);
     writeBusWalls(layout, bus);
   }
+}
+
+/**
+ * The road under the bus. Buses keep to the boulevards, which are ground roads, so this is
+ * the ground's height there: the terrain's in a world with hills, 0 in a flat one.
+ */
+function settleBus(bus: BusState, layout: ArenaLayout): void {
+  bus.y = layout.groundY ? layout.groundY(bus.x, bus.z) : 0;
 }
 
 /** Where the four walls of bus `id` live in `layout.walls`. Reserved by the world builder. */
@@ -160,6 +174,8 @@ function writeBusWalls(layout: ArenaLayout, bus: BusState): void {
     w.az = cz[i];
     w.bx = cx[(i + 1) % 4];
     w.bz = cz[(i + 1) % 4];
+    // As tall as the bus, from the road it stands on: a car on a deck overhead drives past it.
+    w.maxY = bus.y + BUSES.height;
   }
 }
 

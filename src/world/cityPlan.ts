@@ -1,6 +1,7 @@
 import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
+import type { Terrain } from './terrain';
 import type { TrackPath } from './track';
 
 /**
@@ -337,6 +338,11 @@ export interface PassageDef {
 export interface CityPlan {
   megastructures?: MegastructureDef[];
   bounds: Rect;
+  /**
+   * The lie of the land, when the world has one: what `padY` reads, and what the ground mesh
+   * is draped over (`env/cityBuilder.ts`). Missing or `flat`: a plane at y 0.
+   */
+  terrain?: Terrain;
   /** Which colour script the world is drawn in. Missing = the arena's. */
   palette?: 'arena' | 'bay' | 'stack';
   /**
@@ -506,9 +512,10 @@ export interface CityPlan {
   /** True inside a block, wall band or barrier footprint, shrunk by `pad`. Props live only here. */
   isSolid(x: number, z: number, pad?: number): boolean;
   /**
-   * Height of the walkable surface (m). The pavement is flush with the road, so this is 0
-   * everywhere at ground level today; it stays the seam a prop asks for its footing, for
-   * whatever stands on something raised later.
+   * Height of the ground (m): the terrain under a point, in a world with topography
+   * (`terrain.ts`), and 0 everywhere in a flat one. The pavement is flush with the road, so
+   * this is also the walkable surface: every prop, lamp, shelter and figure asks it for its
+   * footing, and every draped slab asks it for its vertices.
    */
   padY(x: number, z: number): number;
 }

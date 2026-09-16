@@ -57,7 +57,8 @@ function buildFacadeEquipment(b: EnvBuilders, rng: () => number): void {
     for (let z = bounds.minZ; z <= bounds.maxZ; z += 16) {
       b.walls.collect(x, z, 12, out);
       for (const v of out) {
-        if (seen.has(v) || v.y0 > 0.5) continue;
+        // Ground volumes only: those standing on the ground under them, which on a hill is not y 0.
+        if (seen.has(v) || v.y0 - b.plan.padY((v.minX + v.maxX) / 2, (v.minZ + v.maxZ) / 2) > 0.5) continue;
         seen.add(v);
         // Wall equipment is the Stack's dressing: only on walls that stand in concrete.
         if (!concreteAt(b, (v.minX + v.maxX) / 2, (v.minZ + v.maxZ) / 2)) continue;
@@ -166,7 +167,7 @@ function buildBladeSigns(b: EnvBuilders, rng: () => number): void {
       const w = tall ? 1.9 : 2.6 + rng() * 1.2;
       const h = tall ? 5.5 + rng() * 2 : w;
       const out = 1.4 + w / 2;
-      const y = 7 + rng() * 7;
+      const y = b.plan.padY(x, z) + 7 + rng() * 7;
       // The ledge is the block's edge, not a wall: the plot behind it may be empty, or set
       // back, or carry a building that stops below this. Without a wall to bracket onto, the
       // blade and its arm would hang over the pavement on nothing.
@@ -210,16 +211,26 @@ function buildRouteMarkers(b: EnvBuilders): void {
     const concrete = concreteAt(b, (wall.minX + wall.maxX) / 2, (wall.minZ + wall.maxZ) / 2);
     const c = concrete ? PAL.neonAmber : colors[i % colors.length];
     b.neon.color(c, concrete ? 0.45 : 0.8);
+    // Where the ground rolls, in pieces along the band, each end on the ground under it, so
+    // the line climbs the hills; on a flat world, the one tube it always was.
+    const PIECE = b.plan.terrain && !b.plan.terrain.flat ? 32 : Infinity;
+    const padY = b.plan.padY;
     if (horizontal) {
       const inner = (wall.minZ + wall.maxZ) / 2 < cz ? wall.maxZ : wall.minZ;
       const glowZ = inner + ((wall.minZ + wall.maxZ) / 2 < cz ? 4 : -4);
-      b.neon.tube(wall.minX + 12, y, inner, wall.maxX - 12, y, inner, 0.22);
-      groundGlow(b, (wall.minX + wall.maxX) / 2, glowZ, wall.maxX - wall.minX - 24, 16, c, 0.05);
+      for (let x0 = wall.minX + 12; x0 < wall.maxX - 12; x0 += PIECE) {
+        const x1 = Math.min(wall.maxX - 12, x0 + PIECE);
+        b.neon.tube(x0, padY(x0, inner) + y, inner, x1, padY(x1, inner) + y, inner, 0.22);
+        groundGlow(b, (x0 + x1) / 2, glowZ, x1 - x0, 16, c, 0.05);
+      }
     } else {
       const inner = (wall.minX + wall.maxX) / 2 < cx ? wall.maxX : wall.minX;
       const glowX = inner + ((wall.minX + wall.maxX) / 2 < cx ? 4 : -4);
-      b.neon.tube(inner, y, wall.minZ, inner, y, wall.maxZ, 0.22);
-      groundGlow(b, glowX, (wall.minZ + wall.maxZ) / 2, 16, wall.maxZ - wall.minZ, c, 0.06);
+      for (let z0 = wall.minZ; z0 < wall.maxZ; z0 += PIECE) {
+        const z1 = Math.min(wall.maxZ, z0 + PIECE);
+        b.neon.tube(inner, padY(inner, z0) + y, z0, inner, padY(inner, z1) + y, z1, 0.22);
+        groundGlow(b, glowX, (z0 + z1) / 2, 16, z1 - z0, c, 0.06);
+      }
     }
   });
 }
@@ -551,29 +562,33 @@ export function buildGate(b: EnvBuilders, g: GateDef): void {
   dz /= span;
   // The gate spans the road, so its halos face along the road: the span's normal.
   const faceRot = Math.atan2(-dz, dx);
+  // Each pylon stands on the ground at its own end; the beam clears the higher of the two.
+  const ground = [b.plan.padY(g.x0, g.z0), b.plan.padY(g.x1, g.z1)];
+  const top = Math.max(ground[0], ground[1]) + g.height;
   for (let i = 0; i < 2; i++) {
     const [x, z] = ends[i];
     if (!g.trusted && !b.plan.isSolid(x, z, 0.2)) continue;
     const c = colors[i];
+    const y0 = ground[i];
     // Structural pylon.
     b.props.color(PAL.metalDark, 0.9);
-    b.props.box(x, g.height / 2, z, 0.9, g.height, 0.9);
+    b.props.box(x, (y0 + top) / 2, z, 0.9, top - y0, 0.9);
     // Neon strip up the pylon: the gate reads as two lit posts and a beam, nothing else.
     const inward = i === 0 ? 1 : -1;
     const ox = dx * inward;
     const oz = dz * inward;
     b.neonPulse.color(c, 1);
-    b.neonPulse.tube(x + ox * 0.5, 1.6, z + oz * 0.5, x + ox * 0.5, g.height - 0.6, z + oz * 0.5, 0.3);
-    halo(b, x + ox * 0.5, g.height / 2, z + oz * 0.5, 5, g.height * 1.2, faceRot, c, 0.16);
+    b.neonPulse.tube(x + ox * 0.5, y0 + 1.6, z + oz * 0.5, x + ox * 0.5, top - 0.6, z + oz * 0.5, 0.3);
+    halo(b, x + ox * 0.5, (y0 + top) / 2, z + oz * 0.5, 5, (top - y0) * 1.2, faceRot, c, 0.16);
     groundGlow(b, x + ox * 2, z + oz * 2, 18, 18, c, 0.15);
   }
   // Top beam.
   const mx = (g.x0 + g.x1) / 2;
   const mz = (g.z0 + g.z1) / 2;
   b.props.color(PAL.metalDark, 0.8);
-  b.props.orientedBox(mx, mz, dx, dz, span, 0.8, g.height - 0.8, g.height);
+  b.props.orientedBox(mx, mz, dx, dz, span, 0.8, top - 0.8, top);
   b.neonPulse.color(g.left, 1);
-  b.neonPulse.tube(g.x0, g.height - 1, g.z0, g.x1, g.height - 1, g.z1, 0.2);
+  b.neonPulse.tube(g.x0, top - 1, g.z0, g.x1, top - 1, g.z1, 0.2);
 }
 
 function buildGates(b: EnvBuilders): void {
@@ -584,10 +599,13 @@ function buildGates(b: EnvBuilders): void {
 
 function buildBillboards(b: EnvBuilders): void {
   for (const d of b.plan.billboards) {
+    // Its height is over the ground at its foot: the wall band it hangs on climbs the hills.
+    const g = b.plan.padY(d.x, d.z);
+    const y = d.y + g;
     // 0 and 1 are the two scrolling holographic columns on the screen atlas; 2 is the portrait
     // BADKALA WANTED ad, which owns a whole texture of its own.
-    if (d.variant === 2) b.badkala.panel(d.x, d.y, d.z, d.w, d.h, d.rotY);
-    else screenPanel(b.screens, d.variant === 0 ? 'holo-data' : 'holo-column', d.x, d.y, d.z, d.w, d.h, d.rotY);
+    if (d.variant === 2) b.badkala.panel(d.x, y, d.z, d.w, d.h, d.rotY);
+    else screenPanel(b.screens, d.variant === 0 ? 'holo-data' : 'holo-column', d.x, y, d.z, d.w, d.h, d.rotY);
     // Frame + masts.
     const nx = Math.sin(d.rotY);
     const nz = Math.cos(d.rotY);
@@ -595,10 +613,10 @@ function buildBillboards(b: EnvBuilders): void {
     const tz = -Math.sin(d.rotY);
     b.props.color(PAL.metalDark, 0.7);
     for (const s of [-1, 1]) {
-      b.props.box(d.x + tx * s * (d.w / 2 + 0.6) - nx * 0.4, d.y, d.z + tz * s * (d.w / 2 + 0.6) - nz * 0.4, 1.2, d.h + 1.4, 1.2);
+      b.props.box(d.x + tx * s * (d.w / 2 + 0.6) - nx * 0.4, y, d.z + tz * s * (d.w / 2 + 0.6) - nz * 0.4, 1.2, d.h + 1.4, 1.2);
       b.props.box(
         d.x + tx * s * (d.w / 2 - 3) - nx * 0.9,
-        (d.y - d.h / 2) / 2,
+        g + (d.y - d.h / 2) / 2,
         d.z + tz * s * (d.w / 2 - 3) - nz * 0.9,
         1,
         d.y - d.h / 2,
@@ -608,14 +626,14 @@ function buildBillboards(b: EnvBuilders): void {
     b.neonPulse.color(d.color, 1);
     b.neonPulse.tube(
       d.x + tx * (d.w / 2) + nx * 0.3,
-      d.y - d.h / 2 - 0.5,
+      y - d.h / 2 - 0.5,
       d.z + tz * (d.w / 2) + nz * 0.3,
       d.x - tx * (d.w / 2) + nx * 0.3,
-      d.y - d.h / 2 - 0.5,
+      y - d.h / 2 - 0.5,
       d.z - tz * (d.w / 2) + nz * 0.3,
       0.3,
     );
-    halo(b, d.x + nx * 0.6, d.y, d.z + nz * 0.6, d.w * 2, d.h * 2.2, d.rotY, d.color, 0.13);
+    halo(b, d.x + nx * 0.6, y, d.z + nz * 0.6, d.w * 2, d.h * 2.2, d.rotY, d.color, 0.13);
     groundGlow(b, d.x + nx * 18, d.z + nz * 18, Math.abs(nx) > 0.5 ? 52 : d.w * 1.5, Math.abs(nx) > 0.5 ? d.w * 1.5 : 52, d.color, 0.08);
   }
 }
@@ -632,17 +650,22 @@ function buildCables(b: EnvBuilders, rng: () => number): void {
     b.props.color(PAL.metalDark, 0.35);
     const mx = (x0 + x1) / 2;
     const mz = (z0 + z1) / 2;
-    b.props.tube(x0, y, z0, mx, y - sag, mz, 0.09);
-    b.props.tube(mx, y - sag, mz, x1, y, z1, 0.09);
+    // Strung at that height over the ground at each end: a street across a hill has one
+    // anchor higher than the other, and the cable hangs between them.
+    const ya = b.plan.padY(x0, z0) + y;
+    const yb = b.plan.padY(x1, z1) + y;
+    const ym = (ya + yb) / 2 - sag;
+    b.props.tube(x0, ya, z0, mx, ym, mz, 0.09);
+    b.props.tube(mx, ym, mz, x1, yb, z1, 0.09);
     // One lamp every handful of cables, not one on half of them.
     if (rng() < 0.16) {
       const c = rng() < 0.5 ? PAL.winWarm : PAL.neonCyan;
       b.props.color(PAL.metalDark, 0.4);
-      b.props.box(mx, y - sag - 0.5, mz, 0.1, 1, 0.1);
+      b.props.box(mx, ym - 0.5, mz, 0.1, 1, 0.1);
       b.neonFlicker.color(c, 1);
-      b.neonFlicker.box(mx, y - sag - 1.1, mz, 0.42, 0.42, 0.42);
+      b.neonFlicker.box(mx, ym - 1.1, mz, 0.42, 0.42, 0.42);
       // Face the halo down the street the cable crosses, not along the cable.
-      halo(b, mx, y - sag - 1.1, mz, 6, 6, Math.abs(x1 - x0) > Math.abs(z1 - z0) ? 0 : Math.PI / 2, c, 0.2);
+      halo(b, mx, ym - 1.1, mz, 6, 6, Math.abs(x1 - x0) > Math.abs(z1 - z0) ? 0 : Math.PI / 2, c, 0.2);
       groundGlow(b, mx, mz, 16, 16, c, 0.09);
     }
   }

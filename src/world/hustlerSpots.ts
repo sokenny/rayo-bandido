@@ -434,6 +434,8 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
 
 /** Put the hustlers on a world's layout. Before the street props, which keep clear of them. */
 export function addHustlers(world: World, spots: readonly HustlerSpot[] = METRO_HUSTLER_SPOTS): World {
-  world.layout.hustlerSpots = spots.map((s) => ({ ...s }));
+  // Each stands on the ground where the city puts its ground: the spots are written flat.
+  const groundY = world.layout.groundY;
+  world.layout.hustlerSpots = spots.map((s) => ({ ...s, y: groundY ? groundY(s.x, s.z) : 0 }));
   return world;
 }

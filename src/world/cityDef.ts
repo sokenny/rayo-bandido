@@ -3,6 +3,7 @@ import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
+import type { TerrainSpec } from './terrain';
 import type { TrackSpec } from './track';
 
 /**
@@ -121,6 +122,11 @@ export interface CitySpec {
    * owner out front. Cuts the plots it touches back to its edge, like a station. Missing: none.
    */
   garage?: GarageSpec;
+  /**
+   * The lie of the land (`terrain.ts`): the relief the ground follows, and what the world wants
+   * kept level besides its lots and elevated corridors. Missing: flat, everything at y 0.
+   */
+  terrain?: TerrainSpec;
   /** Exponential haze density. Missing: `HAZE.cityDensity`. */
   fogDensity?: number;
   /** Column spacing under the elevated roads (m). Missing: 12, the Bay's. */

@@ -18,7 +18,10 @@ export function streetSites(): ActivitySite[] {
 
 /** Put the rings on a city. Called for the OPEN WORLD only; the race worlds clear the field. */
 export function addStreetSites(world: World, sites: readonly ActivitySite[] = STREET_SITES): World {
-  world.layout.streetSites = sites.map((s) => ({ ...s }));
-  world.plan.streetMarkers = sites.map((s) => ({ ...s }));
+  // On the ground where the city puts its ground: a site is written at y 0, the street may not be.
+  const groundY = world.layout.groundY;
+  const placed = sites.map((s) => ({ ...s, y: groundY ? Math.max(s.y, groundY(s.x, s.z)) : s.y }));
+  world.layout.streetSites = placed.map((s) => ({ ...s }));
+  world.plan.streetMarkers = placed.map((s) => ({ ...s }));
   return world;
 }

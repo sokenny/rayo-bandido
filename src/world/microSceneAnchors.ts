@@ -159,11 +159,15 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
   if (layout.garageSite) keepOut.push({ x: layout.garageSite.x, z: layout.garageSite.z, r: A.markerClear });
   for (const h of layout.hustlerSpots ?? []) keepOut.push({ x: h.x, z: h.z, r: A.hustlerClear });
 
+  /** The ground's own height: the streets are draped over the terrain, and so is everything here. */
+  const groundY = (x: number, z: number): number => (layout.groundY ? layout.groundY(x, z) : 0);
+
   const onAnyRoad = (x: number, z: number, pad: number, except: RibbonDef | null): boolean => {
+    const y = groundY(x, z);
     for (const rb of plan.ribbons) {
       if (rb === except) continue;
       // A deck overhead is not in the way; its ramp coming down to the ground is.
-      if (onRibbonAtLevel(rb, x, z, 0, pad)) return true;
+      if (onRibbonAtLevel(rb, x, z, y, pad)) return true;
     }
     return false;
   };
@@ -189,8 +193,8 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
   const onGround = (x: number, z: number): boolean => {
     if (!layout.surface) return true;
     const sample = { y: 0, gx: 0, gz: 0 };
-    layout.surface.sample(x, z, 0, sample);
-    return sample.y <= 0.05;
+    layout.surface.sample(x, z, groundY(x, z), sample);
+    return sample.y <= groundY(x, z) + 0.05;
   };
 
   /* ---------------------------------------------------------------- bus shelters */
@@ -209,7 +213,7 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
       id: `ms-stop-${i}`,
       type: 'bus-stop',
       tags: ['bus-stop', 'roadside', 'civilian', 'wide-sidewalk'],
-      transform: { x, y: st.y, z, heading: Math.atan2(st.nx, -st.nz) },
+      transform: { x, y: groundY(x, z), z, heading: Math.atan2(st.nx, -st.nz) },
       // The shelter dictates where anybody can stand, so this anchor has an opinion about it.
       actorSlots: SHELTER_SLOTS.map((s) => ({ ...s })),
       propSlots: SHELTER_PROP_SLOTS.map((s) => ({ ...s })),
@@ -252,7 +256,7 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
           type: 'under-bridge',
           tags: ['under-bridge', 'dark', 'hidden', 'civilian'],
           // Facing back in towards the columns, which is where the road under the deck runs.
-          transform: { x, y: 0, z, heading: Math.atan2(-nx, nz) },
+          transform: { x, y: groundY(x, z), z, heading: Math.atan2(-nx, nz) },
           actorSlots: [],
           propSlots: [],
           visibility: 'hidden',
@@ -375,7 +379,7 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
             id: `ms-kerb-${out.length}`,
             type,
             tags,
-            transform: { x, y: 0, z, heading: Math.atan2(-nx, nz) },
+            transform: { x, y: groundY(x, z), z, heading: Math.atan2(-nx, nz) },
             actorSlots: [],
             propSlots: [],
             approachDirection: { x: c.tx * side, z: c.tz * side },

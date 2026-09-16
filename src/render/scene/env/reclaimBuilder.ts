@@ -305,8 +305,9 @@ function buildVerges(b: EnvBuilders, field: ReclaimField): void {
       sinceLast += len;
       if (sinceLast < RECLAIM_SCATTER.vergeStep) continue;
       sinceLast = 0;
-      // A ramp climbing away from the street has no pavement beside it.
-      if (a.y > 0.5) continue;
+      // A ramp climbing away from the street has no pavement beside it. (A street on a hill is
+      // still a street: its samples carry the ground's height.)
+      if (a.y - b.plan.padY(a.x, a.z) > 0.5) continue;
       const nx = -a.tz;
       const nz = a.tx;
       for (const side of [-1, 1] as const) {

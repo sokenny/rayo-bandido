@@ -273,7 +273,7 @@ const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true }
 const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false, judgeOnly: false };
 
 /** What `stepHustlers` is told about the car. One object, never reallocated. */
-const HUSTLER_CONTEXT: HustlerContext = { damaged: false, pursued: false };
+const HUSTLER_CONTEXT: HustlerContext = { damaged: false, pursued: false, groundY: 0 };
 
 /** What the micro-scene director is told about the world. One object, never reallocated. */
 const MICRO_SCENE_SIGNALS = createMicroSceneSignals();
@@ -523,6 +523,7 @@ export function stepGame(
     h.othersTalking = (!!state.passenger && state.passenger.lineTimeLeft > 0) || (!!state.buho && state.buho.lineTimeLeft > 0) || (!!state.garage && state.garage.lineTimeLeft > 0);
     HUSTLER_CONTEXT.damaged = !!state.crash && (state.crash.marks > 0 || state.crash.heavy);
     HUSTLER_CONTEXT.pursued = !!state.police && (state.police.phase === 'pursuit' || state.police.phase === 'escaping');
+    HUSTLER_CONTEXT.groundY = layout.groundY ? layout.groundY(state.vehicle.x, state.vehicle.z) : 0;
     // `input`, not `cmd`: a hold (the grid, an arrest, a stall) has already taken the key away.
     stepHustlers(h, layout.hustlerSpots, state.vehicle, input, state.economy, HUSTLER_CONTEXT, state.time, dt, state.events);
   }

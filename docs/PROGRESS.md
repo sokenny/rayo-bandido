@@ -3068,3 +3068,61 @@ The art (`env/neonWalls.ts`) is a red additive pane per span fading up from the 
 top and bottom, filled chevrons every 2.6 m pointing the way the race runs (so they read ">" on
 the left wall and "<" on the right, as in the reference), dark posts and a red wash on the road —
 all in existing builders, no new draw call. Typecheck clean, full suite passes.
+
+## Topography: Bandido Metro gets hills (2026-09-16)
+
+Juan asked for the city to stop being a sheet — streets that climb and fall a little, a higher
+district or two, the way Los Angeles has topography without being a mountain — keeping the
+viaducts exactly as they are, with the buildings lifted properly so nothing floats or sinks.
+
+**The field.** `src/world/terrain.ts` turns a designer's RELIEF (a sum of raised-cosine hills,
+`HillDef`) into the ground height of a world: it is held at exactly 0 under every elevated road
+out to its columns' footings, on every lot (meets, gas stations, the garage), for 40 m inland of
+the quay, and inside whatever rectangles the spec names; from the edge of each of those the
+ground may rise at no more than 4.5 %, starting level and steepening over 60 m, so a hill that
+would have run under the viaduct dies away toward it. Relief and fence meet through a p-norm
+smooth minimum, so a crossing is a change of grade, never a crest. The clearance from the
+protected set is a grid computed once (8 m, ~50 ms); a height is a few flops, and the surface
+field asks it for every body every tick (`createSurfaceField` takes the terrain as its ground
+candidate, gradient included, so the car pitches on a hill exactly as it does on a ramp).
+
+**The metro** (`src/world/metroTerrain.ts`): five hills — La Loma (10.5 m, the middle of the
+viaduct district), El Bajo across alley-s1 (a saddle between them), El Alto on the west flank,
+Loma Este behind the works, La Cresta along the north wall behind downtown. Downtown (The Stack
+is carved at absolute floors) and the meet district (the car meet, the garage, El Búho's bay and
+every street La Curva is run on, which was proved barrier-tight on level ground) are named flat.
+Measured: steepest street 5.5 %, sharpest change of grade between samples 2 %, 30-odd streets
+that rise 5 m or more along their length.
+
+**How the world is built on it.** Everything in `createCityWorld` is laid out on flat ground as
+before (the block generator, kerb field, rail gaps, pillars and bus stops all assume a street at
+y 0), the surface field and the sites (rush, passengers, El Búho, the garage ring, shelters,
+skybridge tiers, the spawn) take their heights from the terrain, and the ground roads are draped
+over it — centreline sample by sample — last of all. `ArenaLayout.groundY` and `CityPlan.padY`
+(now the terrain's height) are the two seams everything else reads: the doors to the races,
+hustler spots, street props, micro-scene anchors, buses (which now carry a `y` and stand on the
+boulevard under them), the hustlers' "on the street" test.
+
+**The art.** The ground plane is a grid of quads over the terrain's extent where it is off level
+and merged runs of one quad where it is not (`buildTerrainFloor`); every road, pavement and dash
+of paint takes the ground's height at its own corners (`roadY`), so a street across a hillside
+leans with it and meets the pavement and the crossing street exactly; block and perimeter slabs
+are draped (`drapedSlab`, one quad wherever every vertex is at 0); each plot's building is raised
+to the high side of its footprint and stands on a concrete plinth down to the low side
+(`groundLevel`, `plinth`); shopfront bands, signs, screens, blade signs, cables, gates,
+billboards, the ring billboard and the perimeter's retaining wall and marker line all take the
+ground under them. A flat world draws exactly what it drew before: the Bay's and the Stack's
+triangle budgets are unchanged and their tests untouched.
+
+**Tests.** `tests/terrain.test.ts`: the streets really climb; none steeper than 6 % or with a
+change of grade over 2 % between samples; every elevated sample is byte-identical to the flat
+build and the ground under it out to the footings is 0; the lots, downtown, the meet district,
+the shore and every sample of La Curva's course are 0; the surface field answers the terrain
+off-road and the deck on it; every site, shelter, spawn, prop, anchor, hustler and bus is at the
+ground's height; Bandido Bay builds with no terrain at all. Full suite 69 files / 1077 tests
+green, typecheck clean; `scripts/metro-preview.mjs` still loads the spec under plain Node.
+
+**Known limits.** A hustler who walks (the sock sellers) keeps his spot's height along his walk,
+so on a slope he floats or sinks a few decimetres at the ends of it; micro-scene actors likewise
+stand at their anchor's height. The car does not roll with a cross-slope (the road leans, the body
+stays level: 2.5° at most). The plinths are bare concrete.

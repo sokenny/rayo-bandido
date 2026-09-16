@@ -56,6 +56,8 @@ export interface HustlerContext {
   damaged: boolean;
   /** The police are chasing it. */
   pursued: boolean;
+  /** Height of the ground under the car (m): 0 in a flat world, the hill's in one with terrain. */
+  groundY: number;
 }
 
 function createNpc(spot: HustlerSpot): HustlerNpcState {
@@ -364,7 +366,7 @@ export function stepHustlers(
     if (s.othersTalking || !at || Math.hypot(v.x - at.x, v.z - at.z) > HUSTLERS.hearRadius) hush(s);
   }
 
-  const onStreet = v.y < HUSTLERS.streetY;
+  const onStreet = v.y - ctx.groundY < HUSTLERS.streetY;
   for (let i = 0; i < spots.length && i < s.npcs.length; i++) {
     const spot = spots[i];
     const n = s.npcs[i];

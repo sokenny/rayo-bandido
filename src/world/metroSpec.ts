@@ -9,6 +9,7 @@ import type { Rect, ZoneId } from './cityPlan';
 import { inRect } from './cityPlan.ts';
 import { CURVA_SITE } from './curvaSpec.ts';
 import { PAL } from '../render/scene/env/palette.ts';
+import { metroTerrain } from './metroTerrain.ts';
 import { planStackMassing } from './stackMassing.ts';
 import {
   STACK_ART,
@@ -735,6 +736,8 @@ export const METRO_SPEC: CitySpec = {
     ...METRO_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 })),
   ],
   blockOptions: METRO_BLOCK_OPTIONS,
+  // The hills (`metroTerrain.ts`): downtown and the meet district stay level, the rest rolls.
+  terrain: metroTerrain(STACK_RECT),
   planMegastructures: (ribbons) => planStackMassing(ribbons, STACK_OFFSET),
   downtown: METRO_DOWNTOWN,
   // The Bay's art everywhere, the Stack's inside its footprint: its lean megastructures (the

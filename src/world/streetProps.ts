@@ -180,11 +180,15 @@ export function placeStreetProps(world: World): StreetPropDef[] {
     }
   }
 
+  /** The ground's own height: the streets are draped over the terrain, and so is everything here. */
+  const groundY = (x: number, z: number): number => (layout.groundY ? layout.groundY(x, z) : 0);
+
   const onAnyRoad = (x: number, z: number, pad: number, except: RibbonDef | null): boolean => {
+    const y = groundY(x, z);
     for (const rb of plan.ribbons) {
       if (rb === except) continue;
       // A deck overhead is not in the way; its ramp coming down to the ground is.
-      if (onRibbonAtLevel(rb, x, z, 0, pad)) return true;
+      if (onRibbonAtLevel(rb, x, z, y, pad)) return true;
     }
     return false;
   };
@@ -194,7 +198,7 @@ export function placeStreetProps(world: World): StreetPropDef[] {
     if (kerbside) {
       // Nothing solid past the gutter, and nothing at all on any other street.
       if (kind === 'dumpster') return false;
-      if (onRibbonAtLevel(own, x, z, 0, (STREET_PROP_SHAPES[kind].solid ? r : 0) - P.gutter)) return false;
+      if (onRibbonAtLevel(own, x, z, groundY(x, z), (STREET_PROP_SHAPES[kind].solid ? r : 0) - P.gutter)) return false;
       if (onAnyRoad(x, z, r + 0.25, own)) return false;
     } else if (onAnyRoad(x, z, r + 0.25, null)) return false;
     // Another street's edge nearby: a junction mouth or a corner.
@@ -208,8 +212,9 @@ export function placeStreetProps(world: World): StreetPropDef[] {
     // Kerbside trash stays off the grates, so no column of steam rises through a bin.
     for (const v of ventCells.get(cellKey(x, z)) ?? []) if (Math.hypot(x - v.x, z - v.z) < SEWER_STEAM.grateLength / 2 + r + 0.3) return false;
     if (layout.surface) {
-      layout.surface.sample(x, z, 0, surf);
-      if (surf.y > 0.05) return false;
+      const gy = groundY(x, z);
+      layout.surface.sample(x, z, gy, surf);
+      if (surf.y > gy + 0.05) return false;
     }
     const cx = Math.floor(x / 4);
     const cz = Math.floor(z / 4);
@@ -322,7 +327,7 @@ export function placeStreetProps(world: World): StreetPropDef[] {
             }
             continue;
           }
-          accepted.push({ kind: p.kind, variant: p.variant, x, z, y: 0, yaw: yaw + p.turn, rank });
+          accepted.push({ kind: p.kind, variant: p.variant, x, z, y: groundY(x, z), yaw: yaw + p.turn, rank });
         }
         if (failed || accepted.length < (kind === 'parking' || kind === 'dumpster' ? 1 : 2)) continue;
         for (const a of accepted) {

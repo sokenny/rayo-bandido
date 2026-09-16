@@ -34,6 +34,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Race barriers are tall holographic chevron walls now, and only close the streets that lead off the course.',
       'The main menu now sits over a live 3D view of La Curva and the car meet, not a flat backdrop.',
       'Rayo Rush now shows a live ladder against other players\' best scores while you run.',
+      'Bandido Metro has hills now: streets that climb and fall, with a couple of higher districts.',
     ],
   },
   {

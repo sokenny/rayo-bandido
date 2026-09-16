@@ -29,6 +29,7 @@ import { reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
 import { createRectIndex } from './spatialIndex';
 import { createSurfaceField } from './surface';
+import { createTerrain } from './terrain';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
 /**
@@ -158,6 +159,12 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : [])];
   const lots = [...meetLots, ...cornerLots];
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
+  // The lie of the land (`terrain.ts`): the relief the spec draws, held level under every
+  // elevated road, on every lot, along the shore and wherever else the spec says. Everything
+  // below is laid out on flat ground the way it always was — the blocks, the kerbs, the rails,
+  // the pillars — and the ground roads are draped over the terrain last of all, so nothing at
+  // build time mistakes a street on a hill for a ramp. Flat, in a spec that draws no relief.
+  const terrain = createTerrain(spec.terrain, bounds, elevated.map((rb) => rb.path), lots, quayZ);
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   const blocks = clipBlocksToLots(
     reserveMegastructurePlots(generateBlocks(inner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
@@ -273,7 +280,10 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   // bridge different streets by different rules (`skybridgeSets`); the Bay and the Stack
   // each have one.
   const skybridgeSets = spec.skybridgeSets ?? [{ streets: spec.skybridgeStreets, style: spec.skybridges }];
-  const skybridges = skybridgeSets.flatMap((set) => findSkybridges(ground, elevated, [...blocks, ...groundMasses], zoneAt, set.streets, spec.downtown, set.style, set.within));
+  const skybridges = skybridgeSets
+    .flatMap((set) => findSkybridges(ground, elevated, [...blocks, ...groundMasses], zoneAt, set.streets, spec.downtown, set.style, set.within))
+    // A bridge's tier is a height over the street; the street may be on a hill.
+    .map((sb) => ({ ...sb, y: sb.y + terrain.heightAt((sb.ax + sb.bx) / 2, (sb.az + sb.bz) / 2) }));
 
   /* ---------------------------------------------------------- bus stops */
 
@@ -292,6 +302,8 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     blockOptions.shoulderAt,
     spec.busStopSpacing ?? BUS_STOP_SPACING,
   );
+  // A shelter stands on the ground it was placed on.
+  for (const st of busStops) st.y = terrain.heightAt(st.x, st.z);
   const busRoutes: BusRoute[] = lanes.map((points) => ({ points, stops: callingPoints(points, busStops) }));
 
 
@@ -299,7 +311,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   // Built here rather than at the layout: a ground spawn at the foot of a ramp sits a few
   // centimetres above zero, and the car has to start on the road, not under it.
-  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5);
+  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, terrain);
   const GROUND_SAMPLE = { y: 0, gx: 0, gz: 0 };
 
   const targetSpawns: SpawnPoint[] = [];
@@ -385,7 +397,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     const alongX = Math.abs(st.tx) > 0.5;
     const hx = alongX ? BUS_STOP.length / 2 : BUS_STOP.depth / 2;
     const hz = alongX ? BUS_STOP.depth / 2 : BUS_STOP.length / 2;
-    colliders.push({ minX: st.x - hx, maxX: st.x + hx, minZ: st.z - hz, maxZ: st.z + hz, maxY: BUS_STOP.height, tag: 'bus-stop' });
+    colliders.push({ minX: st.x - hx, maxX: st.x + hx, minZ: st.z - hz, maxZ: st.z + hz, maxY: st.y + BUS_STOP.height, tag: 'bus-stop' });
   }
   const walls: ObstacleWall[] = rails.map((r) => ({ ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, ...railBounds(r), tag: r.kind }));
   walls.push(...quay);
@@ -413,31 +425,35 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     walls.push({ ax: 0, az: PARKED, bx: 0, bz: PARKED, maxY: BUSES.height, tag: 'bus' });
   }
 
+  /** A site on the ground, at the ground's height there: the spec writes them at y 0. */
+  const onGround = <T extends { x: number; z: number; y: number }>(site: T): T => ({ ...site, y: terrain.heightAt(site.x, site.z) });
+
   const layout: ArenaLayout = {
     bounds,
-    playerSpawn: { ...spec.spawn },
+    playerSpawn: { ...spec.spawn, y: terrain.heightAt(spec.spawn.x, spec.spawn.z) },
     targetSpawns,
     targetPatrols,
     cruiseRoute,
     colliders,
     walls,
     surface,
+    groundY: (x, z) => terrain.heightAt(x, z),
     race: null,
     // The free-world activity markers, one per mission and in mission order. Points and
     // headings; the rules read them (`src/sim/rush.ts`) and the art stands on whichever is
     // current (`env/rushMarker.ts`). No colliders — the streets under them are still streets.
-    rushSites: spec.rushSites.map((site) => ({ ...site })),
+    rushSites: spec.rushSites.map((site) => onGround(site)),
     // Where passengers wait. Points on roads; the rules and the art both read this list.
-    passengerStops: spec.passengerStops.map((stop) => ({ ...stop, tags: stop.tags.slice() })),
+    passengerStops: spec.passengerStops.map((stop) => ({ ...onGround(stop), tags: stop.tags.slice() })),
     passengerTrip: spec.passengerTrip ? { ...spec.passengerTrip } : null,
     // The streets, as centrelines, for `src/world/roadGraph.ts` to route a passenger home over.
     // Ground only: the viaduct and its ramps are left out because every stop is a kerb, and a
     // deck crossing over a street is not a turning off it.
     roadNetwork: ground.map((rb) => ({ points: rb.path.samples.map((sm) => ({ x: sm.x, z: sm.z })) })),
     // Where El Búho stands. A point under the deck; the rules and the figure both read it.
-    buhoSite: spec.buhoSite ? { ...spec.buhoSite } : null,
+    buhoSite: spec.buhoSite ? onGround(spec.buhoSite) : null,
     // The ring on the garage's apron, where Loco Mustang talks to whoever pulls up.
-    garageSite: garage ? garageSite(garage) : null,
+    garageSite: garage ? onGround(garageSite(garage)) : null,
     busRoutes,
     minimap: {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: quayZ !== null ? bounds.maxZ - 20 : inner.maxZ },
@@ -506,7 +522,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     water,
     plaza: null,
     wantedBoard: null,
-    rushMarkers: spec.rushSites.map((site) => ({ ...site })),
+    rushMarkers: spec.rushSites.map((site) => onGround(site)),
     startLine: null,
     checkpoints: [],
     // Roads inside the buildings, and the frames over the open ones (Phase 2 of the Stack).
@@ -523,16 +539,24 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     ...(spec.densityAt ? { densityAt: spec.densityAt } : {}),
     ...(blockOptions.shoulderAt ? { shoulderAt: blockOptions.shoulderAt } : {}),
     ...(spec.render ? { render: { ...spec.render } } : {}),
+    ...(terrain.flat ? {} : { terrain }),
     zoneAt,
     isRoad(x, z, pad = 0) {
       for (const rb of ribbons) if (isOnPath(rb.path, x, z, pad)) return true;
       return false;
     },
     isSolid,
-    padY() {
-      return 0;
+    padY(x, z) {
+      return terrain.heightAt(x, z);
     },
   };
+
+  // LAST: the ground roads are draped over the terrain, centreline sample by sample. Everything
+  // above was laid out with them flat, which is what the block generator, the kerb field and
+  // the rail gaps assume of a street; from here on whoever reads a sample's `y` — recovery, the
+  // marker paint, the gutters' grates — gets the road's real height. The renderer drapes their
+  // slabs vertex by vertex off `padY` and only reads these for the level a lamp stands at.
+  if (!terrain.flat) for (const rb of ground) for (const s of rb.path.samples) s.y = terrain.heightAt(s.x, s.z);
 
   return { layout, plan };
 }

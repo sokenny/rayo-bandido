@@ -245,7 +245,7 @@ export function createHustlersVisual(spots: readonly HustlerSpot[]): HustlersVis
   const members: CrowdMember[] = spots.map((spot) => ({
     look: hustlerLook(spot),
     x: spot.x,
-    y: 0.03,
+    y: (spot.y ?? 0) + 0.03,
     z: spot.z,
     heading: spot.heading,
     act: spot.kind,

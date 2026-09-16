@@ -208,8 +208,10 @@ function buildPowerLine(b: EnvBuilders, from: TowerDef | undefined, to: TowerDef
 
 function buildRingBillboard(b: EnvBuilders, r: RingBillboardDef, rng: () => number): void {
   const y0 = b.plan.padY(r.x, r.z);
-  const bottom = r.y - r.height / 2;
-  const top = r.y + r.height / 2;
+  // The drum's height is over the ground at the mast.
+  const centre = r.y + y0;
+  const bottom = centre - r.height / 2;
+  const top = centre + r.height / 2;
   // Mast and collar.
   b.props.color(PAL.metalDark, 0.9);
   b.props.box(r.x, (y0 + bottom) / 2, r.z, 2.6, bottom - y0, 2.6);
@@ -266,11 +268,11 @@ function buildRingBillboard(b: EnvBuilders, r: RingBillboardDef, rng: () => numb
   for (let k = 0; k < 4; k++) {
     const rot = (k * Math.PI) / 2;
     const c = k % 2 === 0 ? PAL.neonCyan : PAL.neonMagenta;
-    halo(b, r.x + Math.sin(rot) * (r.radius + 1), r.y, r.z + Math.cos(rot) * (r.radius + 1), r.radius * 2.6, r.height * 2.4, rot, c, 0.14);
+    halo(b, r.x + Math.sin(rot) * (r.radius + 1), centre, r.z + Math.cos(rot) * (r.radius + 1), r.radius * 2.6, r.height * 2.4, rot, c, 0.14);
   }
   b.glow.color(PAL.neonViolet, 0.12);
   b.glow.planeY(r.x, bottom - 0.4, r.z, r.radius * 2.4, r.radius * 2.4);
-  groundGlow(b, r.x, r.z, r.radius * 4, r.radius * 4, PAL.neonViolet, 0.08 + rng() * 0.02, y0 + 0.02);
+  groundGlow(b, r.x, r.z, r.radius * 4, r.radius * 4, PAL.neonViolet, 0.08 + rng() * 0.02, 0.02);
 }
 
 /* ------------------------------------------------------------------ skybridges */

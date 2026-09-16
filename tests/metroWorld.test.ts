@@ -263,7 +263,8 @@ describe('metro districts: the Stack\'s rules inside its footprint, the Bay\'s o
     expect(inside.length).toBeGreaterThan(8);
     expect(outside.length).toBeGreaterThan(8);
     for (const sb of inside) expect([16, 27, 40]).toContain(sb.y);
-    for (const sb of outside) expect([12, 15, 19, 24]).toContain(sb.y);
+    // A tier is a height over the street; the outer boulevards climb the hills (`terrain.ts`).
+    for (const sb of outside) expect([12, 15, 19, 24].map((h) => h + layout.groundY!((sb.ax + sb.bx) / 2, (sb.az + sb.bz) / 2))).toContainEqual(sb.y);
     expect(inside.some((sb) => sb.kind === 'concrete')).toBe(true);
     for (const sb of bridges) {
       const mx = (sb.ax + sb.bx) / 2;
