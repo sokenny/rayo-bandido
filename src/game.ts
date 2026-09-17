@@ -117,7 +117,7 @@ import { createMicroSceneVisual } from './render/scene/microSceneVisual';
 import { createMicroSceneDebug } from './microScenes/debug';
 import { reportCatalogIssues } from './microScenes/validate';
 import { createMoogulTrip } from './render/scene/moogulTrip';
-import { createLeaderboard, fetchBoard, submitRaceTime } from './net/leaderboard';
+import { createLeaderboard, fetchBoard, flushPendingRuns, submitRaceTime } from './net/leaderboard';
 import { account } from './net/account';
 import { boardToRivals, LADDER_PAGE, placeOnLadder, type LadderPlace } from './ui/rushLadder';
 import type { LeaderboardKind } from './content/leaderboards';
@@ -524,6 +524,8 @@ export function createGame(
   // localStorage at once and refreshes behind the frame (`src/net/leaderboard.ts`).
   // Not in a rush ROOM: a match is a run against the people in it, not an attempt on the board.
   const leaderboard = hasRush && !match ? createLeaderboard() : null;
+  // Runs a saturated server could not take last time go out now, behind the frame.
+  void flushPendingRuns();
   /** One flag per electric car: whether it is drawn as a target this frame. */
   const rushMarks = hasRush ? new Uint8Array(state.targets.length) : null;
   /**

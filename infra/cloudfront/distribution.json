@@ -1,0 +1,63 @@
+{
+  "CallerReference": "rayo-bandido-cdn-1",
+  "Comment": "rayobandido.com: game, API and /ws in front of the EB load balancer",
+  "Enabled": true,
+  "HttpVersion": "http2and3",
+  "IsIPV6Enabled": true,
+  "PriceClass": "PriceClass_All",
+  "Aliases": { "Quantity": 2, "Items": ["rayobandido.com", "www.rayobandido.com"] },
+  "ViewerCertificate": {
+    "ACMCertificateArn": "__CERT_ARN__",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  },
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "eb-alb",
+        "DomainName": "__ALB_DNS__",
+        "CustomOriginConfig": {
+          "HTTPPort": 80,
+          "HTTPSPort": 443,
+          "OriginProtocolPolicy": "https-only",
+          "OriginSslProtocols": { "Quantity": 1, "Items": ["TLSv1.2"] },
+          "OriginReadTimeout": 30,
+          "OriginKeepaliveTimeout": 5
+        }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "eb-alb",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 7,
+      "Items": ["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"],
+      "CachedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] }
+    },
+    "Compress": false,
+    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+    "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3"
+  },
+  "CacheBehaviors": {
+    "Quantity": 7,
+    "Items": [
+      {
+        "PathPattern": "/assets/*",
+        "TargetOriginId": "eb-alb",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "AllowedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] },
+        "Compress": false,
+        "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+        "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3"
+      },
+      { "PathPattern": "/songs/*", "__MEDIA__": true },
+      { "PathPattern": "/dialogue/*", "__MEDIA__": true },
+      { "PathPattern": "/npc-voice/*", "__MEDIA__": true },
+      { "PathPattern": "/textures/*", "__MEDIA__": true },
+      { "PathPattern": "*.mp3", "__MEDIA__": true },
+      { "PathPattern": "*.webp", "__MEDIA__": true }
+    ]
+  }
+}

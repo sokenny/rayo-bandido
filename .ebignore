@@ -40,3 +40,6 @@ artifacts/
 # (`npm run dialogue:voices`); the local generation cache stays here.
 .env
 .cache/
+
+# CloudFront setup, run from a workstation (`infra/cloudfront/setup.sh`); nothing on the instance reads it.
+/infra/

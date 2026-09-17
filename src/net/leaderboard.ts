@@ -26,6 +26,18 @@ const REFRESH_MS = 60_000;
 /** A board request that has not answered in this long is treated as offline (ms). */
 const TIMEOUT_MS = 4000;
 
+/**
+ * THE OUTBOX. A run the server could not take — unreachable, timed out, or overloaded (5xx, 429)
+ * — is kept in localStorage and sent again later: after `RETRY_MS`, after the next run that does
+ * get through, and on the next visit (`flushPendingRuns`). A run the server refused on its merits
+ * (any other 4xx) is dropped, since sending it again changes nothing. A retry that lands twice
+ * is harmless: the board keeps each player's best.
+ */
+const OUTBOX_KEY = 'rb.boards.outbox';
+const OUTBOX_MAX = 20;
+const OUTBOX_TTL_MS = 7 * 86_400_000;
+const RETRY_MS = 30_000;
+
 /** A row of any board. `value` is points on rush and milliseconds on the timed boards. */
 export interface BoardRow {
   rank: number;
@@ -112,6 +124,8 @@ function write(key: string, value: string): void {
 export function clearBoardMirror(): void {
   try {
     localStorage.removeItem(BEST_KEY);
+    // Unsent runs too: filed after the switch, they would land on the other player's board.
+    localStorage.removeItem(OUTBOX_KEY);
   } catch {
     /* nothing to forget */
   }
@@ -131,8 +145,10 @@ async function getJson<T>(url: string): Promise<T | null> {
   }
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T | null> {
-  if (typeof fetch !== 'function') return null;
+type Posted<T> = { body: T } | { retry: boolean };
+
+async function postJson<T>(url: string, body: unknown): Promise<Posted<T>> {
+  if (typeof fetch !== 'function') return { retry: false };
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -141,11 +157,94 @@ async function postJson<T>(url: string, body: unknown): Promise<T | null> {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!response.ok) return null;
-    return (await response.json()) as T;
+    if (!response.ok) return { retry: response.status >= 500 || response.status === 429 };
+    return { body: (await response.json()) as T };
   } catch {
-    return null;
+    return { retry: true };
   }
+}
+
+interface PendingRun {
+  id: string;
+  url: string;
+  body: unknown;
+  at: number;
+}
+
+function readOutbox(): PendingRun[] {
+  try {
+    const parsed: unknown = JSON.parse(read(OUTBOX_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    const cutoff = Date.now() - OUTBOX_TTL_MS;
+    return parsed.filter(
+      (r): r is PendingRun => !!r && typeof r.id === 'string' && typeof r.url === 'string' && typeof r.at === 'number' && r.at > cutoff,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeOutbox(runs: PendingRun[]): void {
+  if (runs.length === 0) {
+    try {
+      localStorage.removeItem(OUTBOX_KEY);
+    } catch {
+      /* nothing to forget */
+    }
+    return;
+  }
+  write(OUTBOX_KEY, JSON.stringify(runs.slice(-OUTBOX_MAX)));
+}
+
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let flushing: Promise<void> | null = null;
+
+function scheduleRetry(): void {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void flushPendingRuns();
+  }, RETRY_MS);
+}
+
+/** Send whatever runs are waiting in the outbox. Never rejects; safe to call at any time. */
+export function flushPendingRuns(): Promise<void> {
+  if (!flushing) {
+    flushing = (async () => {
+      const settled = new Set<string>();
+      let stalled = false;
+      for (const run of readOutbox()) {
+        const result = await postJson(run.url, run.body);
+        if ('body' in result || !result.retry) {
+          settled.add(run.id);
+        } else {
+          // Still down: the rest would only fail the same way.
+          stalled = true;
+          break;
+        }
+      }
+      // Read again rather than write back what was read: a run can be queued while this runs.
+      writeOutbox(readOutbox().filter((r) => !settled.has(r.id)));
+      if (stalled) scheduleRetry();
+    })().finally(() => {
+      flushing = null;
+    });
+  }
+  return flushing;
+}
+
+/** File a run, keeping it for later when the server could not take it now. */
+async function postRun<T>(url: string, body: unknown): Promise<T | null> {
+  const result = await postJson<T>(url, body);
+  if ('body' in result) {
+    void flushPendingRuns();
+    return result.body;
+  }
+  if (result.retry) {
+    writeOutbox([...readOutbox(), { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, url, body, at: Date.now() }]);
+    scheduleRetry();
+  }
+  return null;
 }
 
 /** The top of any board, or an empty list when it cannot be reached. */
@@ -156,11 +255,12 @@ export async function fetchBoard(board: BoardId, limit = 10): Promise<BoardRow[]
 
 /**
  * File a finished race on a timed board. Fire and forget: resolves with whether the server took
- * it, and false for an unreachable one. The race's own card never waits on this.
+ * it, and false for an unreachable one (which is then kept in the outbox and sent again later).
+ * The race's own card never waits on this.
  */
 export async function submitRaceTime(board: Exclude<BoardId, 'rush'>, seconds: number, stats: Record<string, number> = {}): Promise<boolean> {
   if (!(seconds > 0)) return false;
-  const body = await postJson<{ accepted?: boolean }>(`${BOARDS_PATH}/${board}/runs`, { ms: Math.round(seconds * 1000), ...stats });
+  const body = await postRun<{ accepted?: boolean }>(`${BOARDS_PATH}/${board}/runs`, { ms: Math.round(seconds * 1000), ...stats });
   return !!body?.accepted;
 }
 
@@ -234,7 +334,7 @@ export function createLeaderboard(): Leaderboard {
         best = run.score;
         write(BEST_KEY, String(best));
       }
-      const body = await postJson<{ accepted?: boolean; rank?: number; best?: number }>(`${BOARDS_PATH}/rush/runs`, run);
+      const body = await postRun<{ accepted?: boolean; rank?: number; best?: number }>(`${BOARDS_PATH}/rush/runs`, run);
       if (!body) {
         online = false;
         return { accepted: false, newBest: localNewBest, previousBest, rank, online };

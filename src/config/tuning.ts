@@ -2868,6 +2868,21 @@ export const HUSTLERS = {
     /** Nothing more from him for this long after. */
     cooldown: 30,
   },
+  travesti: {
+    /** Within this, a car under `slowSpeed` for `noticeSeconds` is a car cruising for her. */
+    noticeRadius: 18,
+    slowSpeed: 8,
+    noticeSeconds: 0.6,
+    /** Anywhere within this for `lingerSeconds`, whatever the speed, and she is on it too. */
+    lingerRadius: 12,
+    lingerSeconds: 2,
+    /** The call: turns, steps to the kerb, beckons. Then she waits on the car. */
+    callSeconds: 5,
+    /** Past this the car has left her. */
+    leaveRadius: 26,
+    /** Nothing more from her for this long after a car has left. */
+    cooldown: 35,
+  },
   medias: {
     /** His beat: a stroll, and a stand at each end of it hawking at the street before he turns back. */
     walkSpeed: 1.05,

@@ -44,6 +44,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       'The in-game radio now cycles through four songs instead of looping one theme track.',
       'Thunder now rolls under the rain while you drive, and behind every menu screen too.',
       'Menu options chirp softly when you move onto them.',
+      'The highway\'s east ramp now descends past Villa 31 onto a widened avenue circling the Obelisco.',
+      'The Obelisco stands cracked and lit in its plaza, with a fissure, barricades and a glowing sign across the avenue.',
+      'A McDonald\'s now lights up the corner by the Obelisco.',
+      'Three new graffiti pieces in the city — no wall repeats a mirrored tag anymore.',
+      'New faces work the kerb after dark, around the park\'s loop road and a few corners of the city.',
+      'Your name, or a quick sign-in for guests, now shows in the HUD while you drive, not just on menus.',
+      'A race time or score that fails to save now retries later instead of getting lost.',
     ],
   },
   {

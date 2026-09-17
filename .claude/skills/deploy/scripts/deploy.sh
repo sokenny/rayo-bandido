@@ -194,6 +194,24 @@ log "${DOMAIN} -> ${TARGET_DNS}"
 
 lower() { tr '[:upper:]' '[:lower:]'; }
 
+# A CDN in front (`infra/cloudfront/setup.sh`) is one more hop to see through: the
+# environment is whatever that distribution's origin is, and the distribution is
+# remembered so the release can be invalidated from its edge caches once it is live.
+DIST_ID=""
+if [[ "$(echo "$TARGET_DNS" | lower)" == *.cloudfront.net ]]; then
+  DIST_ID=$(aws cloudfront list-distributions \
+    --query "DistributionList.Items[?DomainName=='$(echo "$TARGET_DNS" | lower)'].Id | [0]" --output text)
+  [[ -n "$DIST_ID" && "$DIST_ID" != "None" ]] || \
+    fail "${DOMAIN} points at CloudFront (${TARGET_DNS}) but no distribution in this account has that name."
+  ORIGIN_ID=$(aws cloudfront get-distribution-config --id "$DIST_ID" \
+    --query 'DistributionConfig.DefaultCacheBehavior.TargetOriginId' --output text)
+  TARGET_DNS=$(aws cloudfront get-distribution-config --id "$DIST_ID" \
+    --query "DistributionConfig.Origins.Items[?Id=='${ORIGIN_ID}'].DomainName | [0]" --output text)
+  [[ -n "$TARGET_DNS" && "$TARGET_DNS" != "None" ]] || \
+    fail "CloudFront distribution ${DIST_ID} has no origin '${ORIGIN_ID}' — can't resolve what it fronts."
+  log "CloudFront ${DIST_ID} -> ${TARGET_DNS}"
+fi
+
 ENV_NAMES=$(aws elasticbeanstalk describe-environments --application-name "$APP_NAME" \
   --region "$REGION" --query "Environments[?Status=='Ready'].EnvironmentName" --output text)
 [[ -n "$ENV_NAMES" ]] || fail "No Ready environments under application '${APP_NAME}'."
@@ -504,6 +522,35 @@ check_live() {
   [[ "$HTTP_CODE" == "200" && -n "$LOCAL_ASSET" && "$LOCAL_ASSET" == "$LIVE_ASSET" ]]
 }
 
+# Songs, dialogue and textures keep their names across builds and CloudFront holds
+# them for a day, so a release is not fully out until the edges forget the old ones.
+# The page itself is never cached and every script is fingerprinted, which is why
+# the verification below does not have to wait for this to finish. `/*` counts as a
+# single path against the monthly free invalidations.
+invalidate_cdn() {
+  [[ -n "$DIST_ID" ]] || return 0
+  INVALIDATION_ID=$(aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
+    --paths '/*' --query 'Invalidation.Id' --output text) || {
+    INVALIDATION_ID="(failed)"; echo "WARNING: could not invalidate CloudFront ${DIST_ID}." >&2; return 0; }
+  log "Invalidating CloudFront ${DIST_ID} (${INVALIDATION_ID})..."
+}
+
+wait_cdn() {
+  [[ -n "$DIST_ID" && "$INVALIDATION_ID" != "(failed)" ]] || return 0
+  local status=""
+  for _ in $(seq 1 30); do
+    status=$(aws cloudfront get-invalidation --distribution-id "$DIST_ID" --id "$INVALIDATION_ID" \
+      --query 'Invalidation.Status' --output text 2>/dev/null || echo "")
+    [[ "$status" == "Completed" ]] && { INVALIDATION_STATUS="Completed"; return 0; }
+    sleep 10
+  done
+  INVALIDATION_STATUS="${status:-unknown} after 5 min (edges may serve old media a little longer)"
+}
+
+INVALIDATION_ID=""
+INVALIDATION_STATUS="n/a (no CDN in front)"
+invalidate_cdn
+
 # A load balancer can need a moment to route to the refreshed instance.
 VERIFIED=""
 for _ in 1 2 3 4 5; do
@@ -520,6 +567,7 @@ if [[ -z "$VERIFIED" ]]; then
     aws elasticbeanstalk update-environment --environment-name "$TARGET_ENV" \
       --version-label "$PREV_VERSION" --region "$REGION" >/dev/null
     wait_ready "$TARGET_ENV" || true
+    invalidate_cdn
     if check_live; then
       echo "Rolled back. ${DOMAIN} is serving ${PREV_VERSION} again." >&2
     else
@@ -528,6 +576,8 @@ if [[ -z "$VERIFIED" ]]; then
   fi
   exit 1
 fi
+
+wait_cdn
 
 echo
 echo "==================== DEPLOY SUMMARY ===================="
@@ -538,5 +588,6 @@ echo "HTTP status:        ${HTTP_CODE}"
 echo "Local build asset:  ${LOCAL_ASSET}"
 echo "Live domain asset:  ${LIVE_ASSET}"
 echo "/rooms response:    ${ROOMS}"
+echo "CloudFront:         ${DIST_ID:-none} — invalidation ${INVALIDATION_STATUS}"
 echo "Result:             MATCH — ${DOMAIN} is serving this deploy."
 echo "==========================================================="

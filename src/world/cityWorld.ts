@@ -19,7 +19,7 @@ import {
   type WallRect,
   type ZoneId,
 } from './cityPlan';
-import { buildRails, generateBlocks, hash01, onRibbonAtLevel, pathBox, pointRectDistance, railBounds, streetShoulder, type BlockOptions } from './cityGen';
+import { buildRails, generateBlocks, hash01, mergeCells, onRibbonAtLevel, pathBox, pointRectDistance, railBounds, streetShoulder, type BlockOptions } from './cityGen';
 import { meetColliders } from './carMeet';
 import { clipBlocksToLots, stationColliders } from './gasStation';
 import { garageColliders, garageParts, garageSite } from './garage';
@@ -31,6 +31,7 @@ import { createKerbField } from './kerbs';
 import { createRectIndex } from './spatialIndex';
 import { createSurfaceField } from './surface';
 import { createParkRelief } from './parkRelief';
+import { BARRICADE, barricadeBox } from './metroVilla';
 import { createTerrain, type TerrainSpec } from './terrain';
 import { buildTrackPath, createProjection, isElevated, isOnPath, offsetAtStation, pointAtStation, projectOntoPath, type TrackPath } from './track';
 
@@ -161,7 +162,9 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const gasStations = spec.gasStations ?? [];
   // Loco Mustang's garage takes a corner the same way.
   const garage = spec.garage ?? null;
-  const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : [])];
+  // The Obelisco's McDonald's takes its corner the same way (`metroVilla.ts`).
+  const obelisco = spec.obelisco ?? null;
+  const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : []), ...(obelisco ? [obelisco.mcdonalds] : [])];
   // A park takes its land whole, like a meet, but the block generator never runs on it in the
   // first place (`blockInner`): it is a lot for the kerbs (no city pavement on its roads: the
   // park draws its own), the cables and the fences. For the terrain it is a lot only when it
@@ -192,10 +195,18 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
         };
   const terrain = createTerrain(terrainSpec, bounds, elevated.map((rb) => rb.path), levelLots, quayZ);
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
+  // A villa keeps the blocks the generator cut there, and builds them its own way (`CitySpec.villas`).
+  const villas = spec.villas ?? [];
   const blocks = clipBlocksToLots(
     reserveMegastructurePlots(generateBlocks(blockInner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
     cornerLots,
-  );
+  ).map((blk) => {
+    const villa = villas.find((v) => inRect(v.land, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2));
+    return villa ? { ...blk, villa: villa.tag } : blk;
+  });
+  // A villa is built into every scrap of ground the grid left over — the strips the generator
+  // drops beside a ramp's corridor — right up to the pavement and the columns.
+  for (const v of villas) blocks.push(...fillVilla(v, ribbons, blocks, lots, blockOptions, zoneAt));
   const rails = buildRails(ribbons, (rb) => !!rb.elevated);
   const groundMasses: BlockRect[] = megastructures.flatMap((m) => m.volumes.filter((v) => v.y0 === 0).map((v) => ({
     ...v, tag: m.tag, zone: 'urban' as const, massing: 4 as const,
@@ -455,6 +466,23 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     colliders.push(...c.boxes);
     walls.push(...c.walls);
   }
+  // The Obelisco: its plaza is an oval of kerb walls the car stops at, and the McDonald's on the
+  // corner is one box (`metroVilla.ts`).
+  if (obelisco) {
+    const sides = 32;
+    const { rx, rz } = obelisco.plaza;
+    for (let i = 0; i < sides; i++) {
+      const a0 = (i / sides) * Math.PI * 2;
+      const a1 = ((i + 1) / sides) * Math.PI * 2;
+      walls.push({ ax: obelisco.x + Math.cos(a0) * rx, az: obelisco.z + Math.sin(a0) * rz, bx: obelisco.x + Math.cos(a1) * rx, bz: obelisco.z + Math.sin(a1) * rz, maxY: obelisco.height, tag: 'obelisco' });
+    }
+    const m = obelisco.mcdonalds;
+    colliders.push({ minX: m.minX + 1.5, maxX: m.maxX - 1.5, minZ: m.minZ + 1.5, maxZ: m.maxZ - 1.5, maxY: 12, tag: 'mcdonalds' });
+    for (const bc of obelisco.barricades) {
+      const box = barricadeBox(bc);
+      colliders.push({ ...box, maxY: terrain.heightAt(bc.x, bc.z) + (bc.toppled ? BARRICADE.width : BARRICADE.height), tag: 'barricade' });
+    }
+  }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -571,6 +599,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     ...(gasStations.length > 0 ? { gasStations: gasStations.map((g) => ({ ...g })) } : {}),
     ...(garage ? { garage: { ...garage, streets: garage.streets.slice() } } : {}),
     ...(parks.length > 0 ? { parks: parks.map((p) => ({ ...p })) } : {}),
+    ...(obelisco ? { obelisco: { ...obelisco, plaza: { ...obelisco.plaza }, mcdonalds: { ...obelisco.mcdonalds }, gantry: { ...obelisco.gantry }, fissures: obelisco.fissures.map((f) => f.map((p) => ({ ...p }))), barricades: obelisco.barricades.map((bc) => ({ ...bc })) } } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),
@@ -603,6 +632,60 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/** Grid step (m) the leftover ground of a villa is found on: fine enough to reach the pavement's edge. */
+const VILLA_CELL = 2;
+
+/**
+ * The ground inside a villa's land that no block, lot, street (with its pavement) or elevated
+ * corridor (with its columns) has, as merged rectangles: the villa's houses go there too, and
+ * they are as solid as any other block.
+ */
+function fillVilla(
+  villa: NonNullable<CitySpec['villas']>[number],
+  ribbons: readonly RibbonDef[],
+  blocks: readonly BlockRect[],
+  lots: readonly Rect[],
+  opts: BlockOptions,
+  zoneAt: (x: number, z: number) => ZoneId,
+): BlockRect[] {
+  const half = (VILLA_CELL / 2) * Math.SQRT2;
+  const cells: Rect[] = [];
+  const land = villa.land;
+  const touchesLand = (r: Rect): boolean => r.maxX > land.minX && r.minX < land.maxX && r.maxZ > land.minZ && r.minZ < land.maxZ;
+  const taken = [...blocks.filter(touchesLand), ...lots.filter(touchesLand)];
+  // A ribbon just outside the land still keeps its pavement clear inside it.
+  const near = ribbons.filter((rb) => {
+    const box = pathBox(rb.path);
+    return touchesLand({ minX: box.minX - 12, maxX: box.maxX + 12, minZ: box.minZ - 12, maxZ: box.maxZ + 12 });
+  });
+  for (let x = land.minX; x + VILLA_CELL <= land.maxX; x += VILLA_CELL) {
+    for (let z = land.minZ; z + VILLA_CELL <= land.maxZ; z += VILLA_CELL) {
+      const cx = x + VILLA_CELL / 2;
+      const cz = z + VILLA_CELL / 2;
+      const cell: Rect = { minX: x, maxX: x + VILLA_CELL, minZ: z, maxZ: z + VILLA_CELL };
+      const overlaps = (r: Rect): boolean => cell.maxX > r.minX && cell.minX < r.maxX && cell.maxZ > r.minZ && cell.minZ < r.maxZ;
+      if (taken.some(overlaps)) continue;
+      const zone = zoneAt(cx, cz);
+      const shoulder = opts.shoulderAt ? opts.shoulderAt(cx, cz, zone) : opts.shoulder[zone];
+      let clear = true;
+      for (const rb of near) {
+        const pad = rb.elevated ? opts.elevatedShoulder + 1.5 + half : (rb.kind === 'alley' ? opts.alleyShoulder : shoulder) + half;
+        if (isOnPath(rb.path, cx, cz, pad)) {
+          clear = false;
+          break;
+        }
+      }
+      if (clear) cells.push(cell);
+    }
+  }
+  return mergeCells(cells, 48)
+    .filter((r) => r.maxX - r.minX >= 6 && r.maxZ - r.minZ >= 6)
+    .map((r, i) => {
+      const zone = zoneAt((r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2);
+      return { tag: `${villa.tag}-fill-${i}`, ...r, zone, massing: 1 as const, villa: villa.tag };
+    });
+}
 
 /** The depth fields of several parks as one: the deepest answer wins, which is the only one when the lakes never overlap. */
 function joinLakeFields(fields: readonly LakeField[]): LakeField {

@@ -10,8 +10,8 @@ import { isClear, type GraffitiSurface, type ReclaimProfile } from './reclaim';
  * GRAFFITI AND GRIME — one atlas, one material, one draw call for every piece of illicit
  * paint and every damp streak in the city.
  *
- * THE PAINT is real graffiti art: nine hand-drawn pieces out of `public/textures/graffiti/`,
- * filling the atlas's twelve paint cells with the first three used a second time mirrored.
+ * THE PAINT is real graffiti art: twelve hand-drawn pieces out of `public/textures/graffiti/`,
+ * one per paint cell of the atlas, so no piece on the walls is a mirrored copy of another.
  * They carry their own colour, so the quad's vertex colour is not a hue here — it is
  * WEATHERING: how much of
  * the paint is left after a few years of weather, plus the slight wash towards the night the
@@ -62,6 +62,9 @@ const GRAFFITI_ART: ReadonlyArray<{ file: string; aspect: number; banner?: boole
   { file: 'graffiti/textura-grafiti-7.webp', aspect: 768 / 256, banner: true },
   { file: 'graffiti/textura-grafiti-8.webp', aspect: 672 / 256, banner: true },
   { file: 'graffiti/textura-grafiti-9.webp', aspect: 512 / 256, banner: true },
+  { file: 'graffiti/textura-grafiti-10.webp', aspect: 100 / 67, banner: true },
+  { file: 'graffiti/textura-grafiti-11.webp', aspect: 100 / 50, banner: true },
+  { file: 'graffiti/textura-grafiti-12.webp', aspect: 100 / 50, banner: true },
 ];
 
 /** How long the atlas waits for the art before the procedural fallback becomes permanent. */
@@ -71,11 +74,11 @@ const ART_TIMEOUT_MS = 4000;
  * How far the art is pulled towards the night, and how hard. Photographed paint is lit by
  * daylight; without this the tags sit in front of the city rather than on it. Same idea as
  * the tint in `render/textures/manifest.ts`, applied here because this atlas is composited
- * from six files rather than loaded from one.
+ * from several files rather than loaded from one.
  */
 const ART_TINT = 0.2;
 
-/** Which file of `GRAFFITI_ART` a paint cell holds. Cells past the ninth repeat, mirrored. */
+/** Which file of `GRAFFITI_ART` a paint cell holds. Cells past the last file repeat, mirrored. */
 export function graffitiArtIndex(cell: number): number {
   return cell % GRAFFITI_ART.length;
 }
@@ -123,10 +126,9 @@ export const GRAFFITI_CELLS = {
  * One piece of art, drawn so every file in `GRAFFITI_ART` turns up on the city's walls the
  * same number of times.
  *
- * The atlas has twelve paint cells for nine files, so three of the files own a mirrored
- * second cell. Picking the FILE first and only then choosing between its cells is the whole
- * point of this function: picking a cell instead would make those three files twice as
- * common as the other six.
+ * Picking the FILE first and only then choosing between its cells is the whole point of this
+ * function: whenever the atlas has more paint cells than files, the files that own a mirrored
+ * second cell would otherwise turn up twice as often as the rest.
  */
 export function pickPaintCell(rng: () => number): number {
   const n = GRAFFITI_ART.length;
@@ -459,8 +461,8 @@ export interface GraffitiAtlas {
 /**
  * The atlas: the procedural fallback now, the real art as soon as it arrives.
  *
- * Twelve paint cells are filled from nine files, the first three of them used a second time
- * mirrored. Every file is stretched to fill its square cell — `graffitiAspect` then gives the quad its
+ * Twelve paint cells are filled from the files in order; if there are fewer files than cells,
+ * the first ones are used a second time mirrored. Every file is stretched to fill its square cell — `graffitiAspect` then gives the quad its
  * true shape back — which keeps the atlas free of transparent padding and every tag as large
  * on the wall as the cell can make it.
  */
@@ -647,7 +649,7 @@ function cropCell(uv: { u0: number; v0: number; u1: number; v1: number }, crop?:
  * barrier that is shorter than the piece they had in mind. Returns null if the overlap is
  * too small to be worth a quad.
  */
-function clipToSurface(
+export function clipToSurface(
   s: GraffitiSurface,
   across: number,
   up: number,

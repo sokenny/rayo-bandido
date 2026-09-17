@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEvent, HustlerSpot, PlayerCommand } from '../src/core/types';
 import { HUSTLERS } from '../src/config/tuning';
-import { HUSTLER_NICKNAMES, HUSTLER_VOICE, MEDIAS_LINES, TRAPITO_LINES, WASHER_LINES, streetPrice, validateHustlerLines } from '../src/content/hustlers';
+import { HUSTLER_NICKNAMES, HUSTLER_VOICE, MEDIAS_LINES, TRAPITO_LINES, TRAVESTI_LINES, TRAVESTI_NICKNAMES, WASHER_LINES, streetPrice, validateHustlerLines } from '../src/content/hustlers';
 import { createPlayerCommand } from '../src/core/input/keyboard';
 import { createEconomyState, createVehicleState } from '../src/sim/gameState';
 import {
@@ -48,6 +48,8 @@ const WASHER: HustlerSpot = {
   approach: { x: 204, z: -6, heading: 0 },
   signal: { x: 201, z: -1, heading: Math.PI, offset: 0 },
 };
+
+const TRAVESTI: HustlerSpot = { id: 'tv', kind: 'travesti', label: 'tv', x: 400, z: 400, heading: 0, seed: 4 };
 
 /** Walks 36 m north-south at x = -400, facing west at the street. */
 const SELLER: HustlerSpot = {
@@ -447,6 +449,45 @@ describe('a windshield washer', () => {
   });
 });
 
+describe('a travesti', () => {
+  it('calls a car that slows by her with one of her lines, in her own voice, and takes nothing', () => {
+    const w = world([TRAVESTI]);
+    w.economy.money = 5000;
+    w.park(407, 402);
+    const called = lines(w.run(1));
+    expect(called.length).toBe(1);
+    expect(TRAVESTI_LINES.call).toContain(called[0].text);
+    expect(w.s.npcs[0].phase).toBe('call');
+    expect(w.s.offering).toBe(-1);
+    expect(w.economy.money).toBe(5000);
+    expect(HUSTLER_VOICE.travesti).toBe('travesti');
+  });
+
+  it('lets a car at speed go by, waits while one stays, and lets it go when it leaves', () => {
+    const w = world([TRAVESTI]);
+    w.park(410, 400);
+    w.v.speed = 25;
+    expect(lines(w.run(1)).length).toBe(0);
+    w.park(407, 402);
+    w.run(1);
+    w.run(HUSTLERS.travesti.callSeconds + 0.5);
+    expect(w.s.npcs[0].phase).toBe('wait');
+    w.park(600, 600);
+    expect(lines(w.run(1)).length).toBe(0);
+    expect(w.s.npcs[0].phase).toBe('idle');
+    // Back inside her cooldown: nothing.
+    w.park(407, 402);
+    expect(lines(w.run(2)).length).toBe(0);
+  });
+
+  it('goes by a name of her own once she knows the car', () => {
+    const spots = [TRAPITO, TRAVESTI];
+    const s = createHustlerState(spots);
+    s.npcs[1].encounters = HUSTLERS.nicknameAfter;
+    expect(hustlerName(s, spots, 1)).toBe(TRAVESTI_NICKNAMES[0]);
+  });
+});
+
 describe('the open world', () => {
   const { layout, plan } = createOpenWorld();
 
@@ -461,7 +502,10 @@ describe('the open world', () => {
 
   it('puts every hustler on a pavement, clear of anything solid, and every washer on a lane at his light', () => {
     expect(layout.hustlerSpots?.length).toBe(METRO_HUSTLER_SPOTS.length);
-    expect(METRO_HUSTLER_SPOTS.length).toBeLessThanOrEqual(HUSTLER_NICKNAMES.length);
+    const travestis = METRO_HUSTLER_SPOTS.filter((h) => h.kind === 'travesti').length;
+    expect(METRO_HUSTLER_SPOTS.length - travestis).toBeLessThanOrEqual(HUSTLER_NICKNAMES.length);
+    expect(travestis).toBeGreaterThan(0);
+    expect(travestis).toBeLessThanOrEqual(TRAVESTI_NICKNAMES.length);
     for (const h of METRO_HUSTLER_SPOTS) {
       expect(plan.isRoad(h.x, h.z, 0), `${h.id} stands in the road`).toBe(false);
       expect(solidAt(h.x, h.z, 0.4), `${h.id} stands in something`).toBeNull();
@@ -473,6 +517,10 @@ describe('the open world', () => {
         expect(plan.isRoad(s.x, s.z, 0), `${h.id}'s light stands in the road`).toBe(false);
         expect(solidAt(s.x, s.z, 0.2), `${h.id}'s light stands in something`).toBeNull();
         expect(Math.hypot(h.x - s.x, h.z - s.z)).toBeLessThan(7);
+      } else if (h.kind === 'travesti') {
+        // At the edge of a road, facing it: a few steps ahead of her is asphalt.
+        const ahead = [3, 4, 5, 6].some((d) => plan.isRoad(h.x + Math.sin(h.heading) * d, h.z - Math.cos(h.heading) * d, 0));
+        expect(ahead, `${h.id} does not face a road`).toBe(true);
       } else if (h.kind === 'medias') {
         // His whole walk is pavement and clear, and his spot is the middle of it.
         const b = h.beat!;
@@ -527,6 +575,8 @@ describe('the look', () => {
           ? (['idle', 'call', 'wait', 'grumble'] as const)
           : spot.kind === 'medias'
             ? (['idle', 'call', 'wait', 'grumble', 'waveOff'] as const)
+            : spot.kind === 'travesti'
+              ? (['idle', 'call', 'wait'] as const)
             : (['idle', 'offer', 'approach', 'clean', 'thanks', 'retreat', 'refused', 'waveOff'] as const);
       for (const phase of phases) {
         for (const mood of ['plain', 'damaged', 'clean'] as const) {

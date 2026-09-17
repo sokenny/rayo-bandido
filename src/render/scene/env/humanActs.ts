@@ -64,7 +64,12 @@ export type HumanAct =
    * A sock seller: walks his beat with the box round his neck, holds a pair up at the street from
    * either end, and — cued — stops for a car, pitches it, shrugs when it goes. Needs `Actor.cue`.
    */
-  | 'medias';
+  | 'medias'
+  /**
+   * A travesti: waits on her kerb with a hand on her hip, the bag on her arm, and — cued — turns to
+   * a car, steps to the kerb, beckons it over and blows it a kiss. Needs `Actor.cue`.
+   */
+  | 'travesti';
 
 export interface ActorSpec {
   act: HumanAct;
@@ -203,7 +208,7 @@ export function createActor(spec: ActorSpec): Actor {
   const faceFocus = spec.focus && (spec.act === 'warm' || spec.act === 'inspect' || spec.act === 'vibe');
   const face = faceFocus ? bearing(spec.x, spec.z, spec.focus!.x, spec.focus!.z) : spec.heading;
   const toward = spec.to ? bearing(spec.x, spec.z, spec.to.x, spec.to.z) : face;
-  const cue = spec.act === 'trapito' || spec.act === 'washer' || spec.act === 'medias' ? createHustlerCue() : null;
+  const cue = spec.act === 'trapito' || spec.act === 'washer' || spec.act === 'medias' || spec.act === 'travesti' ? createHustlerCue() : null;
   if (cue) {
     // Where he stands until anybody says otherwise, so the first pose is never at the origin.
     cue.atX = spec.x;
@@ -273,6 +278,9 @@ export function stepActor(a: Actor, time: number, dt: number, subject: CrowdSubj
       break;
     case 'medias':
       medias(a, t, dt, out);
+      break;
+    case 'travesti':
+      travesti(a, t, out);
       break;
     default:
       break;
@@ -781,6 +789,53 @@ function washer(a: Actor, t: number, p: BodyPose): void {
     default:
       return;
   }
+}
+
+/** Her weight on one leg and the hip out, the bag arm bent at the elbow and the other hand on her hip. */
+function hipOut(p: BodyPose, t: number, w: number): void {
+  const sway = Math.sin(t * 0.9);
+  p.tilt += (0.1 + 0.03 * sway) * w;
+  p.legL += 0.06 * w;
+  p.legR -= 0.12 * w;
+  p.twist += 0.08 * sway * w;
+  arm(p, false, 0.35, 0.12, 1.45, 0.35, w);
+  arm(p, true, -0.1, 0.55, 1.6, 0.9, w);
+}
+
+function travesti(a: Actor, t: number, p: BodyPose): void {
+  const s = a.spec.seed * 13;
+  const c = a.cue;
+  if (!c || c.phase === 'idle' || c.phase === 'grumble') {
+    hipOut(p, t, 1);
+    // Now and then a hand through her hair, or a look down the road for the next car.
+    const hair = spell(t, 7, 0.35, s + 60);
+    arm(p, true, 2.3, 0.6, 2.3, 0.2, hair);
+    p.tilt -= 0.08 * hair;
+    const look = spell(t, 5.5, 0.4, s + 61);
+    p.look += 0.7 * Math.sin(t * 0.4 + s) * look;
+    return;
+  }
+  const k = c.t;
+  // Round to the car and a step out to the kerb at it.
+  const turnIn = c.phase === 'call' ? ease(k / 0.5) : 1;
+  faceAndStep(a, p, c.carX, c.carZ, 0.9 * turnIn, c.phase === 'call' ? 1.1 * ease((k - 0.4) / 1.2) : 1.1);
+  hipOut(p, t, 0.6);
+
+  if (c.phase === 'wait') {
+    // Leaning at the window, one finger calling it closer now and then.
+    p.lean += 0.14;
+    const come = spell(t, 2.6, 0.55, s + 62);
+    arm(p, true, 1.25, 0.1, 1.2 + 0.5 * Math.sin(t * 9), 0.1, come);
+    return;
+  }
+
+  // THE CALL: a lean, the finger — "vení, papi" — and a kiss blown off the palm at the driver.
+  p.lean += 0.12 * ease(k / 0.8);
+  const beckon = envelope(k, 0.5, 0.8, 3.0, 3.3);
+  arm(p, true, 1.3, 0.15, 1.1 + 0.55 * Math.sin(t * 9), 0.1, beckon);
+  const kiss = envelope(k, 3.2, 3.5, 4.3, 4.7);
+  arm(p, true, 1.2 - 0.9 * ease((k - 3.9) / 0.4), 0.1, 2.3 - 1.8 * ease((k - 3.9) / 0.4), 0.3, kiss);
+  p.nod -= 0.05 * kiss;
 }
 
 /** Both hands on the sides of the box hung at his belly. */

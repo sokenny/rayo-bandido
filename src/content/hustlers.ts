@@ -17,6 +17,11 @@ import { MAX_LINE_CHARS } from './passengers';
  * slows down: three pairs, a good price, for the kids, and — the moment you drive off — that they
  * are not stealing from anybody, they are selling socks. Talk only, like a trapito.
  *
+ * TRAVESTIS work the kerb at night — the Bosques' loop road and a few dark corners of the city — in
+ * a miniskirt and heels, a little bag over the arm. A car that slows by one gets called over and
+ * offered the night, in the park's own words. Talk only, like a trapito: no button, no price
+ * taken, nothing waited for. They have a voice of their own (`travesti`).
+ *
  * TONE. Villero, the way it is actually spoken on that corner: "ameo" and "ñeri" and "pa" instead
  * of amigo, "la gorra" and "la yuta" for the police, "rescatate", "bardear", "posta", "de una".
  * Funny, a little pushy, never a caricature and never a threat. The trapitos and washers share a
@@ -71,6 +76,26 @@ export interface MediasLines {
   /** Said instead of a pitch, sometimes, once he has seen this car a few times. */
   regular: readonly string[];
 }
+
+/** A travesti only calls: the car slows by her, and she makes her offer. */
+export interface TravestiLines {
+  call: readonly string[];
+}
+
+export const TRAVESTI_LINES: TravestiLines = {
+  call: [
+    '¿Andás perdido, rey, o buscás que te acomoden la noche?',
+    'Vení, papi… por unos mangos te saco esa cara de preocupado.',
+    '¿Querés compañía nomás o también un service rapidito?',
+    'Estacioná más adelante, corazón. Acá se charla; allá arreglamos.',
+    '¿Una atención completa o venís buscando algo para levantar la noche?',
+    'No doy indicaciones gratis, bombón… pero conozco todos los atajos.',
+    '¿Querés mimos o mercadería para después?',
+    'Bajá el vidrio papi. El bucal son 200 pe y por 500 te entrego la burra',
+    '¿Viniste a mirar, ratón, o vas a poner unos mangos y sacarte las ganas?',
+    'Estacioná allá atrás, bebé. Por quinientos te vas contento y deslechado.',
+  ],
+};
 
 export const TRAPITO_LINES: TrapitoLines = {
   call: [
@@ -238,11 +263,14 @@ export const HUSTLER_NICKNAMES: readonly string[] = ['El Chino', 'Pity', 'El Tuc
   'Pocho', 'Lucho', 'El Colo', 'Tincho', 'Fede', 'El Rata', 'Jonathan', 'Maxi', 'Beto', 'El Mono', 'Pipa', 'Cacho', 'Dylan', 'El Topo', 'Chaca', 'Tito', 'Mati', 'El Oso',
   'Maicol', 'El Pollo', 'Yeison', 'Brandon', 'El Tano', 'Cristian'];
 
+/** What a travesti gets called once she has worked your car a few times. One each, in the order the travestis are listed. */
+export const TRAVESTI_NICKNAMES: readonly string[] = ['La Colo', 'Jessica', 'La Tati', 'Mía', 'Karen', 'La Negra', 'Luana', 'Daiana', 'La Rubia', 'Samanta', 'Pamela', 'Yésica'];
+
 /** What the subtitle calls one before he has a name. */
-export const HUSTLER_TRADE: Record<HustlerKind, string> = { trapito: 'Trapito', washer: 'Limpiavidrios', medias: 'Vendedor de medias' };
+export const HUSTLER_TRADE: Record<HustlerKind, string> = { trapito: 'Trapito', washer: 'Limpiavidrios', medias: 'Vendedor de medias', travesti: 'Travesti' };
 
 /** Whose voice says a hustler's lines (`server/dialogue/voices.mjs`). */
-export const HUSTLER_VOICE = { trapito: 'trapito', washer: 'trapito', medias: 'villero' } as const satisfies Record<HustlerKind, string>;
+export const HUSTLER_VOICE = { trapito: 'trapito', washer: 'trapito', medias: 'villero', travesti: 'travesti' } as const satisfies Record<HustlerKind, string>;
 
 /** The washer's two buttons. The price is filled in from `HUSTLERS.washer.price`. */
 export const WASHER_CHOICES = { accept: 'Dejarlo limpiar', decline: 'No, gracias' } as const;
@@ -260,6 +288,7 @@ export function validateHustlerLines(): string[] {
     ...Object.entries(TRAPITO_LINES).map(([k, v]) => [`trapito.${k}`, v] as [string, readonly string[]]),
     ...Object.entries(WASHER_LINES).map(([k, v]) => [`washer.${k}`, v] as [string, readonly string[]]),
     ...Object.entries(MEDIAS_LINES).map(([k, v]) => [`medias.${k}`, v] as [string, readonly string[]]),
+    ...Object.entries(TRAVESTI_LINES).map(([k, v]) => [`travesti.${k}`, v] as [string, readonly string[]]),
   ];
   for (const [name, lines] of pools) {
     // Two at least, so "never the same line twice running" always has somewhere to go.
@@ -271,5 +300,6 @@ export function validateHustlerLines(): string[] {
     });
   }
   if (new Set(HUSTLER_NICKNAMES).size !== HUSTLER_NICKNAMES.length) problems.push('nicknames: repeats a name');
+  if (new Set(TRAVESTI_NICKNAMES).size !== TRAVESTI_NICKNAMES.length) problems.push('travesti nicknames: repeats a name');
   return problems;
 }

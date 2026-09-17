@@ -370,9 +370,14 @@ describe('metro art budget', () => {
     buildCarMeets(b);
     buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
-    // Downtown's screens, and only downtown's.
+    // Downtown's screens, and the Obelisco's crossing's (`metroVilla.ts`), and nowhere else.
     expect(screens.length).toBeGreaterThan(150);
-    for (const p of screens) expect(p.x > STACK_RECT.minX - 20 && p.x < STACK_RECT.maxX + 20 && p.z > STACK_RECT.minZ - 20 && p.z < STACK_RECT.maxZ + 20, `${p.kind} at (${p.x}, ${p.z})`).toBe(true);
+    const obeliscoZone = METRO_SPEC.screens![1].within;
+    for (const p of screens) {
+      const downtown = p.x > STACK_RECT.minX - 20 && p.x < STACK_RECT.maxX + 20 && p.z > STACK_RECT.minZ - 20 && p.z < STACK_RECT.maxZ + 20;
+      const obelisco = p.x > obeliscoZone.minX - 20 && p.x < obeliscoZone.maxX + 20 && p.z > obeliscoZone.minZ - 20 && p.z < obeliscoZone.maxZ + 20;
+      expect(downtown || obelisco, `${p.kind} at (${p.x}, ${p.z})`).toBe(true);
+    }
     // Nine times the Bay's area with the Stack at the top. Drawn in chunks and culled by
     // distance (`CityPlan.render`), so what the GPU sees per frame is a Stack's worth; the
     // whole must still fit in memory as one set of arrays while it is built.

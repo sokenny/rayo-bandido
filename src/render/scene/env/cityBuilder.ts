@@ -583,7 +583,8 @@ function buildLinks(b: EnvBuilders, plots: Plot[]): void {
 
 function buildBlocks(b: EnvBuilders): void {
   const plots: Plot[] = [];
-  for (const blk of b.plan.blocks) plots.push(...planBlock(b, blk));
+  // A villa's blocks are built by `villaBuilder.ts`.
+  for (const blk of b.plan.blocks) if (!blk.villa) plots.push(...planBlock(b, blk));
   assignLandmarks(plots, b.plan.landmarkAnchors);
   for (const p of plots) buildPlot(b, p);
   buildLinks(b, plots);

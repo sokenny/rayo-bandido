@@ -700,6 +700,8 @@ function buildBlockClutter(b: EnvBuilders, rng: () => number): void {
   // is inside the facade, so a container or a stall is only placed where the plot in front of
   // the wall is genuinely open (a slab or a set-back tower leaves room; a full-plot box does not).
   for (const blk of b.plan.blocks) {
+    // A villa's houses stand out to its pavement (`villaBuilder.ts`): nothing goes on its ledge.
+    if (blk.villa) continue;
     const setback = setbackAt(b, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2, 3.4);
     const tight = setback < 1.5;
     walkLedge(blk, 1.4, 7, (x, z, dx, dz, along) => {

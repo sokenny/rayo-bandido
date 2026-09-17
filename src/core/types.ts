@@ -1165,9 +1165,11 @@ export interface GarageState {
 
 /**
  * A trapito watches parking spaces nobody asked him to; a washer works a red light; a sock seller
- * (`medias`) walks a stretch of pavement with a box of socks round his neck.
+ * (`medias`) walks a stretch of pavement with a box of socks round his neck; a travesti works a
+ * stretch of kerb at night — the Bosques' loop road, a dark corner of the city — and calls the cars
+ * that slow down for her.
  */
-export type HustlerKind = 'trapito' | 'washer' | 'medias';
+export type HustlerKind = 'trapito' | 'washer' | 'medias' | 'travesti';
 
 /**
  * Where one street hustler works (`src/world/hustlerSpots.ts`). Everything is in world space;

@@ -79,5 +79,7 @@ export const CHARACTER_VOICES = {
   // villero cast — the sock sellers first — in another that talks the same way.
   trapito: voice('hcoTXwGtTbk7rmbQW4G0'),
   villero: voice('JmUKrnhUnPYfwSKGSEFT'),
+  // The travestis working the Bosques' loop and the city's dark corners.
+  travesti: voice('KEowAojY5C8EodzPy9Ic'),
   policia: radioVoice('mZTof7eSbESeUWP6fuMw'),
 };

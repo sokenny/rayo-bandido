@@ -22,7 +22,7 @@ import { readStreetRaceProgress } from './core/progress';
 import { streetNewestEvent } from './sim/streetGate';
 import { installMobileShell } from './ui/mobileShell';
 import { account } from './net/account';
-import { createAccountBadge } from './ui/accountBadge';
+import { createAccountBadge, createPlayerTag } from './ui/accountBadge';
 import { scheduleMenuBackdrop } from './ui/menuBackdropLoader';
 import { playMenuAmbience } from './audio/menuAmbience';
 
@@ -219,6 +219,14 @@ async function buildGame(
     onEnterCircuit: options.onEnterCircuit,
     onEnterStreetRace: options.onEnterStreetRace,
   });
+  // The player's nickname and, for a guest, the way to sign in — over every world, all the time.
+  // After `createGame`, whose HUD empties the root it is given; gone again with the world.
+  const tag = createPlayerTag(hudRoot!, account());
+  const disposeGame = game.dispose.bind(game);
+  game.dispose = () => {
+    tag.dispose();
+    disposeGame();
+  };
   // `?nowarm=1` skips the warm-up to reproduce the first-use hitches on purpose (A/B, and the
   // negative test for the perf gate: `node scripts/perf-probe.mjs --check --url ...?nowarm=1`).
   if (new URLSearchParams(location.search).has('nowarm')) {
@@ -403,6 +411,8 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
   let goPending = false;
   let building = false;
 
+  // The account corner over the lobby, put away while a race is on (the HUD's tag has it then).
+  const badge = createAccountBadge(menuRoot!, account());
   const lobby = createLobby(menuRoot!, session, {
     onLeave() {
       // Leaving a room goes back to the rooms, not out of multiplayer: the usual next thing
@@ -427,6 +437,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     goPending = false;
     teardownRace();
     lobby.hide();
+    badge.setHidden(true);
     const mode = gameMode(roomGame());
     loading.show(mode === 'rush' ? 'BUILDING THE CITY' : 'BUILDING THE CIRCUIT');
     try {
@@ -440,6 +451,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     } catch (err) {
       console.error('Rayo Bandido: could not build the race', err);
       lobby.show();
+      badge.setHidden(false);
       void loading.hide();
     } finally {
       building = false;
@@ -467,6 +479,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     teardownRace();
     void loading.hide();
     lobby.show();
+    badge.setHidden(false);
   });
 
   session.onLobby(() => {
@@ -480,6 +493,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
       teardownRace();
       void loading.hide();
       lobby.show();
+      badge.setHidden(false);
     }
   });
 
@@ -509,6 +523,7 @@ function rooms(): void {
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
   const game = gameFromUrl();
+  createAccountBadge(menuRoot!, account());
   createRoomBrowser(menuRoot!, storedName(), game, {
     onEnter(entry) {
       // A reload rather than an in-place hand-off, so the address bar and the game agree from
@@ -545,7 +560,7 @@ function menu(): void {
   playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
-  // Who is playing, and the way to sign in: on the main menu only, never over a world.
+  // Who is playing, and the way to sign in: on every menu (over a world, it is the HUD's tag).
   createAccountBadge(menuRoot!, account());
   scheduleMenuBackdrop(canvas!);
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
@@ -567,6 +582,7 @@ function changelog(): void {
   playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  createAccountBadge(menuRoot!, account());
   createChangelogScreen(menuRoot!, () => {
     setTimeout(() => location.assign(urlWith()), 180);
   });
@@ -577,6 +593,7 @@ function quickPlayMenu(): void {
   playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  createAccountBadge(menuRoot!, account());
   scheduleMenuBackdrop(canvas!);
   showQuickPlayMenu(menuRoot!, {
     onSelect(game: RoomGame) {
@@ -597,6 +614,7 @@ function quickPlayModeMenu(game: RoomGame): void {
   playMenuAmbience();
   const loading = createLoadingScreen(document.getElementById('loading-root'));
   void loading.hide();
+  createAccountBadge(menuRoot!, account());
   scheduleMenuBackdrop(canvas!);
   showQuickPlayModeMenu(menuRoot!, game, {
     onSelect(choice: QuickPlayChoice) {

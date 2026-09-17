@@ -3178,3 +3178,97 @@ The noise hash avoids `sin()` of a large argument: at metro coordinates it came 
 the test GPU, which is why the first attempt showed no patches at all. Darker overall: grass tint
 `0x4a7053`, grade `normalize` 0.66, and park plants at `LIT` 0.82 (was 1.45) for gloomier woods.
 
+
+## La bajada: Villa 31, the 9 de Julio and the Obelisco (2026-09-16, later)
+
+Juan asked for the Autopista Illia's descent past Villa 31 onto the 9 de Julio, with the
+Obelisco, its McDonald's and the planted "BA" letters, made dystopian — somewhere generic in the
+metro near a highway, and The Stack left exactly as it is. Spec in `src/world/metroVilla.ts`.
+
+**Where.** The viaduct's east-leg ramp (`ramp-e-s`, geometry untouched) is the descent: driven
+off the deck heading north, it drops over st-s4 onto st-e3 at z 540, pointed at downtown.
+
+**The 9 de Julio.** St-e3 widened to 54 m from blvd-ring-s (z 243) to the ramp's foot (z 520),
+tapering back to 13 m over 28 m each end (`nueveDeJulioNodes`, `metroSpec.ts`). The traffic cells
+with a corner on the island are replaced by two loops, one file each side of it
+(`NUEVE_DE_JULIO.laneWest/laneEast`). The trapito at st-e3 × st-s3 moved to the new kerb. The
+crossing has its own screen zone (22 boards, 4 heroes, blades, holograms).
+
+**The Obelisco** (`env/obeliscoBuilder.ts`) on a 10 m island in the crossing with st-s3: the
+shaft is unlit pale stone in `neon` (south and west faces brighter), a violet line up each arris,
+a red beacon; kerb, lawn, stepped plinth, floodlights; "BA" in hedge cubes (the long B and the
+A) facing the descent. The island is a ring of 16 walls. **The McDonald's** takes the corner east
+of the avenue as a corner lot (`CitySpec.obelisco.mcdonalds`, cut out of the block like a gas
+station): red box, lit glass, arches on the fascia and on a pylon, and on the roof a board
+reading BANDIDO CITY SIEMPRE AVANZA (see the second pass below). A green gantry over the ramp: AV. 9 DE JULIO ↓↓↓. The tube
+font (`gasStationBuilder.ts`) gained B J K Q W X Y Z ' and -.
+
+**Villa 31** (`CitySpec.villas`, `env/villaBuilder.ts`): every block with its centre between
+blvd-ring-e, av-e1, av-s1 and av-s2 is tagged `villa` and built as self-built houses instead of
+the kit — guillotine-split lots 4-8.5 m, bare brick or painted, one to six storeys with slab
+lines, stacked taller toward each block's middle so the barrio reads as a hill of houses; small
+warm windows (some neon), water tanks, rebar, railings, washing, cables across the roofs. Faces
+against a taller neighbour are skipped floor by floor. The strips the generator drops beside the
+ramp's corridor are filled with solid villa blocks on a 2 m grid (`fillVilla`, `cityWorld.ts`),
+so the houses run to the pavement. Blade signs, ledge clutter and the reclamation's kerb plants
+skip villa blocks. Murals on the frontage: VILLA 31 PRESENTE, BARRIO PADRE MUGICA.
+
+**Tests.** `tests/villa.test.ts` (7): the avenue's widths and the ramp landing on it, the island's
+kerb and room both sides, no traffic leg within 12 m of the obelisk, the McDonald's corner clear
+of blocks and solid, villa blocks on both sides of the ramp and solid, art ~64k triangles in the
+city's own batches. `metroWorld.test.ts` allows the Obelisco's screen zone. Full suite 72 files /
+1103 tests green, typecheck clean, metro preview checks clear. Build of the metro world +100 ms.
+
+**Known limits.** The descent is the existing ramp's 110 m climb (14.9 %), not a longer one. The
+houses are boxes on the block's collider (no alleys to drive in). The McDonald's is one box
+collider. `tests/terrain.test.ts`'s 6 s build-time bound is close under a loaded parallel run.
+Tuning shots: `artifacts/villa/villa-shots.mjs` (local).
+
+**Second pass (same day).** Juan: the villa has to rise over the highway, the Obelisco has to sit
+in a boulevard like the Plaza de la República, the BA much bigger with NDIDO CITY under it, a
+thicker, broken concrete shaft, and no "Buenos Aires" anywhere in the game.
+
+- The villa: two to six storeys by the block's edge and middle, plus STACKS (`stackAt`, 22 m
+  patches, 42 % of the ground) that add four to nine, up to fourteen storeys (40 m); anything over
+  five storeys is two builds, the upper one set back or pushed out and in another brick or paint.
+- The 9 de Julio is 76 m in its stretch; the Obelisco stands in an oval plaza (`plaza: { rx 22,
+  rz 46 }`, 32 kerb walls): kerb, outer lawn, lit ring walk, inner lawn, paving, walks from st-s3.
+  Traffic files at ±31 m. The McDonald's corner moved east (x 524-538.5, z 368-404), the trapito
+  to the new kerb (x 439.8).
+- The shaft: 6.4 m base, 56 m, in the wall material (the concrete photograph) in 7 m lifts, 16
+  spalls with rebar, 14 zigzag cracks, a broken tip with its apex knocked off-centre, rubble on
+  the plinth; floodlights in the paving.
+- BA in 1.3 m hedge cubes (a 5 × 7 block font, `PIXELS`) on a dark grey band 24 × 3 m whose face
+  reads NDIDO CITY in pale grey blocks. The rooftop board reads BANDIDO CITY / SIEMPRE / AVANZA.
+- `tests/villa.test.ts` checks the oval kerb and walks every traffic leg against the plaza; the
+  triangle ceiling for the villa and the Obelisco is 260k.
+
+**Third pass (same day).** Juan: the shaft's texture banded; a quake fissure across the avenue
+and the protests' concrete barricades; the villa's walls too flat; a cyberpunk sign; a thicker,
+taller Obelisco.
+
+- The shaft is 9 m at the base and 80 m tall, in `concrete` (flat trim, no photograph: the wall
+  material's world-mapped 4 m tile is what banded it) cut into 5 × 2.4 m formwork panels, each a
+  shade off along a slow stain; tapering rain streaks; 30 spalls, 34 cracks.
+- `ObeliscoSpec.fissures`: three polylines south of the plaza, drawn jagged (1.6 m spans with
+  jitter), black, the asphalt heaved up either side with the north side higher (a fault), a
+  glow down the widest spans, loose chunks. Art only.
+- `ObeliscoSpec.barricades`: 12 jersey barriers (some toppled), each an axis-aligned collider from
+  `barricadeBox` (the art uses the same rectangle), clear of the traffic files and the plaza
+  (`tests/villa.test.ts` walks every ground traffic leg).
+- The sign: BA in black steel pixels faced with LED panels graded magenta to cyan (a few dead or
+  flickering, one or two out of line), hedge clumps growing over it, a frame with red beacons,
+  searchlight beams; the band is black steel with magenta LED strips and NDIDO CITY in white LEDs.
+- The villa's walls: concrete slab bands and corner columns proud of the brick, sills, and per
+  floor a room built out, a balcony with rail and door, a render patch, an AC unit, a shutter at
+  street level, drain pipes. The villa is now ~200k triangles (ceiling in the test 250k).
+
+**Fourth pass (same day).** The barricades are 5 × 1.4 × 2.2 m (`BARRICADE`), respaced so none
+overlap, with lifting eyes on the standing ones; the test now checks each footprint's corners are
+on the avenue and its whole box clear of every ground traffic leg. The fissure lost its heaved
+lips and loose chunks — the car drove through the relief, which read false — and is a flush black
+opening with the glow in its widest spans.
+Then 20 % lower (1.76 m), and six in ten carry graffiti from the city's atlas (`graffiti.ts`
+`decal`, `pickPaintCell`) on the face toward the approach — the narrow upper wall of a standing
+one, the whole side of a toppled one — sometimes on the back too; the rest keep a hazard stripe
+or a slash of neon paint.

@@ -78,7 +78,10 @@ The script does, in order:
 2. Resolves `rayobandido.com`'s Route53 A record to find what it actually
    points to (a load balancer or an environment's own CNAME), then matches
    that against every `Ready` environment under the `rayo-bandido`
-   application to find the one true deploy target. The load-balancer lookup
+   application to find the one true deploy target. When the domain points at
+   CloudFront (`infra/cloudfront/setup.sh`), it first reads that distribution's
+   origin — the load balancer — and matches that instead, remembering the
+   distribution for step 9. The load-balancer lookup
    is retried, because `describe-environment-resources` intermittently
    returns a spurious "No Environment found" for an environment that
    `describe-environments` just listed as `Ready`. If it still can't find an
@@ -113,6 +116,11 @@ The script does, in order:
    asked for. It also hits `/rooms` as a liveness check on the server process
    itself, not just the static assets. **If verification fails it rolls back**
    to the previous version label rather than leaving the domain broken.
+   With CloudFront in front, it also invalidates `/*` just before this check.
+   The check does not wait for the invalidation: the page is
+   never cached and scripts are fingerprinted. Songs, dialogue and textures keep their
+   names and are cached for a day, so the summary says whether the invalidation finished
+   (it waits up to 5 minutes). A rollback invalidates again.
 
 ## What to tell the user afterward
 

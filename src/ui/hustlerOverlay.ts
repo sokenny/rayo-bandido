@@ -1,5 +1,5 @@
 import type { GameEvent, HustlerHudSnapshot } from '../core/types';
-import { HUSTLER_VOICE, MEDIAS_LINES, TRAPITO_LINES, WASHER_CHOICES, WASHER_LINES, streetPrice } from '../content/hustlers';
+import { HUSTLER_VOICE, MEDIAS_LINES, TRAPITO_LINES, TRAVESTI_LINES, WASHER_CHOICES, WASHER_LINES, streetPrice } from '../content/hustlers';
 import { prepareDialogue, speakDialogue, stopDialogue } from '../audio/dialogueVoice';
 
 /**
@@ -63,6 +63,7 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
   // The whole cast is voiced: trapitos and washers with the one street voice, the sock sellers with the villero one.
   void prepareDialogue('trapito', [...Object.values(TRAPITO_LINES).flat(), ...Object.values(WASHER_LINES).flat()]);
   void prepareDialogue('villero', Object.values(MEDIAS_LINES).flat());
+  void prepareDialogue('travesti', Object.values(TRAVESTI_LINES).flat());
 
   let shownLineId = -1;
   /** Where the line on air is coming from. A fresh one per line, so the last line stays where it was said. */
@@ -146,12 +147,14 @@ export function createHustlerOverlay(options: HustlerOverlayOptions): HustlerOve
         shownLineId = -1;
         stopDialogue('trapito');
         stopDialogue('villero');
+        stopDialogue('travesti');
       }
     },
 
     dispose() {
       stopDialogue('trapito');
       stopDialogue('villero');
+      stopDialogue('travesti');
       yesEl.removeEventListener('click', onYes);
       noEl.removeEventListener('click', onNo);
       for (const animation of animations.values()) animation.cancel();

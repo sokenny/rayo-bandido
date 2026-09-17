@@ -157,6 +157,18 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5190", "--strictPort"],
       "port": 5190
+    },
+    {
+      "name": "rayo-bandido-api-preview-8096",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["RB_DATABASE_URL=memory://", "RB_GOOGLE_CLIENT_ID=preview-only", "RB_GOOGLE_CLIENT_SECRET=preview-only", "node", "server/index.mjs", "--port", "8096"],
+      "port": 8096
+    },
+    {
+      "name": "rayo-bandido-dev-5196",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["RB_MATCH_SERVER=http://127.0.0.1:8096", "npx", "vite", "--host", "127.0.0.1", "--port", "5196", "--strictPort"],
+      "port": 5196
     }
   ]
 }

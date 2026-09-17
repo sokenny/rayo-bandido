@@ -1,0 +1,20 @@
+{
+  "Name": "rayo-bandido-media",
+  "Comment": "Media in dist/ without fingerprints; MinTTL overrides origin no-cache, deploys invalidate /*",
+  "DefaultTTL": 86400,
+  "MaxTTL": 31536000,
+  "MinTTL": 86400,
+  "ParametersInCacheKeyAndForwardedToOrigin": {
+    "EnableAcceptEncodingGzip": true,
+    "EnableAcceptEncodingBrotli": true,
+    "HeadersConfig": {
+      "HeaderBehavior": "none"
+    },
+    "CookiesConfig": {
+      "CookieBehavior": "none"
+    },
+    "QueryStringsConfig": {
+      "QueryStringBehavior": "none"
+    }
+  }
+}

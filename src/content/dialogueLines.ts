@@ -1,7 +1,7 @@
 import type { DialogueCharacterId } from '../audio/dialogueVoice';
 import { BUHO } from './buho';
 import { LOCO_MUSTANG } from './garage';
-import { MEDIAS_LINES, TRAPITO_LINES, WASHER_LINES } from './hustlers';
+import { MEDIAS_LINES, TRAPITO_LINES, TRAVESTI_LINES, WASHER_LINES } from './hustlers';
 import { INTRO } from './intro';
 import { POLICE_RADIO_LINES } from './policeRadio';
 
@@ -22,5 +22,6 @@ export const RUNTIME_DIALOGUE: Partial<Record<DialogueCharacterId, readonly stri
   'loco-mustang': [...LOCO_MUSTANG.greetings, ...LOCO_MUSTANG.soon],
   trapito: [...Object.values(TRAPITO_LINES).flat(), ...Object.values(WASHER_LINES).flat()],
   villero: Object.values(MEDIAS_LINES).flat(),
+  travesti: Object.values(TRAVESTI_LINES).flat(),
   policia: Object.values(POLICE_RADIO_LINES).flat(),
 };

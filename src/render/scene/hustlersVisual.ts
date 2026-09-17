@@ -18,10 +18,10 @@ import type { HumanHead, HumanLook } from './env/humanFigure';
 import { createHumanCrowd, type CrowdMember } from './env/humanRig';
 
 /**
- * THE TRAPITOS, THE WASHERS AND THE SOCK SELLERS, drawn (`src/sim/hustlers.ts` decides what they do).
+ * THE TRAPITOS, THE WASHERS, THE SOCK SELLERS AND THE TRAVESTIS, drawn (`src/sim/hustlers.ts` decides what they do).
  *
  * THE PEOPLE are the city's shared body (`env/humanFigure.ts`) as ONE skinned crowd: two draw calls
- * for the whole cast wherever they stand, posed by the `trapito`, `washer` and `medias` acts
+ * for the whole cast wherever they stand, posed by the `trapito`, `washer`, `medias` and `travesti` acts
  * (`env/humanActs.ts`) from a cue this file writes onto each actor from the rules' state every
  * frame — for a sock seller, that includes where on his beat he is (`hustlerAt`). Only people near the camera are stepped; past `HUSTLERS.showWithin` nobody is drawn.
  * One rig, cheap variations: every look is picked from short lists by the spot's seed.
@@ -68,6 +68,24 @@ const JERSEYS = [
   { coat: 0x163a94, band: 0xf2c200 },
   { coat: 0xecebe6, sash: 0xd3122b },
 ] as const;
+/**
+ * A travesti's night out: a top (sleeveless, or a short faux-fur jacket), a miniskirt, tights or
+ * bare legs, heels, long hair, and a little bag on the arm. Loud colours, because she wants to be
+ * seen from a moving car.
+ */
+const TOPS = [0xff2f8f, 0x111114, 0xe8e2d4, 0xd4202e, 0x7a2cff, 0xf2c200];
+const SKIRTS = [0x0c0c10, 0xff3fa4, 0xc0c4cc, 0xb0182e, 0x3a1a5a, 0x1c6fff];
+/** Fishnet-dark tights, skin-tone tights, or none. `null` means bare legs, in her skin. */
+const TIGHTS: Array<number | null> = [0x14111a, 0x2a1a1e, null];
+const HEELS = [0x0a0a0c, 0xd4202e, 0xf0e8dc, 0xc9a24a];
+const LONG_HAIR = [
+  { hair: 0x0e0c10, accent: 0x3a1418 },
+  { hair: 0xd8b060, accent: 0xf2d890 },
+  { hair: 0x6a1a14, accent: 0xff5a3a },
+  { hair: 0x1a1210, accent: 0x9a2a6a },
+  { hair: 0xe8d8c0, accent: 0xff9fd6 },
+];
+const PURSES = [0x0a0a0c, 0xe8e2d4, 0xff2f8f, 0xc9a24a];
 /** Cardboard, from fresh to rained on. */
 const BOXES = [0xb68a52, 0xa27a48, 0xc29a62];
 
@@ -105,7 +123,35 @@ export function hustlerLook(spot: HustlerSpot): HumanLook {
     aura: 0xffb070,
     auraRadius: 1.7,
   };
-  if (spot.kind === 'medias') {
+  if (spot.kind === 'travesti') {
+    // Tall and broad in the shoulders under the make-up and the heels.
+    const hair = pick(LONG_HAIR, s, 30);
+    const tights = pick(TIGHTS, s, 31);
+    const jacket = pick([false, false, true], s, 32);
+    look.height = 1.03 + pick([0, 0.03, 0.06], s, 33);
+    look.build = pick([1.06, 1.12, 1.18], s, 34);
+    look.hair = hair.hair;
+    look.hairAccent = hair.accent;
+    look.head = 'long';
+    look.headwear = undefined;
+    look.coat = pick(TOPS, s, 35);
+    look.coatLength = 0;
+    look.sleeveless = !jacket;
+    look.skirt = pick(SKIRTS, s, 36);
+    look.legs = tights ?? look.skin;
+    look.legStripe = undefined;
+    look.shorts = undefined;
+    look.heels = true;
+    look.boots = pick(HEELS, s, 37);
+    look.vest = undefined;
+    look.band = undefined;
+    look.prop = 'purse';
+    look.propColor = pick(PURSES, s, 38);
+    look.propAccent = 0xf2c860;
+    // A pool of pink under her: the headlights find her before the street lamps do.
+    look.aura = 0xff5fb0;
+    look.auraRadius = 2.2;
+  } else if (spot.kind === 'medias') {
     // No vest and nothing hi-vis: a football shirt, a cap, and the box. The LEDs taped along the
     // box are what catches the eye at night, and they walk with him — a pool on the ground would not.
     const jersey = JERSEYS[s % JERSEYS.length];

@@ -45,9 +45,9 @@ export type HumanPose =
 
 /**
  * What is on the head. `crop` is hair alone; the rest add to it. `bucket` is a bucket hat, brim all
- * round; `capBack` is the cap worn with its peak at the back.
+ * round; `capBack` is the cap worn with its peak at the back; `long` falls past the shoulders.
  */
-export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'capBack' | 'hood' | 'bucket';
+export type HumanHead = 'crop' | 'fringe' | 'mop' | 'tied' | 'cap' | 'capBack' | 'hood' | 'bucket' | 'long';
 
 /** The one thing about a face that is visible at night, if anything is. */
 export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
@@ -55,9 +55,10 @@ export type HumanEyes = 'none' | 'eyes' | 'lenses' | 'visor';
 /**
  * What they brought. `camera`, `cloth` (a trapito's fluorescent rag) and `squeegee` are held in the
  * hand; `sockBox` is a sock seller's cardboard box hung from the neck, with a pair of socks for the
- * hand that only shows while he holds it up; the rest stand on the ground beside them.
+ * hand that only shows while he holds it up; `purse` is a small bag hung by its strap from the left
+ * forearm; the rest stand on the ground beside them.
  */
-export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera' | 'cloth' | 'squeegee' | 'sockBox';
+export type HumanProp = 'none' | 'cooler' | 'toolbag' | 'case' | 'camera' | 'cloth' | 'squeegee' | 'sockBox' | 'purse';
 
 /**
  * One person's whole appearance. Only the colours are required: everything else has a default
@@ -95,6 +96,10 @@ export interface HumanLook {
   vest?: number;
   /** Shorts: bare from the knee down, in `skin`. */
   shorts?: boolean;
+  /** A miniskirt in this colour round the hips, over legs in `legs` (tights, or `skin` for bare). */
+  skirt?: number;
+  /** High heels in `boots` instead of boots: a pointed toe, a thin heel, a strap round the ankle. */
+  heels?: boolean;
   /** A stripe down the outside of each leg, in this colour: track pants. */
   legStripe?: number;
   /** A reused plastic bottle in the left hand, in this colour: a washer's. */
@@ -199,6 +204,13 @@ const GRIP_JOINT = 0.86;
 const LEG_X = 0.15;
 /** Where shorts end. */
 const KNEE = 0.5;
+/** How high a heel lifts the ankle: where the bare leg ends in the shoe. */
+const HEEL_TOP = 0.16;
+/** A miniskirt: how far it rises above the hip joint and hangs below it. */
+const SKIRT_RISE = 0.08;
+const SKIRT_DROP = 0.26;
+/** A purse on the left forearm: its middle, and its size (thin across the arm, long front to back). */
+const PURSE = { y: 1.0, w: 0.08, h: 0.19, d: 0.27 } as const;
 /** Where a short sleeve ends. */
 const SHORT_SLEEVE = 1.34;
 /** A sock seller's box, hung from the neck: its middle, its size, and how far in front of the chest. */
@@ -382,9 +394,14 @@ function buildLegs(f: Body, look: HumanLook): void {
   for (const side of [-1, 1]) {
     f.bone(side < 0 ? BONE.legL : BONE.legR);
     const x = side * LEG_X;
-    const hem = look.shorts ? KNEE : FOOT;
+    const hem = look.heels ? HEEL_TOP : look.shorts ? KNEE : FOOT;
     f.color(look.legs, 1);
-    f.box(x, (hem + HIP) / 2, 0, 0.22, HIP - hem, 0.26);
+    if (look.skirt !== undefined) {
+      // Slim legs under the skirt, down into the shoe.
+      f.box(x, (hem + HIP) / 2, 0, 0.15, HIP - hem, 0.17);
+    } else {
+      f.box(x, (hem + HIP) / 2, 0, 0.22, HIP - hem, 0.26);
+    }
     if (look.shorts) {
       f.color(look.skin, 1);
       f.box(x, (FOOT + KNEE) / 2, 0, 0.15, KNEE - FOOT, 0.17);
@@ -394,7 +411,21 @@ function buildLegs(f: Body, look: HumanLook): void {
       f.box(x + side * 0.112, (hem + HIP) / 2, 0, 0.012, HIP - hem, 0.06);
     }
     f.color(look.boots, 1);
-    f.box(x, FOOT / 2, -0.02, 0.24, FOOT, 0.3, true);
+    if (look.heels) {
+      // A pointed toe down on the ground, the heel up on a thin post, and a strap round the ankle.
+      f.box(x, 0.035, -0.1, 0.1, 0.07, 0.16, true);
+      f.box(x, 0.1, 0.02, 0.11, 0.06, 0.14);
+      f.box(x, 0.06, 0.08, 0.035, 0.12, 0.035, true);
+      f.box(x, HEEL_TOP - 0.02, 0, 0.14, 0.04, 0.16);
+    } else {
+      f.box(x, FOOT / 2, -0.02, 0.24, FOOT, 0.3, true);
+    }
+  }
+  if (look.skirt !== undefined) {
+    // On the hips, not the legs, so a stride never splits it.
+    f.bone(BONE.hips);
+    f.color(look.skirt, 1.05);
+    f.box(0, HIP - (SKIRT_DROP - SKIRT_RISE) / 2, 0, LEG_X * 2 + 0.24, SKIRT_DROP + SKIRT_RISE, 0.3);
   }
 }
 
@@ -508,6 +539,15 @@ function buildHead(f: Body, look: HumanLook): void {
       f.box(-0.2, HEAD_Y + 0.06, 0.04, 0.1, 0.22, 0.3);
       f.box(0.2, HEAD_Y + 0.06, 0.04, 0.1, 0.22, 0.3);
       break;
+    case 'long':
+      // Down the back past the shoulders, and either side of the face.
+      f.color(look.hair, 1);
+      f.box(0, HEAD_Y + 0.17, 0.01, 0.35, 0.08, 0.35);
+      f.box(0, HEAD_Y - 0.13, 0.15, 0.36, 0.56, 0.1);
+      f.color(hairAccent, 1.05);
+      f.box(-0.17, HEAD_Y - 0.05, 0.01, 0.06, 0.4, 0.28);
+      f.box(0.17, HEAD_Y - 0.05, 0.01, 0.06, 0.4, 0.28);
+      break;
     case 'tied':
       f.color(look.hair, 1);
       f.box(0, HEAD_Y + 0.04, 0.22, 0.16, 0.16, 0.14);
@@ -580,6 +620,16 @@ function buildHeld(f: Body, look: HumanLook, armX: number): void {
   } else if (look.phone !== undefined) {
     f.color(0x15161a, 1);
     f.box(armX, GRIP_JOINT - 0.04, -0.02, 0.09, 0.16, 0.03);
+  }
+  if (look.prop === 'purse') {
+    // Hung by its strap from the crook of the left elbow, riding the forearm.
+    f.bone(BONE.foreArmL);
+    const px = -armX - 0.1;
+    f.color(look.propColor ?? 0x111114, 1);
+    f.box(px, PURSE.y, 0, PURSE.w, PURSE.h, PURSE.d);
+    f.color(look.propColor ?? 0x111114, 0.7);
+    f.box(px + 0.04, PURSE.y + PURSE.h / 2 + 0.05, -0.07, 0.02, 0.1, 0.02);
+    f.box(px + 0.04, PURSE.y + PURSE.h / 2 + 0.05, 0.07, 0.02, 0.1, 0.02);
   }
   if (look.bottle !== undefined) {
     // Held by the neck in the other hand, on the forearm so it swings with it, never put away.
@@ -712,6 +762,11 @@ function buildAccents(f: Body, look: HumanLook, w: number, d: number, armX: numb
       f.panel(0, SOCK_BOX.y + SOCK_BOX.h / 2 - 0.02, -d / 2 - SOCK_BOX.gap - SOCK_BOX.d - 0.006, SOCK_BOX.w - 0.04, 0.025);
       break;
     }
+    case 'purse':
+      // The clasp: a glint of gold on its front edge.
+      f.bone(BONE.foreArmL);
+      f.panel(-armX - 0.1, PURSE.y + 0.03, -PURSE.d / 2 - 0.004, PURSE.w - 0.02, 0.03);
+      break;
     case 'camera':
       // The dot that says it is recording, on the face that is on top while they film.
       f.bone(BONE.hand);

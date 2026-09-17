@@ -12,6 +12,7 @@ import { PAL } from '../render/scene/env/palette.ts';
 import { metroTerrain } from './metroTerrain.ts';
 import { METRO_PARK, PARK_BRIDGE, PARK_ENTRIES, PARK_LAND, PARK_NORTH, PARK_ROADS } from './metroPark.ts';
 import { planStackMassing } from './stackMassing.ts';
+import { METRO_OBELISCO, METRO_VILLA, NUEVE_DE_JULIO } from './metroVilla.ts';
 import {
   STACK_ART,
   STACK_BLOCK_OPTIONS,
@@ -270,8 +271,13 @@ export const OUTER_ROADS: CityRoadSpec[] = [
   straight('blvd-ring-s', 20, X_MIN, RING.south, X_MAX, RING.south),
   straight('blvd-ring-w', 20, RING.west, Z_MIN, RING.west, Z_SHORE),
   straight('blvd-ring-e', 20, RING.east, Z_MIN, RING.east, Z_SHORE),
-  // Two of these run on into the park, across its loop (`PARK_ENTRIES`).
-  ...OUTER_NS.map(([x, w, tag]) => straight(tag, w, x, PARK_ENTRIES[tag] ?? Z_MIN, x, Z_SHORE)),
+  // Two of these run on into the park, across its loop (`PARK_ENTRIES`); st-e3 is the 9 de Julio
+  // for a stretch (`metroVilla.ts`).
+  ...OUTER_NS.map(([x, w, tag]) =>
+    tag === NUEVE_DE_JULIO.tag
+      ? { tag, kind: 'track' as const, spec: { closed: false, nodes: nueveDeJulioNodes(x, PARK_ENTRIES[tag] ?? Z_MIN, w) } }
+      : straight(tag, w, x, PARK_ENTRIES[tag] ?? Z_MIN, x, Z_SHORE),
+  ),
   ...OUTER_EW.map(([z, w, tag]) => straight(tag, w, X_MIN, z, X_MAX, z)),
   // The waterfront boulevard, along the quay.
   straight('blvd-water', 16, X_MIN, METRO_QUAY_Z - 14, X_MAX, METRO_QUAY_Z - 14),
@@ -281,6 +287,20 @@ export const OUTER_ROADS: CityRoadSpec[] = [
   straight('alley-w1', 7.5, -550, 920, -550, 1060, 'alley'),
   straight('alley-e1', 7.5, 480, -530, 620, -530, 'alley'),
 ];
+
+/**
+ * St-e3 with the 9 de Julio in it: the street's own nodes outside the stretch, and four nodes
+ * that taper it out to the avenue's width and back (`track.ts` lerps a width along a straight).
+ */
+function nueveDeJulioNodes(x: number, north: number, width: number): TrackNode[] {
+  const { fromZ, toZ, taper } = NUEVE_DE_JULIO;
+  const nodes = straightNodes(x, north, x, Z_SHORE, width)
+    // The tapers are straight lerps, so nothing may break them; a district change inside the full stretch is kept.
+    .filter((nd) => !((nd.z > fromZ - taper && nd.z < fromZ) || (nd.z > toZ && nd.z < toZ + taper)))
+    .map((nd) => (nd.z >= fromZ && nd.z <= toZ ? { ...nd, width: NUEVE_DE_JULIO.width } : nd));
+  const ends = [n(x, fromZ - taper, 0, width), n(x, fromZ, 0, NUEVE_DE_JULIO.width), n(x, toZ, 0, NUEVE_DE_JULIO.width), n(x, toZ + taper, 0, width)];
+  return [...nodes.filter((nd) => !ends.some((e) => Math.abs(e.z - nd.z) < 1)), ...ends].sort((a, b) => a.z - b.z);
+}
 
 /* ------------------------------------------------------------------ the viaduct */
 
@@ -648,8 +668,16 @@ function fillLoops(): Array<{ rect: Rect; cars: number }> {
   const even: Array<[number, number, number]> = [[-620, -480, 2], [-340, -252, 2], [-60, 30, 2], [160, 250, 2], [340, 480, 2]];
   const odd: Array<[number, number, number]> = [[-480, -340, 2], [-252, -60, 3], [30, 160, 2], [250, 340, 2], [480, 620, 2]];
   for (let b = 0; b < bands.length - 1; b++) {
-    for (const [minX, maxX, cars] of b % 2 === 0 ? even : odd) fill.push(loop(minX, maxX, bands[b], bands[b + 1], cars));
+    for (const [minX, maxX, cars] of b % 2 === 0 ? even : odd) {
+      // The two cells with a corner on the Obelisco's island (`metroVilla.ts`) are replaced below.
+      if (b < 2 && (minX === 480 || maxX === 480)) continue;
+      fill.push(loop(minX, maxX, bands[b], bands[b + 1], cars));
+    }
   }
+  // The 9 de Julio: a file each side of the island, round from the ring to av-s1, so the avenue
+  // carries its traffic past the Obelisco on both sides and nothing turns across the island.
+  fill.push(loop(RING.east, NUEVE_DE_JULIO.laneWest, RING.south, 500, 3));
+  fill.push(loop(NUEVE_DE_JULIO.laneEast, 620, RING.south, 500, 3));
   // The waterfront end to end, so the drive along the quay is never an empty one.
   fill.push(loop(-620, 620, 1060, METRO_QUAY_Z - 14, 8));
   return fill.map((l) => ({ rect: l.rect, cars: l.cars * FILL_DENSITY }));
@@ -753,6 +781,9 @@ export const METRO_SPEC: CitySpec = {
   ],
   // The park (`metroPark.ts`): the north edge, beyond the city's own rectangle.
   parks: [METRO_PARK],
+  // La bajada (`metroVilla.ts`): Villa 31 round the east ramp, the Obelisco on the 9 de Julio.
+  villas: [METRO_VILLA],
+  obelisco: METRO_OBELISCO,
   blockBounds: METRO_CITY,
   blockOptions: METRO_BLOCK_OPTIONS,
   // The hills (`metroTerrain.ts`): downtown and the meet district stay level, the rest rolls.
@@ -780,7 +811,11 @@ export const METRO_SPEC: CitySpec = {
   skybridgeSets: METRO_SKYBRIDGE_SETS,
   neonDistricts: [{ ...SOUTHWEST }],
   // Downtown's LED boards, blades and holograms, as the Stack has them.
-  screens: [{ within: STACK_RECT, ...STACK_SCREENS }],
+  screens: [
+    { within: STACK_RECT, ...STACK_SCREENS },
+    // The Obelisco's crossing, lit like downtown: boards on the towers round the plaza.
+    { within: { minX: 380, maxX: 560, minZ: 250, maxZ: 470 }, boards: 22, heroes: 4, blades: 10, roofBoards: 4, holograms: 2, crossings: 2, bridges: 0 },
+  ],
   ringBillboards: [{ x: -520, z: 700, y: 60, radius: 13, height: 11 }],
   radioTowers: [
     ...STACK_SPEC.radioTowers.map((t) => ({ ...t, x: t.x + STACK_OFFSET.x, z: t.z + STACK_OFFSET.z })),

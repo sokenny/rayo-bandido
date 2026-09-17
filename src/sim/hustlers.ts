@@ -11,7 +11,7 @@ import type {
   WasherCancelReason,
 } from '../core/types';
 import { HUSTLERS } from '../config/tuning';
-import { HUSTLER_NICKNAMES, HUSTLER_TRADE, MEDIAS_LINES, TRAPITO_LINES, WASHER_LINES } from '../content/hustlers';
+import { HUSTLER_NICKNAMES, HUSTLER_TRADE, MEDIAS_LINES, TRAPITO_LINES, TRAVESTI_LINES, TRAVESTI_NICKNAMES, WASHER_LINES } from '../content/hustlers';
 import { payStreetService } from './economy';
 import { lineSeconds } from './passenger';
 
@@ -42,6 +42,10 @@ import { lineSeconds } from './passenger';
  * drives off — may tell it he is not stealing from anybody. Talk only, like a trapito: no button,
  * no price. With the police on the car he wants nothing to do with it. His clock stands still
  * while he sells, so he walks on from exactly where he stopped.
+ *
+ * A TRAVESTI works her stretch of kerb at night. A car that slows or lingers by her gets called
+ * over and offered the night; she waits on it while it stays, and lets it go when it leaves. Talk
+ * only, like a trapito: no button, no price.
  *
  * ONE VOICE AT A TIME for the whole cast, and never over a passenger, El Búho or Loco Mustang
  * (`othersTalking`). A washer's lines take the strip from a trapito's; nobody else's do. Lines
@@ -271,7 +275,13 @@ export function hustlerName(s: HustlerState, spots: readonly HustlerSpot[], i: n
   const n = s.npcs[i];
   const spot = spots[i];
   if (!n || !spot) return '';
-  if (n.encounters >= HUSTLERS.nicknameAfter) return HUSTLER_NICKNAMES[i % HUSTLER_NICKNAMES.length];
+  if (n.encounters >= HUSTLERS.nicknameAfter) {
+    if (spot.kind !== 'travesti') return HUSTLER_NICKNAMES[i % HUSTLER_NICKNAMES.length];
+    // Her own name, counted among the travestis only, so the men's list never names one of them.
+    let k = 0;
+    for (let j = 0; j < i; j++) if (spots[j].kind === 'travesti') k++;
+    return TRAVESTI_NICKNAMES[k % TRAVESTI_NICKNAMES.length];
+  }
   return HUSTLER_TRADE[spot.kind];
 }
 
@@ -372,6 +382,7 @@ export function stepHustlers(
     const n = s.npcs[i];
     if (spot.kind === 'trapito') stepTrapito(s, i, spot, n, v, onStreet, ctx, time, dt, events);
     else if (spot.kind === 'medias') stepMedias(s, i, spot, n, v, onStreet, ctx, time, dt, events);
+    else if (spot.kind === 'travesti') stepTravesti(s, i, spot, n, v, onStreet, time, dt, events);
     else stepWasher(s, i, spot, n, v, onStreet, cmd, economy, ctx, time, dt, events);
   }
 }
@@ -443,6 +454,56 @@ function stepTrapito(
     }
     case 'grumble':
       if (time - n.since >= T.grumbleSeconds) setPhase(n, 'idle', time);
+      return;
+    default:
+      setPhase(n, 'idle', time);
+      return;
+  }
+}
+
+/* ------------------------------------------------------------------ travestis */
+
+function stepTravesti(
+  s: HustlerState,
+  i: number,
+  spot: HustlerSpot,
+  n: HustlerNpcState,
+  v: VehicleState,
+  onStreet: boolean,
+  time: number,
+  dt: number,
+  events: GameEvent[],
+): void {
+  const T = HUSTLERS.travesti;
+  const d = onStreet ? Math.hypot(v.x - spot.x, v.z - spot.z) : Infinity;
+  const speed = Math.abs(v.speed);
+
+  switch (n.phase) {
+    case 'idle': {
+      if (s.locked || time < n.cooldownUntil || d > T.noticeRadius) {
+        n.dwell = 0;
+        return;
+      }
+      if (speed < T.slowSpeed) n.dwell += dt;
+      else if (d < T.lingerRadius) n.dwell += dt * (T.noticeSeconds / T.lingerSeconds);
+      else n.dwell = 0;
+      if (n.dwell < T.noticeSeconds) return;
+      n.dwell = 0;
+      n.encounters += 1;
+      s.stats.calls += 1;
+      n.mood = 'plain';
+      setPhase(n, 'call', time);
+      say(s, i, TRAVESTI_LINES.call, 'call', events);
+      return;
+    }
+    case 'call':
+    case 'wait':
+      if (s.locked || d > T.leaveRadius) {
+        n.cooldownUntil = time + T.cooldown;
+        setPhase(n, 'idle', time);
+        return;
+      }
+      if (n.phase === 'call' && time - n.since >= T.callSeconds) setPhase(n, 'wait', time);
       return;
     default:
       setPhase(n, 'idle', time);

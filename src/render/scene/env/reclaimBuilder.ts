@@ -373,6 +373,8 @@ function buildBlockGreenery(b: EnvBuilders, field: ReclaimField): void {
   const facesRoad = (x: number, z: number, ox: number, oz: number): boolean =>
     b.plan.isRoad(x + ox * 6, z + oz * 6) || b.plan.isRoad(x + ox * 10, z + oz * 10) || b.plan.isRoad(x + ox * 14, z + oz * 14);
   for (const blk of b.plan.blocks) {
+    // A villa's houses stand out to its pavement (`villaBuilder.ts`): nothing goes on its ledge.
+    if (blk.villa) continue;
     const setback = blockSetback(blk.maxX - blk.minX, blk.maxZ - blk.minZ, setbackAt(b, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2, SIDEWALK));
 
     /** `outX/outZ` points from the block out at the street; `pave` is the pavement there. */

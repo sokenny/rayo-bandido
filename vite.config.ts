@@ -25,7 +25,8 @@ function stripHtmlComments(): Plugin {
  * serves both. In development Vite forwards these two prefixes to the match server on 8080
  * (`DEV_MATCH_PORT`), keeping the Host header, so a sign-in's redirect comes back to 5173.
  */
-const MATCH_SERVER = 'http://127.0.0.1:8080';
+// `RB_MATCH_SERVER` points a second Vite at a second match server, when 8080 is already taken.
+const MATCH_SERVER = process.env.RB_MATCH_SERVER || 'http://127.0.0.1:8080';
 // The object form, not the string shorthand: the shorthand turns `changeOrigin` on, which rewrites
 // Host to 8080 and sends a sign-in back to the match server instead of to this page.
 const accountProxy = {

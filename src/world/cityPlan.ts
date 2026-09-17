@@ -2,6 +2,7 @@ import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
+import type { ObeliscoSpec } from './metroVilla';
 import type { Terrain } from './terrain';
 import type { TrackPath } from './track';
 
@@ -45,6 +46,8 @@ export interface BlockRect extends Rect {
    * stops at the same height, so a car on the deck above never hits a roof it cannot see.
    */
   maxHeight?: number;
+  /** Built as a villa's houses rather than the city's buildings (`CitySpec.villas`). */
+  villa?: string;
 }
 
 export interface WallRect extends Rect {
@@ -463,6 +466,8 @@ export interface CityPlan {
   garage?: GarageSpec;
   /** The parks (`park.ts`): the land, the lakes, the trees, the walls and the people, drawn by `env/parkBuilder.ts`. */
   parks?: ParkSpec[];
+  /** The Obelisco, its island and the McDonald's on its corner (`metroVilla.ts`, `env/obeliscoBuilder.ts`). */
+  obelisco?: ObeliscoSpec;
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.

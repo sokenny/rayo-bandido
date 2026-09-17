@@ -36,6 +36,15 @@ import type { World } from './arenaWorld';
  *     - st-e3's east pavement, out in the industrial east.
  *   A seller's `x`/`z` is the middle of his walk.
  *
+ *   TRAVESTIS, each on the edge of a road at night, facing it —
+ *     - seven round the Bosques' loop (`metroPark.ts`): under the west woods, up in the north-west
+ *       trees, along the north leg, the north-east bend, the east leg past the planetarium, and
+ *       on the city-side pavement of the south leg at either end — all clear of the park's
+ *       meeting places,
+ *     - under the viaduct's east leg, beside the columns,
+ *     - on the kerb at the villa's edge, off blvd-ring-e,
+ *     - on the waterfront boulevard at the docks.
+ *
  * Every spot stands on pavement, every washer's car waits on his approach's lane, every seller's
  * whole walk is pavement, and none of them is inside anything solid (`tests/hustlers.test.ts`). The coordinates were read off the built
  * world, not the spec: kerb lines, lot edges and the ramp are where the assembler put them.
@@ -273,13 +282,13 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
   {
     id: 'trapito-e3-s3',
     kind: 'trapito',
-    label: 'ST E3 × ST S3',
-    x: 471.3,
+    label: 'OBELISCO · 9 DE JULIO',
+    x: 439.8,
     z: 347,
     heading: E,
     seed: 112,
-    space: { x: 475.8, z: 341.5 },
-    signal: { x: 472.7, z: 352.7, heading: N, offset: 4 },
+    space: { x: 444.3, z: 341.5 },
+    signal: { x: 441.2, z: 352.7, heading: N, offset: 4 },
   },
   {
     id: 'trapito-w1-n3',
@@ -429,6 +438,96 @@ export const METRO_HUSTLER_SPOTS: HustlerSpot[] = [
     heading: W,
     seed: 105,
     beat: { from: { x: 489.3, z: 20.5 }, to: { x: 489.3, z: 56.5 } },
+  },
+  {
+    id: 'travesti-bosque-oeste',
+    kind: 'travesti',
+    label: 'BOSQUES · LOOP WEST',
+    x: -629.4,
+    z: -863.2,
+    heading: 1.802,
+    seed: 201,
+  },
+  {
+    id: 'travesti-bosque-noroeste',
+    kind: 'travesti',
+    label: 'BOSQUES · NORTH-WEST WOODS',
+    x: -446.3,
+    z: -1065.3,
+    heading: 2.678,
+    seed: 202,
+  },
+  {
+    id: 'travesti-loop-norte',
+    kind: 'travesti',
+    label: 'BOSQUES · NORTH LEG',
+    x: -13.4,
+    z: -1074.9,
+    heading: -0.235,
+    seed: 203,
+  },
+  {
+    id: 'travesti-loop-noreste',
+    kind: 'travesti',
+    label: 'BOSQUES · NORTH-EAST BEND',
+    x: 492.9,
+    z: -1038.5,
+    heading: 0.329,
+    seed: 204,
+  },
+  {
+    id: 'travesti-loop-este',
+    kind: 'travesti',
+    label: 'BOSQUES · EAST LEG',
+    x: 613.8,
+    z: -794.5,
+    heading: -1.095,
+    seed: 205,
+  },
+  {
+    id: 'travesti-loop-sur-este',
+    kind: 'travesti',
+    label: 'BOSQUES · SOUTH LEG EAST',
+    x: 366.8,
+    z: -712.5,
+    heading: 0.131,
+    seed: 206,
+  },
+  {
+    id: 'travesti-loop-sur-oeste',
+    kind: 'travesti',
+    label: 'BOSQUES · SOUTH LEG WEST',
+    x: -414.1,
+    z: -688.7,
+    heading: -0.043,
+    seed: 207,
+  },
+  {
+    id: 'travesti-bajo-autopista',
+    kind: 'travesti',
+    label: 'UNDER THE VIADUCT · EAST',
+    x: 520,
+    z: 410,
+    heading: W,
+    seed: 208,
+  },
+  {
+    id: 'travesti-villa',
+    kind: 'travesti',
+    label: 'LA VILLA · RING EAST',
+    x: 362,
+    z: 648,
+    heading: N,
+    seed: 209,
+  },
+  {
+    id: 'travesti-puerto',
+    kind: 'travesti',
+    label: 'THE QUAY · DOCKS',
+    x: -178,
+    z: 1196,
+    heading: N,
+    seed: 210,
   },
 ];
 

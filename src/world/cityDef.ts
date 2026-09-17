@@ -2,6 +2,7 @@ import type { CarMeetSpec } from './carMeet';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
+import type { ObeliscoSpec, VillaSpec } from './metroVilla';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TerrainSpec } from './terrain';
@@ -131,6 +132,17 @@ export interface CitySpec {
    * (and `elevated`, for a bridge). Missing: none.
    */
   parks?: ParkSpec[];
+  /**
+   * Villas (`metroVilla.ts`): blocks the generator still cuts and that are still solid, built up
+   * with the villa's self-built houses instead of the city's buildings (`env/villaBuilder.ts`).
+   * Missing: none.
+   */
+  villas?: VillaSpec[];
+  /**
+   * The Obelisco on its island in a crossing, the planted letters, and the McDonald's on the
+   * corner (`metroVilla.ts`, `env/obeliscoBuilder.ts`). The island is solid. Missing: none.
+   */
+  obelisco?: ObeliscoSpec;
   /**
    * Where the block generator runs, when it is not the whole land inside the wall band: a
    * world with a park across one edge keeps its grid exactly where it was by naming the city's

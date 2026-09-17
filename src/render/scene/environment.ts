@@ -14,6 +14,8 @@ import { buildCarMeets } from './env/meetBuilder';
 import { buildGasStations } from './env/gasStationBuilder';
 import { buildGarage } from './env/garageBuilder';
 import { buildParks } from './env/parkBuilder';
+import { buildVillas } from './env/villaBuilder';
+import { buildObelisco } from './env/obeliscoBuilder';
 import { createParkPeopleVisual } from './parkPeopleVisual';
 import { createParkDucksVisual } from './parkDucksVisual';
 import { LAKE, triangulate } from '../../world/park';
@@ -431,6 +433,10 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   buildGarage(b);
   // The parks: grass, lake beds, trees, paths, walls, the planetarium (`env/parkBuilder.ts`).
   buildParks(b);
+  // La bajada: Villa 31's houses, and the Obelisco with its island, the McDonald's and the signs
+  // (`env/villaBuilder.ts`, `env/obeliscoBuilder.ts`).
+  buildVillas(b);
+  buildObelisco(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
