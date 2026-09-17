@@ -15,6 +15,7 @@ import { planTrip } from '../src/sim/passenger';
 import { createCityWorld } from '../src/world/cityWorld';
 import { inRect, type RibbonDef } from '../src/world/cityPlan';
 import { METRO_BUS_ROUTES, METRO_MEET, METRO_RUSH_SITES, METRO_SPEC, METRO_VIADUCT_Y, STACK_OFFSET, STACK_RECT } from '../src/world/metroSpec';
+import { ESTRELLA } from '../src/world/metroSouth';
 import { MEET_EDGE, meetSolids, meetWalls, solidCorners } from '../src/world/carMeet';
 import { STACK_ELEVATED, STACK_L1_Y, STACK_L2_Y, STACK_L3_Y, STACK_ROADS } from '../src/world/stackSpec';
 import { STACK_SITES } from '../src/world/stackMassing';
@@ -105,10 +106,14 @@ describe('metro layout contract', () => {
     const stackSpine = STACK_ELEVATED.find((r) => r.tag === 'spine')!.spec.nodes[0];
     const first = spine.path.samples[0];
     expect(Math.hypot(first.x - (stackSpine.x + STACK_OFFSET.x), first.z - (stackSpine.z + STACK_OFFSET.z))).toBeLessThan(60);
-    // The central avenue runs from the north wall to the shore; the cuts stop at the ring.
+    // The central avenue runs from the north wall to Plaza Estrella, and on from it to the shore
+    // (`metroSouth.ts`); the cuts stop at the ring.
     const central = ground.find((rb) => rb.tag === 'av-central')!;
     expect(central.path.samples[0].z).toBeLessThan(-600);
-    expect(central.path.samples[central.path.samples.length - 1].z).toBeGreaterThan(1100);
+    expect(central.path.samples[central.path.samples.length - 1].z).toBeCloseTo(ESTRELLA.z - ESTRELLA.radius, 0);
+    const centralSouth = ground.find((rb) => rb.tag === 'av-central-s')!;
+    expect(centralSouth.path.samples[0].z).toBeCloseTo(ESTRELLA.z + ESTRELLA.radius, 0);
+    expect(centralSouth.path.samples[centralSouth.path.samples.length - 1].z).toBeGreaterThan(1100);
     const cut = ground.find((rb) => rb.tag === 'cut-d')!;
     expect(cut.path.samples[cut.path.samples.length - 1].z).toBeCloseTo(STACK_RECT.maxZ + 40, 1);
     // Every megastructure site is inside the Stack's footprint, moved with it.
@@ -535,5 +540,50 @@ describe('the car meet under the viaduct corner', () => {
     expect(gaps('w', lot.minZ, lot.maxZ)).toBe(1);
     expect(gaps('s', lot.minX, lot.maxX)).toBe(1);
     expect(gaps('e', lot.minZ, lot.maxZ)).toBe(1);
+  });
+});
+
+describe("the south's diagonals, curves and roundabouts (metroSouth.ts)", () => {
+  const roundabouts = METRO_SPEC.roundabouts!;
+
+  it('builds every new road and leaves nothing of the grid it replaced', () => {
+    for (const tag of ['rot-estrella', 'rot-pantallas', 'rot-puerto', 'diag-norte', 'diag-sur', 'av-curva', 'paseo-luna', 'costanera', 'costanera-w', 'calle-vieja', 'bajada-puerto']) {
+      expect(ground.some((rb) => rb.tag === tag), tag).toBe(true);
+    }
+    for (const tag of ['st-s6', 'alley-s1']) expect(ground.some((rb) => rb.tag === tag), tag).toBe(false);
+    // Diagonal Norte lands in the 9 de Julio beside the Obelisco's plaza.
+    const diag = ground.find((rb) => rb.tag === 'diag-norte')!;
+    const end = diag.path.samples[diag.path.samples.length - 1];
+    expect(Math.hypot(end.x - 480, end.z - 360)).toBeLessThan(60);
+  });
+
+  it('keeps every island clear: no block on it, no traffic or bus through it, a kerb all round', () => {
+    for (const r of roundabouts) {
+      for (const blk of plan.blocks) {
+        const dx = Math.max(blk.minX - r.x, 0, r.x - blk.maxX);
+        const dz = Math.max(blk.minZ - r.z, 0, r.z - blk.maxZ);
+        expect(Math.hypot(dx, dz), `${blk.tag} on ${r.tag}`).toBeGreaterThan(r.island);
+      }
+      for (const patrol of layout.targetPatrols) {
+        for (const w of patrol) expect(Math.hypot(w.x - r.x, w.z - r.z), r.tag).toBeGreaterThan(r.island + 1);
+      }
+      for (const route of layout.busRoutes!) {
+        for (const p of route.points) expect(Math.hypot(p.x - r.x, p.z - r.z), r.tag).toBeGreaterThan(r.island + 1);
+      }
+      expect(layout.walls.filter((w) => w.tag === 'roundabout' && Math.hypot(w.ax - r.x, w.az - r.z) < r.island + 0.1).length).toBe(32);
+    }
+  });
+
+  it('drives the roundabouts one way, anticlockwise from above', () => {
+    for (const r of roundabouts) {
+      const on = layout.targetPatrols.filter((p) => p.every((w) => Math.abs(Math.hypot(w.x - r.x, w.z - r.z) - r.radius) < r.width / 2));
+      expect(on.length, r.tag).toBeGreaterThan(0);
+      for (const p of on) {
+        // x east, z south: anticlockwise seen from above is a negative cross product round the centre.
+        const a = p[0];
+        const b = p[1];
+        expect((a.x - r.x) * (b.z - r.z) - (a.z - r.z) * (b.x - r.x), r.tag).toBeLessThan(0);
+      }
+    }
   });
 });

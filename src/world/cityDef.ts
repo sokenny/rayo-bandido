@@ -3,6 +3,7 @@ import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
 import type { ObeliscoSpec, VillaSpec } from './metroVilla';
+import type { RoundaboutSpec } from './metroSouth';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TerrainSpec } from './terrain';
@@ -40,6 +41,8 @@ export interface DeckTrafficSpec {
   cars: number;
   /** Offsets from the centreline (m) of the lanes the traffic runs in; mirrored for the oncoming files. */
   lanes: number[];
+  /** A one-way loop (a roundabout): the lanes are driven this way round the samples only (-1: backwards), none mirrored. Missing: both ways. */
+  oneWay?: 1 | -1;
 }
 
 export interface ActivitySiteSpec {
@@ -95,6 +98,8 @@ export interface CitySpec {
   trafficLoops: Array<{ rect: Rect; cars: number }>;
   /** Cars lapping the elevated loops. */
   deckTraffic: DeckTrafficSpec[];
+  /** Cars driving an open ground road out and back, a file each way `lane` m off its centreline. Missing: none. */
+  pathTraffic?: Array<{ tag: string; cars: number; lane: number }>;
   /** The rectangle cruise mode follows. */
   cruiseLoop: Rect;
   /** Streets with bus shelters, and the rectangles the buses drive. Empty: no bus network. */
@@ -143,6 +148,11 @@ export interface CitySpec {
    * corner (`metroVilla.ts`, `env/obeliscoBuilder.ts`). The island is solid. Missing: none.
    */
   obelisco?: ObeliscoSpec;
+  /**
+   * Roundabouts (`metroSouth.ts`): the ring road is an ordinary closed entry of `roads`; this is
+   * its island, solid, with no blocks on it, and its monument (`env/roundaboutBuilder.ts`). Missing: none.
+   */
+  roundabouts?: RoundaboutSpec[];
   /**
    * Where the block generator runs, when it is not the whole land inside the wall band: a
    * world with a park across one edge keeps its grid exactly where it was by naming the city's

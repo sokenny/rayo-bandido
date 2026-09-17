@@ -27,6 +27,10 @@ const SESSION_DAYS = 400;
 const TOUCH_MS = 6 * 60 * 60 * 1000;
 /** Longest display name. Matches `NAME_MAX` in `src/net/protocol.ts`. */
 export const NAME_MAX = 14;
+/** Shortest name a player may pick. */
+export const NAME_MIN = 3;
+/** What the boards show for a player with no name: nobody may own it. */
+const NAME_FALLBACK = 'BANDIDO';
 const CHAINS = ['rush', 'circuit', 'street'];
 /** Levels a chain record may carry. The game has three per chain; this is only a bound. */
 const MAX_LEVELS = 32;
@@ -86,6 +90,18 @@ export function sanitizeDisplayName(value) {
     .trim();
   return cleaned.length > 0 ? cleaned : null;
 }
+
+/**
+ * A name a player may own: sanitized, long enough, and not the boards' fallback. Names are
+ * unique across players (`003_unique_display_name.sql`), so this is a handle, not a label.
+ */
+export function claimableName(value) {
+  const name = sanitizeDisplayName(value);
+  return name && name.length >= NAME_MIN && name !== NAME_FALLBACK ? name : null;
+}
+
+/** Postgres's unique_violation. */
+const isUniqueViolation = (err) => err?.code === '23505';
 
 function wholeNumber(value, min, max) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -238,10 +254,12 @@ export function createAccounts(db, { log = () => {} } = {}) {
   async function profile(userId, q = db) {
     const [user] = await q.query(`select id, display_name, avatar_url from users where id = $1`, [userId]);
     if (!user) return null;
-    const identities = await q.query(`select provider from user_identities where user_id = $1 order by created_at`, [userId]);
+    const identities = await q.query(`select provider, email from user_identities where user_id = $1 order by created_at`, [userId]);
     return {
       id: user.id,
       name: user.display_name,
+      // Only ever sent to the player themselves (`GET /api/me`, `POST /api/profile`).
+      email: identities.find((r) => r.email)?.email ?? null,
       avatar: user.avatar_url,
       guest: identities.length === 0,
       providers: identities.map((r) => r.provider),
@@ -298,11 +316,20 @@ export function createAccounts(db, { log = () => {} } = {}) {
     });
   }
 
+  /** Give a player a name. `{ name }`, or `{ error: 'invalid' | 'taken' }`. */
   async function setName(userId, raw) {
-    const name = sanitizeDisplayName(raw);
-    if (!name) return null;
-    await db.query(`update users set display_name = $2 where id = $1`, [userId, name]);
-    return name;
+    const name = claimableName(raw);
+    if (!name) return { error: 'invalid' };
+    try {
+      const [taken] = await db.query(`select 1 from users where upper(display_name) = upper($2) and id <> $1`, [userId, name]);
+      if (taken) return { error: 'taken' };
+      await db.query(`update users set display_name = $2 where id = $1`, [userId, name]);
+    } catch (err) {
+      // Two players asking for the same name at once: the index decides.
+      if (isUniqueViolation(err)) return { error: 'taken' };
+      throw err;
+    }
+    return { name };
   }
 
   /** Move everything guest `fromId` has onto `toId`, and delete the guest. Inside a transaction. */
@@ -320,8 +347,10 @@ export function createAccounts(db, { log = () => {} } = {}) {
     );
     const merged = mergeProgress(await progress(toId, q), strip(await progress(fromId, q)), { wallet: 'max' });
     await writeProgress(q, toId, merged);
-    await q.query(`update users set display_name = coalesce(display_name, (select display_name from users where id = $1)) where id = $2`, [fromId, toId]);
+    // The guest's name goes with it — once the guest is gone, since a name has one owner.
+    const [guest] = await q.query(`select display_name from users where id = $1`, [fromId]);
     await q.query(`delete from users where id = $1`, [fromId]);
+    await q.query(`update users set display_name = coalesce(display_name, $2) where id = $1`, [toId, guest?.display_name ?? null]);
   }
 
   /**
@@ -361,11 +390,14 @@ export function createAccounts(db, { log = () => {} } = {}) {
         userId,
         identity.email ?? null,
       ]);
-      await q.query(`update users set display_name = coalesce(display_name, $2), avatar_url = coalesce(avatar_url, $3) where id = $1`, [
-        userId,
-        sanitizeDisplayName(identity.name),
-        identity.avatar ?? null,
-      ]);
+      // The provider's name, as a first name, only if nobody has it: a taken one leaves the player
+      // nameless until they pick one.
+      await q.query(
+        `update users set display_name = coalesce(display_name,
+           (select $2::text where $2::text is not null and not exists (select 1 from users where upper(display_name) = upper($2::text)))),
+           avatar_url = coalesce(avatar_url, $3) where id = $1`,
+        [userId, claimableName(identity.name), identity.avatar ?? null],
+      );
       return { userId, token };
     });
     if (result.token) setSessionCookie(req, res, result.token);

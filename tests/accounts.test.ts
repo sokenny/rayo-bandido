@@ -91,7 +91,7 @@ function browser(): Browser {
 }
 
 interface Me {
-  user: { id: string; name: string | null; guest: boolean; providers: string[] };
+  user: { id: string; name: string | null; email: string | null; guest: boolean; providers: string[] };
   progress: {
     wallet: number | null;
     intro: { status: string; version: number } | null;
@@ -190,6 +190,28 @@ describe('accounts', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('gives each name to one player, whatever the case', async () => {
+    const first = browser();
+    const second = browser();
+    expect((await first.post('/api/profile', { name: 'Neon Viuda' })).status).toBe(200);
+    const clash = await second.post<{ error: string }>('/api/profile', { name: 'neon viuda' });
+    expect(clash.status).toBe(409);
+    expect(clash.body.error).toBe('taken');
+    // Asking again for the name you already have is fine.
+    expect((await first.post('/api/profile', { name: 'NEON VIUDA' })).status).toBe(200);
+    // Letting it go frees it.
+    await first.post('/api/profile', { name: 'Otra Viuda' });
+    const { status, body } = await second.post<{ user: Me['user'] }>('/api/profile', { name: 'neon viuda' });
+    expect(status).toBe(200);
+    expect(body.user.name).toBe('NEON VIUDA');
+  });
+
+  it('refuses names that are too short or are the boards’ fallback', async () => {
+    const b = browser();
+    expect((await b.post('/api/profile', { name: 'ab' })).status).toBe(400);
+    expect((await b.post('/api/profile', { name: 'bandido' })).status).toBe(400);
+  });
+
   it('turns a guest into an account on first sign-in, keeping everything', async () => {
     const b = browser();
     const guest = await b.get<Me>('/api/me');
@@ -201,7 +223,26 @@ describe('accounts', () => {
     expect(me.body.user.guest).toBe(false);
     expect(me.body.user.providers).toEqual(['dev']);
     expect(me.body.user.name).toBe('LUZ');
+    expect(me.body.user.email).toBe('first-timer@dev.invalid');
     expect(me.body.progress.wallet).toBe(500);
+  });
+
+  it('does not hand a sign-in a name somebody else already has', async () => {
+    await browser().post('/api/profile', { name: 'Tomado' });
+    const b = browser();
+    await b.signIn('late-comer', 'Tomado');
+    const me = await b.get<Me>('/api/me');
+    expect(me.body.user.guest).toBe(false);
+    expect(me.body.user.name).toBeNull();
+  });
+
+  it('keeps a merged guest’s name on the account', async () => {
+    const laptop = browser();
+    await laptop.signIn('nameless-account', 'X');
+    const phone = browser();
+    await phone.post('/api/profile', { name: 'Fantasma' });
+    await phone.signIn('nameless-account', 'X');
+    expect((await phone.get<Me>('/api/me')).body.user.name).toBe('FANTASMA');
   });
 
   it('merges a second device’s guest into the account it signs in to', async () => {

@@ -237,6 +237,90 @@ export const VEHICLE = {
 };
 
 /**
+ * The car's vertical life (`src/sim/surface.ts`): gravity, four sprung wheels that each read the
+ * road under them, and a body free to pitch and roll. What makes a crest at speed a jump, a
+ * ledge a fall the car tips over, and a landing something the springs have to take.
+ *
+ * Inertias are per unit mass (m^2): the body's pitch and roll moments over its mass. The
+ * suspension is a preloaded spring per corner — at rest each carries a quarter of the weight
+ * with no compression — so it holds the body exactly at the road and lets a wheel hang
+ * `g / stiffness` below it before it leaves the ground.
+ */
+export const VERTICAL = {
+  /** Gravity (m/s^2). Real: the jumps are meant to read true. */
+  gravity: 9.81,
+  /** Half the wheelbase: the wheels' distance ahead of / behind the centre (m). */
+  halfWheelbase: 1.3,
+  /** Half the track: the wheels' distance either side of the centre (m). */
+  halfTrack: 0.8,
+  /** Heave frequency of the suspension (rad/s). ~1.9 Hz, a road car's. */
+  springFrequency: 12,
+  /** Damping ratio of the suspension. */
+  springDamping: 0.55,
+  /** Compression past which a corner bottoms out and the body takes the landing rigidly (m). */
+  bumpTravel: 0.14,
+  /** Bounce left in a bottomed-out landing (0 = dead, 1 = elastic). */
+  bumpRestitution: 0.12,
+  /** Pitch inertia per unit mass (m^2). A 4.5 m body. */
+  pitchInertia: 1.7,
+  /** Roll inertia per unit mass (m^2). */
+  rollInertia: 0.55,
+  /** How fast the air bleeds the body's spin (1/s). Small: a car in flight keeps turning. */
+  airSpinDamping: 0.15,
+  /** How fast the air bleeds the yaw a car took off with (1/s). */
+  airYawDamping: 0.35,
+  /** Seconds with no wheel on the road before the tyres are called off (a crest skim keeps grip). */
+  airGrace: 0.06,
+  /** Seconds of flight before touching down counts as a landing (thump, shake). */
+  landingMinAir: 0.18,
+  /** Share of horizontal speed a landing scrubs per m/s of vertical impact, capped below. */
+  landingScrub: 0.012,
+  landingScrubMax: 0.3,
+  /**
+   * Past these the body is wrecked rather than flying: it is held there, spin killed, so a car
+   * never lands on its roof and drives away upside down (rad).
+   */
+  maxPitch: 1.25,
+  maxRoll: 1.1,
+  /** A car standing on its wheels this far over is eased back upright (rad, rate 1/s). */
+  uprightFrom: 0.6,
+  uprightRate: 2.2,
+  /** Fastest fall (m/s): past it the surface probe could step through a deck in one tick. */
+  maxFallSpeed: 55,
+};
+
+/**
+ * Uneven asphalt (`src/sim/roadRoughness.ts`): centimetres of soft relief under each wheel,
+ * and how the tyres answer the load it takes off and puts back (`stepVehicle`). Subtle by
+ * design: nothing at a cruise, a car that has to be held on its line flat out.
+ */
+export const ROAD_ROUGHNESS = {
+  /** Relief octaves: wavelength along the road (m), peak height (m). No potholes. */
+  octaves: [
+    { wavelength: 34, amplitude: 0.03 },
+    { wavelength: 14, amplitude: 0.018 },
+    { wavelength: 6, amplitude: 0.016 },
+    { wavelength: 2.6, amplitude: 0.006 },
+  ],
+  /**
+   * How fast the tyres' grip follows the load on them (1/s). A tyre needs some rolling to build
+   * force again, so a buzz is felt as a blur and a swell as a real light moment.
+   */
+  loadRelax: 14,
+  /** Grip lost per unit of load taken off the tyres (1 = static load). */
+  unloadGrip: 0.9,
+  /** Grip gained per unit of load added: tyres give back less than they lose. */
+  loadGrip: 0.25,
+  /** Floor under the load-scaled grip (share of normal). */
+  minGrip: 0.45,
+  /**
+   * Bump steer: steering angle (rad) per unit of left/right front load difference, at top
+   * speed; scales with speed squared so it only asks for corrections when the car is moving.
+   */
+  bumpSteer: 0.1,
+};
+
+/**
  * Drivetrain: a six-speed automatic with a real engine rpm, so the tachometer is a gameplay
  * instrument and not just a picture of road speed.
  *

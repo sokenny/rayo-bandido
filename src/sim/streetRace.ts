@@ -313,7 +313,7 @@ export function stepStreetRace(sr: StreetRaceState, layout: ArenaLayout, state: 
       }
     }
     stepVehicle(v, r.cmd, false, dt, false, false);
-    settleVehicle(v, layout);
+    settleVehicle(v, layout, dt);
     SCRATCH.length = 0;
     resolveCollisions(v, layout, SCRATCH, dt);
     // The field this rival can hit: the player, and the other rivals, at their tick poses.

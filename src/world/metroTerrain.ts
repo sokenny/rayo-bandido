@@ -10,10 +10,11 @@ import { reliefOf, type HillDef, type TerrainSpec } from './terrain.ts';
  * Five hills, none steeper than about five per cent on the streets that climb them:
  *
  *   - LA LOMA, the big one: the middle of the district inside the viaduct, cresting ten
- *     metres on av-s2 east of av-central, with the market avenue climbing its north flank
- *     and st-s5 running over its shoulder toward the shore,
- *   - EL BAJO, the low hill south-west of it, across alley-s1: the two make a saddle the alley
- *     runs through, and the south-west business district sits on its western slope,
+ *     metres on av-s2 east of av-central, with the market avenue climbing its north flank,
+ *     Plaza Estrella on its west flank and the Paseo Media Luna over its shoulder toward the
+ *     shore (`metroSouth.ts`),
+ *   - EL BAJO, the low hill south-west of it: the two make a saddle the Diagonal Sur runs
+ *     through, and the south-west business district sits on its western slope,
  *   - EL ALTO, the west flank north of the meet: st-w3 and av-w1 climb it toward the north
  *     boulevard, the radio mast stands on its side,
  *   - LOMA ESTE, its smaller mirror on the east flank behind the works.

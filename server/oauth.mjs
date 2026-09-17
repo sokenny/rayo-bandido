@@ -148,7 +148,7 @@ function dev() {
     },
     async exchange({ code }) {
       const { sub, name } = JSON.parse(Buffer.from(code, 'base64url').toString('utf8'));
-      return { provider: 'dev', subject: String(sub), email: null, name, avatar: null };
+      return { provider: 'dev', subject: String(sub), email: `${sub}@dev.invalid`, name, avatar: null };
     },
   };
 }

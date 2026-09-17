@@ -16,8 +16,10 @@ import { buildGarage } from './env/garageBuilder';
 import { buildParks } from './env/parkBuilder';
 import { buildVillas } from './env/villaBuilder';
 import { buildObelisco } from './env/obeliscoBuilder';
+import { buildRoundabouts } from './env/roundaboutBuilder';
 import { createParkPeopleVisual } from './parkPeopleVisual';
 import { createParkDucksVisual } from './parkDucksVisual';
+import { createFloralisVisual, type FloralisVisual } from './floralisVisual';
 import { LAKE, triangulate } from '../../world/park';
 import { buildScreens } from './env/screenBuilder';
 import { createMeetVisual } from './meetVisual';
@@ -95,6 +97,11 @@ export interface EnvironmentVisual {
   streetMarkers: ActivityMarkerVisual[];
   /** The high-score holograms beside the rings, by board; only the ones this world stands. */
   leaderboards: Partial<Record<LeaderboardKind, LeaderboardHologramVisual>>;
+  /**
+   * La flor in Plaza Estrella (`floralisVisual.ts`), in the world that has it; null elsewhere.
+   * Exposed because it answers the player: `src/game.ts` hands it the bolts that cross it.
+   */
+  floralis: FloralisVisual | null;
   /** The neon sign atlas (`env/textures.ts`), shared with the pavement signs (`streetPropsVisual.ts`). Owned here. */
   signAtlas: THREE.Texture;
   /**
@@ -437,6 +444,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   // (`env/villaBuilder.ts`, `env/obeliscoBuilder.ts`).
   buildVillas(b);
   buildObelisco(b);
+  // The south's roundabouts: their islands and what stands on them (`env/roundaboutBuilder.ts`).
+  buildRoundabouts(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);
@@ -653,6 +662,11 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const parkDucks = plan.parks && plan.parks.length > 0 ? createParkDucksVisual(plan.parks, plan) : null;
   if (parkDucks) root.add(parkDucks.root);
 
+  // La flor in Plaza Estrella (`floralisVisual.ts`): the one piece of scenery the lightning opens.
+  const flowerSite = (plan.roundabouts ?? []).find((r) => r.monument === 'flower');
+  const floralis = flowerSite ? createFloralisVisual(flowerSite, plan.padY(flowerSite.x, flowerSite.z) + 0.3) : null;
+  if (floralis) root.add(floralis.root);
+
   /* ---------------------------------------------------------------- animation */
 
   let flickerSlot = -1;
@@ -669,6 +683,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
     circuitMarker,
     streetMarkers,
     leaderboards,
+    floralis,
     signAtlas: signTex,
     wetRoad,
     moogul: { hemi, key, surface: moogulSurface, walls: b.walls },
@@ -730,6 +745,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       if (stopPeople && camX !== undefined && camZ !== undefined) stopPeople.update(camX, camZ, time, frameDt, people);
       if (parkPeople && camX !== undefined && camZ !== undefined) parkPeople.update(camX, camZ, time, frameDt, people);
       if (parkDucks && camX !== undefined && camZ !== undefined) parkDucks.update(camX, camZ, time, frameDt, people);
+      floralis?.update(time, camX, camZ);
       // The lakes' ripple keeps the world's clock.
       lakeTime.value = time;
     },
@@ -744,6 +760,7 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
       stopPeople?.dispose();
       parkPeople?.dispose();
       parkDucks?.dispose();
+      floralis?.dispose();
       badkala.dispose();
       screenAtlas.dispose();
       graffiti.dispose();

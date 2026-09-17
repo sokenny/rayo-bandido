@@ -43,8 +43,11 @@ export interface StreetPropShape {
   fixed: boolean;
 }
 
-/** The one place the props' sizes are written: placement, the rules and the art all read it. */
-export const STREET_PROP_SHAPES: Record<StreetPropKind, StreetPropShape> = {
+/**
+ * The props' sizes as the art is modelled (m). `STREET_PROP_SCALE` grows a kind as a whole;
+ * placement and the rules read the scaled `STREET_PROP_SHAPES`, the art builds at this size and is scaled.
+ */
+export const STREET_PROP_BASE: Record<StreetPropKind, StreetPropShape> = {
   bag: { hx: 0.3, hy: 0.27, hz: 0.27, radius: 0.36, variants: 3, solid: true, fixed: false },
   box: { hx: 0.32, hy: 0.25, hz: 0.26, radius: 0.36, variants: 3, solid: true, fixed: false },
   cone: { hx: 0.2, hy: 0.36, hz: 0.2, radius: 0.3, variants: 1, solid: true, fixed: false },
@@ -60,11 +63,36 @@ export const STREET_PROP_SHAPES: Record<StreetPropKind, StreetPropShape> = {
   litter: { hx: 0.35, hy: 0.02, hz: 0.3, radius: 0.22, variants: 3, solid: false, fixed: false },
 };
 
+/** Uniform size multiplier per kind: street junk reads bigger from a car at speed. */
+export const STREET_PROP_SCALE: Record<StreetPropKind, number> = {
+  bag: 1.25,
+  box: 1.5,
+  cone: 1,
+  barrier: 1,
+  sign: 1,
+  chair: 1,
+  table: 1,
+  charger: 1,
+  bin: 1.2,
+  dumpster: 1,
+  litter: 1.3,
+};
+
+/** The one place the props' sizes are read from: placement, the rules and the art all use it. */
+export const STREET_PROP_SHAPES = Object.fromEntries(
+  (Object.keys(STREET_PROP_BASE) as StreetPropKind[]).map((k) => {
+    const b = STREET_PROP_BASE[k];
+    const f = STREET_PROP_SCALE[k];
+    return [k, { ...b, hx: b.hx * f, hy: b.hy * f, hz: b.hz * f, radius: b.radius * f }];
+  }),
+) as Record<StreetPropKind, StreetPropShape>;
+
 /** A dumpster meets the car as two round posts this far either side of its centre (m), each of this radius. */
 export const DUMPSTER_POSTS = { offset: 0.42, radius: 0.56 };
 
-/** A flattened box's half height, once a hard hit has squashed it. */
-export const FLAT_BOX_HY = 0.07;
+/** A flattened box's half height as modelled, and once a hard hit has squashed it (scaled). */
+export const FLAT_BOX_BASE_HY = 0.07;
+export const FLAT_BOX_HY = FLAT_BOX_BASE_HY * STREET_PROP_SCALE.box;
 
 const P = {
   /** Metres between the stations tried along a street. */

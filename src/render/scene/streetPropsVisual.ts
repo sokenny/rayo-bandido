@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StreetPropDef, StreetPropKind } from '../../core/types';
 import { STREET_PROPS } from '../../config/tuning';
 import type { StreetPropsState } from '../../sim/streetProps';
-import { FLAT_BOX_HY, STREET_PROP_SHAPES } from '../../world/streetProps';
+import { FLAT_BOX_BASE_HY, STREET_PROP_BASE, STREET_PROP_SCALE, STREET_PROP_SHAPES } from '../../world/streetProps';
 import { MeshBuilder } from './env/meshBuilder';
 import { signCell } from './env/textures';
 import { applyHaze, HAZE } from './env/haze';
@@ -241,6 +241,8 @@ function buildKit(): Kit {
       draw(mb);
       if (mb.empty) continue;
       const g = mb.build();
+      const f = STREET_PROP_SCALE[kind];
+      if (f !== 1) g.scale(f, f, f);
       geometries[name].push(g);
       out.push({ batch: name, geometry: g });
     }
@@ -250,7 +252,7 @@ function buildKit(): Kit {
   /* bags: lumpy, knotted, in three plastics */
   const bagColors = [0x3a4a40, 0x4a4a52, 0x3e5470];
   for (let v = 0; v < 3; v++) {
-    const h = STREET_PROP_SHAPES.bag.hy;
+    const h = STREET_PROP_BASE.bag.hy;
     add('bag', v, 'intact', {
       body: (mb) => {
         mb.color(bagColors[v], 1).chamfer(0.11);
@@ -266,7 +268,7 @@ function buildKit(): Kit {
   /* cardboard boxes, and the one a tyre went over */
   const card = [0xc49660, 0xae8450, 0xd2aa74];
   for (let v = 0; v < 3; v++) {
-    const { hx, hy, hz } = STREET_PROP_SHAPES.box;
+    const { hx, hy, hz } = STREET_PROP_BASE.box;
     add('box', v, 'intact', {
       body: (mb) => {
         mb.color(card[v], 1);
@@ -281,16 +283,16 @@ function buildKit(): Kit {
     add('box', v, 'flat', {
       body: (mb) => {
         mb.color(card[v], 0.9);
-        mb.box(0, 0, 0, hx * 2.3, FLAT_BOX_HY * 2, hz * 2.2, { bottom: true });
+        mb.box(0, 0, 0, hx * 2.3, FLAT_BOX_BASE_HY * 2, hz * 2.2, { bottom: true });
         mb.color(card[v], 0.65);
-        mb.box(0.05, FLAT_BOX_HY + 0.003, 0, 0.04, 0.006, hz * 2.1);
+        mb.box(0.05, FLAT_BOX_BASE_HY + 0.003, 0, 0.04, 0.006, hz * 2.1);
       },
     });
   }
 
   /* traffic cone: worn orange, one reflective band */
   {
-    const { hy } = STREET_PROP_SHAPES.cone;
+    const { hy } = STREET_PROP_BASE.cone;
     add('cone', 0, 'intact', {
       body: (mb) => {
         mb.color(0x1a1a1c, 1);
@@ -307,7 +309,7 @@ function buildKit(): Kit {
 
   /* construction barriers: a striped sawhorse and a plastic block */
   {
-    const { hx, hy } = STREET_PROP_SHAPES.barrier;
+    const { hx, hy } = STREET_PROP_BASE.barrier;
     add('barrier', 0, 'intact', {
       body: (mb) => {
         // Legs: splayed pairs at each end.
@@ -339,7 +341,7 @@ function buildKit(): Kit {
 
   /* sidewalk signs: an A-frame and a metal board on a foot, faces from the neon atlas */
   {
-    const { hx, hy, hz } = STREET_PROP_SHAPES.sign;
+    const { hx, hy, hz } = STREET_PROP_BASE.sign;
     add('sign', 0, 'intact', {
       body: (mb) => {
         mb.color(0x6a5a4a, 1.2);
@@ -373,7 +375,7 @@ function buildKit(): Kit {
 
   /* plastic cafe chair and table, white under an instance tint */
   for (let v = 0; v < 3; v++) {
-    const { hx, hy, hz } = STREET_PROP_SHAPES.chair;
+    const { hx, hy, hz } = STREET_PROP_BASE.chair;
     add('chair', v, 'intact', {
       body: (mb) => {
         mb.color(0xffffff, 0.95);
@@ -385,7 +387,7 @@ function buildKit(): Kit {
     });
   }
   for (let v = 0; v < 2; v++) {
-    const { hx, hy, hz } = STREET_PROP_SHAPES.table;
+    const { hx, hy, hz } = STREET_PROP_BASE.table;
     add('table', v, 'intact', {
       body: (mb) => {
         mb.color(0xffffff, 0.95);
@@ -398,7 +400,7 @@ function buildKit(): Kit {
 
   /* EV charger: pedestal, pale casing, dark screen, holstered cable, status light */
   {
-    const { hy } = STREET_PROP_SHAPES.charger;
+    const { hy } = STREET_PROP_BASE.charger;
     const casing = 0xdfe6ee;
     const base = (mb: MeshBuilder): void => {
       mb.color(0x2a2d33, 1);
@@ -452,7 +454,7 @@ function buildKit(): Kit {
 
   /* trash cans: a dented galvanised can with its lid, and a green wheelie bin */
   {
-    const { hy } = STREET_PROP_SHAPES.bin;
+    const { hy } = STREET_PROP_BASE.bin;
     add('bin', 0, 'intact', {
       body: (mb) => {
         const steel = 0x464c50;
@@ -495,7 +497,7 @@ function buildKit(): Kit {
 
   /* dumpsters: steel skip, long side to the wall, one lid thrown open over a heap of bags */
   {
-    const { hx, hy, hz } = STREET_PROP_SHAPES.dumpster;
+    const { hx, hy, hz } = STREET_PROP_BASE.dumpster;
     const paint = [0x2c4a3a, 0x2a4260];
     for (let v = 0; v < 2; v++) {
       add('dumpster', v, 'intact', {
@@ -539,7 +541,7 @@ function buildKit(): Kit {
 
   /* litter: newspapers, a flattened takeaway box, crushed cans */
   {
-    const y = -STREET_PROP_SHAPES.litter.hy + 0.012;
+    const y = -STREET_PROP_BASE.litter.hy + 0.012;
     const sheet = (mb: MeshBuilder, cx: number, cz: number, w: number, d: number, a: number, lift: number): void => {
       const c = Math.cos(a);
       const s = Math.sin(a);

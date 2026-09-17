@@ -44,6 +44,7 @@ import { createKeyboardInput, createPlayerCommand } from './core/input/keyboard'
 import { createGamepadInput } from './core/input/gamepad';
 import { combineInputs } from './core/input/combine';
 import { createInitialGameState, stepGame, type StepOptions } from './sim/gameState';
+import { restVehicle } from './sim/surface';
 import { createCruiseController } from './sim/cruise';
 import {
   beginRush,
@@ -95,6 +96,8 @@ import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installInt
 import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanRig';
 import { speakerSong, type CrowdSubject } from './render/scene/env/humanActs';
 import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
+import { createSaveProgressPrompt, type SaveProgressPrompt } from './ui/saveProgressPrompt';
+import { createPlayAnalytics } from './analyticsPlay';
 import { canAffordShot } from './sim/lightning';
 import { MESSAGES as FLAIR_MESSAGES, flairSeconds } from './sim/flair';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
@@ -138,6 +141,7 @@ import { createBusVisual, type BusVisual } from './render/scene/busVisual';
 import { createChaseCamera, type CameraPose, type CameraView } from './render/camera/chaseCamera';
 import { createWorldProbe } from './render/probe';
 import { createEffects } from './render/fx';
+import { BOLT_TO_Y } from './render/fx/lightningArc';
 import { interpolateVehicle, syncBuses, syncCar, syncPolice, syncTargets, type InterpolatedPose } from './render/sync';
 import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
@@ -771,6 +775,7 @@ export function createGame(
           if (state.intro) finishIntroCinematic(state.intro);
         },
         onSkipLine: () => {
+          play.introLineSkipped();
           if (state.intro) skipIntroLine(state.intro);
         },
         onSkipIntro: () => {
@@ -780,6 +785,16 @@ export function createGame(
       })
     : null;
   if (introOverlay) hudRoot.appendChild(introOverlay.root);
+  /** Asks a guest to keep their progress with Google once the intro is over (only a guest, only if offered). */
+  const savePrompt: SaveProgressPrompt | null = state.intro ? createSaveProgressPrompt(hudRoot, account()) : null;
+  /** What GA hears about this visit (`src/analyticsPlay.ts`): milestones as they happen, play style on the way out. */
+  const play = createPlayAnalytics(state, {
+    mode,
+    online: !!options.net,
+    source: params.get('from') === 'city' ? 'world' : 'menu',
+    streetEvent: mode === 'street' ? Number(params.get('event') ?? 0) : -1,
+    gl: renderer.getContext(),
+  });
   const introMarker = state.intro ? createPassengerMarker() : null;
   if (introMarker) scene.add(introMarker.group);
   /**
@@ -869,6 +884,8 @@ export function createGame(
     applyMusicDuck();
     placeIntroMarker();
     refreshMapMarks();
+    // After the overlay's own INTRO COMPLETADA / OMITIDA note has had the screen.
+    savePrompt?.show({ delayMs: reason === 'completed' ? 2800 : 1600 });
   }
 
   /**
@@ -1576,7 +1593,7 @@ export function createGame(
     v.x = v.prevX = x;
     v.z = v.prevZ = z;
     v.y = v.prevY = y;
-    v.pitch = 0;
+    restVehicle(v);
     v.heading = v.prevHeading = heading;
     v.vx = 0;
     v.vz = 0;
@@ -1603,9 +1620,16 @@ export function createGame(
     hud.onEvent(ev);
     audio.onEvent(ev);
     introOverlay?.onEvent(ev);
+    play.onEvent(ev);
     switch (ev.type) {
       case 'lightningFired':
-        effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
+        // A bolt that hit no car but crossed la flor in Plaza Estrella goes into its heart, and
+        // the flower takes the charge (`render/scene/floralisVisual.ts`). Scenery: the sim's shot is unchanged.
+        if (ev.targetId < 0 && environment.floralis?.hits(ev.fromX, ev.fromZ, ev.toX, ev.toZ)) {
+          const h = environment.floralis.heart;
+          effects.lightning(ev.fromX, ev.fromY, ev.fromZ, h.x, h.y - BOLT_TO_Y, h.z);
+          environment.floralis.strike();
+        } else effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
         {
           // A snap shot still kicks; a full-reach bolt kicks the hardest.
           const size = 0.55 + 0.45 * Math.min(1, ev.spent / LIGHTNING.cost);
@@ -1711,6 +1735,13 @@ export function createGame(
         }
         break;
       }
+      case 'landing':
+        // A flight ended (`src/sim/surface.ts`): the body squats onto its springs, the lens
+        // takes the thump, and a landing hard enough to bottom out strikes sparks off the road.
+        car.dischargeKick(Math.min(1, ev.impact / 9));
+        chase.shake(Math.min(0.35, ev.impact * 0.03));
+        if (ev.impact > 6) effects.collision(ev.x, ev.y, ev.z, ev.impact * 0.5);
+        break;
       case 'collision':
         effects.collision(ev.x, ev.y, ev.z, ev.impact);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
@@ -1813,7 +1844,9 @@ export function createGame(
     cameraPose.y = pose.y;
     cameraPose.z = pose.z;
     cameraPose.heading = pose.heading;
-    cameraPose.roadPitch = v.pitch;
+    // The body's pitch: on the road the grade, in the air whatever the flight did to it. The
+    // lens looks along a road, not down at one, so a nose-dive only tips it so far.
+    cameraPose.roadPitch = Math.max(-0.35, Math.min(0.35, v.pitch));
     cameraPose.vx = v.vx;
     cameraPose.vz = v.vz;
     cameraPose.speed = v.speed;
@@ -1979,6 +2012,7 @@ export function createGame(
   }
 
   function render(alpha: number, frameDt: number): void {
+    play.frame(frameDt);
     // Last frame's main-thread cost; this frame's is not known until it ends.
     const stats = loop.stats;
     const gpuMs = gpuTimer.available ? gpuTimer.ms : -1;
@@ -2626,6 +2660,7 @@ export function createGame(
     dispose() {
       disposed = true;
       loop.stop();
+      play.dispose();
       window.removeEventListener('resize', onResize);
       canvas.removeEventListener('pointerdown', onLookDown);
       canvas.removeEventListener('pointermove', onLookMove);
@@ -2643,6 +2678,7 @@ export function createGame(
       nameTags?.dispose();
       onlinePanel?.dispose();
       introOverlay?.dispose();
+      savePrompt?.dispose();
       for (const p of introParked) {
         scene.remove(p.vis.root);
         p.vis.dispose();
@@ -2787,6 +2823,8 @@ export function createGame(
     wetRoad: environment.wetRoad,
     /** Ambient hovercars and drones: `enabled` toggles them live, `stats()` counts what is drawn. */
     aerial: aerialTraffic,
+    /** La flor in Plaza Estrella: `strike()` as a bolt would, `openness()` to watch it open. */
+    floralis: environment.floralis,
     audio,
     theme,
     /** True once the warm-up has finished and the loop may run without first-use hitches. */
@@ -3019,7 +3057,7 @@ export function createGame(
             v.x = v.prevX = at.x;
             v.z = v.prevZ = at.z;
             v.y = v.prevY = 0;
-            v.pitch = 0;
+            restVehicle(v);
             v.heading = v.prevHeading = at.heading;
             v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
             fillCameraPose(1);
@@ -3066,7 +3104,7 @@ export function createGame(
               v.x = v.prevX = anchor.transform.x + Math.sin(h) * back;
               v.z = v.prevZ = anchor.transform.z - Math.cos(h) * back;
               v.y = v.prevY = 0;
-              v.pitch = 0;
+              restVehicle(v);
               v.heading = v.prevHeading = h + Math.PI;
               v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
               fillCameraPose(1);
@@ -3325,7 +3363,7 @@ export function createGame(
       v.x = v.prevX = x;
       v.z = v.prevZ = z;
       v.y = v.prevY = y;
-      v.pitch = 0;
+      restVehicle(v);
       v.heading = v.prevHeading = heading;
       v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
       if (cruising) cruiseControl.reset(v);

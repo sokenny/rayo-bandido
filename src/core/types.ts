@@ -82,7 +82,10 @@ export type Transmission = 'auto' | 'manual';
 export interface VehicleState {
   x: number;
   z: number;
-  /** Height of the road surface under the car (m). 0 on a flat world. See `src/sim/surface.ts`. */
+  /**
+   * Height of the body's reference point (m): where the road is under a car resting on its
+   * wheels, higher in flight. 0 at rest on a flat world. See `src/sim/surface.ts`.
+   */
   y: number;
   heading: number;
   /** Pose at the start of the current tick, for render interpolation. */
@@ -91,8 +94,9 @@ export interface VehicleState {
   prevY: number;
   prevHeading: number;
   /**
-   * Grade of the road along the heading, as an angle (rad, positive = climbing). The body
-   * tilts by it, and step 4 of `src/sim/vehicle.ts` feels a fraction of gravity along it.
+   * Body pitch (rad, positive = nose up). On the road it settles on the grade along the
+   * heading, so step 4 of `src/sim/vehicle.ts` feels a fraction of gravity along it; in the
+   * air it is the body's own (`src/sim/surface.ts`).
    */
   pitch: number;
   /** World-space velocity in m/s. */
@@ -144,6 +148,26 @@ export interface VehicleState {
   collided: boolean;
   /** Speed lost in the last collision (m/s), 0 when no collision this tick. */
   collisionImpact: number;
+  /** Vertical velocity of the body (m/s, positive = rising). See `src/sim/surface.ts`. */
+  vy: number;
+  /** Body roll (rad, positive = right side up), about the forward axis, after `pitch`. */
+  roll: number;
+  /** Pitch and roll rates of the body (rad/s). */
+  pitchRate: number;
+  rollRate: number;
+  /** No wheel has touched the road for `VERTICAL.airGrace`: the tyres do nothing (`stepVehicle`). */
+  airborne: boolean;
+  /** Seconds since a wheel last touched the road (0 while any does). */
+  airTime: number;
+  /** Speed the body hit the road at (m/s), on the tick a flight ends; 0 otherwise. */
+  landingImpact: number;
+  /**
+   * Load on the tyres as the grip feels it, 1 = the car standing still on a level road: the
+   * springs' push, relaxed at `ROAD_ROUGHNESS.loadRelax`. Written by `settleVehicle`.
+   */
+  tyreLoad: number;
+  /** Front right minus front left share of that load (bump steer), relaxed the same way. */
+  loadSkew: number;
   /** How much the car is sliding this tick (0 = full grip, 1 = full drift). */
   slide: number;
   /** Zero-based gear of the automatic (`DRIVETRAIN.gearTops`). Displayed as `gear + 1`. */
@@ -759,6 +783,8 @@ export type GameEvent =
       distance: number;
     }
   | { type: 'nearMiss'; targetId: number; x: number; y: number; z: number; points: number; quality: number }
+  /** A flight ended (`VehicleState.landingImpact`): how hard, and where. */
+  | { type: 'landing'; x: number; y: number; z: number; impact: number }
   | {
       type: 'collision';
       x: number;
@@ -1799,6 +1825,8 @@ export interface ArenaLayout {
   walls: ObstacleWall[];
   /** Drivable heights, when the world has roads off the ground. Null = everything at y 0. */
   surface: SurfaceField | null;
+  /** Scale of the asphalt's unevenness (`src/sim/roadRoughness.ts`). Missing: 1. 0 = a plane. */
+  roughness?: number;
   /**
    * Height of the ground at a point (m), in a world with topography (`src/world/terrain.ts`).
    * Missing: flat, everything on the ground stands at y 0. What the surface field answers off

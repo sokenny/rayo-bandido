@@ -10,7 +10,8 @@ import { BOARDS, createScores } from './scores.mjs';
  *   GET  /api/me                       who this browser is (a guest is made on first call), what
  *                                      it has saved, and which sign-in providers exist
  *   POST /api/progress                 save progress; answers with the record as it now stands
- *   POST /api/profile     {name}       set the display name
+ *   POST /api/profile     {name}       set the display name, which is unique: 400 {error:'invalid'},
+ *                                      409 {error:'taken'}
  *   GET  /api/boards/:board?limit=10   the top of a board
  *   GET  /api/boards/:board/standing   this player's best and rank
  *   POST /api/boards/:board/runs       file a finished run
@@ -113,8 +114,8 @@ export function createApi({ db, log = () => {}, env = process.env }) {
       const { body, error } = await readJson(req);
       if (error) return send(res, 400, { error });
       const session = await accounts.ensure(req, res);
-      const name = await accounts.setName(session.userId, body?.name);
-      if (!name) return send(res, 400, { error: 'bad name' });
+      const result = await accounts.setName(session.userId, body?.name);
+      if (result.error) return send(res, result.error === 'taken' ? 409 : 400, { error: result.error });
       return send(res, 200, { user: await accounts.profile(session.userId) });
     }
 

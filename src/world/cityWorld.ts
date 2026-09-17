@@ -197,13 +197,17 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   // A villa keeps the blocks the generator cut there, and builds them its own way (`CitySpec.villas`).
   const villas = spec.villas ?? [];
+  const roundabouts = spec.roundabouts ?? [];
   const blocks = clipBlocksToLots(
     reserveMegastructurePlots(generateBlocks(blockInner, ribbons, zoneAt, blockOptions), megastructures).filter((blk) => !touchesLot(blk)),
     cornerLots,
-  ).map((blk) => {
-    const villa = villas.find((v) => inRect(v.land, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2));
-    return villa ? { ...blk, villa: villa.tag } : blk;
-  });
+  )
+    // A roundabout's island is its own: whatever the generator cut inside the ring road goes.
+    .filter((blk) => !roundabouts.some((r) => pointRectDistance(r.x, r.z, blk) < r.radius))
+    .map((blk) => {
+      const villa = villas.find((v) => inRect(v.land, (blk.minX + blk.maxX) / 2, (blk.minZ + blk.maxZ) / 2));
+      return villa ? { ...blk, villa: villa.tag } : blk;
+    });
   // A villa is built into every scrap of ground the grid left over — the strips the generator
   // drops beside a ramp's corridor — right up to the pavement and the columns.
   for (const v of villas) blocks.push(...fillVilla(v, ribbons, blocks, lots, blockOptions, zoneAt));
@@ -382,7 +386,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     if (!rb || !rb.path.closed) throw new Error(`${spec.name}: deck traffic wants a closed loop tagged ${deck.tag}`);
     const samples = rb.path.samples;
     const lanes: Array<Array<{ x: number; z: number; y: number }>> = [];
-    for (const dir of [1, -1]) {
+    for (const dir of deck.oneWay ? [deck.oneWay] : [1, -1]) {
       for (const offset of deck.lanes) {
         const lane: Array<{ x: number; z: number; y: number }> = [];
         for (let i = 0; i < samples.length; i += 3) {
@@ -409,6 +413,36 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
         });
         targetPatrols.push(rotated.map((w) => ({ x: w.x, z: w.z })));
       }
+    }
+  }
+
+  for (const route of spec.pathTraffic ?? []) {
+    // An open ground road (a diagonal, a curved street): out along the right-hand file to the
+    // far end, round, and back along the other, so the files keep to their own sides of the
+    // centreline the way the rectangles' do. The turn happens in the junction the road ends in.
+    const rb = ground.find((e) => e.tag === route.tag);
+    if (!rb || rb.path.closed) throw new Error(`${spec.name}: path traffic wants an open ground road tagged ${route.tag}`);
+    const samples = rb.path.samples;
+    const file = (dir: 1 | -1): Array<{ x: number; z: number }> => {
+      const pts: Array<{ x: number; z: number }> = [];
+      for (let i = 0; i < samples.length; i += 3) {
+        const s = samples[i];
+        pts.push({ x: s.x - s.tz * route.lane * dir, z: s.z + s.tx * route.lane * dir });
+      }
+      return dir > 0 ? pts : pts.reverse();
+    };
+    const circuit = [...file(1), ...file(-1)];
+    for (let k = 0; k < route.cars; k++) {
+      const start = Math.floor(((k + 0.5) * circuit.length) / route.cars) % circuit.length;
+      const rotated = [...circuit.slice(start), ...circuit.slice(0, start)];
+      const ahead = rotated[1];
+      targetSpawns.push({
+        x: rotated[0].x,
+        z: rotated[0].z,
+        y: terrain.heightAt(rotated[0].x, rotated[0].z),
+        heading: Math.atan2(ahead.x - rotated[0].x, -(ahead.z - rotated[0].z)),
+      });
+      targetPatrols.push(rotated);
     }
   }
 
@@ -481,6 +515,15 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     for (const bc of obelisco.barricades) {
       const box = barricadeBox(bc);
       colliders.push({ ...box, maxY: terrain.heightAt(bc.x, bc.z) + (bc.toppled ? BARRICADE.width : BARRICADE.height), tag: 'barricade' });
+    }
+  }
+  // The roundabouts' islands: a round kerb the car stops at (`metroSouth.ts`).
+  for (const r of roundabouts) {
+    const sides = 32;
+    for (let i = 0; i < sides; i++) {
+      const a0 = (i / sides) * Math.PI * 2;
+      const a1 = ((i + 1) / sides) * Math.PI * 2;
+      walls.push({ ax: r.x + Math.cos(a0) * r.island, az: r.z + Math.sin(a0) * r.island, bx: r.x + Math.cos(a1) * r.island, bz: r.z + Math.sin(a1) * r.island, maxY: terrain.heightAt(r.x, r.z) + 40, tag: 'roundabout' });
     }
   }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
@@ -573,7 +616,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     billboards: spec.billboards(bounds),
     // Nothing is strung into a lot: there is no building on it to anchor the far end.
     cableRuns: cableRuns(ground, blockOptions, spec.art?.finish === 'concrete', spec.finishAt, spec.densityAt).filter(
-      ([ax, az, bx, bz]) => !inLot(ax, az) && !inLot(bx, bz),
+      ([ax, az, bx, bz]) => !inLot(ax, az) && !inLot(bx, bz) && !roundabouts.some((r) => Math.hypot(ax - r.x, az - r.z) < r.radius || Math.hypot(bx - r.x, bz - r.z) < r.radius),
     ),
     pylons: [],
     pillars,
@@ -600,6 +643,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     ...(garage ? { garage: { ...garage, streets: garage.streets.slice() } } : {}),
     ...(parks.length > 0 ? { parks: parks.map((p) => ({ ...p })) } : {}),
     ...(obelisco ? { obelisco: { ...obelisco, plaza: { ...obelisco.plaza }, mcdonalds: { ...obelisco.mcdonalds }, gantry: { ...obelisco.gantry }, fissures: obelisco.fissures.map((f) => f.map((p) => ({ ...p }))), barricades: obelisco.barricades.map((bc) => ({ ...bc })) } } : {}),
+    ...(roundabouts.length > 0 ? { roundabouts: roundabouts.map((r) => ({ ...r })) } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),

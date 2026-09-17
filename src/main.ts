@@ -1,4 +1,5 @@
 import './styles.css';
+import { initAnalytics, loadComplete, loadFailed, loadStart, track } from './analytics';
 import type { GameMode } from './core/types';
 import type { Game } from './game';
 import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
@@ -207,18 +208,25 @@ async function buildGame(
   // The world is built from what the player has saved (the wallet, the missions, the intro), so
   // the account's boot sync lands in storage first. Capped: a slow server costs a moment, and a
   // dead one costs nothing but the sync (`src/net/account.ts`).
+  loadStart(mode, { online: !!net });
   await account().ready();
   loading.set(mode === 'race' || mode === 'circuit' || mode === 'street' ? 'BUILDING THE CIRCUIT' : 'BUILDING THE CITY', 0.12);
   // Let the caption paint before the synchronous scene build blocks the thread.
   await loading.paint();
 
   // The game is its own chunk, so a menu never pays to download or parse it.
-  const { createGame } = await import('./game');
-  const game = createGame(canvas!, hudRoot!, debugRoot!, mode, {
-    net,
-    onEnterCircuit: options.onEnterCircuit,
-    onEnterStreetRace: options.onEnterStreetRace,
-  });
+  let game: Game;
+  try {
+    const { createGame } = await import('./game');
+    game = createGame(canvas!, hudRoot!, debugRoot!, mode, {
+      net,
+      onEnterCircuit: options.onEnterCircuit,
+      onEnterStreetRace: options.onEnterStreetRace,
+    });
+  } catch (err) {
+    loadFailed('build', err);
+    throw err;
+  }
   // The player's nickname and, for a guest, the way to sign in — over every world, all the time.
   // After `createGame`, whose HUD empties the root it is given; gone again with the world.
   const tag = createPlayerTag(hudRoot!, account());
@@ -229,16 +237,19 @@ async function buildGame(
   };
   // `?nowarm=1` skips the warm-up to reproduce the first-use hitches on purpose (A/B, and the
   // negative test for the perf gate: `node scripts/perf-probe.mjs --check --url ...?nowarm=1`).
+  let warmupOk = true;
   if (new URLSearchParams(location.search).has('nowarm')) {
     loading.set('SKIPPING WARM-UP', 1);
   } else {
     try {
       await game.warmUp(loading);
     } catch (err) {
+      warmupOk = false;
       // A failed warm-up only costs the first-use hitches it was meant to remove.
       console.warn('Rayo Bandido: warm-up failed, starting cold', err);
     }
   }
+  loadComplete({ warmup_ok: warmupOk });
   return game;
 }
 
@@ -289,11 +300,17 @@ async function openWorld(): Promise<void> {
   const solo = new URLSearchParams(location.search).has('solo');
   let session: NetSession | null = null;
 
+  loadStart('city', { online: !solo });
   if (!solo) {
     loading.set('CONNECTING TO BANDIDO METRO', 0.06);
     await loading.paint();
     session = createSession(storedName(), { join: WORLD_ROOM_CODE });
     const connected = await waitForRoom(session, WORLD_CONNECT_MS);
+    track('world_connect', {
+      connected,
+      result: connected ? 'ok' : session.phase === 'refused' ? 'refused' : 'unreachable',
+      players: connected ? session.players.length : 0,
+    });
     if (!connected) {
       // Nobody to drive with, but the city is still there. A full city and an unreachable one
       // are different disappointments, so the caption says which it was.
@@ -415,6 +432,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
   const badge = createAccountBadge(menuRoot!, account());
   const lobby = createLobby(menuRoot!, session, {
     onLeave() {
+      track('room_leave', { game: roomGame(), in_race: !!game });
       // Leaving a room goes back to the rooms, not out of multiplayer: the usual next thing
       // is to join a different one.
       teardownRace();
@@ -468,7 +486,10 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     void loading.hide();
   }
 
-  session.onMatch(() => void enterRace());
+  session.onMatch(() => {
+    track('mp_match_start', { game: roomGame(), players: session.players.length });
+    void enterRace();
+  });
 
   session.onGo(() => {
     goPending = true;
@@ -476,6 +497,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
   });
 
   session.onResults(() => {
+    track('mp_match_end', { game: roomGame(), players: session.players.length });
     teardownRace();
     void loading.hide();
     lobby.show();
@@ -490,6 +512,7 @@ async function multiplayer(entry: RoomEntry): Promise<void> {
     }
     // A connection that drops mid-race leaves a world running that nobody can score.
     if ((session.phase === 'refused' || session.phase === 'closed') && game) {
+      track('mp_disconnect', { game: roomGame(), phase: session.phase });
       teardownRace();
       void loading.hide();
       lobby.show();
@@ -526,6 +549,11 @@ function rooms(): void {
   createAccountBadge(menuRoot!, account());
   createRoomBrowser(menuRoot!, storedName(), game, {
     onEnter(entry) {
+      track('room_enter', {
+        game: entry.create?.game ?? game,
+        action: entry.create ? 'create' : 'join',
+        listed: entry.create ? entry.create.listed : undefined,
+      });
       // A reload rather than an in-place hand-off, so the address bar and the game agree from
       // the first frame — and so a failed connection can simply be reloaded. Everything else
       // in the query string survives, `?server=` and `?debug=1` included.
@@ -564,6 +592,7 @@ function menu(): void {
   createAccountBadge(menuRoot!, account());
   scheduleMenuBackdrop(canvas!);
   showMainMenu(menuRoot!, (choice: MenuChoice) => {
+    track('menu_select', { choice });
     const url =
       choice === 'quick'
         ? urlWith({ quick: 'menu' })
@@ -597,6 +626,7 @@ function quickPlayMenu(): void {
   scheduleMenuBackdrop(canvas!);
   showQuickPlayMenu(menuRoot!, {
     onSelect(game: RoomGame) {
+      track('quick_play_select', { game });
       setTimeout(() => location.assign(urlWith({ quick: game })), 180);
     },
     onBack() {
@@ -618,6 +648,7 @@ function quickPlayModeMenu(game: RoomGame): void {
   scheduleMenuBackdrop(canvas!);
   showQuickPlayModeMenu(menuRoot!, game, {
     onSelect(choice: QuickPlayChoice) {
+      track('quick_play_mode', { game, online: choice === 'online' });
       const url =
         choice === 'online'
           ? urlWith({ mp: true, game })
@@ -631,6 +662,8 @@ function quickPlayModeMenu(game: RoomGame): void {
     },
   });
 }
+
+initAnalytics();
 
 // Before anything is shown: a phone has to stop treating the game as a document — no zoom on a
 // fast double tap, no pinch, no pull-to-refresh, no callout on a held button. Installed once

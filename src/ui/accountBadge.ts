@@ -1,4 +1,5 @@
 import type { Account, AccountState } from '../net/account';
+import { openAccountPanel } from './accountPanel';
 
 /**
  * WHO IS PLAYING, and the way to sign in — on every screen.
@@ -7,8 +8,10 @@ import type { Account, AccountState } from '../net/account';
  *
  *   still asking     SAVE LINK · CONNECTING
  *   no server        OFFLINE · SAVED ON THIS DEVICE
- *   a guest          BANDIDO · GUEST · PROGRESS SAVED   [SIGN IN · GOOGLE]
- *   signed in        KAITO · GOOGLE · SYNCED            [SIGN OUT]
+ *   a guest          BANDIDO · GUEST · PROGRESS SAVED   [CUENTA] [SIGN IN · GOOGLE]
+ *   signed in        KAITO · GOOGLE · SYNCED            [CUENTA]
+ *
+ * CUENTA opens the account panel (`ui/accountPanel.ts`): email, nickname, signing out.
  *
  * `createPlayerTag` is the one in the HUD, over every world: the nickname, always, and for a guest
  * a way to sign in without going back to a menu. Signing out is the menu's; a button that ends
@@ -20,6 +23,7 @@ import type { Account, AccountState } from '../net/account';
  */
 
 const LABEL: Record<string, string> = { google: 'GOOGLE', discord: 'DISCORD' };
+const ACCOUNT_BUTTON = '<button type="button" class="rb-account__btn" data-action="account">CUENTA</button>';
 
 function escape(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -56,13 +60,13 @@ export function createAccountBadge(root: HTMLElement, acct: Account): { setHidde
       status = '<span class="rb-account__who">OFFLINE</span><span class="rb-account__what">SAVED ON THIS DEVICE</span>';
     } else if (user.guest) {
       status = `<span class="rb-account__who">${escape(nickname(state))}</span><span class="rb-account__what">GUEST · PROGRESS SAVED</span>`;
-      actions = state.providers
+      actions = ACCOUNT_BUTTON + state.providers
         .map((p) => `<button type="button" class="rb-account__btn" data-provider="${escape(p)}">SIGN IN · ${escape(LABEL[p] ?? p.toUpperCase())}</button>`)
         .join('');
     } else {
       const via = user.providers.map((p) => LABEL[p] ?? p.toUpperCase()).join(' + ');
       status = `<span class="rb-account__who">${escape(user.name || 'BANDIDO')}</span><span class="rb-account__what">${escape(via)} · SYNCED</span>`;
-      actions = '<button type="button" class="rb-account__btn" data-action="signout">SIGN OUT</button>';
+      actions = ACCOUNT_BUTTON;
     }
     const notice =
       state.authResult === 'failed'
@@ -78,6 +82,10 @@ export function createAccountBadge(root: HTMLElement, acct: Account): { setHidde
     if (!target) return;
     // Held off the menu's own keyboard and click handling: this is not a mode card.
     e.stopPropagation();
+    if (target.dataset.action === 'account') {
+      openAccountPanel(root, acct);
+      return;
+    }
     target.disabled = true;
     if (target.dataset.action === 'signout') void acct.signOut();
     else if (target.dataset.provider) void acct.signIn(target.dataset.provider);

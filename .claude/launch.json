@@ -169,6 +169,30 @@
       "runtimeExecutable": "env",
       "runtimeArgs": ["RB_MATCH_SERVER=http://127.0.0.1:8096", "npx", "vite", "--host", "127.0.0.1", "--port", "5196", "--strictPort"],
       "port": 5196
+    },
+    {
+      "name": "rayo-bandido-api-preview-8096-win",
+      "runtimeExecutable": "C:\\Program Files\\Git\\usr\\bin\\env.exe",
+      "runtimeArgs": ["RB_DATABASE_URL=memory://", "RB_GOOGLE_CLIENT_ID=preview-only", "RB_GOOGLE_CLIENT_SECRET=preview-only", "C:\\Program Files\\nodejs\\node.exe", "server/index.mjs", "--port", "8096"],
+      "port": 8096
+    },
+    {
+      "name": "rayo-bandido-dev-5196-win",
+      "runtimeExecutable": "C:\\Program Files\\Git\\usr\\bin\\env.exe",
+      "runtimeArgs": ["RB_MATCH_SERVER=http://127.0.0.1:8096", "C:\\Program Files\\nodejs\\node.exe", "node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5196", "--strictPort"],
+      "port": 5196
+    },
+    {
+      "name": "rayo-bandido-api-account-8097-win",
+      "runtimeExecutable": "C:/Program Files/Git/usr/bin/env.exe",
+      "runtimeArgs": ["RB_DATABASE_URL=memory://", "RB_AUTH_DEV=1", "RB_GOOGLE_CLIENT_ID=preview-only", "RB_GOOGLE_CLIENT_SECRET=preview-only", "C:/Program Files/nodejs/node.exe", "server/index.mjs", "--port", "8097"],
+      "port": 8097
+    },
+    {
+      "name": "rayo-bandido-dev-5197-win",
+      "runtimeExecutable": "C:/Program Files/Git/usr/bin/env.exe",
+      "runtimeArgs": ["RB_MATCH_SERVER=http://127.0.0.1:8097", "C:/Program Files/nodejs/node.exe", "node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5197", "--strictPort"],
+      "port": 5197
     }
   ]
 }

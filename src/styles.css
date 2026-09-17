@@ -649,6 +649,219 @@ body.rb-backdrop .rb-menu .rb-panel {
   cursor: progress;
 }
 
+/* ------------------------------------------------ the account panel (`ui/accountPanel.ts`) */
+
+.rb-acctpanel {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: auto;
+  background: radial-gradient(70% 60% at 50% 50%, rgba(5, 6, 10, 0.6) 0%, rgba(5, 6, 10, 0.86) 100%);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.rb-acctpanel.is-on {
+  opacity: 1;
+}
+
+.rb-acctpanel__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(480px, 100%);
+  padding: 22px 24px 20px;
+  box-sizing: border-box;
+  background: var(--rb-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--rb-hairline), inset 0 3px 0 var(--rb-yellow);
+  --rb-n: 16px;
+  clip-path: var(--rb-notch);
+  font-family: var(--rb-mono);
+  color: var(--rb-text);
+}
+
+.rb-acctpanel__close {
+  position: absolute;
+  top: 12px;
+  right: 22px;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--rb-text);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.rb-acctpanel__close:hover {
+  opacity: 1;
+  color: var(--rb-yellow);
+}
+
+.rb-acctpanel__kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--rb-yellow);
+}
+
+.rb-acctpanel__title {
+  margin-top: -8px;
+  font-family: var(--rb-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.rb-acctpanel__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--rb-hairline-cold);
+  border-bottom: 1px solid var(--rb-hairline-cold);
+}
+
+.rb-acctpanel__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.rb-acctpanel__row span {
+  flex: none;
+  color: var(--rb-dim);
+}
+
+.rb-acctpanel__row b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+
+.rb-acctpanel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.rb-acctpanel__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--rb-dim);
+}
+
+.rb-acctpanel__field {
+  display: flex;
+  gap: 8px;
+}
+
+.rb-acctpanel__input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  font-family: var(--rb-display);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-text);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--rb-hairline);
+  border-radius: 0;
+  outline: none;
+}
+
+.rb-acctpanel__input:focus {
+  border-color: var(--rb-yellow);
+}
+
+.rb-acctpanel__input::placeholder {
+  color: var(--rb-dim);
+  font-size: 14px;
+}
+
+.rb-acctpanel__hint {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--rb-dim);
+}
+
+.rb-acctpanel__hint.is-bad {
+  color: var(--rb-red);
+}
+
+.rb-acctpanel__hint.is-good {
+  color: var(--rb-acid);
+}
+
+.rb-acctpanel__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rb-acctpanel__actions,
+.rb-acctpanel__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rb-acctpanel__foot {
+  justify-content: flex-end;
+}
+
+.rb-acctpanel__btn {
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--rb-yellow);
+  background: var(--rb-panel);
+  border: 1px solid var(--rb-hairline);
+  padding: 8px 12px;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+}
+
+.rb-acctpanel__btn.is-primary {
+  flex: none;
+  color: var(--rb-ink);
+  background: var(--rb-yellow);
+}
+
+.rb-acctpanel__btn.is-quiet {
+  color: var(--rb-dim);
+  border-color: var(--rb-hairline-cold);
+}
+
+.rb-acctpanel__btn:hover,
+.rb-acctpanel__btn:focus-visible {
+  color: var(--rb-ink);
+  background: var(--rb-yellow);
+  outline: none;
+}
+
+.rb-acctpanel__btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 /* ------------------------------------------------------------- the wordmark */
 
 .rb-head {
@@ -1567,7 +1780,8 @@ body.rb-backdrop .rb-menu .rb-panel {
 
 .rb-player {
   position: absolute;
-  top: 58px;
+  /* Level with the money readout (top right) once the controls card has faded. */
+  top: 22px;
   left: 22px;
   display: flex;
   align-items: center;
@@ -1585,6 +1799,11 @@ body.rb-backdrop .rb-menu .rb-panel {
   color: var(--rb-dim);
   white-space: nowrap;
   pointer-events: auto;
+}
+
+/* While the controls card is still up in that corner, the tag waits under it. */
+body:not(.rb-touch-pad) #hud-root:has(.rb-controls:not(.is-hidden)):not(.rb-intro-running) .rb-player {
+  top: 58px;
 }
 
 .rb-player__dot {
@@ -5830,6 +6049,214 @@ body.rb-touch-pad .rb-minimap {
   .rb-gauge--charge.is-intro-hilite,
   .rb-intro__channel i {
     animation: none;
+  }
+}
+
+/* ------------------------------------------------------ save-progress prompt */
+/* `src/ui/saveProgressPrompt.ts`: the modal that asks a guest to keep their progress with
+   Google. BadKala's magenta frames it (she is the one asking); the button is the system's
+   yellow. Over everything in the HUD, the street dimmed behind it. */
+
+.rb-saveprompt {
+  --rb-bk: #ff3df0;
+  --rb-bk-hot: #ffb3fa;
+  --rb-bk-hairline: rgba(255, 61, 240, 0.32);
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: auto;
+  background: radial-gradient(70% 60% at 50% 50%, rgba(5, 6, 10, 0.55) 0%, rgba(5, 6, 10, 0.82) 100%);
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.rb-saveprompt[hidden] {
+  display: none;
+}
+
+.rb-saveprompt.is-on {
+  opacity: 1;
+}
+
+.rb-saveprompt__card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  width: min(560px, 100%);
+  padding: 20px 24px 22px 20px;
+  box-sizing: border-box;
+  background: var(--rb-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--rb-bk-hairline), inset 0 3px 0 var(--rb-bk), 0 0 60px rgba(255, 61, 240, 0.2);
+  clip-path: var(--rb-notch);
+  --rb-n: 16px;
+  transform: translateY(10px) scale(0.98);
+  transition: transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.rb-saveprompt.is-on .rb-saveprompt__card {
+  transform: none;
+}
+
+.rb-saveprompt__close {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 1;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--rb-text);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.rb-saveprompt__close:hover {
+  opacity: 1;
+  color: var(--rb-bk-hot);
+}
+
+.rb-saveprompt__portrait {
+  position: relative;
+  flex: none;
+  width: 110px;
+  align-self: flex-start;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(60% 50% at 50% 40%, #2a1240 0%, #0d0f16 100%);
+  box-shadow: inset 0 0 0 1px var(--rb-bk), 0 0 22px rgba(255, 61, 240, 0.35);
+}
+
+.rb-saveprompt__portrait span {
+  font-family: var(--rb-display);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--rb-bk-hot);
+}
+
+/* The same crop as the intro's call portrait: head and shoulders from the full-length poster. */
+.rb-saveprompt__portrait img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 7%;
+  transform: scale(3.1);
+  transform-origin: 50% 7%;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.rb-saveprompt__portrait.has-art img {
+  opacity: 1;
+}
+
+.rb-saveprompt__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rb-saveprompt__kicker {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: var(--rb-bk);
+}
+
+.rb-saveprompt__title {
+  font-family: var(--rb-display);
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--rb-yellow);
+}
+
+.rb-saveprompt__text {
+  font-family: var(--rb-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--rb-text);
+}
+
+.rb-saveprompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 8px;
+}
+
+.rb-saveprompt__google {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 16px 10px 13px;
+  border: none;
+  font-family: var(--rb-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--rb-ink);
+  background: var(--rb-yellow);
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+  transition: background 120ms ease;
+}
+
+.rb-saveprompt__google svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.rb-saveprompt__google:hover {
+  background: #fff;
+}
+
+.rb-saveprompt__google:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+@media (max-width: 560px) {
+  .rb-saveprompt__card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 18px 16px 18px;
+    gap: 12px;
+  }
+
+  .rb-saveprompt__portrait {
+    width: 76px;
+    align-self: center;
+    border-radius: 50%;
+  }
+
+  .rb-saveprompt__actions {
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-saveprompt,
+  .rb-saveprompt__card {
+    transition: none;
   }
 }
 

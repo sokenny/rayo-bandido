@@ -1,3 +1,4 @@
+import { screenFromUrl, setAnalyticsUserId, setUserProperties, track } from '../analytics';
 import {
   applyProgressSnapshot,
   clearSavedProgress,
@@ -39,6 +40,8 @@ export interface AccountUser {
   id: string;
   /** NULL on the server until a name is chosen or a provider supplies one. */
   name: string | null;
+  /** The email the sign-in provider reported. Null for a guest. */
+  email?: string | null;
   avatar: string | null;
   guest: boolean;
   /** The logins attached to this account ('google', 'discord'). */
@@ -69,7 +72,18 @@ export interface Account {
   signOut(): Promise<void>;
   /** The lobby's name, saved to the account. */
   setName(name: string): void;
+  /** Claim a nickname for the account (the account panel). Names are unique on the server. */
+  claimName(name: string): Promise<ClaimNameResult>;
 }
+
+/** How a nickname claim went: `taken` by another player, `invalid` (too short, reserved), or no server. */
+export type ClaimNameResult = { ok: true; name: string } | { ok: false; reason: 'taken' | 'invalid' | 'offline' };
+
+/** Mirrors `NAME_MIN` in `server/accounts.mjs`. */
+export const NICKNAME_MIN = 3;
+
+/** The provider a sign-in left with, so the arrival back can name it. */
+const SIGNIN_KEY = 'rb.analytics.signin';
 
 const ME_PATH = '/api/me';
 const PROGRESS_PATH = '/api/progress';
@@ -104,6 +118,26 @@ function storageSet(key: string, value: string | null): void {
   } catch {
     /* storage unavailable */
   }
+}
+
+/**
+ * Who this is, for analytics: the account id as GA's `user_id`, guest or not as a user property,
+ * and — once, on the arrival back from a provider — how the sign-in went.
+ */
+function reportAccount(state: AccountState): void {
+  if (!state.user) return;
+  setAnalyticsUserId(state.user.id);
+  setUserProperties({ is_guest: state.user.guest, providers: state.user.providers.join(',') || 'none' });
+  if (state.authResult === null) return;
+  let method = 'unknown';
+  try {
+    method = sessionStorage.getItem(SIGNIN_KEY) ?? 'unknown';
+    sessionStorage.removeItem(SIGNIN_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  if (state.authResult === 'ok' && !state.user.guest) track('login', { method, screen: screenFromUrl() });
+  else track('login_failed', { method, screen: screenFromUrl() });
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T | null> {
@@ -210,6 +244,7 @@ export function createAccount(): Account {
     state.online = true;
     state.user = me.user;
     state.providers = me.providers ?? [];
+    reportAccount(state);
 
     // Anything this browser has that the server lacks goes up, and the merged record comes back.
     const serverHasWallet = me.progress.wallet !== null;
@@ -270,11 +305,18 @@ export function createAccount(): Account {
       // The guest's latest record has to be on the server before it can be merged anywhere.
       await Promise.race([boot, new Promise((r) => setTimeout(r, READY_MS))]);
       await Promise.race([flush(), new Promise((r) => setTimeout(r, READY_MS))]);
+      track('sign_in_start', { method: provider, screen: screenFromUrl() });
+      try {
+        sessionStorage.setItem(SIGNIN_KEY, provider);
+      } catch {
+        /* storage unavailable */
+      }
       const back = `${location.pathname}${location.search}`;
       location.assign(`/auth/${encodeURIComponent(provider)}/start?return=${encodeURIComponent(back)}`);
     },
     async signOut() {
       await Promise.race([flush(), new Promise((r) => setTimeout(r, READY_MS))]);
+      track('sign_out', { screen: screenFromUrl() });
       await request('/auth/logout', { method: 'POST', body: '{}' });
       // This browser is somebody new now: nothing of the account stays behind in it.
       setProgressObserver(null);
@@ -287,6 +329,29 @@ export function createAccount(): Account {
     setName(name) {
       storageSet(NAME_KEY, sanitizeName(name));
       void setNameNow(name);
+    },
+    async claimName(name) {
+      let response: Response;
+      try {
+        response = await fetch(PROFILE_PATH, {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+      } catch {
+        return { ok: false, reason: 'offline' };
+      }
+      if (response.status === 409) return { ok: false, reason: 'taken' };
+      if (response.status === 400) return { ok: false, reason: 'invalid' };
+      const body = response.ok ? ((await response.json().catch(() => null)) as { user?: AccountUser } | null) : null;
+      if (!body?.user?.name) return { ok: false, reason: 'offline' };
+      state.user = body.user;
+      storageSet(NAME_KEY, body.user.name);
+      emit();
+      return { ok: true, name: body.user.name };
     },
   };
 }

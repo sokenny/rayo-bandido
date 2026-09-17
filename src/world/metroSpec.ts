@@ -13,6 +13,7 @@ import { metroTerrain } from './metroTerrain.ts';
 import { METRO_PARK, PARK_BRIDGE, PARK_ENTRIES, PARK_LAND, PARK_NORTH, PARK_ROADS } from './metroPark.ts';
 import { planStackMassing } from './stackMassing.ts';
 import { METRO_OBELISCO, METRO_VILLA, NUEVE_DE_JULIO } from './metroVilla.ts';
+import { METRO_ROUNDABOUTS, METRO_SOUTH_CUTS, METRO_SOUTH_PATH_TRAFFIC, METRO_SOUTH_RING_TRAFFIC, cutRoads, metroSouthRoads } from './metroSouth.ts';
 import {
   STACK_ART,
   STACK_BLOCK_OPTIONS,
@@ -52,7 +53,9 @@ import type { TrackNode, TrackSpec } from './track';
  *   - the RING: four 20 m boulevards a block clear of the Stack's edge streets, the seam
  *     between the two cities and the bus network's inner loop,
  *   - the OUTER GRID: two avenues and two streets either side of the ring, streets every
- *     ~140 m down to the water, a couple of alleys, the waterfront boulevard along the quay,
+ *     ~140 m down to the water, a couple of alleys, the waterfront boulevard along the quay —
+ *     and since 2026-09-17, south of av-s1, broken by diagonals, curved streets and three
+ *     roundabouts round Plaza Estrella (`metroSouth.ts`),
  *   - the VIADUCT: a Bay-style closed highway at 15 m round the district south of downtown,
  *     out over the water on its south leg, with four ramps on its west and east legs (two
  *     per leg, one merging each way, so both directions have a way up and a way down),
@@ -301,6 +304,9 @@ function nueveDeJulioNodes(x: number, north: number, width: number): TrackNode[]
   const ends = [n(x, fromZ - taper, 0, width), n(x, fromZ, 0, NUEVE_DE_JULIO.width), n(x, toZ, 0, NUEVE_DE_JULIO.width), n(x, toZ + taper, 0, width)];
   return [...nodes.filter((nd) => !ends.some((e) => Math.abs(e.z - nd.z) < 1)), ...ends].sort((a, b) => a.z - b.z);
 }
+
+/** The south's diagonals, curves and roundabouts (`metroSouth.ts`). */
+export const METRO_SOUTH_ROADS: CityRoadSpec[] = metroSouthRoads(zoneOf, Z_SHORE, X_MAX, X_MIN);
 
 /* ------------------------------------------------------------------ the viaduct */
 
@@ -615,13 +621,15 @@ export const METRO_TRAFFIC_LOOPS: Array<{ rect: Rect; cars: number }> = [
   // South: the viaduct district down to the water.
   loop(-620, -340, RING.south, 500, 6),
   loop(340, 620, RING.south, 500, 6),
-  loop(-620, -340, 500, 780, 6),
-  loop(-340, -60, 500, 780, 6),
-  loop(30, 340, 500, 780, 6),
+  // South of av-s1 the grid is broken by the roundabouts and the curves (`metroSouth.ts`): these
+  // keep to what is still straight, and the new roads carry their own (`pathTraffic`).
+  loop(-620, -480, 500, 780, 6),
+  loop(30, 250, 500, 780, 6),
+  loop(250, 340, 500, 780, 4),
   loop(340, 620, 500, 780, 6),
-  loop(-620, -340, 780, 1060, 6),
-  loop(-60, 250, 780, 1060, 6),
-  loop(340, 620, 780, 1060, 6),
+  loop(-620, -480, 780, 1060, 6),
+  loop(30, 250, 780, 1186, 6),
+  loop(480, 620, 780, 1060, 6),
   ...fillLoops(),
 ];
 
@@ -667,7 +675,8 @@ function fillLoops(): Array<{ rect: Rect; cars: number }> {
   ];
   // South of the ring to the waterfront: a staggered checkerboard of one-block cells, so
   // alternate bands take alternate columns and every north-south street is driven in each.
-  const bands = [RING.south, 360, 500, 640, 780, 920, 1060, METRO_QUAY_Z - 14];
+  // Down to av-s1: south of it the grid is what `metroSouth.ts` left, and its cells are below.
+  const bands = [RING.south, 360, 500];
   const even: Array<[number, number, number]> = [[-620, -480, 2], [-340, -252, 2], [-60, 30, 2], [160, 250, 2], [340, 480, 2]];
   const odd: Array<[number, number, number]> = [[-480, -340, 2], [-252, -60, 3], [30, 160, 2], [250, 340, 2], [480, 620, 2]];
   for (let b = 0; b < bands.length - 1; b++) {
@@ -681,8 +690,20 @@ function fillLoops(): Array<{ rect: Rect; cars: number }> {
   // carries its traffic past the Obelisco on both sides and nothing turns across the island.
   fill.push(loop(RING.east, NUEVE_DE_JULIO.laneWest, RING.south, 500, 3));
   fill.push(loop(NUEVE_DE_JULIO.laneEast, 620, RING.south, 500, 3));
-  // The waterfront end to end, so the drive along the quay is never an empty one.
-  fill.push(loop(-620, 620, 1060, METRO_QUAY_Z - 14, 8));
+  // South of av-s1: the cells that still have four straight sides and no roundabout on a corner.
+  // The waterfront is driven end to end as a road of its own (`METRO_SOUTH_PATH_TRAFFIC`).
+  fill.push(
+    loop(-620, -480, 500, 640, 2),
+    loop(-480, -340, 500, 640, 2),
+    loop(160, 250, 500, 780, 2),
+    loop(340, 480, 500, 640, 2),
+    loop(480, 620, 640, 780, 2),
+    loop(-620, -480, 780, 920, 2),
+    loop(340, 480, 780, 920, 2),
+    loop(480, 620, 920, 1060, 2),
+    loop(-620, -480, 1060, METRO_QUAY_Z - 14, 2),
+    loop(480, 620, 1060, METRO_QUAY_Z - 14, 2),
+  );
   return fill.map((l) => ({ rect: l.rect, cars: l.cars * FILL_DENSITY }));
 }
 
@@ -701,11 +722,13 @@ const METRO_DECK_TRAFFIC = STACK_DECK_TRAFFIC.map((d) => ({ ...d, cars: Math.rou
  */
 export const METRO_BUS_LOOPS: Rect[] = [
   { minX: RING.west, maxX: RING.east, minZ: RING.north, maxZ: RING.south },
-  { minX: -620, maxX: RING.west, minZ: 500, maxZ: 780 },
+  // Round st-w3, not the ring: the ring's corner at av-s2 is the Rotonda de las Pantallas (`metroSouth.ts`).
+  { minX: -620, maxX: -480, minZ: 500, maxZ: 780 },
   { minX: RING.east, maxX: 620, minZ: 500, maxZ: 780 },
 ];
 /** The boulevards with shelters. */
-export const METRO_BUS_ROUTES = ['blvd-ring-n', 'blvd-ring-s', 'blvd-ring-w', 'blvd-ring-e', 'av-s1', 'av-s2', 'av-w1', 'av-e1'];
+// av-s2 east of Plaza Estrella is its own road now (`metroSouth.ts`).
+export const METRO_BUS_ROUTES = ['blvd-ring-n', 'blvd-ring-s', 'blvd-ring-w', 'blvd-ring-e', 'av-s1', 'av-s2', 'av-s2-e', 'av-w1', 'av-e1'];
 
 /* ------------------------------------------------------------------ the free-world activities */
 
@@ -765,7 +788,7 @@ export const METRO_STREET_SITES = [CURVA_SITE];
 /** The Stack's tiers over its avenues, inside its footprint only; the Bay's bridges over the outer boulevards. */
 export const METRO_SKYBRIDGE_SETS: NonNullable<CitySpec['skybridgeSets']> = [
   { streets: STACK_SPEC.skybridgeStreets, style: STACK_SKYBRIDGES, within: STACK_RECT },
-  { streets: ['blvd-ring-n', 'blvd-ring-s', 'blvd-ring-w', 'blvd-ring-e', 'av-s1', 'av-s2', 'av-w1', 'av-e1'], style: { heights: [12, 15, 19, 24], concreteShare: 0.15, max: 40, step: 120 } },
+  { streets: ['blvd-ring-n', 'blvd-ring-s', 'blvd-ring-w', 'blvd-ring-w-s', 'blvd-ring-e', 'av-s1', 'av-s2', 'av-s2-mid', 'av-s2-e', 'av-w1', 'av-e1', 'diag-norte', 'diag-sur'], style: { heights: [12, 15, 19, 24], concreteShare: 0.15, max: 40, step: 120 } },
 ];
 
 export const METRO_SPEC: CitySpec = {
@@ -774,7 +797,9 @@ export const METRO_SPEC: CitySpec = {
   wallBand: METRO_WALL_BAND,
   water: { quayZ: METRO_QUAY_Z },
   zoneOf,
-  roads: [...DOWNTOWN_ROADS, ...OUTER_ROADS, ...PARK_ROADS],
+  // The south without its grid (`metroSouth.ts`): the grid cut back, then the diagonals, curves and roundabouts.
+  roads: [...cutRoads([...DOWNTOWN_ROADS, ...OUTER_ROADS], METRO_SOUTH_CUTS), ...METRO_SOUTH_ROADS, ...PARK_ROADS],
+  roundabouts: METRO_ROUNDABOUTS,
   elevated: [
     ...DOWNTOWN_ELEVATED,
     { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },
@@ -844,11 +869,12 @@ export const METRO_SPEC: CitySpec = {
     ['blvd-ring-s', 1100, PAL.neonPink, PAL.neonMagenta],
     ['av-s1', 700, PAL.neonMagenta, PAL.neonPink],
     ['blvd-water', 700, PAL.neonMagenta, PAL.neonPink],
-    ['blvd-ring-w', 1500, PAL.neonCyan, PAL.neonBlue],
+    ['blvd-ring-w', 1300, PAL.neonCyan, PAL.neonBlue],
   ],
   trafficLoops: METRO_TRAFFIC_LOOPS,
   // A few cars lapping the park's loop, so its curves are driven and its lamps light somebody.
-  deckTraffic: [...METRO_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }, { tag: 'park-loop', cars: 8, lanes: [3.5] }],
+  deckTraffic: [...METRO_DECK_TRAFFIC, { tag: 'viaduct', cars: METRO_VIADUCT_CARS, lanes: [5, 1.5] }, { tag: 'park-loop', cars: 8, lanes: [3.5] }, ...METRO_SOUTH_RING_TRAFFIC],
+  pathTraffic: METRO_SOUTH_PATH_TRAFFIC,
   cruiseLoop: METRO_BUS_LOOPS[0],
   busRoutes: METRO_BUS_ROUTES,
   busRouteLoops: METRO_BUS_LOOPS,

@@ -3,6 +3,7 @@ import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
 import type { ObeliscoSpec } from './metroVilla';
+import type { RoundaboutSpec } from './metroSouth';
 import type { Terrain } from './terrain';
 import type { TrackPath } from './track';
 
@@ -468,6 +469,8 @@ export interface CityPlan {
   parks?: ParkSpec[];
   /** The Obelisco, its island and the McDonald's on its corner (`metroVilla.ts`, `env/obeliscoBuilder.ts`). */
   obelisco?: ObeliscoSpec;
+  /** The roundabouts' islands and monuments (`metroSouth.ts`, `env/roundaboutBuilder.ts`). */
+  roundabouts?: RoundaboutSpec[];
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.

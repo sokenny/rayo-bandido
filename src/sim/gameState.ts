@@ -80,6 +80,15 @@ export function createVehicleState(x: number, z: number, heading: number, y = 0)
     handbrakeYaw: 0,
     collided: false,
     collisionImpact: 0,
+    vy: 0,
+    roll: 0,
+    pitchRate: 0,
+    rollRate: 0,
+    airborne: false,
+    airTime: 0,
+    landingImpact: 0,
+    tyreLoad: 1,
+    loadSkew: 0,
     slide: 0,
     gear: 0,
     rpm01: 0,
@@ -376,7 +385,11 @@ export function stepGame(
   stepBuses(state.buses, layout, dt);
   // Which level the car is on decides which walls are walls for it, so the road height is
   // read before the collision pass.
-  settleVehicle(state.vehicle, layout);
+  settleVehicle(state.vehicle, layout, dt);
+  if (state.vehicle.landingImpact > 0) {
+    const v = state.vehicle;
+    state.events.push({ type: 'landing', x: v.x, y: v.y, z: v.z, impact: v.landingImpact });
+  }
   resolveCollisions(state.vehicle, layout, state.events, dt);
   // The pavement's light clutter and chargers, right behind the walls (`src/sim/streetProps.ts`).
   if (state.streetProps) stepStreetProps(state.streetProps, state.vehicle, layout, state.time, dt, state.events);

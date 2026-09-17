@@ -36,6 +36,7 @@ export function syncCar(car: CarVisual, v: VehicleState, pose: InterpolatedPose)
   if (car.root.rotation.order !== ROOT_ORDER) car.root.rotation.order = ROOT_ORDER;
   car.root.rotation.y = -pose.heading;
   car.root.rotation.x = v.pitch;
+  car.root.rotation.z = v.roll;
   // The rim in the cabin turns off the same angle as the road wheels below (`interior.ts`).
   car.setSteering(v.steerAngle);
   const wheels = car.wheels;

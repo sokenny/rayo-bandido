@@ -1,5 +1,5 @@
 import type { PlayerCommand, VehicleState } from '../core/types';
-import { DRIVETRAIN, NITRO, VEHICLE } from '../config/tuning';
+import { DRIVETRAIN, NITRO, ROAD_ROUGHNESS, VEHICLE, VERTICAL } from '../config/tuning';
 import { clamp, clamp01, damp, forwardX, forwardZ, lerp, rightX, rightZ, wrapAngle } from '../core/math';
 import { gearTopSpeed, lugFactor, stepDrivetrain } from './drivetrain';
 
@@ -118,6 +118,39 @@ export function stepVehicle(
   const counter = slipMag > VEHICLE.slideSlipStart ? clamp01((slip < 0 ? -1 : 1) * steerInput) : 0;
   v.counterSteer = slipMag > VEHICLE.slideSlipStart ? (slip < 0 ? -1 : 1) * steerInput : 0;
 
+  // --- 2b. In the air (`src/sim/surface.ts`): no tyre on the road, no tyre force. ------------
+  // The car keeps the world velocity it left with, less the air's drag, and the yaw rate it
+  // took off with, which the air bleeds slowly. The wheels and the gearbox above still answer
+  // the pedals, so the engine revs and the wheels turn; none of it reaches the road.
+  if (v.airborne) {
+    const yaw = v.yawRate * Math.exp(-VERTICAL.airYawDamping * dt);
+    v.yawRate = yaw;
+    v.heading = wrapAngle(v.heading + yaw * dt);
+    const flat = Math.hypot(v.vx, v.vz);
+    if (flat > 1e-6) {
+      const drag = Math.max(0, 1 - (VEHICLE.airDrag * flat * dt));
+      v.vx *= drag;
+      v.vz *= drag;
+    }
+    v.x += v.vx * dt;
+    v.z += v.vz * dt;
+    const afx = forwardX(v.heading);
+    const afz = forwardZ(v.heading);
+    const airSpeed = v.vx * afx + v.vz * afz;
+    const airLateral = v.vx * rightX(v.heading) + v.vz * rightZ(v.heading);
+    v.speed = airSpeed;
+    v.lateralSpeed = airLateral;
+    const airAbs = airSpeed < 0 ? -airSpeed : airSpeed;
+    v.slipAngle = airAbs > VEHICLE.movingThreshold ? Math.atan2(airLateral, airAbs) : 0;
+    v.latAccel = 0;
+    v.longAccel = 0;
+    if (!cmd.handbrake) v.wheelSpin = wrapAngle(v.wheelSpin + (Math.max(speedLastTick, throttle * VEHICLE.maxSpeed) / VEHICLE.wheelRadius) * dt);
+    v.throttleApplied = nitroActive ? Math.max(throttle, VEHICLE.nitroIdleThrottle) : throttle;
+    v.brakeApplied = brake;
+    v.handbrake = cmd.handbrake;
+    return;
+  }
+
   // --- 3. How much the car is sliding this tick (0 = full grip, 1 = full drift). -------
   const forwardMotion = speed > VEHICLE.movingThreshold;
   // Forward weight transfer under braking (0..1). Drives the left-foot-brake behaviour used
@@ -192,10 +225,22 @@ export function stepVehicle(
       : VEHICLE.slideRegripRate;
   const slide = clamp01(damp(prevSlide, slideTarget, slideRate, dt));
 
-  const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide);
+  // The road's unevenness takes load off the tyres and puts it back (`settleVehicle`): a light
+  // tyre holds less, a pressed one only a little more. Flat out, that is the car going vague
+  // over a swell and biting again after it; at a cruise the load barely moves.
+  const load = v.tyreLoad;
+  const loadGrip = Math.max(
+    ROAD_ROUGHNESS.minGrip,
+    load < 1
+      ? 1 - (1 - load) * ROAD_ROUGHNESS.unloadGrip
+      : 1 + Math.min(load - 1, 1) * ROAD_ROUGHNESS.loadGrip,
+  );
+  const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide) * loadGrip;
   // The loaded front can hold more lateral force, which is what closes the apex.
   const latCap =
-    lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide) * lerp(1, VEHICLE.brakeFrontBite, brakeLoad);
+    lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide) *
+    lerp(1, VEHICLE.brakeFrontBite, brakeLoad) *
+    loadGrip;
 
   // --- 4. Longitudinal. -----------------------------------------------------------------
   const maxForward = VEHICLE.maxSpeed + (nitroActive ? NITRO.boostMaxSpeedBonus : 0);
@@ -296,12 +341,15 @@ export function stepVehicle(
   // --- 5. Yaw. --------------------------------------------------------------------------
   // Bicycle yaw, limited by how much lateral acceleration the tyres can produce. Drifting
   // raises that budget (`driftYawGain`) so the nose can out-rotate the velocity.
-  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle);
+  // Bump steer: one front wheel pressed harder than the other tugs the wheels its way, and the
+  // car goes where they point. Nothing at town speeds; flat out, a line that has to be held.
+  const bumpSteer = v.loadSkew * ROAD_ROUGHNESS.bumpSteer * speedT * speedT;
+  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle + bumpSteer);
   // Weight on the nose = more front grip to spend on rotation: the left-foot brake tightens
   // the line rather than opening it.
   const yawBudget =
     VEHICLE.maxLatAccel * lerp(1, VEHICLE.driftYawGain, slide) * lerp(1, VEHICLE.brakeYawGain, brakeLoad);
-  const yawLimit = yawBudget / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
+  const yawLimit = (yawBudget * loadGrip) / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
   let yaw = clamp(kinematicYaw, -yawLimit, yawLimit);
 
   // Handbrake kick. The pull has an angle *budget* rather than a fixed life: a flick buys

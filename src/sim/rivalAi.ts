@@ -2,6 +2,7 @@ import type { PlayerCommand, RaceCourse, VehicleState } from '../core/types';
 import { STREET_RACE } from '../config/tuning';
 import { clamp, wrapAngle } from '../core/math';
 import { createProjection, pointAtStation, projectOntoPath, type PathProjection, type TrackPath } from '../world/track';
+import { restVehicle } from './surface';
 
 /**
  * THE RIVAL DRIVER: a look-ahead waypoint controller that produces a `PlayerCommand`.
@@ -357,7 +358,7 @@ export function placeOnLine(v: VehicleState, at: PathProjection): void {
   v.yawRate = 0;
   v.slipAngle = 0;
   v.steerAngle = 0;
-  v.pitch = 0;
+  restVehicle(v);
   v.slide = 0;
   v.handbrake = false;
   v.collided = false;

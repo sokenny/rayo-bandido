@@ -30,6 +30,12 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-09-17',
     items: [
       'Music now plays out of the speakers at the car meet, loud by the stack and fading across the lot.',
+      'Cars now have real suspension: crest a hill fast enough and you fly, then land on the springs.',
+      'The road surface itself is a little uneven now — you can feel the asphalt at speed.',
+      'The south side of the metro is no longer a plain grid: diagonals and roundabouts, Buenos Aires style.',
+      'A giant steel flower stands at the new Plaza Estrella, and opens petal by petal if you hit it with the lightning gun.',
+      'Guests are now asked to link a Google account so their progress is saved for good.',
+      'You can now set your own nickname from the account panel — it shows on the boards, the HUD and in rooms.',
     ],
   },
   {

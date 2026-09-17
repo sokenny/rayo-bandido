@@ -1,3 +1,4 @@
+import { track } from '../analytics';
 import { MAX_PLAYERS, NAME_MAX, sanitizeName, sanitizeRoomCode } from '../net/protocol';
 import type { NetSession } from '../net/session';
 import { account } from '../net/account';
@@ -292,6 +293,7 @@ export function createLobby(root: HTMLElement, session: NetSession, callbacks: L
   readyBtn.addEventListener('click', toggleReady);
   startBtn.addEventListener('click', () => session.start());
   copyBtn.addEventListener('click', () => {
+    track('room_share_link', { game: session.room?.game ?? 'unknown', players: session.players.length });
     void navigator.clipboard?.writeText(shareLink(session.room?.code ?? '')).then(
       () => {
         copyBtn.textContent = 'COPIED';
