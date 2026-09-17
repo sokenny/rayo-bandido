@@ -10,6 +10,7 @@ import { lampColor, lampPost } from './propsBuilder';
 import { rollLampFault } from './lampFaults';
 import { PAINT_Y, ROAD_TILE, roadTint } from './cityBuilder';
 import { signCell } from './textures';
+import { buildRoadCracks } from './roadCracks';
 
 /**
  * The circuit's own art, built from the ribbons and rail segments in the plan:
@@ -47,6 +48,8 @@ export function buildTrack(b: EnvBuilders): void {
   for (const rb of b.plan.ribbons) buildRibbon(b, rb);
   if (b.plan.shoulders) for (const rb of b.plan.ribbons) if (!rb.elevated) buildShoulders(b, rb);
   for (const rb of b.plan.ribbons) if (rb.kind === 'track') buildLanePaint(b, rb);
+  // Cracks over the asphalt and its paint, thickest where the city is most tired (`roadCracks.ts`).
+  buildRoadCracks(b);
   buildRails(b, b.plan.rails, rng);
   buildViaducts(b, rng);
   // The roads inside the buildings, and the frames over the open highway (the Stack).

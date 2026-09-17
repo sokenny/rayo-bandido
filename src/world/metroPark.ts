@@ -1,4 +1,4 @@
-import type { CityRoadSpec, ElevatedRoadSpec } from './cityDef';
+import { RAMP_LIFT, type CityRoadSpec, type ElevatedRoadSpec } from './cityDef';
 import type { Rect } from './cityPlan';
 // Value imports spelt with their extension, so `scripts/metro-preview.mjs` can load the metro's
 // spec under plain Node (see `metroSpec.ts`).
@@ -226,7 +226,7 @@ function roadsideWall(spec: TrackSpec, at: Pt, length: number, side: 1 | -1, gap
  */
 export const PARK_BRIDGE: ElevatedRoadSpec = {
   tag: 'park-bridge',
-  lift: 0.08,
+  lift: RAMP_LIFT,
   spec: {
     closed: false,
     nodes: [n(-45, -836, 0, CROSS_W, 0), n(-45, -877, 0, CROSS_W, 2.4), n(-45, -918, 0, CROSS_W, 0)],

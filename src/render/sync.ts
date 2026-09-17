@@ -19,7 +19,9 @@ export interface InterpolatedPose {
 
 export function interpolateVehicle(v: VehicleState, alpha: number, out: InterpolatedPose): void {
   out.x = lerp(v.prevX, v.x, alpha);
-  out.y = lerp(v.prevY, v.y, alpha);
+  // Less the asphalt's unevenness (`src/sim/roadRoughness.ts`): the physics rides the relief,
+  // the road mesh is flat, and the car must sit on the road that is drawn.
+  out.y = lerp(v.prevY - v.prevRoadRelief, v.y - v.roadRelief, alpha);
   out.z = lerp(v.prevZ, v.z, alpha);
   out.heading = lerpAngle(v.prevHeading, v.heading, alpha);
 }

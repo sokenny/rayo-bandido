@@ -162,12 +162,20 @@ export interface VehicleState {
   /** Speed the body hit the road at (m/s), on the tick a flight ends; 0 otherwise. */
   landingImpact: number;
   /**
-   * Load on the tyres as the grip feels it, 1 = the car standing still on a level road: the
-   * springs' push, relaxed at `ROAD_ROUGHNESS.loadRelax`. Written by `settleVehicle`.
+   * Load on the front and rear tyres as their grip feels it, 1 = the car standing still on a
+   * level road: each axle's springs, relaxed at `ROAD_ROUGHNESS.loadRelax`. Written by
+   * `settleVehicle`.
    */
-  tyreLoad: number;
-  /** Front right minus front left share of that load (bump steer), relaxed the same way. */
-  loadSkew: number;
+  frontLoad: number;
+  rearLoad: number;
+  /** Front right minus front left suspension travel over the track (rad): roll steer's input. */
+  frontRoll: number;
+  /**
+   * Mean height of the asphalt's unevenness under the four wheels (m). The road is drawn flat,
+   * so the car is drawn this much lower (`interpolateVehicle`): it sits on the asphalt you see.
+   */
+  roadRelief: number;
+  prevRoadRelief: number;
   /** How much the car is sliding this tick (0 = full grip, 1 = full drift). */
   slide: number;
   /** Zero-based gear of the automatic (`DRIVETRAIN.gearTops`). Displayed as `gear + 1`. */

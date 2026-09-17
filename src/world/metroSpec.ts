@@ -1,5 +1,5 @@
 import type { CarMeetSpec } from './carMeet';
-import type { CityRoadSpec, CitySpec, ElevatedRoadSpec, PassengerStopSpec } from './cityDef';
+import { RAMP_LIFT, type CityRoadSpec, type CitySpec, type ElevatedRoadSpec, type PassengerStopSpec } from './cityDef';
 import type { GasStationSpec } from './gasStation';
 import type { GarageSpec } from './garage';
 import type { BlockOptions } from './cityGen';
@@ -803,7 +803,7 @@ export const METRO_SPEC: CitySpec = {
   elevated: [
     ...DOWNTOWN_ELEVATED,
     { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },
-    ...METRO_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 })),
+    ...METRO_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: RAMP_LIFT })),
     // The park's bridge over the strait (`metroPark.ts`).
     PARK_BRIDGE,
   ],

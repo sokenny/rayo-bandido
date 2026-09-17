@@ -34,6 +34,13 @@ export interface ElevatedRoadSpec {
   lift: number;
 }
 
+/**
+ * The lift a ramp (or any elevated road meeting another slab at its own level) is drawn with
+ * (m): over the tallest ground road's crossing lift, and no more — the car rides the samples,
+ * so whatever is drawn above them is how far its wheels look sunk into the asphalt.
+ */
+export const RAMP_LIFT = 0.025;
+
 /** Cars lapping one elevated loop, split evenly between its lane files. */
 export interface DeckTrafficSpec {
   /** Tag of a closed elevated road in `CitySpec.elevated`. */

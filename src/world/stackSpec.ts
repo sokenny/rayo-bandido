@@ -1,4 +1,4 @@
-import type { CityRoadSpec, CitySpec, ElevatedRoadSpec } from './cityDef';
+import { RAMP_LIFT, type CityRoadSpec, type CitySpec, type ElevatedRoadSpec } from './cityDef';
 import type { BlockOptions } from './cityGen';
 import type { Rect, ZoneId } from './cityPlan';
 // The one value import in this data module, spelt with its extension so the QA scripts can
@@ -202,7 +202,7 @@ export const STACK_ELEVATED: Array<ElevatedRoadSpec & { level: 1 | 2 | 3 }> = [
   { tag: 'deck', spec: STACK_DECK_SPEC, lift: 0, level: 1 },
   { tag: 'spine', spec: STACK_SPINE_SPEC, lift: 0, level: 2 },
   { tag: 'ring', spec: STACK_RING_SPEC, lift: 0, level: 3 },
-  ...STACK_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08, level: rampLevel(r.tag) })),
+  ...STACK_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: RAMP_LIFT, level: rampLevel(r.tag) })),
 ];
 
 function rampLevel(tag: string): 1 | 2 | 3 {

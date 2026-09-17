@@ -3,6 +3,7 @@ import { createCityWorld } from './cityWorld';
 import { CURVA_COURSE, CURVA_RAMPS } from './curvaSpec';
 import { METRO_SPEC } from './metroSpec';
 import { layStreetCourse } from './streetWorld';
+import { RAMP_LIFT } from './cityDef';
 
 /**
  * LA CURVA: Bandido Metro with the fourth Street Race drawn inside it (`curvaSpec.ts`).
@@ -14,6 +15,6 @@ import { layStreetCourse } from './streetWorld';
  * world does not have them.
  */
 export function createCurvaWorld(seed?: number): World {
-  const elevated = [...METRO_SPEC.elevated, ...CURVA_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 }))];
+  const elevated = [...METRO_SPEC.elevated, ...CURVA_RAMPS.map((r) => ({ tag: r.tag, spec: r.spec, lift: RAMP_LIFT }))];
   return layStreetCourse(createCityWorld({ ...METRO_SPEC, elevated }), CURVA_COURSE, seed);
 }

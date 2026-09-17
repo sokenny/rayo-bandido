@@ -1,5 +1,5 @@
 import { PAL } from '../render/scene/env/palette';
-import type { CityRoadSpec, CitySpec } from './cityDef';
+import { RAMP_LIFT, type CityRoadSpec, type CitySpec } from './cityDef';
 import { hash01, type BlockOptions } from './cityGen';
 import { inRect, type Rect, type ZoneId } from './cityPlan';
 import { planMegastructures } from './cityMegastructures';
@@ -351,8 +351,8 @@ export const BAY_SPEC: CitySpec = {
   roads: CITY_ROADS,
   elevated: [
     { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },
-    ...RAMP_SPECS.map((r) => ({ tag: r.tag, spec: r.spec, lift: 0.08 })),
-    { tag: 'skyway', spec: SKYWAY_SPEC.spec, lift: 0.07 },
+    ...RAMP_SPECS.map((r) => ({ tag: r.tag, spec: r.spec, lift: RAMP_LIFT })),
+    { tag: 'skyway', spec: SKYWAY_SPEC.spec, lift: RAMP_LIFT },
   ],
   blockOptions: BAY_BLOCK_OPTIONS,
   planMegastructures,

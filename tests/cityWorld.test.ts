@@ -667,7 +667,11 @@ describe('city art budget', () => {
     // scene's lighting can actually show on street furniture: horizontal breaks with lit top
     // faces, and more emissive edges. Measured at 229k in the same 19 draw calls; the ceiling
     // leaves headroom without hiding a regression.
-    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(270000);
+    //
+    // A further ~3k is the cracks in the asphalt (`env/roadCracks.ts`): flat dark polylines on
+    // the road, thickest where the reclamation field says the city is tired. Cheap here because
+    // the Bay is small and mostly kept; the metro carries about 20k of them.
+    expect(triangles, `city triangles: ${triangles}`).toBeLessThan(274000);
     expect(triangles, 'the city is not empty').toBeGreaterThan(40000);
     // One batch per material for the whole city, the structural district included: it draws
     // into the same builders every other building does, so a new district adds triangles and

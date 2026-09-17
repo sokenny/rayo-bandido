@@ -32,6 +32,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Music now plays out of the speakers at the car meet, loud by the stack and fading across the lot.',
       'Cars now have real suspension: crest a hill fast enough and you fly, then land on the springs.',
       'The road surface itself is a little uneven now — you can feel the asphalt at speed.',
+      'The asphalt is cracked all over the city now, worst downtown and on the streets nobody looks after.',
       'The south side of the metro is no longer a plain grid: diagonals and roundabouts, Buenos Aires style.',
       'A giant steel flower stands at the new Plaza Estrella, and opens petal by petal if you hit it with the lightning gun.',
       'Guests are now asked to link a Google account so their progress is saved for good.',

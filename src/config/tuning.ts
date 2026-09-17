@@ -295,29 +295,31 @@ export const VERTICAL = {
  * design: nothing at a cruise, a car that has to be held on its line flat out.
  */
 export const ROAD_ROUGHNESS = {
-  /** Relief octaves: wavelength along the road (m), peak height (m). No potholes. */
+  /**
+   * Relief octaves: wavelength along the road (m), peak height (m). Long, low swells — the road
+   * breathes under the car rather than shaking it — and no potholes.
+   */
   octaves: [
-    { wavelength: 34, amplitude: 0.03 },
-    { wavelength: 14, amplitude: 0.018 },
-    { wavelength: 6, amplitude: 0.016 },
-    { wavelength: 2.6, amplitude: 0.006 },
+    { wavelength: 110, amplitude: 0.18 },
+    { wavelength: 45, amplitude: 0.07 },
+    { wavelength: 18, amplitude: 0.012 },
   ],
   /**
    * How fast the tyres' grip follows the load on them (1/s). A tyre needs some rolling to build
    * force again, so a buzz is felt as a blur and a swell as a real light moment.
    */
   loadRelax: 14,
-  /** Grip lost per unit of load taken off the tyres (1 = static load). */
+  /** Grip lost per unit of load taken off an axle (1 = static load). */
   unloadGrip: 0.9,
   /** Grip gained per unit of load added: tyres give back less than they lose. */
   loadGrip: 0.25,
   /** Floor under the load-scaled grip (share of normal). */
   minGrip: 0.45,
   /**
-   * Bump steer: steering angle (rad) per unit of left/right front load difference, at top
-   * speed; scales with speed squared so it only asks for corrections when the car is moving.
+   * Roll steer of the front axle: steering angle per radian of the front wheels' travel
+   * difference (one wheel up a swell, the other not). A road car sits around 0.05-0.15.
    */
-  bumpSteer: 0.1,
+  rollSteer: 0.12,
 };
 
 /**

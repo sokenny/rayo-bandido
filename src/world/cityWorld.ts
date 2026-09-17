@@ -79,6 +79,45 @@ const BUS_STOP_KERB_GAP = 0.35;
 /** Nothing parked within this of the player's spawn (m). */
 const BUS_STOP_SPAWN_CLEAR = 34;
 
+/** Height step between two ground roads that cross (m): enough that their slabs never z-fight. */
+const CROSSING_LIFT_STEP = 0.004;
+
+/**
+ * Roads crossing at grade are drawn at different heights so their slabs never z-fight. Each road
+ * takes the lowest step none of the roads it touches has taken (a greedy colouring of the
+ * crossings), so the tallest is a few steps up however many roads the city has. The car rides
+ * the unlifted ground: a lift that grew with the road's index had the metro's later streets
+ * drawn 10+ cm over the wheels.
+ */
+function assignCrossingLifts(ground: RibbonDef[]): void {
+  const CELL = 24;
+  const cells = new Map<number, number[]>();
+  const key = (cx: number, cz: number): number => (cx + 2048) * 4096 + (cz + 2048);
+  ground.forEach((rb, i) => {
+    for (const s of rb.path.samples) {
+      const r = s.halfWidth + 2;
+      for (let cx = Math.floor((s.x - r) / CELL); cx <= Math.floor((s.x + r) / CELL); cx++) {
+        for (let cz = Math.floor((s.z - r) / CELL); cz <= Math.floor((s.z + r) / CELL); cz++) {
+          const list = cells.get(key(cx, cz));
+          if (!list) cells.set(key(cx, cz), [i]);
+          else if (list[list.length - 1] !== i) list.push(i);
+        }
+      }
+    }
+  });
+  const touches = ground.map(() => new Set<number>());
+  for (const list of cells.values()) {
+    for (const a of list) for (const b of list) if (a !== b) touches[a].add(b);
+  }
+  const level = ground.map(() => -1);
+  ground.forEach((rb, i) => {
+    let l = 0;
+    while ([...touches[i]].some((j) => level[j] === l)) l++;
+    level[i] = l;
+    rb.lift = l * CROSSING_LIFT_STEP + (rb.kind === 'alley' ? 0.002 : 0);
+  });
+}
+
 /**
  * Assemble a city. Called with no argument this is Bandido Bay, exactly as it was before the
  * spec existed: the circuit, the street race and every mission instance it that way.
@@ -101,13 +140,13 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   /* ---------------------------------------------------------- roads */
 
-  const ground: RibbonDef[] = spec.roads.map((r, i) => ({
+  const ground: RibbonDef[] = spec.roads.map((r) => ({
     path: buildTrackPath(r.spec),
     kind: r.kind,
     tag: r.tag,
-    // Roads crossing at grade get their own lift each, so their slabs never z-fight.
-    lift: i * 0.004 + (r.kind === 'alley' ? 0.002 : 0),
+    lift: 0,
   }));
+  assignCrossingLifts(ground);
   const elevated: RibbonDef[] = spec.elevated.map((r) => ({ path: buildTrackPath(r.spec), kind: 'track', tag: r.tag, elevated: true, lift: r.lift }));
   for (const rb of elevated) if (!isElevated(rb.path)) throw new Error(`${spec.name}: ${rb.tag} is meant to be elevated`);
   const ribbons: RibbonDef[] = [...ground, ...elevated];

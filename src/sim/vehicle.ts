@@ -225,22 +225,18 @@ export function stepVehicle(
       : VEHICLE.slideRegripRate;
   const slide = clamp01(damp(prevSlide, slideTarget, slideRate, dt));
 
-  // The road's unevenness takes load off the tyres and puts it back (`settleVehicle`): a light
-  // tyre holds less, a pressed one only a little more. Flat out, that is the car going vague
-  // over a swell and biting again after it; at a cruise the load barely moves.
-  const load = v.tyreLoad;
-  const loadGrip = Math.max(
-    ROAD_ROUGHNESS.minGrip,
-    load < 1
-      ? 1 - (1 - load) * ROAD_ROUGHNESS.unloadGrip
-      : 1 + Math.min(load - 1, 1) * ROAD_ROUGHNESS.loadGrip,
-  );
-  const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide) * loadGrip;
+  // The road's swells take load off an axle and put it back (`settleVehicle`): a light tyre
+  // holds less, a pressed one only a little more. The rear's grip is what keeps the car's
+  // velocity behind its nose, so a light rear mid-corner lets the tail step out; the front's is
+  // what turns it, so a light front runs wide. At a cruise the load barely moves.
+  const frontGrip = axleGrip(v.frontLoad);
+  const rearGrip = axleGrip(v.rearLoad);
+  const grip = lerp(VEHICLE.gripLateral, VEHICLE.gripLateralDrift, slide) * rearGrip;
   // The loaded front can hold more lateral force, which is what closes the apex.
   const latCap =
     lerp(VEHICLE.maxLatAccel, VEHICLE.maxLatAccelDrift, slide) *
     lerp(1, VEHICLE.brakeFrontBite, brakeLoad) *
-    loadGrip;
+    rearGrip;
 
   // --- 4. Longitudinal. -----------------------------------------------------------------
   const maxForward = VEHICLE.maxSpeed + (nitroActive ? NITRO.boostMaxSpeedBonus : 0);
@@ -341,15 +337,16 @@ export function stepVehicle(
   // --- 5. Yaw. --------------------------------------------------------------------------
   // Bicycle yaw, limited by how much lateral acceleration the tyres can produce. Drifting
   // raises that budget (`driftYawGain`) so the nose can out-rotate the velocity.
-  // Bump steer: one front wheel pressed harder than the other tugs the wheels its way, and the
-  // car goes where they point. Nothing at town speeds; flat out, a line that has to be held.
-  const bumpSteer = v.loadSkew * ROAD_ROUGHNESS.bumpSteer * speedT * speedT;
-  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle + bumpSteer);
+  // Roll steer: one front wheel up a swell and the other not toes the axle a hair. The angle
+  // is the same at any speed; the yaw it buys grows with speed, so it only asks for a
+  // correction when the car is really moving.
+  const rollSteer = v.frontRoll * ROAD_ROUGHNESS.rollSteer;
+  const kinematicYaw = (speed / VEHICLE.wheelbase) * Math.tan(v.steerAngle + rollSteer);
   // Weight on the nose = more front grip to spend on rotation: the left-foot brake tightens
   // the line rather than opening it.
   const yawBudget =
     VEHICLE.maxLatAccel * lerp(1, VEHICLE.driftYawGain, slide) * lerp(1, VEHICLE.brakeYawGain, brakeLoad);
-  const yawLimit = (yawBudget * loadGrip) / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
+  const yawLimit = (yawBudget * frontGrip) / Math.max(absSpeed, VEHICLE.yawLimitMinSpeed);
   let yaw = clamp(kinematicYaw, -yawLimit, yawLimit);
 
   // Handbrake kick. The pull has an angle *budget* rather than a fixed life: a flick buys
@@ -445,6 +442,14 @@ export function stepVehicle(
   v.throttleApplied = nitroActive ? Math.max(throttle, VEHICLE.nitroIdleThrottle) : throttle;
   v.brakeApplied = brake;
   v.handbrake = cmd.handbrake;
+}
+
+/** Grip of an axle carrying `load` (1 = static), per `ROAD_ROUGHNESS`. */
+function axleGrip(load: number): number {
+  return Math.max(
+    ROAD_ROUGHNESS.minGrip,
+    load < 1 ? 1 - (1 - load) * ROAD_ROUGHNESS.unloadGrip : 1 + Math.min(load - 1, 1) * ROAD_ROUGHNESS.loadGrip,
+  );
 }
 
 /** Hermite ease between two edges. Local copy so `src/core/math.ts` stays untouched. */

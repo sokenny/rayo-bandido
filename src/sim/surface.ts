@@ -29,7 +29,7 @@ import { sampleRoadRoughness, type RoadRoughnessSample } from './roadRoughness';
  *
  * The road is not a plane under the wheels: `src/sim/roadRoughness.ts` lays a few centimetres of
  * unevenness over the surface field (`ArenaLayout.roughness`), so the springs never quite rest
- * at speed. What they push with is handed to the handling model as `tyreLoad` / `loadSkew`.
+ * at speed. What they push with is handed to the handling model as `frontLoad` / `rearLoad` / `frontRoll`.
  *
  * The horizontal motion stays the handling model's; the road's push is treated as vertical,
  * which is what leaves the planar model's tuning untouched on a street.
@@ -47,6 +47,7 @@ const CORNER_GX = new Float64Array(4);
 const CORNER_GZ = new Float64Array(4);
 const BUMP_CLOSING = new Float64Array(4);
 const CORNER_FORCE = new Float64Array(4);
+const CORNER_PEN = new Float64Array(4);
 const BUMP_PASSES = 8;
 
 function sampleSurface(field: SurfaceField | null, x: number, z: number, hint: number): void {
@@ -75,6 +76,7 @@ export function settleVehicle(v: VehicleState, layout: ArenaLayout, dt = SIM_STE
   const rz = rightZ(v.heading);
   const airTimeBefore = v.airTime;
   const roughness = layout.roughness ?? 1;
+  let relief = 0;
 
   // --- Springs: each wheel reads the road under itself. ----------------------------------
   let cp = Math.cos(v.pitch);
@@ -98,6 +100,7 @@ export function settleVehicle(v: VehicleState, layout: ArenaLayout, dt = SIM_STE
     sampleSurface(field, cx, cz, cy + fall);
     if (roughness > 0) {
       sampleRoadRoughness(cx, cz, roughness, ROUGH);
+      relief += ROUGH.h * 0.25;
       SAMPLE.y += ROUGH.h;
       SAMPLE.gx += ROUGH.gx;
       SAMPLE.gz += ROUGH.gz;
@@ -108,6 +111,7 @@ export function settleVehicle(v: VehicleState, layout: ArenaLayout, dt = SIM_STE
     CORNER_GZ[i] = SAMPLE.gz;
     // Compressed by `pen`; preloaded, so it can hang `g / 4K` below the road before it leaves.
     const pen = SAMPLE.y - cy;
+    CORNER_PEN[i] = pen;
     let force = g / 4 + K * pen;
     if (force <= 0) continue;
     // How fast the road closes on this wheel: the road's own rise under the car's motion, less
@@ -125,8 +129,15 @@ export function settleVehicle(v: VehicleState, layout: ArenaLayout, dt = SIM_STE
 
   // --- What the tyres feel: the springs' push, relaxed (a tyre builds force as it rolls). ---
   const relax = 1 - Math.exp(-ROAD_ROUGHNESS.loadRelax * dt);
-  v.tyreLoad += (lift / g - v.tyreLoad) * relax;
-  v.loadSkew += (((CORNER_FORCE[1] - CORNER_FORCE[0]) * 2) / g - v.loadSkew) * relax;
+  v.frontLoad += (((CORNER_FORCE[0] + CORNER_FORCE[1]) * 2) / g - v.frontLoad) * relax;
+  v.rearLoad += (((CORNER_FORCE[2] + CORNER_FORCE[3]) * 2) / g - v.rearLoad) * relax;
+  // Travel difference across the front axle; a wheel off the road hangs at full droop.
+  const droop = -g / (4 * K);
+  const penL = CORNER_FORCE[0] > 0 ? CORNER_PEN[0] : droop;
+  const penR = CORNER_FORCE[1] > 0 ? CORNER_PEN[1] : droop;
+  v.frontRoll = contacts > 0 ? (penR - penL) / (2 * B) : 0;
+  v.prevRoadRelief = v.roadRelief;
+  v.roadRelief = relief;
 
   // --- Integrate. -------------------------------------------------------------------------
   v.vy = Math.max(-VERTICAL.maxFallSpeed, v.vy + (lift - g) * dt);
@@ -245,8 +256,10 @@ export function restVehicle(v: VehicleState): void {
   v.airborne = false;
   v.airTime = 0;
   v.landingImpact = 0;
-  v.tyreLoad = 1;
-  v.loadSkew = 0;
+  v.frontLoad = 1;
+  v.rearLoad = 1;
+  v.frontRoll = 0;
+  v.prevRoadRelief = v.roadRelief;
 }
 
 export function settleTarget(t: TargetState, layout: ArenaLayout): void {
