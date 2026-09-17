@@ -33,7 +33,7 @@ import type {
   RushRival,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MEET_MUSIC, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -93,7 +93,7 @@ import { activitySuppressed, engagedActivity, introEngaged, type ActivityKind } 
 import { INTRO } from './content/intro';
 import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installIntroMeetup, skipIntro, skipIntroLine } from './sim/intro';
 import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanRig';
-import type { CrowdSubject } from './render/scene/env/humanActs';
+import { speakerSong, type CrowdSubject } from './render/scene/env/humanActs';
 import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
 import { canAffordShot } from './sim/lightning';
 import { MESSAGES as FLAIR_MESSAGES, flairSeconds } from './sim/flair';
@@ -495,7 +495,13 @@ export function createGame(
   end();
 
   end = measure('audio');
-  const audio = createAudio(state.targets.length, busStopCrowds(world.plan.busStops));
+  // The speaker stacks at the meets play the meet's song (`audio/meetSpeakers.ts`).
+  const meetSpeakerPoints = (world.plan.meets ?? []).flatMap((m) => m.props.filter((p) => p.kind === 'speakers').map((p) => ({ x: p.x, z: p.z })));
+  if (meetSpeakerPoints.length > 0) {
+    speakerSong.x = meetSpeakerPoints[0].x;
+    speakerSong.z = meetSpeakerPoints[0].z;
+  }
+  const audio = createAudio(state.targets.length, busStopCrowds(world.plan.busStops), meetSpeakerPoints);
   // Background theme song. Loops quietly under the game.
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
@@ -504,7 +510,14 @@ export function createGame(
   // each caller, so a line ending (which restores the duck) cannot bring it back early; `endIntro`
   // lets go. Not the player's mute (M): that one would silence the voice too.
   let introHoldsMusic = !!state.intro;
-  const duckMusic = (level: number): void => theme.duck(introHoldsMusic ? 0 : level);
+  // Two reasons to lower the radio, multiplied: a voice over it, and the meet's own song in earshot.
+  let voiceDuck = 1;
+  let meetDuck = 1;
+  const applyMusicDuck = (): void => theme.duck(introHoldsMusic ? 0 : voiceDuck * meetDuck);
+  const duckMusic = (level: number): void => {
+    voiceDuck = level;
+    applyMusicDuck();
+  };
   duckMusic(1);
   // Spoken dialogue follows the game's mute (M) and sits over the music the way a call does.
   configureDialogueVoice({ isMuted: () => theme.isMuted(), duckMusic, duckLevel: INTRO.call.duck });
@@ -852,7 +865,8 @@ export function createGame(
     }
     layout.playerSpawn = { ...cityArrival };
     introHoldsMusic = false;
-    theme.duck(1);
+    voiceDuck = 1;
+    applyMusicDuck();
     placeIntroMarker();
     refreshMapMarks();
   }
@@ -2084,6 +2098,14 @@ export function createGame(
     hearing.vx = v.vx;
     hearing.vz = v.vz;
     placeDialogueListener(hearing);
+    // The radio steps aside for the song at the meet, in steps coarse enough not to re-ramp every frame.
+    const meetHeard = Math.round(audio.meetPresence() * 20) / 20;
+    const nextMeetDuck = 1 - meetHeard * (1 - MEET_MUSIC.radioUnder);
+    if (nextMeetDuck !== meetDuck) {
+      meetDuck = nextMeetDuck;
+      applyMusicDuck();
+    }
+    speakerSong.beats = audio.meetBeats();
     audio.update(
       frameDt,
       {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CROWD } from '../src/config/tuning';
-import { createActor, createPose, stepActor, type ActorSpec, type BodyPose, type CrowdSubject, type HumanAct } from '../src/render/scene/env/humanActs';
+import { createActor, createPose, speakerSong, stepActor, type ActorSpec, type BodyPose, type CrowdSubject, type HumanAct } from '../src/render/scene/env/humanActs';
 
 /**
  * What people do (`src/render/scene/env/humanActs.ts`). The shapes of the poses are judged by
@@ -130,5 +130,27 @@ describe('what people do', () => {
     }
     expect(deepest).toBeGreaterThan(0.6);
     expect(upright * DT).toBeGreaterThan(6);
+  });
+  it("nods on the song's own beat by the meet's speakers, and on the clock elsewhere", () => {
+    const pose = createPose();
+    const nodAt = (s: ActorSpec, beats: number, clock: number): number => {
+      speakerSong.beats = beats;
+      stepActor(createActor(s), clock, DT, null, pose);
+      return pose.nod;
+    };
+    speakerSong.x = 10;
+    speakerSong.z = 18;
+    try {
+      const near = spec('vibe');
+      // Head down on the beat, up between beats, whatever the wall clock says.
+      expect(nodAt(near, 12, 3.3)).toBeGreaterThan(nodAt(near, 12.5, 3.3) + 0.2);
+      // Speakers somewhere else: the song does not reach them.
+      const far = spec('vibe', { x: 500, focus: { x: 500, z: 18 } });
+      expect(nodAt(far, 12, 3.3)).toBeCloseTo(nodAt(far, 12.5, 3.3), 6);
+      // No song playing: the clock at CROWD.bpm.
+      expect(nodAt(near, NaN, 60 / CROWD.bpm)).toBeGreaterThan(nodAt(near, NaN, 30 / CROWD.bpm) + 0.2);
+    } finally {
+      speakerSong.beats = NaN;
+    }
   });
 });

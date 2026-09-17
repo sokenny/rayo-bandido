@@ -31,6 +31,14 @@ import type { HumanPose } from './humanFigure';
  * space the actor's own `x`/`z` are in.
  */
 
+/**
+ * The song on the meet's speakers, written every frame by the composition root from the audio
+ * (`audio/meetSpeakers.ts`): beats into it (NaN while it is not playing) and where the stack is.
+ * Someone vibing to speakers within `CROWD.songRadius` of it nods on the song's own beat rather
+ * than on the made-up clock, so the heads land on the kick you hear.
+ */
+export const speakerSong = { beats: NaN, x: 0, z: 0 };
+
 /** Things a person does. */
 export type HumanAct =
   /** Waits, shifts their weight, looks about. */
@@ -503,12 +511,16 @@ function pace(a: Actor, t: number, dt: number, p: BodyPose): void {
 
 function vibe(a: Actor, clock: number, t: number, p: BodyPose): void {
   const s = a.spec.seed * 13;
-  // Everyone near the speakers hears the same music, so the beat is on the shared clock.
-  const beat = (clock * CROWD.bpm) / 60;
+  // Everyone near the speakers hears the same music, so the beat is on the shared clock — the
+  // song's own, when it is playing and these are its speakers.
+  const f = a.spec.focus;
+  const song = Number.isFinite(speakerSong.beats) && !!f && Math.hypot(f.x - speakerSong.x, f.z - speakerSong.z) < CROWD.songRadius;
+  const beat = song ? speakerSong.beats : (clock * CROWD.bpm) / 60;
   const swing = Math.sin(Math.PI * beat);
   const down = 1 - Math.abs(swing);
   p.lift += -0.04 * down;
-  p.nod = 0.06 + 0.14 * down;
+  // The head drops sharp on the beat and comes up easy between them.
+  p.nod = 0.04 + 0.26 * down * down * down;
   p.twist = 0.1 * swing;
   p.tilt += 0.04 * swing;
   p.legL = 0.05 * swing;

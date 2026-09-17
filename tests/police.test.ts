@@ -100,7 +100,7 @@ describe('police eligibility', () => {
     const p = state.police!;
     // A live situation: heat, a star, a chaser on the road.
     stepGame(state, cmd, layout, DT);
-    p.heat = 60;
+    p.heat = POLICE.stars[1] + 5;
     const u = p.units[0];
     u.status = 'active';
     u.role = 'pursuit';
@@ -192,10 +192,9 @@ describe('wanted heat', () => {
 });
 
 describe('pursuit', () => {
-  it('starts at two stars with one chaser, grows to the cap at three, and never past it', () => {
+  it('starts at two stars (three unseen close shots) with one chaser, grows to the cap at three, and never past it', () => {
     const r = rig();
-    tick(r, 1, (events) => offense(events, 10, r.v));
-    tick(r, 1, (events) => offense(events, 10, r.v));
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
     expect(r.p.stars).toBe(2);
     expect(r.p.phase).toBe('pursuit');
     const chasers = (): number => r.p.units.filter((u) => u.status === 'active' && u.role === 'pursuit').length;
@@ -259,8 +258,7 @@ describe('pursuit', () => {
 
   it('is escaped by staying out of sight: ESCAPING after the grace, over after the countdown', () => {
     const r = rig();
-    tick(r, 1, (events) => offense(events, 10, r.v));
-    tick(r, 1, (events) => offense(events, 10, r.v));
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
     expect(r.p.phase).toBe('pursuit');
     // The chaser has the car in view, then the car is gone: far outside the city, where no
     // car can be put near the player.
@@ -291,8 +289,7 @@ describe('pursuit', () => {
 
   it('cancels the escape when a chaser sees the car again', () => {
     const r = rig();
-    tick(r, 1, (events) => offense(events, 10, r.v));
-    tick(r, 1, (events) => offense(events, 10, r.v));
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
     const first = r.p.units.find((unit) => unit.status === 'active' && unit.role === 'pursuit')!;
     first.x = r.v.x + 6;
     first.z = r.v.z;
@@ -319,8 +316,7 @@ describe('pursuit', () => {
 
   it('arrests a car that sits still on a chaser\'s bumper, fines it, and hands it back', () => {
     const r = rig();
-    tick(r, 1, (events) => offense(events, 10, r.v));
-    tick(r, 1, (events) => offense(events, 10, r.v));
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
     expect(r.p.stars).toBe(2);
     const u = r.p.units.find((unit) => unit.status === 'active' && unit.role === 'pursuit')!;
     u.x = r.v.x + 3;

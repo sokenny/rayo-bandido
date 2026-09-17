@@ -37,7 +37,7 @@ export type QuickPlayChoice = 'offline' | 'online';
 /** How often the open-room count is re-read while a screen is up. */
 const POLL_MS = 5000;
 /** The dossier row that carries the room count. */
-const ROOMS_LABEL = 'ROOMS';
+const ROOMS_LABEL = 'SALAS';
 
 /** `160` -> `2:40`. A target time the way a pit board would write it. */
 function lapTime(seconds: number): string {
@@ -49,8 +49,8 @@ function lapTime(seconds: number): string {
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 /** The street circuit every event of the series runs on, as the dossier writes it. */
-const CURVA_LINE = 'LA CURVA · 3.8 KM · 01 LAP';
-const GRID_LINE = 'BANDIDO GRID · 1.5 KM · 02 LAPS';
+const CURVA_LINE = 'LA CURVA · 3.8 KM · 01 VUELTA';
+const GRID_LINE = 'BANDIDO GRID · 1.5 KM · 02 VUELTAS';
 
 /**
  * What this browser is up to in each chain, read from the same storage the worlds read on boot
@@ -68,22 +68,22 @@ function missionLines(): Record<RoomGame, { mission: string; target: string }> {
   return {
     rush: {
       mission: rushAllClear(rush.cleared)
-        ? `ALL ${rushLevelCount()} CLEAR`
+        ? `LAS ${rushLevelCount()} COMPLETAS`
         : `${rushLevel + 1}/${rushLevelCount()}`,
-      target: `${rushTargetScore(rush.cleared).toLocaleString('en-US')} PTS IN ${RUSH.durationSeconds} S`,
+      target: `${rushTargetScore(rush.cleared).toLocaleString('en-US')} PTS EN ${RUSH.durationSeconds} S`,
     },
     street: {
       mission:
         street.cleared >= streetEventCount()
-          ? `ALL ${streetEventCount()} WON · ${event.name}`
+          ? `LAS ${streetEventCount()} GANADAS · ${event.name}`
           : `${event.name} · ${event.difficulty}`,
-      target: `WIN AGAINST ${event.rivals} RIVAL${event.rivals === 1 ? '' : 'S'}`,
+      target: `GANALE A ${event.rivals} RIVAL${event.rivals === 1 ? '' : 'ES'}`,
     },
     circuit: {
       mission: timeAttackAllClear(ta.cleared)
-        ? `ALL ${timeAttackLevelCount()} CLEAR · ${taSpec.name}`
+        ? `LAS ${timeAttackLevelCount()} COMPLETAS · ${taSpec.name}`
         : `${timeAttackLevelIndex(ta.cleared) + 1}/${timeAttackLevelCount()} · ${taSpec.name}`,
-      target: `${lapTime(taSpec.seconds)} · ${taSpec.crashes === 0 ? 'NO CONTACT' : `${taSpec.crashes} CRASH${taSpec.crashes === 1 ? '' : 'ES'} MAX`}`,
+      target: `${lapTime(taSpec.seconds)} · ${taSpec.crashes === 0 ? 'SIN CONTACTO' : `MÁX. ${taSpec.crashes} CHOQUE${taSpec.crashes === 1 ? '' : 'S'}`}`,
     },
   };
 }
@@ -97,13 +97,13 @@ export const GAME_NAMES: Record<RoomGame, string> = {
 
 /** How many rooms are up for each game, as a dossier row says it. One request for all three. */
 async function roomsLines(): Promise<Record<RoomGame, string>> {
-  const line = (count: number): string => (count === 0 ? 'NONE OPEN · HOST ONE' : `${pad2(count)} OPEN`);
+  const line = (count: number): string => (count === 0 ? 'NINGUNA ABIERTA · ABRÍ UNA' : `${pad2(count)} ABIERTA${count === 1 ? '' : 'S'}`);
   try {
     const rooms = (await fetchRooms()).filter((room) => room.mode !== 'world');
     const count = (game: RoomGame): number => rooms.filter((room) => room.game === game).length;
     return { rush: line(count('rush')), street: line(count('street')), circuit: line(count('circuit')) };
   } catch {
-    return { rush: 'NO SERVER', street: 'NO SERVER', circuit: 'NO SERVER' };
+    return { rush: 'SIN SERVIDOR', street: 'SIN SERVIDOR', circuit: 'SIN SERVIDOR' };
   }
 }
 
@@ -120,38 +120,38 @@ export function showQuickPlayMenu(root: HTMLElement, callbacks: QuickPlayCallbac
   const entries: Array<MenuScreenEntry<RoomGame>> = [
     {
       id: 'rush',
-      kicker: 'SCORE ATTACK',
+      kicker: 'A PUNTOS',
       name: GAME_NAMES.rush,
-      desc: `${RUSH.durationSeconds} seconds loose in Bandido Metro. Drift to charge the Rayo, bolt the electric cars and keep the streak alive. Alone it is the mission chain; online everybody starts at GO and the biggest score takes it.`,
+      desc: `${RUSH.durationSeconds} segundos sueltos en Bandido Metro. Derrapá para cargar el Rayo, apagá los autos eléctricos y mantené viva la racha. Solo, es la cadena de misiones; online, todos arrancan en el mismo GO y gana el que más puntos hace.`,
       spec: [
-        ['MISSION', lines.rush.mission],
-        ['TARGET', lines.rush.target],
-        ['ZONE', 'BANDIDO METRO'],
-        [ROOMS_LABEL, 'CHECKING'],
+        ['MISIÓN', lines.rush.mission],
+        ['OBJETIVO', lines.rush.target],
+        ['ZONA', 'BANDIDO METRO'],
+        [ROOMS_LABEL, 'BUSCANDO'],
       ],
     },
     {
       id: 'street',
       kicker: 'LA CURVA',
       name: GAME_NAMES.street,
-      desc: `La Curva: up the highway over the car meet, across The Stack's deck and back down. Alone it is the series against the AI rivals; online it is you and up to ${MAX_PLAYERS - 1} friends on the same grid.`,
+      desc: `La Curva: subí a la autopista sobre el car meet, cruzá el deck de The Stack y volvé a bajar. Solo, es la serie contra los rivales de la IA; online, sos vos y hasta ${MAX_PLAYERS - 1} amigos en la misma grilla.`,
       spec: [
-        ['EVENT', lines.street.mission],
-        ['CIRCUIT', CURVA_LINE],
-        ['OFFLINE', lines.street.target],
-        [ROOMS_LABEL, 'CHECKING'],
+        ['EVENTO', lines.street.mission],
+        ['CIRCUITO', CURVA_LINE],
+        ['SOLO', lines.street.target],
+        [ROOMS_LABEL, 'BUSCANDO'],
       ],
     },
     {
       id: 'circuit',
       kicker: 'BANDIDO GRID',
       name: GAME_NAMES.circuit,
-      desc: `Two laps of the Bandido Grid against a target time and a crash allowance, three missions deep. Online it is the same two laps with up to ${MAX_PLAYERS} cars in them, and the flag decides.`,
+      desc: `Dos vueltas al Bandido Grid contra un tiempo objetivo y un límite de choques, en tres misiones. Online son las mismas dos vueltas con hasta ${MAX_PLAYERS} autos, y decide la bandera.`,
       spec: [
-        ['MISSION', lines.circuit.mission],
-        ['TARGET', lines.circuit.target],
-        ['CIRCUIT', GRID_LINE],
-        [ROOMS_LABEL, 'CHECKING'],
+        ['MISIÓN', lines.circuit.mission],
+        ['OBJETIVO', lines.circuit.target],
+        ['CIRCUITO', GRID_LINE],
+        [ROOMS_LABEL, 'BUSCANDO'],
       ],
     },
   ];
@@ -159,8 +159,8 @@ export function showQuickPlayMenu(root: HTMLElement, callbacks: QuickPlayCallbac
   let done = false;
   const screen: MenuScreen<RoomGame> = createMenuScreen<RoomGame>(root, {
     screen: 'QUICK PLAY',
-    sub: 'QUICK PLAY · PICK YOUR POISON',
-    hint: '<b>←</b> <b>→</b> select · <b>ENTER</b> execute · <b>ESC</b> back to the menu',
+    sub: 'QUICK PLAY · ELEGÍ TU VENENO',
+    hint: '<b>←</b> <b>→</b> elegir · <b>ENTER</b> aceptar · <b>ESC</b> volver al menú',
     entries,
     onSelect(choice) {
       done = true;
@@ -203,60 +203,60 @@ export function showQuickPlayModeMenu(
     game === 'rush'
       ? {
           id: 'offline',
-          kicker: 'SOLO · MISSION CHAIN',
+          kicker: 'SOLO · CADENA DE MISIONES',
           name: 'OFFLINE',
-          desc: `Dropped on the marker with the count-in already running: ${RUSH.durationSeconds} seconds, every electric car in reach, and the mission target to beat. R runs it again from the marker.`,
+          desc: `Aparecés en el marcador con la cuenta regresiva ya en marcha: ${RUSH.durationSeconds} segundos, todos los eléctricos a tiro y el objetivo de la misión para superar. Con R la corrés de nuevo desde el marcador.`,
           spec: [
-            ['MISSION', lines.mission],
-            ['TARGET', lines.target],
-            ['BOARD', 'EVERY RUN COUNTS'],
+            ['MISIÓN', lines.mission],
+            ['OBJETIVO', lines.target],
+            ['RANKING', 'TODA CORRIDA CUENTA'],
           ],
         }
       : game === 'street'
         ? {
             id: 'offline',
-            kicker: 'SOLO · VS AI RIVALS',
+            kicker: 'SOLO · VS RIVALES IA',
             name: 'OFFLINE',
-            desc: 'The newest event of the series you have reached, against its AI field. Win it and the next, harder field is waiting on the same grid.',
+            desc: 'El último evento de la serie al que llegaste, contra sus rivales de la IA. Ganalo y en la misma grilla te espera el siguiente, más difícil.',
             spec: [
-              ['EVENT', lines.mission],
-              ['GOAL', lines.target],
-              ['CIRCUIT', CURVA_LINE],
+              ['EVENTO', lines.mission],
+              ['META', lines.target],
+              ['CIRCUITO', CURVA_LINE],
             ],
           }
         : {
             id: 'offline',
-            kicker: 'SOLO · MISSION CHAIN',
+            kicker: 'SOLO · CADENA DE MISIONES',
             name: 'OFFLINE',
-            desc: 'The Bandido Grid on your own. Two laps of the city against a target time AND a crash allowance: get round it, then carry speed, then do it without touching a thing.',
+            desc: 'El Bandido Grid para vos solo. Dos vueltas a la ciudad contra un tiempo objetivo Y un límite de choques: primero completala, después llevá velocidad, y al final hacelo sin tocar nada.',
             spec: [
-              ['MISSION', lines.mission],
-              ['TARGET', lines.target],
-              ['CIRCUIT', GRID_LINE],
+              ['MISIÓN', lines.mission],
+              ['OBJETIVO', lines.target],
+              ['CIRCUITO', GRID_LINE],
             ],
           };
 
   const online: MenuScreenEntry<QuickPlayChoice> = {
     id: 'online',
-    kicker: 'ROOM · PLAY WITH FRIENDS',
+    kicker: 'SALA · JUGÁ CON AMIGOS',
     name: 'ONLINE',
     desc:
       game === 'rush'
-        ? `A room for up to ${MAX_PLAYERS}. Everybody is dropped at the same marker, the run starts at the same GO, and when the clock runs out the biggest score wins. Open one and send the link, or join with a code.`
-        : `A room for up to ${MAX_PLAYERS}. Open one and send your friends the link or the code, or join a room that is already up. Same grid, same lights, nowhere to run.`,
+        ? `Una sala para hasta ${MAX_PLAYERS}. Todos aparecen en el mismo marcador, la corrida arranca en el mismo GO y cuando se acaba el reloj gana el puntaje más alto. Abrí una y mandá el link, o entrá con un código.`
+        : `Una sala para hasta ${MAX_PLAYERS}. Abrí una y pasales a tus amigos el link o el código, o sumate a una que ya esté abierta. Misma grilla, mismas luces, sin dónde esconderse.`,
     spec: [
-      ['GRID', `UP TO ${pad2(MAX_PLAYERS)} CARS`],
-      [game === 'rush' ? 'WINNER' : 'CIRCUIT', game === 'rush' ? 'HIGHEST SCORE' : game === 'street' ? CURVA_LINE : GRID_LINE],
-      ['ENTRY', 'ROOM CODE OR LINK'],
-      [ROOMS_LABEL, 'CHECKING'],
+      ['GRILLA', `HASTA ${pad2(MAX_PLAYERS)} AUTOS`],
+      [game === 'rush' ? 'GANADOR' : 'CIRCUITO', game === 'rush' ? 'MAYOR PUNTAJE' : game === 'street' ? CURVA_LINE : GRID_LINE],
+      ['ENTRADA', 'CÓDIGO O LINK'],
+      [ROOMS_LABEL, 'BUSCANDO'],
     ],
   };
 
   let done = false;
   const screen: MenuScreen<QuickPlayChoice> = createMenuScreen<QuickPlayChoice>(root, {
     screen: name,
-    sub: `QUICK PLAY · ${name} · ALONE OR WITH FRIENDS`,
-    hint: '<b>←</b> <b>→</b> select · <b>ENTER</b> execute · <b>ESC</b> back to quick play',
+    sub: `QUICK PLAY · ${name} · SOLO O CON AMIGOS`,
+    hint: '<b>←</b> <b>→</b> elegir · <b>ENTER</b> aceptar · <b>ESC</b> volver a quick play',
     entries: [offline, online],
     onSelect(choice) {
       done = true;

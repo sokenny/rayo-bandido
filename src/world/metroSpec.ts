@@ -463,6 +463,9 @@ export const METRO_MEET: CarMeetSpec = {
     { x: -562.13, z: 327.32, heading: -Math.PI / 2, kind: 'idle', seed: 4, act: 'warm', focus: { x: -563.2, z: 326.5 } },
     { x: -564.28, z: 325.69, heading: 0.9, kind: 'pocket', seed: 12, act: 'warm', focus: { x: -563.2, z: 326.5 } },
     { x: -564.2, z: 321.6, heading: 1.93, kind: 'idle', seed: 15, act: 'vibe', focus: { x: -561.8, z: 322.5 } },
+    // Two more in front of the stack, heads going to the song.
+    { x: -559.3, z: 320.2, heading: -0.7, kind: 'folded', seed: 16, act: 'vibe', focus: { x: -561.8, z: 322.5 } },
+    { x: -561.6, z: 319.0, heading: 0, kind: 'pocket', seed: 17, act: 'vibe', focus: { x: -561.8, z: 322.5 } },
     // Behind the row along the north fence: two talking, the cooler, and someone pacing on the phone.
     { x: -547.2, z: 243.2, heading: 0.15, kind: 'folded', seed: 5 },
     { x: -544.9, z: 244.2, heading: -0.7, kind: 'pocket', seed: 6 },

@@ -1539,6 +1539,34 @@ export const SONGS = {
   whiteboyRick: { src: '/songs/whiteboy-rick.mp3', startAt: 10 },
   kloudbug: { src: '/songs/kloudbug-hailstones.mp3', startAt: 0 },
   ekstrak: { src: '/songs/ekstrak-belt.mp3', startAt: 0 },
+  /** Lifestyle — Plaudo. Not on the radio: it is what the speakers at the meet play (`MEET_MUSIC`). */
+  plaudo: { src: '/songs/lifestyle-plaudo.mp3', startAt: 0 },
+};
+
+/**
+ * The speakers at the car meet (`src/audio/meetSpeakers.ts`): a song on loop, heard from the stack
+ * (`speakers` props of every meet). The people vibing by it nod on its beat (`humanActs.ts`), so
+ * `bpm` and `firstBeat` are the recording's own, measured off the file. Distances in metres.
+ */
+export const MEET_MUSIC = {
+  song: SONGS.plaudo,
+  /** Measured: 83.000 BPM, hats on the eighths, the grid starting 0.02 s in. */
+  bpm: 83,
+  firstBeat: 0.02,
+  /** Loudness beside the stack. */
+  volume: 0.55,
+  /** Full within `near`; silent past `far`. The arrival at the gate (≈35 m) already hears it. */
+  near: 9,
+  far: 110,
+  /** Lowpass with distance: open at the stack, the bass-only thump of a party across the lot. */
+  brightHz: 16000,
+  darkHz: 900,
+  /** Share of the full stereo spread: a wall of sound is only loosely somewhere. */
+  panDepth: 0.6,
+  /** Share of its level kept under a spoken line (BadKala at the meet, a micro-scene). */
+  underVoice: 0.35,
+  /** The radio steps aside to this share of its volume while the meet is fully heard. */
+  radioUnder: 0.15,
 };
 
 /** One entry of `SONGS`. */
@@ -2398,27 +2426,28 @@ export const POLICE = {
   /** What a patrol has to be, relative to an offence, to have seen it. */
   detection: {
     /** Metres, from the patrol to either the player or the car that was hit. */
-    radius: 60,
-    /** Cosine of the half-angle: -0.2 is "in front or beside", about 100 degrees each way. */
-    forwardCos: -0.2,
+    radius: 50,
+    /** Cosine of the half-angle: 0.1 is "in front", about 84 degrees each way. */
+    forwardCos: 0.1,
   },
   heat: {
     max: 100,
     /** Offence heat by the distance the bolt crossed (m). */
     closeRange: 25,
     mediumRange: 60,
-    close: 35,
-    medium: 20,
-    far: 10,
+    close: 25,
+    medium: 15,
+    far: 8,
     /** On top, when a patrol saw it happen. */
-    witnessed: 15,
+    witnessed: 17,
     /** Heat lost per second while nothing is happening and nobody can see the car. */
-    decayPerSecond: 3,
+    decayPerSecond: 4,
     /** Seconds after the last offence before decay starts. */
-    decayDelay: 5,
+    decayDelay: 4,
   },
   /** Heat at which each star lights: one, two, three. */
-  stars: [25, 50, 75],
+  /** Unseen, a pursuit takes three close shots in a row; a patrol that sees one chases at once. */
+  stars: [25, 60, 85],
   /** Pursuing cars allowed by star count (index = stars). */
   unitsByStars: [0, 0, 1, 3],
   /** Radius (m) inside which an alerted patrol drives to where the offence happened. */
@@ -2772,8 +2801,13 @@ export const CROWD = {
   flinchStep: 0.3,
   /** Walking pace of someone pacing a beat on the phone (m/s). */
   paceSpeed: 0.95,
-  /** Tempo the people by the speakers move to. */
-  bpm: 96,
+  /**
+   * Tempo the people by the speakers move to while no song is playing (before the first gesture).
+   * Once the meet's song plays they take its beat instead (`MEET_MUSIC`), so this matches it.
+   */
+  bpm: 83,
+  /** Someone vibing to speakers within this (m) of the meet's stack nods to that song. */
+  songRadius: 12,
   /**
    * Level of detail, by camera distance to a crowd (m): full rate inside `fullWithin`, every
    * `farStride`th frame out to `animateWithin`, and frozen beyond — a person there is a few

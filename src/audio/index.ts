@@ -15,6 +15,7 @@ import { createHorns } from './horns';
 import type { PassByGust } from './passBy';
 import { createAmbientVoices } from './ambientVoice';
 import { createMicroSceneVoices } from './microSceneVoice';
+import { createMeetSpeakers } from './meetSpeakers';
 import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
 import type { BusStopCrowd } from '../world/busStopCrowds';
 import { skidIntensity } from './dsp';
@@ -81,6 +82,10 @@ export interface AudioSystem {
    * once a frame, so the rules can hold a conversation back without knowing what an AudioContext is.
    */
   microScenesBlocked(): boolean;
+  /** Beats into the song on the meet's speakers (`audio/meetSpeakers.ts`), NaN while it is not playing. */
+  meetBeats(): number;
+  /** 0..1: how much of the meet's song the listener is hearing, for the radio to step aside. */
+  meetPresence(): number;
   /** AudioContext state for QA/automation: 'suspended' | 'running' | 'closed' | 'unavailable'. */
   status(): string;
   dispose(): void;
@@ -94,14 +99,23 @@ const SILENT: AudioSystem = {
   passBy() {},
   lightningCharging() {},
   microScenesBlocked: () => false,
+  meetBeats: () => NaN,
+  meetPresence: () => 0,
   reset() {},
   setMuted() {},
   status: () => 'unavailable',
   dispose() {},
 };
 
-/** `busStops`: the people waiting at stops (`world/busStopCrowds.ts`), who may shout at the car. */
-export function createAudio(targetCount: number, busStops: readonly BusStopCrowd[] = []): AudioSystem {
+/**
+ * `busStops`: the people waiting at stops (`world/busStopCrowds.ts`), who may shout at the car.
+ * `meetSpeakerPoints`: where the speaker stacks at the world's car meets stand, which play its song.
+ */
+export function createAudio(
+  targetCount: number,
+  busStops: readonly BusStopCrowd[] = [],
+  meetSpeakerPoints: ReadonlyArray<{ x: number; z: number }> = [],
+): AudioSystem {
   const core = createAudioCore();
   if (!core) return SILENT;
 
@@ -139,6 +153,8 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
   const ambient = createAmbientVoices(core, busStops, {
     blocked: () => priorityTalking() || micro.speaking(),
   });
+  // The song at the meet (`audio/meetSpeakers.ts`), which turns down under anyone speaking.
+  const meetMusic = createMeetSpeakers(core, meetSpeakerPoints);
 
   // Resume on the first real user gesture (browser autoplay policy). A context can also be
   // suspended again later — the tab is hidden, or the OS takes audio focus — so `update` re-arms
@@ -169,9 +185,13 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
       }
       ambient.update(dt, listener, targets, skid.drifting, !!policeInput?.siren);
       micro.update(dt, listener);
+      meetMusic?.update(dt, listener, dialogueSpeaking() || micro.speaking());
     },
 
     microScenesBlocked: priorityTalking,
+
+    meetBeats: () => (meetMusic ? meetMusic.beats() : NaN),
+    meetPresence: () => (meetMusic ? meetMusic.presence() : 0),
 
     onEvent(ev) {
       radio.onEvent(ev);
@@ -327,6 +347,7 @@ export function createAudio(targetCount: number, busStops: readonly BusStopCrowd
       radio.dispose();
       ambient.dispose();
       micro.dispose();
+      meetMusic?.dispose();
       rain.dispose();
       nitro.dispose();
       rayo.dispose();

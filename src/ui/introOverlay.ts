@@ -88,15 +88,14 @@ function binding(action: string): string {
 
 /** A key from the binding table as the card names it: the first of its alternatives, in Spanish. */
 function keyLabel(action: string): string {
-  const key = binding(action).split(' or ')[0];
-  return key === 'SPACE' ? 'ESPACIO' : key;
+  return binding(action).split(' o ')[0];
 }
 
 /** Card text with `{hand}` / `{aim}` filled in as key caps. The config is ours: no user text. */
 function withKeys(text: string): string {
   return text
-    .replace('{hand}', `<b class="rb-key">${keyLabel('handbrake')}</b>`)
-    .replace('{aim}', `<b class="rb-key">${keyLabel('hold: aim')}</b>`);
+    .replace('{hand}', `<b class="rb-key">${keyLabel('freno de mano')}</b>`)
+    .replace('{aim}', `<b class="rb-key">${keyLabel('mantener: apuntar')}</b>`);
 }
 
 export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
