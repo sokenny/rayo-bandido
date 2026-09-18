@@ -92,6 +92,11 @@ function makeUnit(id: number): PoliceUnit {
     stuck: 0,
     sight: false,
     lights: false,
+    tactic: 'chase',
+    planLeft: 0,
+    aimX: 0,
+    aimZ: 0,
+    side: id % 2 === 0 ? 1 : -1,
   };
 }
 
@@ -382,6 +387,7 @@ function freeUnit(p: PoliceState): PoliceUnit | null {
 
 function retire(u: PoliceUnit): void {
   u.status = 'disabled';
+  u.planLeft = 0;
   u.role = 'patrol';
   u.lights = false;
   u.sight = false;
@@ -445,6 +451,7 @@ function backToPatrol(u: PoliceUnit, layout: ArenaLayout): void {
   u.sight = false;
   u.stuck = 0;
   u.timer = 0;
+  u.planLeft = 0;
 }
 
 /* ---------------------------------------------------------------- phases */
@@ -678,6 +685,59 @@ function driveInvestigate(u: PoliceUnit, layout: ArenaLayout, dt: number): void 
   if (u.stuck > POLICE.pursuit.stuckSeconds) backToPatrol(u, layout);
 }
 
+/**
+ * THE CLOSE-RANGE PLAN. Re-aiming at the player's lead point every tick made a chaser that got
+ * ahead of the car copy its wheel one-to-one: the lead point sits in front of the chaser, so
+ * every turn the player made, the chaser made in the same instant. Instead a chaser thinks every
+ * `plan.min..max` seconds and holds what it decided in between: the lead and flank offset are
+ * frozen (it follows where the car is, not which way it is pointing this instant), and a chaser
+ * that finds itself ahead stops chasing forward and either turns back to meet the car or slows
+ * across its path. Geometry that makes the plan nonsense (the car got past a blocker, a chaser
+ * fell behind) ends it early.
+ */
+function planChase(u: PoliceUnit, p: PoliceState, v: VehicleState, dist: number, dt: number): void {
+  const plan = POLICE.pursuit.plan;
+  const fx = forwardX(v.heading);
+  const fz = forwardZ(v.heading);
+  // How far in front of the car the chaser is, along the car's heading.
+  const along = (u.x - v.x) * fx + (u.z - v.z) * fz;
+  const ahead = along > plan.aheadMargin && Math.abs(v.speed) > plan.aheadMinSpeed;
+
+  u.planLeft -= dt;
+  if (u.planLeft > 0) {
+    if (u.tactic === 'chase' && !ahead) return;
+    if (u.tactic === 'cutBack' && along > 0) return;
+    if (u.tactic === 'block' && along > 0 && dist > plan.blockReleaseDistance) return;
+  }
+
+  u.planLeft = plan.min + nextRandom(p) * (plan.max - plan.min);
+  if (nextRandom(p) < plan.sideSwap) u.side = -u.side;
+  const rx = -fz;
+  const rz = fx;
+  if (ahead) {
+    if (nextRandom(p) < plan.blockChance) {
+      // Swing across the road in front of the car, off to this chaser's side of its own nose.
+      u.tactic = 'block';
+      const hx = forwardX(u.heading);
+      const hz = forwardZ(u.heading);
+      u.aimX = u.x + hx * plan.blockForward - hz * u.side * plan.blockSwing;
+      u.aimZ = u.z + hz * plan.blockForward + hx * u.side * plan.blockSwing;
+    } else {
+      // Turn back and come at the car, a little off its centre line.
+      u.tactic = 'cutBack';
+      u.aimX = rx * u.side * plan.cutBackOffset;
+      u.aimZ = rz * u.side * plan.cutBackOffset;
+    }
+    return;
+  }
+  u.tactic = 'chase';
+  const lead = POLICE.pursuit.lead * (plan.leadMin + nextRandom(p) * (plan.leadMax - plan.leadMin));
+  // Flank wide from a distance, tuck in for the shove up close.
+  const flank = u.side * (plan.flankMin + nextRandom(p) * (plan.flankMax - plan.flankMin)) * Math.min(1, dist / 20);
+  u.aimX = v.vx * lead + rx * flank;
+  u.aimZ = v.vz * lead + rz * flank;
+}
+
 function driveChaser(u: PoliceUnit, p: PoliceState, layout: ArenaLayout, v: VehicleState, dt: number): void {
   const cfg = POLICE.pursuit;
   const stars = Math.max(2, Math.min(p.stars, cfg.speedByStars.length - 1));
@@ -695,21 +755,35 @@ function driveChaser(u: PoliceUnit, p: PoliceState, layout: ArenaLayout, v: Vehi
     return;
   }
 
-  // Where to drive: straight at the car when it is close and in the clear, otherwise along the
+  // Where to drive: by a committed plan when it is close and in the clear, otherwise along the
   // street network toward it, otherwise straight at it anyway.
   const dxp = v.x - u.x;
   const dzp = v.z - u.z;
   const dist = Math.sqrt(dxp * dxp + dzp * dzp);
   let tx = v.x + v.vx * cfg.lead;
   let tz = v.z + v.vz * cfg.lead;
+  let pace = 1;
   const direct = dist < cfg.directRange && u.sight;
-  if (!direct && p.nav && p.nav.field && aimAlong(p.nav.graph, p.nav.field, u.x, u.z, cfg.routeLookahead, p.nav.aim) && !p.nav.aim.atGoal) {
-    tx = p.nav.aim.x;
-    tz = p.nav.aim.z;
+  if (direct) {
+    planChase(u, p, v, dist, dt);
+    if (u.tactic === 'block') {
+      tx = u.aimX;
+      tz = u.aimZ;
+      pace = cfg.plan.blockPace;
+    } else {
+      tx = v.x + u.aimX;
+      tz = v.z + u.aimZ;
+    }
+  } else {
+    u.planLeft = 0;
+    if (p.nav && p.nav.field && aimAlong(p.nav.graph, p.nav.field, u.x, u.z, cfg.routeLookahead, p.nav.aim) && !p.nav.aim.atGoal) {
+      tx = p.nav.aim.x;
+      tz = p.nav.aim.z;
+    }
   }
   const delta = steerToward(u, tx, tz, cfg.turnRate, dt);
   // Lift for a corner, and do not ram a stopped car at full tilt: ease to a stop on it.
-  let cruise = top * (1 - 0.55 * Math.min(1, Math.abs(delta) / 1.4));
+  let cruise = pace * top * (1 - 0.55 * Math.min(1, Math.abs(delta) / 1.4));
   if (dist < 8) cruise = Math.min(cruise, 4 + Math.abs(v.speed));
   easeSpeed(u, cruise, accel, POLICE.patrol.brake, dt);
   advance(u, dt);
@@ -1069,7 +1143,7 @@ export function stepPolice(
   resolveTargetCollisions(v, p.units, SCRATCH_EVENTS);
   for (let i = 0; i < SCRATCH_EVENTS.length; i++) {
     const ev = SCRATCH_EVENTS[i];
-    if (ev.type === 'collision') events.push({ type: 'collision', x: ev.x, y: ev.y, z: ev.z, impact: ev.impact, closing: ev.closing, police: true });
+    if (ev.type === 'collision') events.push({ type: 'collision', x: ev.x, y: ev.y, z: ev.z, impact: ev.impact, nx: ev.nx, nz: ev.nz, closing: ev.closing, police: true });
   }
   SCRATCH_EVENTS.length = 0;
 

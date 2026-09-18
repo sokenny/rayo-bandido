@@ -5559,6 +5559,16 @@ body.rb-touch-pad .rb-minimap {
   display: none;
 }
 
+/* The opening lasts about a second and a half: the fade and the title land well inside it. */
+.rb-intro__cine.is-opening {
+  animation-duration: 350ms;
+}
+
+.rb-intro__cine.is-opening .rb-intro__cine-title {
+  animation-duration: 600ms;
+  animation-delay: 150ms;
+}
+
 .rb-intro__cine-title b {
   font-family: var(--rb-display);
   font-size: clamp(30px, 5.4vw, 56px);

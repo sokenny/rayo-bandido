@@ -5,6 +5,7 @@ import { clamp01, forwardX, forwardZ, rightX, rightZ } from '../../core/math';
 import { createFxTextures } from './sprites';
 import { createTireSmoke } from './tireSmoke';
 import { createSkidMarks } from './skidMarks';
+import { createWaterSpray } from './waterSpray';
 import {
   createNitroExhaust,
   EXHAUST_LOCAL_X,
@@ -13,6 +14,7 @@ import {
 } from './nitroExhaust';
 import { createLightningArc, BOLT_FROM_Y, BOLT_TO_Y } from './lightningArc';
 import { createSparkFx } from './sparks';
+import { createCrashSparks } from './crashSparks';
 import { createShockRings } from './explosion';
 import { createPowerDown } from './powerDown';
 import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
@@ -23,7 +25,8 @@ import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
  *
  * CONTRACT (called from `src/game.ts`)
  * - `setCarPose` every render frame with the interpolated car pose: used to emit tire smoke
- *   from the rear wheels while drifting, lay skid marks, and drive the nitro exhaust.
+ *   from the rear wheels while drifting, throw water off the wet road, lay skid marks, and
+ *   drive the nitro exhaust.
  * - `lightning(fromX, fromZ, toX, toZ)` on a `lightningFired` event: a cyan/blue-white arc
  *   that clearly connects the car to the target for ~0.4 s.
  * - `backfire(strength)` when the exhaust pops: a flame spit at the tailpipes, in step with
@@ -34,13 +37,15 @@ import { createScorePopups, POPUP_KILL, POPUP_RUSH } from './scorePopup';
  * - `scorePopup(x, z, amount)` on `targetDestroyed`: a floating "+X" over the wreck.
  *   A near miss has no world pop: it is paid on the HUD, because the car it was scored on is
  *   already behind the camera by the time a number over it could be read.
- * - `collision(x, z, impact)` on collisions: a few sparks.
+ * - `collision(x, y, z, impact, nx, nz)` on collisions: a shower of streaking sparks off the
+ *   bodywork at the contact point (`crashSparks.ts`), and a steady stream of them while the car
+ *   grinds along a barrier (read off the vehicle in `setCarPose`).
  * - `reset()` on restart: hide every live effect.
  *
  * BUDGET
- * - 10 draw calls when absolutely everything is on screen at once, fewer when idle
- *   (each pool hides itself when empty): tire smoke, skid marks, nitro flames, nitro trail,
- *   bolt core, bolt glow, bolt branches, shock rings, sparks, flashes; plus one per live
+ * - 12 draw calls when absolutely everything is on screen at once, fewer when idle
+ *   (each pool hides itself when empty): tire smoke, water spray, skid marks, nitro flames, nitro trail,
+ *   bolt core, bolt glow, bolt branches, shock rings, sparks, metal sparks, flashes; plus one per live
  *   score popup (5 slots, all hidden when nothing was scored recently). Only kills spend that
  *   pool now, so five wrecks in a row is the worst it ever sees.
  * - ~2.6k triangles worst case (points are two triangles each).
@@ -74,7 +79,11 @@ export interface EffectsSystem {
    * for that kill rather than joining it: two numbers over one wreck is one too many.
    */
   rushPopup(x: number, y: number, z: number, amount: number): void;
-  collision(x: number, y: number, z: number, impact: number): void;
+  /**
+   * The car hit something. `nx`/`nz` is the outward contact normal when the sim knows it
+   * (walls, cars); without it the sparks come off the car's belly. Call after `setCarPose`.
+   */
+  collision(x: number, y: number, z: number, impact: number, nx?: number, nz?: number): void;
   /**
    * A street prop knocked (`propHit`): a puff of dust off cardboard and bin bags, a scrape of
    * sparks off metal, and one electrical burst when a charger breaks. Budgeted: at most a few
@@ -103,6 +112,10 @@ const SPIN_START = 0.3;
 /** Smoke of fully spinning rears with no sideways motion. */
 const SPIN_SMOKE = 0.6;
 
+/** Ground speed (m/s) where the rolling water mist starts, and where it is fullest. */
+const SPRAY_ROLL_START = 9;
+const SPRAY_ROLL_FULL = 42;
+
 /**
  * Backfire ignition colour: deep red-orange, hot enough to glow white in the additive core but
  * with no green to wash it toward yellow. Deliberately unlike the nitro magenta and the
@@ -128,10 +141,12 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
   const textures = createFxTextures();
   const smoke = createTireSmoke(root, textures);
+  const spray = createWaterSpray(root, textures);
   const skid = createSkidMarks(root);
   const nitroFx = createNitroExhaust(root, textures);
   const bolt = createLightningArc(root, textures);
   const sparkFx = createSparkFx(root, textures);
+  const crashSparks = createCrashSparks(root, sparkFx);
   const rings = createShockRings(root);
   const powerDownFx = createPowerDown(sparkFx, smoke);
   const popups = createScorePopups(root);
@@ -149,6 +164,9 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
   // The damage smoke out of the bonnet: puffs per second, and the fraction of one owed.
   let damageSmokeRate = 0;
   let damageSmokeDue = 0;
+  // The car's velocity as `setCarPose` last saw it: what a hit tears the sparks along.
+  let carVx = 0;
+  let carVz = 0;
 
   return {
     setCarPose(pose, vehicle, drifting, nitro, frameDt) {
@@ -176,15 +194,44 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
         // A latched drift always smokes, even in a smooth low-angle slide.
         if (drifting && intensity < 0.35) intensity = 0.35;
       }
+      const slide = intensity;
       // Spinning rears smoke at any speed: a burnout at a standstill, the donut's cloud.
+      let spin = 0;
       if (vehicle.wheelspin > SPIN_START) {
-        const spin = clamp01((vehicle.wheelspin - SPIN_START) / (1 - SPIN_START)) * SPIN_SMOKE;
-        if (spin > intensity) intensity = spin;
+        spin = clamp01((vehicle.wheelspin - SPIN_START) / (1 - SPIN_START));
+        if (spin * SPIN_SMOKE > intensity) intensity = spin * SPIN_SMOKE;
+      }
+
+      // The whole city is wet: the rears throw water whenever they are on it.
+      if (vehicle.airborne) {
+        spray.emit(frameDt, 0, 0, 0, pose.y, leftX, leftZ, rightWheelX, rightWheelZ, fx, fz, 0, 0, vehicle.vx, vehicle.vz);
+      } else {
+        const groundSpeed = Math.hypot(vehicle.vx, vehicle.vz);
+        const roll = clamp01((groundSpeed - SPRAY_ROLL_START) / (SPRAY_ROLL_FULL - SPRAY_ROLL_START));
+        // The slide's direction on the ground: the part of the car's velocity across its nose.
+        // Mid-spin it can be near zero; fall back to the side the tail is swinging out to.
+        const along = vehicle.vx * fx + vehicle.vz * fz;
+        let sx = vehicle.vx - fx * along;
+        let sz = vehicle.vz - fz * along;
+        const across = Math.hypot(sx, sz);
+        if (across > 0.5) {
+          sx /= across;
+          sz /= across;
+        } else {
+          const side = vehicle.yawRate >= 0 ? -1 : 1;
+          sx = rx * side;
+          sz = rz * side;
+        }
+        spray.emit(frameDt, roll, slide, spin, pose.y, leftX, leftZ, rightWheelX, rightWheelZ, fx, fz, sx, sz, vehicle.vx, vehicle.vz);
       }
 
       smoke.emit(frameDt, intensity, pose.y, leftX, leftZ, rightWheelX, rightWheelZ, vehicle.vx, vehicle.vz);
       skid.track(sliding, pose.y, leftX, leftZ, rightWheelX, rightWheelZ);
       skid.flush();
+
+      carVx = vehicle.vx;
+      carVz = vehicle.vz;
+      crashSparks.scrape(frameDt, pose.x, pose.y, pose.z, vehicle.vx, vehicle.vz, vehicle.wallScrape, vehicle.wallNx, vehicle.wallNz);
 
       if (damageSmokeRate > 0) {
         // The bonnet, a metre and a half ahead of the wheelbase centre, just over the panel.
@@ -266,12 +313,8 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
       popups.spawn(x, y, z, amount, POPUP_RUSH);
     },
 
-    collision(x, y, z, impact) {
-      const strength = clamp01(impact / 12);
-      const count = 6 + Math.round(strength * 8);
-      // Warm orange/white scrape, deliberately unlike the cyan of the lightning.
-      sparkFx.burst(x, y + 0.45, z, count, 3 + strength * 5, 0.4, 0.14, 1, 0.62 + strength * 0.25, 0.3);
-      sparkFx.flash(x, y + 0.5, z, 0.7 + strength * 0.9, 0.1, 1, 0.7, 0.4);
+    collision(x, y, z, impact, nx, nz) {
+      crashSparks.impact(x, y, z, impact, nx, nz, carVx, carVz);
     },
 
     propImpact(kind, x, y, z, impact, damaged) {
@@ -304,9 +347,11 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
     update(frameDt, time) {
       propFxBudget = Math.min(PROP_FX_BURST, propFxBudget + frameDt * PROP_FX_RATE);
       smoke.update(frameDt);
+      spray.update(frameDt);
       nitroFx.update(frameDt, time);
       bolt.update(frameDt);
       sparkFx.update(frameDt);
+      crashSparks.update(frameDt);
       rings.update(frameDt);
       powerDownFx.update(frameDt);
       popups.update(frameDt);
@@ -314,10 +359,12 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
     reset() {
       smoke.reset();
+      spray.reset();
       skid.reset();
       nitroFx.reset();
       bolt.reset();
       sparkFx.reset();
+      crashSparks.reset();
       rings.reset();
       powerDownFx.reset();
       popups.reset();
@@ -325,10 +372,12 @@ export function createEffects(scene: THREE.Scene): EffectsSystem {
 
     dispose() {
       smoke.dispose();
+      spray.dispose();
       skid.dispose();
       nitroFx.dispose();
       bolt.dispose();
       sparkFx.dispose();
+      crashSparks.dispose();
       rings.dispose();
       popups.dispose();
       textures.dispose();

@@ -282,7 +282,7 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
       video.remove();
       video = null;
     }
-    cineEl.classList.remove('is-on', 'is-video', 'is-placeholder');
+    cineEl.classList.remove('is-on', 'is-video', 'is-placeholder', 'is-opening');
     cineEl.classList.add('is-gone');
     if (which === 'opening') options.onOpeningDone();
     else options.onCinematicDone();
@@ -295,6 +295,8 @@ export function createIntroOverlay(options: IntroOverlayOptions): IntroOverlay {
     cineSubEl.textContent = sub;
     cineEl.classList.remove('is-video', 'is-gone');
     cineEl.classList.add('is-on', 'is-placeholder');
+    // The opening is a beat, not a hold: its fade and title are timed to fit inside it.
+    cineEl.classList.toggle('is-opening', which === 'opening');
     window.clearTimeout(openingTimer);
     openingTimer = window.setTimeout(finishPresentation, seconds * 1000);
   }

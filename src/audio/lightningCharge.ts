@@ -5,8 +5,11 @@ import { fetchSample, normalizeRms } from './sample';
 export interface LightningChargeAudio {
   /** Every frame: whether a shot is loading (`LightningState.charging`). Edges start and stop the load. */
   setCharging(charging: boolean): void;
-  /** The bolt left the car. Returns false while the release recording has not loaded. */
-  release(): boolean;
+  /**
+   * The bolt left the car; `strength` 0..1 is how much of a full load it carried, and sets how
+   * loud it lands. Returns false while the release recording has not loaded.
+   */
+  release(strength: number): boolean;
   reset(): void;
   dispose(): void;
 }
@@ -102,7 +105,7 @@ export function createLightningChargeAudio(core: AudioCore): LightningChargeAudi
       else stopLoad(FUMBLE_TC);
     },
 
-    release() {
+    release(strength) {
       if (disposed) return false;
       stopLoad(FIRE_TC);
       if (!releaseBuffer) return false;
@@ -110,10 +113,11 @@ export function createLightningChargeAudio(core: AudioCore): LightningChargeAudi
       const src = ctx.createBufferSource();
       src.buffer = releaseBuffer;
       const gain = ctx.createGain();
-      gain.gain.value = AUDIO.lightningReleaseVolume;
+      const f = Math.min(1, Math.max(0, strength));
+      gain.gain.value = AUDIO.lightningReleaseVolumeMin + (AUDIO.lightningReleaseVolumeMax - AUDIO.lightningReleaseVolumeMin) * f;
       // Its own bus, over the mix's limiter, with everything else pulled down under it.
       src.connect(gain).connect(core.lead);
-      core.duck(AUDIO.lightningReleaseDuckDb, releaseBuffer.duration);
+      core.duck(AUDIO.lightningReleaseDuckDbMin + (AUDIO.lightningReleaseDuckDbMax - AUDIO.lightningReleaseDuckDbMin) * f, releaseBuffer.duration);
       src.onended = () => {
         src.disconnect();
         gain.disconnect();

@@ -61,6 +61,21 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
   const impact = pushOutOfWorld(v, VEHICLE.collisionRadius, layout, WALL, dt, CONTACT);
   if (CONTACT.count > 0) unwedge(v, CONTACT, dt);
 
+  // Which way the wall faces and how fast the car is sliding along it, for the sparks.
+  let nx = 0;
+  let nz = 0;
+  v.wallScrape = 0;
+  if (CONTACT.count > 0) {
+    const len = Math.hypot(CONTACT.nx, CONTACT.nz);
+    if (len > 1e-6) {
+      nx = CONTACT.nx / len;
+      nz = CONTACT.nz / len;
+      v.wallScrape = Math.abs(v.vz * nx - v.vx * nz);
+    }
+  }
+  v.wallNx = nx;
+  v.wallNz = nz;
+
   if (impact > 0.5) {
     v.collided = true;
     v.collisionImpact = impact;
@@ -71,7 +86,9 @@ export function resolveCollisions(v: VehicleState, layout: ArenaLayout, events: 
     const rz = Math.sin(v.heading);
     v.speed = v.vx * fx + v.vz * fz;
     v.lateralSpeed = v.vx * rx + v.vz * rz;
-    events.push({ type: 'collision', x: v.x, y: v.y, z: v.z, impact });
+    // Struck where the body meets the wall, not at its centre.
+    const r = VEHICLE.collisionRadius;
+    events.push({ type: 'collision', x: v.x - nx * r, y: v.y, z: v.z - nz * r, impact, nx, nz });
   }
 }
 
@@ -387,7 +404,7 @@ export function resolveTargetCollisions(v: VehicleState, targets: TargetState[],
       bumped = true;
       // The event names the car and the knock, so a multiplayer client can tell the host.
       const closing = Math.max(0, approach - carAlong);
-      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, y: v.y, z: (v.z + t.z) * 0.5, impact: approach, targetId: t.id, knockX, knockZ, closing });
+      events.push({ type: 'collision', x: (v.x + t.x) * 0.5, y: v.y, z: (v.z + t.z) * 0.5, impact: approach, nx: -nx, nz: -nz, targetId: t.id, knockX, knockZ, closing });
     }
   }
 

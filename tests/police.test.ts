@@ -287,6 +287,49 @@ describe('pursuit', () => {
     expect(r.p.phase).toBe('calm');
   });
 
+  it('a chaser that gets ahead of the car stops chasing forward instead of copying its wheel', () => {
+    const r = rig();
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
+    const u = r.p.units.find((unit) => unit.status === 'active' && unit.role === 'pursuit')!;
+    // The car rolls toward -Z (heading 0); the chaser is 12 m in front of it, same way round.
+    r.v.heading = 0;
+    r.v.speed = 20;
+    r.v.vx = 0;
+    r.v.vz = -20;
+    u.x = u.prevX = r.v.x;
+    u.z = u.prevZ = r.v.z - 12;
+    u.y = r.v.y;
+    u.heading = 0;
+    u.planLeft = 0;
+    tick(r, 3);
+    expect(['cutBack', 'block']).toContain(u.tactic);
+  });
+
+  it('a chaser holds its plan between thoughts rather than re-aiming at every turn of the wheel', () => {
+    const r = rig();
+    for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));
+    const u = r.p.units.find((unit) => unit.status === 'active' && unit.role === 'pursuit')!;
+    r.v.heading = 0;
+    r.v.speed = 20;
+    r.v.vx = 0;
+    r.v.vz = -20;
+    u.x = u.prevX = r.v.x;
+    u.z = u.prevZ = r.v.z + 12;
+    u.y = r.v.y;
+    u.heading = 0;
+    u.planLeft = 0;
+    tick(r, 2);
+    expect(u.tactic).toBe('chase');
+    const aim = { x: u.aimX, z: u.aimZ };
+    // The player throws the wheel: the chaser's committed lead does not follow on the same tick.
+    r.v.heading = 0.6;
+    r.v.vx = 20 * Math.sin(0.6);
+    r.v.vz = -20 * Math.cos(0.6);
+    tick(r, 1);
+    expect(u.aimX).toBe(aim.x);
+    expect(u.aimZ).toBe(aim.z);
+  });
+
   it('cancels the escape when a chaser sees the car again', () => {
     const r = rig();
     for (let i = 0; i < 3; i++) tick(r, 1, (events) => offense(events, 10, r.v));

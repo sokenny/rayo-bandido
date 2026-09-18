@@ -3,7 +3,7 @@ import { AUDIO } from '../config/tuning';
 import { clamp, clamp01, lerp } from '../core/math';
 import { engineNote } from './dsp';
 import { fireBackfire } from './backfire';
-import { createTurboFlutterTrigger, fireTurboFlutter } from './turboFlutter';
+import { createTurboFlutterTrigger, createTurboFlutterVoice } from './turboFlutter';
 
 /** Live drive state the engine voice reads each frame. */
 export interface EngineInput {
@@ -181,6 +181,7 @@ export function createEngine(core: AudioCore): EngineVoice {
   turbo.start();
 
   const flutter = createTurboFlutterTrigger();
+  const flutterVoice = createTurboFlutterVoice(ctx, master);
 
   function firingHzFor(rpm01: number): number {
     return lerp(AUDIO.engineIdleHz, AUDIO.engineRedlineHz, rpm01);
@@ -234,7 +235,7 @@ export function createEngine(core: AudioCore): EngineVoice {
       // how spooled the car is. The surge fires only on a closed throttle with pressure behind
       // it (see `audio/turboFlutter.ts`) — not on every lift, which is most of them.
       const surge = flutter.tick(dt, input.speed, throttle, input.nitro);
-      if (surge > 0) fireTurboFlutter(ctx, master, noise, surge);
+      if (surge > 0) flutterVoice.play(surge);
 
       // Whine: pitched by boost, coloured by the gear so upshifts still bend the note.
       const spool = flutter.boost;
@@ -290,6 +291,7 @@ export function createEngine(core: AudioCore): EngineVoice {
       } catch {
         /* already stopped */
       }
+      flutterVoice.dispose();
       toneGain.disconnect();
       filter.disconnect();
       shaper.disconnect();

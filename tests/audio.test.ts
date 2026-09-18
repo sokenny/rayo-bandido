@@ -12,7 +12,7 @@ import {
   stereoPan,
 } from '../src/audio/dsp';
 import { BACKFIRE, createBackfireTrigger } from '../src/audio/backfire';
-import { FLUTTER, chuffTimes, createTurboFlutterTrigger } from '../src/audio/turboFlutter';
+import { FLUTTER, SURGE, createTurboFlutterTrigger, surgePlayback } from '../src/audio/turboFlutter';
 import { DRIVETRAIN } from '../src/config/tuning';
 import { autoGear, roadRpm01 } from '../src/sim/drivetrain';
 
@@ -320,23 +320,26 @@ describe('turbo flutter trigger', () => {
     expect(trigger.boost).toBeLessThan(spooled * 0.2);
   });
 
-  it('keeps every burst short enough to read as punctuation, and shorter than the gap', () => {
-    for (const s of [0, 0.25, 0.5, 0.75, 1]) {
-      const times = chuffTimes(s);
-      expect(times.length).toBeGreaterThanOrEqual(3);
-      const last = times[times.length - 1] + FLUTTER.CHUFF_PERIOD;
-      expect(last).toBeLessThanOrEqual(1);
-      // A burst that outlives the refractory gap would overlap the next one into a drone.
-      expect(last).toBeLessThan(FLUTTER.MIN_INTERVAL);
+  it('plays a big surge longer, louder and higher than a small one', () => {
+    const small = surgePlayback(0.1, 1.4, 0);
+    const big = surgePlayback(1, 1.4, 0);
+    expect(big.length).toBeGreaterThan(small.length);
+    expect(big.gain).toBeGreaterThan(small.gain);
+    expect(big.rate).toBeGreaterThan(small.rate);
+  });
+
+  it('never runs a surge past the end of its recording, whatever the jitter', () => {
+    for (const s of [0, 0.5, 1]) {
+      for (const j of [-1, 0, 1]) {
+        const p = surgePlayback(s, 1.6, j);
+        expect(p.length).toBeLessThanOrEqual(1.6 / p.rate + 1e-9);
+        expect(p.length).toBeGreaterThan(SURGE.FADE); // still a flutter, not a click
+      }
     }
   });
 
-  it('gives a big surge more chuffs than a small one, and spaces them out as it fades', () => {
-    const small = chuffTimes(0.1);
-    const big = chuffTimes(1);
-    expect(big.length).toBeGreaterThan(small.length);
-    const gaps = big.slice(1).map((t, i) => t - big[i]);
-    for (let i = 1; i < gaps.length; i++) expect(gaps[i]).toBeGreaterThan(gaps[i - 1]);
+  it('varies the pitch of the same surge by its jitter', () => {
+    expect(surgePlayback(0.5, 1.4, -1).rate).toBeLessThan(surgePlayback(0.5, 1.4, 1).rate);
   });
 
   it('spools on nitro even with the pedal up, and drops the lot on reset', () => {

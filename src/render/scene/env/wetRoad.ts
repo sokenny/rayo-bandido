@@ -26,8 +26,8 @@ import { WET_ROAD, type WetRoadTier } from '../../../config/tuning';
  * - Puddles are one tiling noise texture sampled in world space; ripples are a jittered grid of
  *   rings with an analytic gradient, faded out past the distance where they would only shimmer.
  *
- * Cost: one extra scene render of the tagged meshes into the small buffer — skipped on alternate
- * frames while the view holds still enough to re-project the last one (`WET_ROAD.refresh`) —
+ * Cost: one extra scene render of the tagged meshes into the small buffer — every frame by default;
+ * `WET_ROAD.refresh.every` can skip frames and re-project the last one while the view holds still —
  * plus a few texture reads on road pixels. `?wet=off|low|medium|high` overrides the tier for A/B.
  */
 export interface WetRoad {

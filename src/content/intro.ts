@@ -118,7 +118,7 @@ export const INTRO = {
    * title lines, skippable at once. The car waits under the deck until it is over.
    */
   opening: {
-    seconds: 5,
+    seconds: 1.5,
     title: 'RED BANDIDA',
     sub: 'SEÑAL RESTABLECIDA',
   },

@@ -27,6 +27,8 @@ export function resolveRivalCollisions(v: VehicleState, rivals: readonly RivalCa
   let impact = 0;
   let hitX = 0;
   let hitZ = 0;
+  let hitNx = 0;
+  let hitNz = 0;
 
   for (let i = 0; i < rivals.length; i++) {
     const other = rivals[i];
@@ -71,6 +73,8 @@ export function resolveRivalCollisions(v: VehicleState, rivals: readonly RivalCa
       impact = closing;
       hitX = (v.x + other.x) * 0.5;
       hitZ = (v.z + other.z) * 0.5;
+      hitNx = nx;
+      hitNz = nz;
     }
   }
 
@@ -85,6 +89,6 @@ export function resolveRivalCollisions(v: VehicleState, rivals: readonly RivalCa
     const rz = Math.sin(v.heading);
     v.speed = v.vx * fx + v.vz * fz;
     v.lateralSpeed = v.vx * rx + v.vz * rz;
-    events.push({ type: 'collision', x: hitX, y: v.y, z: hitZ, impact });
+    events.push({ type: 'collision', x: hitX, y: v.y, z: hitZ, impact, nx: hitNx, nz: hitNz });
   }
 }

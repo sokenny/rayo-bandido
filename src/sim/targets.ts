@@ -262,6 +262,10 @@ function coastToAStop(t: TargetState, layout: ArenaLayout, time: number, dt: num
   if (t.vx !== 0 || t.vz !== 0) {
     t.x += t.vx * dt;
     t.z += t.vz * dt;
+    // It spins as it slides, by the metre, so a harder throw is also a wilder one. The side is
+    // the jerk's, which keeps it the same on every machine.
+    const moved = Math.sqrt(t.vx * t.vx + t.vz * t.vz) * dt;
+    t.heading = wrapAngle(t.heading + (t.id % 2 === 0 ? 1 : -1) * TARGETS.dying.spinPerMetre * moved);
     const decay = Math.max(0, 1 - TARGETS.dying.pushDamping * dt);
     t.vx *= decay;
     t.vz *= decay;

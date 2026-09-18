@@ -178,8 +178,7 @@ const CLIP_CURVE = ((): Float32Array<ArrayBuffer> => {
  * Loudness comes from the sustained low-mid energy, not from a taller peak — the master limiter
  * flattens peaks anyway, so a spikier bang would only sound thinner.
  *
- * Standalone (not closed over an engine), matching `fireTurboFlutter`, so it can be
- * auditioned in isolation.
+ * Standalone (not closed over an engine), so it can be auditioned in isolation.
  */
 export function fireBackfire(ctx: AudioContext, out: AudioNode, noise: AudioBuffer, strength: number): void {
   const t0 = ctx.currentTime;

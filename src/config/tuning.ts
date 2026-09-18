@@ -659,18 +659,23 @@ export const TARGETS = {
     jerkTime: 0.3,
     /**
      * How far the bolt throws the car it hits (m), along the line from the shooter: from the
-     * shortest shot that leaves (`LIGHTNING.minHold`) to a full-reach one. Given as distance and
-     * not speed because distance is what reads; the kick speed is this × `pushDamping`, so a
-     * full shot leaves at ~24 m/s and bleeds it off over a couple of seconds.
+     * shortest shot that leaves (`LIGHTNING.minHold`) to a full-reach one, linear in between.
+     * Given as distance and not speed because distance is what reads; the kick speed is this ×
+     * `pushDamping`, so a full shot leaves at ~48 m/s and bleeds it off over a few seconds.
      */
-    boltSlideMin: 5,
-    boltSlideMax: 15,
+    boltSlideMin: 8,
+    boltSlideMax: 40,
     /**
      * How fast a wreck's shove bleeds off (1/s). Lower than a live car's `knock.damping`: the
      * motor is dead and nothing is fighting the slide, and it keeps the throw a slide rather
      * than a teleport.
      */
-    pushDamping: 1.6,
+    pushDamping: 1.2,
+    /**
+     * Radians a wreck turns per metre of shove, so the spin is tied to the throw: a snap shot
+     * slews it round a quarter turn, a full one sends it through a whole pirouette.
+     */
+    spinPerMetre: 0.16,
   },
   /**
    * Physical bump when the player drives into an electric car. Arcade, not realistic: the car
@@ -1240,8 +1245,10 @@ export const WET_ROAD = {
    * It is redrawn sooner when the camera has moved `maxMove` metres, turned `maxTurn` radians
    * or the road under the player has risen or dropped `maxRise` metres since, so the buffer's
    * edges never lag into view at speed, through a drift or over a crest.
+   * `every: 1` redraws it every frame (the skip is off): at 2 the moving lights (traffic,
+   * sirens) reflected at half rate and the wet road read as stuttering. Set 2 to bring it back.
    */
-  refresh: { every: 2, maxMove: 1.5, maxTurn: 0.05, maxRise: 0.15 },
+  refresh: { every: 1, maxMove: 1.5, maxTurn: 0.05, maxRise: 0.15 },
 };
 
 export const RENDER = {
@@ -1302,8 +1309,13 @@ export const AUDIO = {
   engineVolume: 0.22,
   /** Turbo whine level. Kept low so it seasons the engine, not dominates. */
   turboVolume: 0.07,
-  /** Turbo flutter ("stututu") level on throttle lift. Its own knob so it cuts through the engine. */
-  turboFlutterVolume: 0.5,
+  /**
+   * Turbo flutter ("stututu") level on a lift off boost (`audio/turboFlutter.ts`), on the
+   * recordings in `turboFlutterSrcs` normalized to 0.12 RMS. Its own knob so it cuts through the engine.
+   */
+  turboFlutterVolume: 0.9,
+  /** The flutter recordings (served from public/): one per surge, never the same twice running. */
+  turboFlutterSrcs: ['/turbo-flutter-1.m4a', '/turbo-flutter-2.m4a', '/turbo-flutter-3.m4a'],
   /**
    * Exhaust backfire ("pops and bangs") level. Short and heavily clipped, so it is meant to sit
    * hot and push the master limiter — that momentary duck of the engine is part of the impact.
@@ -1372,10 +1384,16 @@ export const AUDIO = {
    * second sits ~10 dB under the rest, so starting there made the charge-up seem to start late.
    */
   lightningLoadOffset: 1.0,
-  /** The discharge when the bolt leaves: the loudest thing in that moment. */
-  lightningReleaseVolume: 6.0,
-  /** dB the rest of the mix drops under the release, recovering over the recording's length. */
-  lightningReleaseDuckDb: 13,
+  /**
+   * The discharge when the bolt leaves: the loudest thing in that moment. Scaled by how long the
+   * shot was loaded, from a snap shot (`Min`) to a full hold (`Max`); the lead bus's limiter
+   * catches the top, so a full one lands squashed and hot.
+   */
+  lightningReleaseVolumeMin: 3.5,
+  lightningReleaseVolumeMax: 12,
+  /** dB the rest of the mix drops under the release, recovering over the recording's length. Same scaling. */
+  lightningReleaseDuckDbMin: 8,
+  lightningReleaseDuckDbMax: 18,
   /**
    * An electric car hit by the Rayo going dead (`audio/evDisabled.ts`): one of these, at random,
    * sounding from the car with distance, pan and doppler.
@@ -2582,6 +2600,37 @@ export const POLICE = {
     turnRate: 2.6,
     /** How far ahead of the player the chaser aims (s of the player's velocity). */
     lead: 0.45,
+    /**
+     * Close-range thinking (`planChase` in src/sim/police.ts): a chaser commits to an aim for a
+     * while instead of re-aiming every tick, so it does not mirror the player's steering.
+     */
+    plan: {
+      /** Seconds a plan is held (random in between). */
+      min: 0.45,
+      max: 1.1,
+      /** The frozen lead is `lead` times this (random in between). */
+      leadMin: 0.3,
+      leadMax: 1.3,
+      /** Sideways offset (m) from the car's line a chaser aims at, at 20 m and beyond. */
+      flankMin: 0.5,
+      flankMax: 3.5,
+      /** Chance per re-plan that a chaser switches which side it favours. */
+      sideSwap: 0.3,
+      /** A chaser this far (m) in front of a moving car is "ahead" and stops chasing forward. */
+      aheadMargin: 3,
+      aheadMinSpeed: 5,
+      /** Once ahead: chance to block (slow, swing across) instead of turning back. */
+      blockChance: 0.45,
+      /** Block aim: this far (m) along the chaser's nose, this far (m) to its side. */
+      blockForward: 10,
+      blockSwing: 9,
+      /** Share of top speed a blocker drives at. */
+      blockPace: 0.4,
+      /** A blocker the car is this close to (m) re-plans (usually into a chase). */
+      blockReleaseDistance: 6,
+      /** Cutting back: aim this far (m) off the car's centre line. */
+      cutBackOffset: 1.5,
+    },
     /** Road-network lookahead (m) when steering by the route rather than straight at the car. */
     routeLookahead: 16,
     /** Inside this (m) with a clear line the chaser stops routing and drives straight at the car. */

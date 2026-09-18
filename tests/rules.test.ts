@@ -115,7 +115,7 @@ describe('game rules', () => {
     expect(s.economy.money).toBe(TARGETS.reward);
   });
 
-  it('the bolt throws the car it hits 5 to 15 m away from the shooter, by the force of the shot', () => {
+  it('the bolt throws the car it hits 8 to 40 m away from the shooter, by the force of the shot', () => {
     const slide = (hold: number) => {
       const { layout, s, t } = aimedAtFirstTarget(8);
       const startX = t.x;
@@ -130,10 +130,10 @@ describe('game rules', () => {
     };
     const snap = slide(LIGHTNING.minHold + DT);
     const full = slide(LIGHTNING.maxHold);
-    expect(snap).toBeGreaterThan(4.5);
-    expect(snap).toBeLessThan(6.5);
-    expect(full).toBeGreaterThan(13.5);
-    expect(full).toBeLessThanOrEqual(15.2);
+    expect(snap).toBeGreaterThan(7.5);
+    expect(snap).toBeLessThan(10);
+    expect(full).toBeGreaterThan(38);
+    expect(full).toBeLessThanOrEqual(40.3);
   });
 
   it('a short hold falls short of a target that a long hold reaches', () => {

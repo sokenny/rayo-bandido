@@ -68,6 +68,7 @@ const MIME = {
   '.glb': 'model/gltf-binary',
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
 };
 
 const stamp = () => new Date().toISOString().slice(11, 19);

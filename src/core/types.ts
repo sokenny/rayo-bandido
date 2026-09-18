@@ -148,6 +148,14 @@ export interface VehicleState {
   collided: boolean;
   /** Speed lost in the last collision (m/s), 0 when no collision this tick. */
   collisionImpact: number;
+  /**
+   * Speed (m/s) the body is sliding along a wall it touched this tick, 0 when clear of every
+   * wall. Presentation only: the stream of sparks off a car grinding down a barrier.
+   */
+  wallScrape: number;
+  /** Outward normal (xz, unit) of that wall contact. Meaningless while `wallScrape` is 0. */
+  wallNx: number;
+  wallNz: number;
   /** Vertical velocity of the body (m/s, positive = rising). See `src/sim/surface.ts`. */
   vy: number;
   /** Body roll (rad, positive = right side up), about the forward axis, after `pitch`. */
@@ -799,6 +807,12 @@ export type GameEvent =
       y: number;
       z: number;
       impact: number;
+      /**
+       * Outward contact normal (xz, unit), pointing from what was hit toward the car, when the
+       * sim knows it. Presentation uses it to strike sparks off the right side of the car.
+       */
+      nx?: number;
+      nz?: number;
       /** Set when the other party was an electric car: its id and the knock velocity it was given. */
       targetId?: number;
       knockX?: number;
@@ -1081,7 +1095,27 @@ export interface PoliceUnit extends TargetState {
   sight: boolean;
   /** Emergency lights and siren on. Read by presentation. */
   lights: boolean;
+  /**
+   * The chaser's current close-range plan (`POLICE.pursuit.plan`): what it is doing, the aim it
+   * committed to, and how long before it thinks again. Committing is what keeps a chaser from
+   * mirroring every twitch of the player's wheel.
+   */
+  tactic: PoliceTactic;
+  /** Seconds left on `tactic`; at zero the chaser re-plans. */
+  planLeft: number;
+  /** The committed aim: an offset from the player for chase/cutBack, a world point for block. */
+  aimX: number;
+  aimZ: number;
+  /** Which side of the car this chaser favours, -1 or 1. */
+  side: number;
 }
+
+/**
+ *   chase    - from behind or beside: at the player plus a lead and a flank offset frozen at plan time.
+ *   cutBack  - found itself ahead of the car: turn back and come at it.
+ *   block    - found itself ahead of the car: slow and swing across the road in its path.
+ */
+export type PoliceTactic = 'chase' | 'cutBack' | 'block';
 
 export type PoliceRole = 'patrol' | 'investigate' | 'pursuit';
 

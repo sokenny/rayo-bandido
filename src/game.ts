@@ -98,7 +98,7 @@ import { speakerSong, type CrowdSubject } from './render/scene/env/humanActs';
 import { createIntroOverlay, type IntroOverlay, type IntroOverlaySnapshot } from './ui/introOverlay';
 import { createSaveProgressPrompt, type SaveProgressPrompt } from './ui/saveProgressPrompt';
 import { createPlayAnalytics } from './analyticsPlay';
-import { canAffordShot } from './sim/lightning';
+import { boltLoad, canAffordShot } from './sim/lightning';
 import { MESSAGES as FLAIR_MESSAGES, flairSeconds } from './sim/flair';
 import { canBoard, canDropOff, stopById } from './sim/passenger';
 import { PASSENGERS, passengerById, preferenceLabel } from './content/passengers';
@@ -1631,7 +1631,7 @@ export function createGame(
         } else effects.lightning(ev.fromX, ev.fromY, ev.fromZ, ev.toX, ev.toY, ev.toZ);
         {
           // A snap shot still kicks; a full-reach bolt kicks the hardest.
-          const size = 0.55 + 0.45 * Math.min(1, ev.spent / LIGHTNING.cost);
+          const size = 0.4 + 0.6 * boltLoad(ev.spent);
           chase.tremble(size);
           car.dischargeKick(size);
         }
@@ -1742,7 +1742,7 @@ export function createGame(
         if (ev.impact > 6) effects.collision(ev.x, ev.y, ev.z, ev.impact * 0.5);
         break;
       case 'collision':
-        effects.collision(ev.x, ev.y, ev.z, ev.impact);
+        effects.collision(ev.x, ev.y, ev.z, ev.impact, ev.nx, ev.nz);
         chase.shake(Math.min(0.3, ev.impact * CAMERA.shakeCollisionPerImpact));
         // Shoved an electric car: the shove is real here now, and the host is asked to
         // repeat it so it is real everywhere. Same hold as a kill, so the host's reports do

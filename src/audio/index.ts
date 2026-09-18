@@ -21,6 +21,7 @@ import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
 import type { BusStopCrowd } from '../world/busStopCrowds';
 import { screechIntensity } from './dsp';
 import { chainMultiplier } from '../sim/rush';
+import { boltLoad } from '../sim/lightning';
 
 /** Slide state for the tire scrub, read each frame. */
 export interface SkidInput {
@@ -202,7 +203,8 @@ export function createAudio(
       switch (ev.type) {
         case 'lightningFired':
           // The recording (`audio/lightningCharge.ts`); the synthesized zap only until it has loaded.
-          if (!rayo.release()) oneShots.lightning();
+          // Loud by the load: a snap shot cracks, a full hold detonates.
+          if (!rayo.release(boltLoad(ev.spent))) oneShots.lightning();
           break;
         case 'targetDestroyed':
           // The recordings, from the car itself (`audio/evDisabled.ts`); the synthesized power-down

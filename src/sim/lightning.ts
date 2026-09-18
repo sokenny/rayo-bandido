@@ -190,6 +190,16 @@ export function lightningCost(hold: number): number {
 }
 
 /**
+ * How much of a full load a shot carried (0..1), from what it `spent`: 0 for the shortest hold
+ * that leaves, 1 for a full one. Presentation scales the discharge's sound and kick by it.
+ */
+export function boltLoad(spent: number): number {
+  const floor = lightningCost(LIGHTNING.minHold);
+  const span = LIGHTNING.cost - floor;
+  return span > 0 ? Math.min(1, Math.max(0, (spent - floor) / span)) : 1;
+}
+
+/**
  * The longest hold `charge` can pay for (s), which is the reach the meter can still buy. What
  * the loading loop enforces a tick at a time, and what presentation asks to draw a ceiling.
  */

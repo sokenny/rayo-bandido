@@ -36,6 +36,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Three places built for stunts: a roadworks jump on st-n3, a collapsed parking garage, and a concrete storm drain.',
       'Medium and heavy crashes and the tire screech are real recordings now, not synthesized.',
       'The metro runs much smoother: the electric traffic is drawn far more cheaply, so frame rates go up.',
+      'Crashes throw real sparks off the side that hit, and grinding along a wall trails a shower of them behind you.',
+      'The wet streets throw water off your rear tyres: mist at speed, a sheet of spray in a drift, a tail in a burnout.',
+      'Police chasers think ahead: they flank you, turn back when they overshoot, and swing across the road to block.',
+      'The Rayo bolt throws cars much farther and spins the wrecks; the longer you hold it, the louder the discharge.',
+      'The turbo flutter when you lift off boost is a real recording now, not synthesized.',
+      'Reflections of traffic and sirens on the wet road no longer stutter.',
+      'The opening title is a quick beat: about a second and a half instead of five.',
     ],
   },
   {
