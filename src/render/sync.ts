@@ -1,7 +1,7 @@
 import type { BusState, PoliceUnit, TargetState, VehicleState } from '../core/types';
 import { lerp, lerpAngle } from '../core/math';
 import type { CarVisual } from './scene/carVisual';
-import type { ElectricCarVisual } from './scene/electricCarVisual';
+import type { ElectricFleet } from './scene/electricFleet';
 import type { BusVisual } from './scene/busVisual';
 import type { PoliceCarVisual } from './scene/policeCarVisual';
 
@@ -52,18 +52,20 @@ export function syncCar(car: CarVisual, v: VehicleState, pose: InterpolatedPose)
 }
 
 /**
- * The traffic.
+ * The traffic: stages every car's interpolated pose and status on the instanced fleet
+ * (`scene/electricFleet.ts`), which draws them once the camera has moved (`fleet.commit`).
  *
  * NOT CULLED BY DISTANCE, and that was measured rather than assumed. The open world holds 126
  * of these against a 60-draw budget, so hiding the far ones looks like free money — but the
  * city's haze is `FogExp2` (`HAZE.cityDensity`), chosen precisely so the far side of the bay
  * keeps some contrast instead of clamping to flat fog. A car at 165 m is only about a fifth
  * hazed, and dropping it there changes pixels by up to 100/255: a visible pop. By the distance
- * the fog really does hide a car there is nothing left within it to cull. The draw calls are
- * real and worth fixing — by instancing the fleet, not by hiding it.
+ * the fog really does hide a car there is nothing left within it to cull. The draw calls were
+ * real, and the fix was instancing the fleet (2026-09-18), not hiding it: the fleet only leaves
+ * out the cars outside the camera's frustum.
  */
-export function syncTargets(
-  visuals: ElectricCarVisual[],
+export function syncFleet(
+  fleet: ElectricFleet,
   targets: TargetState[],
   alpha: number,
   time: number,
@@ -73,13 +75,18 @@ export function syncTargets(
    */
   rushMarks: Uint8Array | null = null,
 ): void {
-  for (let i = 0; i < targets.length && i < visuals.length; i++) {
+  for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
-    const vis = visuals[i];
-    vis.root.position.set(lerp(t.prevX, t.x, alpha), lerp(t.prevY, t.y, alpha), lerp(t.prevZ, t.z, alpha));
-    vis.root.rotation.y = -lerpAngle(t.prevHeading, t.heading, alpha);
-    vis.setStatus(t.status, t.hitTime >= 0 ? time - t.hitTime : 0);
-    vis.setRushTarget(!!rushMarks && rushMarks[t.id] === 1);
+    fleet.place(
+      i,
+      lerp(t.prevX, t.x, alpha),
+      lerp(t.prevY, t.y, alpha),
+      lerp(t.prevZ, t.z, alpha),
+      -lerpAngle(t.prevHeading, t.heading, alpha),
+      t.status,
+      t.hitTime >= 0 ? time - t.hitTime : 0,
+      !!rushMarks && rushMarks[t.id] === 1,
+    );
   }
 }
 

@@ -3272,3 +3272,50 @@ Then 20 % lower (1.76 m), and six in ten carry graffiti from the city's atlas (`
 `decal`, `pickPaintCell`) on the face toward the approach — the narrow upper wall of a standing
 one, the whole side of a toppled one — sometimes on the back too; the rest keep a hazard stripe
 or a slash of neon paint.
+
+## The electric fleet is instanced (2026-09-18)
+
+The win the 09-16 profile pointed at. The metro's electric traffic (629 cars today) was 629 scene
+graphs of six objects and four cloned materials each; it is now `src/render/scene/electricFleet.ts`,
+six `InstancedMesh`es for the whole fleet plus a few plain meshes. No shader is patched. A car in
+service and a settled wreck both have a fixed look, so each look gets its own material cloned
+from the same template, set to exactly the values the per-car visual reaches: body in service and
+wreck (paint as the instance colour, wreck roughness 0.75 and metalness 0.1), bars lit and dead,
+beacon in its flash (opacity 1, scale 1.25) and between flashes (0.16, 1). A car in the
+power-down cascade (under `ELECTRIC_CASCADE_END` = 2.45 s since the hit, the end of the variant-2
+hazard blink) is drawn by the old per-car visual, created at the hit and released once the wreck
+settles, so the cascade is the same code as before. The Rush ring is a pool of `maxMarked` plain
+meshes. Instances are frustum-culled per car on the CPU against the chase camera and packed at the
+front (0.02 ms a frame), and still never culled by distance. Instance colours are sent again only
+when a slot changes car. A hidden, never-culled per-car visual stays in the fleet so the warm-up
+compiles the cascade's programs and they survive the last cascade being disposed. The shared
+maths (chassis pose, dead paint, beacon blink, ring motion) moved out of `setStatus`/`update`
+into pure exports that both paths call.
+
+Measured headless (1600x900, `?mode=city&intro=0&solo=1&scale=1`, 4-6 s windows of
+`__rb.metrics`, same dev server before and after; the machine was busier than on 09-16):
+
+| | render JS | sim | GPU | draws | tris | frame / worst | scene objects |
+|---|---|---|---|---|---|---|---|
+| spawn, before | 11.06 ms | 0.98 | 5.50 ms | 1173 | 1144k | 12.9 / 24.7 ms | 5840 |
+| spawn, after | 3.55 ms | 0.37 | 1.59 ms | 340 | 1144k | 4.7 / 16.5 ms | 2093 |
+| spawn, fleet hidden (ceiling) | 3.47 ms | | 1.57 ms | 351 | 983k | 4.7 ms | |
+| cruise, before | 10.20 ms | 1.51 | 4.43 ms | 924 | 938k | 13.0 / 25.7 ms | |
+| cruise, after | 3.87 ms | 0.63 | 1.19 ms | 309 | 939k | 5.7 ms | |
+
+The fleet now costs 4 draws a frame (1668 before). Three's `updateMatrixWorld` went from 0.99 to
+0.38 ms a frame, `projectObject` from 1.24 to 0.39 and `setProgram` from 0.79 to 0.16. With culling
+off, spawn is render 3.63 / GPU 1.76 ms / 1351k tris, so culling stays on. Programs: +2 at load
+(the instanced body and bars; the beacon shares a program), and **none compiled by a hit**. A real
+bolt fired in a fresh page (car 308) created 0 programs, and so did 8 simultaneous cascades.
+Visual check: the same frame was rendered back to back with the fleet and with 629 old per-car
+visuals. Spawn differs in 431 of 1.44 M pixels by at most 8/255, settled wrecks by at most 8/255,
+and cascades by at most 1/255. A montage of all four variants at nine ages (surge to settled)
+shows no step at the hand-off. The Rush rings were checked in a live run. `npm run perf -- --mode
+race`: programs 50 → 50 in every phase, and frame and worst frames match the 09-16 run.
+
+Still compiling mid-game, and not from this change: in the metro cruise, `street-props-glow` and
+`env-grass` each build one program after the warm-up (grass gains a `uv` map late). Tests: the
+fleet matrix is checked against the per-car scene graph, the look at `ELECTRIC_CASCADE_END`
+against a settled wreck for all four variants, plus cascade hand-off, revival, rings and culling
+(`tests/electricFleet.test.ts`). Typecheck clean, 1142 tests pass.

@@ -90,6 +90,19 @@ const SAG_TIME = 0.95;
 const JERK_TIME = 0.35;
 const JERK_YAW = 0.085;
 
+/** The variant-2 hazards: two slow amber blinks after the beacon, over this many seconds. */
+const HAZARD_TIME = 1.4;
+/** The variant-1 beacon: how much longer than `T_BEACON` its contact holds on. */
+const STUCK_BEACON = 0.9;
+
+/**
+ * Seconds after the hit from which every variant's cascade has finished and a wreck no longer
+ * changes: the last thing to go out is the variant-2 hazard blink. From here on the car looks
+ * exactly as it does at `SETTLED`, which is what lets the fleet (`electricFleet.ts`) draw it
+ * instanced.
+ */
+export const ELECTRIC_CASCADE_END = Math.max(T_BEACON + HAZARD_TIME, T_BEACON + STUCK_BEACON, SAG_TIME, JERK_TIME);
+
 const TAU = Math.PI * 2;
 
 function clamp01(x: number): number {
@@ -120,6 +133,82 @@ function stutter(age: number, phase: number): number {
   if (n > -0.3) return 0.18;
   return 0;
 }
+
+/** Where the roof beacon sits on the chassis. */
+export const BEACON_OFFSET: Readonly<{ x: number; y: number; z: number }> = { x: 0, y: 1.56, z: 0.1 };
+
+/** The chassis of a car: the sag, lean and jerk it carries under its root. Euler order XYZ. */
+export interface ElectricChassisPose {
+  rx: number;
+  ry: number;
+  rz: number;
+  y: number;
+}
+
+/**
+ * The chassis pose of car `index`, `age` seconds after its hit, or at rest when `age` is null
+ * (a car in service). Pure: `setStatus` and the instanced fleet both read it.
+ */
+export function electricChassisPose(index: number, age: number | null, out: ElectricChassisPose): ElectricChassisPose {
+  if (age === null) {
+    out.rx = 0;
+    out.ry = 0;
+    out.rz = 0;
+    out.y = 0;
+    return out;
+  }
+  // Vary the collapse direction so six targets never go down in lockstep.
+  const tiltSign = index % 2 === 0 ? 1 : -1;
+  const tiltAmount = 0.16 + (index % 3) * 0.04;
+  const sag = smooth(clamp01(age / SAG_TIME));
+  // One twitch of torque as the motor cuts, rung out inside a third of a second, and under it
+  // the car settling onto its springs and leaning off the lane.
+  const jerk = age < JERK_TIME ? Math.sin((age / JERK_TIME) * Math.PI * 1.5) * (1 - age / JERK_TIME) : 0;
+  out.ry = tiltSign * JERK_YAW * jerk;
+  out.rz = tiltSign * tiltAmount * sag - tiltSign * 0.06 * jerk;
+  out.rx = 0.05 * sag + 0.03 * jerk;
+  out.y = -0.12 * sag;
+  return out;
+}
+
+/** The paint car `index` wears in service. Shared: copy it, never write to it. */
+export function electricBodyPaint(index: number): THREE.Color {
+  return BODY_COLORS[index % BODY_COLORS.length];
+}
+
+/** The paint with nothing lighting it: its own hue, half the value, a little colder. */
+export function electricDeadPaint(index: number, out: THREE.Color): THREE.Color {
+  return out.copy(electricBodyPaint(index)).multiplyScalar(0.5).lerp(DEAD_TINT, 0.2);
+}
+
+/** Where in the network blink car `index` is: its own phase, so a street never pulses as one. */
+function blinkPhaseOf(index: number): number {
+  return (index * 0.37) % 1;
+}
+
+/** Whether the roof beacon of car `index`, in service, is in its flash at `time`. */
+export function electricBeaconFlash(index: number, time: number): boolean {
+  return (time * 0.85 + blinkPhaseOf(index)) % 1 < 0.14;
+}
+
+/** The beacon in service: full and swollen in the flash, a faint ember between. */
+export const BEACON_FLASH = { opacity: 1, scale: 1.25 } as const;
+export const BEACON_DIM = { opacity: 0.16, scale: 1 } as const;
+
+/** A wreck's body once it has settled (`setStatus` at full sag): rougher and flatter. */
+export const DEAD_BODY_ROUGHNESS = 0.35 + 1 * 0.4;
+export const DEAD_BODY_METALNESS = 0.2 - 1 * 0.1;
+
+/** The Rush ring's motion: slow and dim on purpose — present, not insistent. */
+export function electricRushRingSpin(time: number): number {
+  return time * 0.18;
+}
+export function electricRushRingOpacity(time: number): number {
+  return 0.2 + 0.06 * Math.sin(time * 1.3);
+}
+
+/** The amber a Rayo Rush target wears on the ground. */
+export const ELECTRIC_RUSH_RING: Readonly<THREE.Color> = RUSH_RING;
 
 interface SharedResources {
   body: THREE.BufferGeometry;
@@ -291,6 +380,15 @@ export function electricCarGeometry(): { body: THREE.BufferGeometry; bars: THREE
   return { body: s.body, bars: s.bars };
 }
 
+/**
+ * Everything the instanced fleet (`electricFleet.ts`) is built from: the shared geometries and
+ * the template materials every per-car visual clones. Shared: the caller clones the materials
+ * and must not dispose any of it.
+ */
+export function electricFleetKit(): Readonly<SharedResources> {
+  return getShared();
+}
+
 export function disposeElectricCarResources(): void {
   if (!shared) return;
   shared.body.dispose();
@@ -336,7 +434,7 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   const bars = new THREE.Mesh(s.bars, barMat);
   chassis.add(bars);
   const beacon = new THREE.Mesh(s.beacon, beaconMat);
-  beacon.position.set(0, 1.56, 0.1);
+  beacon.position.set(BEACON_OFFSET.x, BEACON_OFFSET.y, BEACON_OFFSET.z);
   beacon.renderOrder = 2;
   chassis.add(beacon);
 
@@ -346,10 +444,10 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
   ring.visible = false;
   root.add(ring);
 
-  // Vary the collapse direction and the blink phase so six targets never move in lockstep.
-  const tiltSign = index % 2 === 0 ? 1 : -1;
-  const tiltAmount = 0.16 + (index % 3) * 0.04;
-  const blinkPhase = (index * 0.37) % 1;
+  // Vary the collapse direction (`electricChassisPose`) and the blink phase so six targets never
+  // move in lockstep.
+  const blinkPhase = blinkPhaseOf(index);
+  const pose: ElectricChassisPose = { rx: 0, ry: 0, rz: 0, y: 0 };
 
   /**
    * How this car's power-down goes wrong, by index rather than at random: the mix on a street
@@ -362,10 +460,9 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
    */
   const variant = index % 4;
   const flickerEnd = variant === 3 ? 0.42 : T_FLICKER;
-  const beaconEnd = variant === 1 ? T_BEACON + 0.9 : T_BEACON;
+  const beaconEnd = variant === 1 ? T_BEACON + STUCK_BEACON : T_BEACON;
 
-  /** The paint with nothing lighting it: its own hue, half the value, a little colder. */
-  const deadBody = cleanBody.clone().multiplyScalar(0.5).lerp(DEAD_TINT, 0.2);
+  const deadBody = electricDeadPaint(index, new THREE.Color());
 
   let alive = true;
   let rushTarget = false;
@@ -418,9 +515,9 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       // 2. THE LIGHT BARS ride the same surge well past the brightness they are allowed in
       // service, stutter with it, and are cut after the cabin has gone dark.
       let hazard = 0;
-      if (variant === 2 && age > T_BEACON && age < T_BEACON + 1.4) {
+      if (variant === 2 && age > T_BEACON && age < T_BEACON + HAZARD_TIME) {
         const since = age - T_BEACON;
-        hazard = since % 0.7 < 0.28 ? 1 - since / 1.4 : 0;
+        hazard = since % 0.7 < 0.28 ? 1 - since / HAZARD_TIME : 0;
       }
       let barLevel: number;
       if (age < T_SURGE) barLevel = 1 + 1.6 * (age / T_SURGE);
@@ -449,13 +546,10 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
         beacon.visible = false;
       }
 
-      // 4. THE JERK. One twitch of torque as the motor cuts, rung out inside a third of a
-      // second, and under it the car settling onto its springs and leaning off the lane.
-      const jerk = age < JERK_TIME ? Math.sin((age / JERK_TIME) * Math.PI * 1.5) * (1 - age / JERK_TIME) : 0;
-      chassis.rotation.y = tiltSign * JERK_YAW * jerk;
-      chassis.rotation.z = tiltSign * tiltAmount * sag - tiltSign * 0.06 * jerk;
-      chassis.rotation.x = 0.05 * sag + 0.03 * jerk;
-      chassis.position.y = -0.12 * sag;
+      // 4. THE JERK as the motor cuts, and the car settling onto its springs.
+      electricChassisPose(index, age, pose);
+      chassis.rotation.set(pose.rx, pose.ry, pose.rz);
+      chassis.position.y = pose.y;
     },
     setRushTarget(value) {
       if (value === rushTarget) return;
@@ -466,17 +560,14 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
     },
     update(_frameDt, time) {
       if (alive) {
-        const phase = (time * 0.85 + blinkPhase) % 1;
-        const flash = phase < 0.14;
+        const look = electricBeaconFlash(index, time) ? BEACON_FLASH : BEACON_DIM;
         beacon.visible = true;
-        beaconMat.opacity = flash ? 1 : 0.16;
-        const scale = flash ? 1.25 : 1;
-        beacon.scale.set(scale, scale, scale);
+        beaconMat.opacity = look.opacity;
+        beacon.scale.setScalar(look.scale);
       }
       if (rushTarget) {
-        // Slow and dim on purpose: present, not insistent.
-        ring.rotation.y = time * 0.18;
-        ringMat.opacity = 0.2 + 0.06 * Math.sin(time * 1.3);
+        ring.rotation.y = electricRushRingSpin(time);
+        ringMat.opacity = electricRushRingOpacity(time);
       }
     },
     dispose() {

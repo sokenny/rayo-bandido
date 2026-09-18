@@ -134,7 +134,8 @@ import { thinSewerSteam, thinStreetProps } from './world/streetProps';
 import { createSewerSteamVisual, type SewerSteamVisual } from './render/scene/sewerSteamVisual';
 import { createAerialTraffic, type AerialTrafficVisual } from './render/scene/aerialTrafficVisual';
 import { createCarVisual } from './render/scene/carVisual';
-import { createElectricCarVisual, disposeElectricCarResources, type ElectricCarVisual } from './render/scene/electricCarVisual';
+import { disposeElectricCarResources } from './render/scene/electricCarVisual';
+import { createElectricFleet } from './render/scene/electricFleet';
 import { createPoliceCarVisual, disposePoliceCarResources, type PoliceCarVisual } from './render/scene/policeCarVisual';
 import { isPoliceEnabledForCurrentGameState } from './sim/police';
 import { createBusVisual, type BusVisual } from './render/scene/busVisual';
@@ -142,7 +143,7 @@ import { createChaseCamera, type CameraPose, type CameraView } from './render/ca
 import { createWorldProbe } from './render/probe';
 import { createEffects } from './render/fx';
 import { BOLT_TO_Y } from './render/fx/lightningArc';
-import { interpolateVehicle, syncBuses, syncCar, syncPolice, syncTargets, type InterpolatedPose } from './render/sync';
+import { interpolateVehicle, syncBuses, syncCar, syncFleet, syncPolice, type InterpolatedPose } from './render/sync';
 import { createGpuTimer } from './render/gpuTimer';
 import { createResolutionGovernor } from './render/adaptiveResolution';
 import { compileScene, warmRender } from './render/warmup';
@@ -421,12 +422,10 @@ export function createGame(
   // has to see past it — otherwise every reading would be the bodywork.
   car.root.userData.probeIgnore = true;
   scene.add(car.root);
-  const targetVisuals: ElectricCarVisual[] = [];
-  for (let i = 0; i < state.targets.length; i++) {
-    const vis = createElectricCarVisual(i);
-    scene.add(vis.root);
-    targetVisuals.push(vis);
-  }
+  // The electric traffic, instanced (`src/render/scene/electricFleet.ts`): a handful of draws
+  // for the whole fleet instead of four per car.
+  const targetFleet = createElectricFleet(state.targets.length);
+  scene.add(targetFleet.root);
   // The city's buses. Nothing shoots or shoves them, so unlike the electric cars they are
   // plain scenery that happens to move: no status, no acquisition ring.
   const busVisuals: BusVisual[] = [];
@@ -2053,8 +2052,7 @@ export function createGame(
     // while a run is on — `markRushTargets` answers with the same rule that decides what
     // actually scores, so the two can never disagree.
     if (state.rush && rushMarks) markRushTargets(state.rush, state.targets, v.x, v.z, rushMarks);
-    syncTargets(targetVisuals, state.targets, alpha, simTime, rushMarks);
-    for (let i = 0; i < targetVisuals.length; i++) targetVisuals[i].update(frameDt, simTime);
+    syncFleet(targetFleet, state.targets, alpha, simTime, rushMarks);
     syncBuses(busVisuals, state.buses, alpha);
     if (state.police) {
       syncPolice(policeVisuals, state.police.units, alpha, state.police.aimedUnit);
@@ -2491,6 +2489,10 @@ export function createGame(
     }
     if (nameTags) nameTags.update(chase.camera, rivals);
 
+    // The fleet is culled per car against the camera the frame is drawn with, so it is packed
+    // here, after the camera has moved, rather than where its poses were staged.
+    targetFleet.commit(chase.camera, simTime, frameDt);
+
     gpuTimer.begin();
     // Not behind the opening clip: an opaque video over a city nobody can see is GPU time spent
     // on nothing. The simulation above ran regardless — a networked city is never paused.
@@ -2705,7 +2707,8 @@ export function createGame(
         sewerVisual.dispose();
       }
       if (aerialTraffic) aerialTraffic.dispose();
-      for (const t of targetVisuals) t.dispose();
+      scene.remove(targetFleet.root);
+      targetFleet.dispose();
       for (const b of busVisuals) b.dispose();
       for (const p of policeVisuals) p.dispose();
       disposePoliceCarResources();
@@ -2823,6 +2826,11 @@ export function createGame(
     wetRoad: environment.wetRoad,
     /** Ambient hovercars and drones: `enabled` toggles them live, `stats()` counts what is drawn. */
     aerial: aerialTraffic,
+    /**
+     * The instanced electric fleet: `stats` counts what was drawn in each look last frame,
+     * `cull = false` sends every car to the GPU (A/B), `root.visible` hides the lot.
+     */
+    fleet: targetFleet,
     /** La flor in Plaza Estrella: `strike()` as a bolt would, `openness()` to watch it open. */
     floralis: environment.floralis,
     audio,
