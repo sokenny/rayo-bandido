@@ -1040,6 +1040,20 @@ body.rb-backdrop .rb-menu .rb-panel {
   font-weight: 700;
 }
 
+.rb-menu__footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--rb-text);
+  text-align: center;
+  text-transform: uppercase;
+}
+
 /* ================================================================ main menu */
 
 .rb-console {
@@ -6370,6 +6384,28 @@ body.rb-touch-pad .rb-minimap {
   }
 
   .rb-log__items li {
+    font-size: 10px;
+  }
+}
+
+/* ----------------------------------------------------------------- lore */
+/* The LORE tab (`src/ui/lore.ts`): reuses the changelog's frame and scroll box, but reads as
+   plain paragraphs — no headings or lists, just the text. */
+
+.rb-lore__body p {
+  margin: 8px 0 0;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--rb-text);
+}
+
+.rb-lore__body p:first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .rb-lore__body p {
     font-size: 10px;
   }
 }

@@ -37,6 +37,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'A giant steel flower stands at the new Plaza Estrella, and opens petal by petal if you hit it with the lightning gun.',
       'Guests are now asked to link a Google account so their progress is saved for good.',
       'You can now set your own nickname from the account panel — it shows on the boards, the HUD and in rooms.',
+      'A new LORE tab on the main menu: who Rayo Bandido is, and why the city hates the sound of him.',
+      'The main menu now speaks in Rioplatense Spanish, the voice of the game.',
     ],
   },
   {

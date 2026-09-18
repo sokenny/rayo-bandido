@@ -38,6 +38,8 @@ export interface MenuScreenOptions<T extends string> {
   sub: string;
   /** The line along the bottom. Markup: `<b>` sets a key cap. */
   hint: string;
+  /** An optional credit line under the hint, e.g. where the game was made. Plain text/markup. */
+  footer?: string;
   entries: Array<MenuScreenEntry<T>>;
   onSelect(id: T): void;
   /** ESC. Omitted on the first screen, where there is nothing to go back to. */
@@ -86,7 +88,8 @@ export function createMenuScreen<T extends string>(
     `</div>` +
     `</div>` +
     `</div>` +
-    `<div class="rb-menu__hint">${options.hint}</div>`;
+    `<div class="rb-menu__hint">${options.hint}</div>` +
+    (options.footer ? `<div class="rb-menu__footer">${options.footer}</div>` : '');
   root.appendChild(menu);
 
   const cards = Array.from(menu.querySelectorAll<HTMLButtonElement>('.rb-item'));

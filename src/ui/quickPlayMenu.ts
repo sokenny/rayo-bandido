@@ -122,7 +122,7 @@ export function showQuickPlayMenu(root: HTMLElement, callbacks: QuickPlayCallbac
       id: 'rush',
       kicker: 'A PUNTOS',
       name: GAME_NAMES.rush,
-      desc: `${RUSH.durationSeconds} segundos sueltos en Bandido Metro. Derrapá para cargar el Rayo, apagá los autos eléctricos y mantené viva la racha. Solo, es la cadena de misiones; online, todos arrancan en el mismo GO y gana el que más puntos hace.`,
+      desc: `${RUSH.durationSeconds} segundos sueltos en Bandido Metro. Derrapá para cargar el Rayo y apagá autos eléctricos: cada uno suma puntos, más si disparás en plena derrapada. Chocar o errar te los resta.`,
       spec: [
         ['MISIÓN', lines.rush.mission],
         ['OBJETIVO', lines.rush.target],
@@ -204,7 +204,7 @@ export function showQuickPlayModeMenu(
       ? {
           id: 'offline',
           kicker: 'SOLO · CADENA DE MISIONES',
-          name: 'OFFLINE',
+          name: 'SOLO',
           desc: `Aparecés en el marcador con la cuenta regresiva ya en marcha: ${RUSH.durationSeconds} segundos, todos los eléctricos a tiro y el objetivo de la misión para superar. Con R la corrés de nuevo desde el marcador.`,
           spec: [
             ['MISIÓN', lines.mission],
@@ -216,7 +216,7 @@ export function showQuickPlayModeMenu(
         ? {
             id: 'offline',
             kicker: 'SOLO · VS RIVALES IA',
-            name: 'OFFLINE',
+            name: 'SOLO',
             desc: 'El último evento de la serie al que llegaste, contra sus rivales de la IA. Ganalo y en la misma grilla te espera el siguiente, más difícil.',
             spec: [
               ['EVENTO', lines.mission],
@@ -227,7 +227,7 @@ export function showQuickPlayModeMenu(
         : {
             id: 'offline',
             kicker: 'SOLO · CADENA DE MISIONES',
-            name: 'OFFLINE',
+            name: 'SOLO',
             desc: 'El Bandido Grid para vos solo. Dos vueltas a la ciudad contra un tiempo objetivo Y un límite de choques: primero completala, después llevá velocidad, y al final hacelo sin tocar nada.',
             spec: [
               ['MISIÓN', lines.mission],
@@ -239,7 +239,7 @@ export function showQuickPlayModeMenu(
   const online: MenuScreenEntry<QuickPlayChoice> = {
     id: 'online',
     kicker: 'SALA · JUGÁ CON AMIGOS',
-    name: 'ONLINE',
+    name: 'CON AMIGOS',
     desc:
       game === 'rush'
         ? `Una sala para hasta ${MAX_PLAYERS}. Todos aparecen en el mismo marcador, la corrida arranca en el mismo GO y cuando se acaba el reloj gana el puntaje más alto. Abrí una y mandá el link, o entrá con un código.`

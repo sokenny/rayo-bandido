@@ -34,7 +34,7 @@ export interface MainMenu {
 }
 
 /** What the main menu can hand back: a world to drive, a screen one step deeper, or the intro again. */
-export type MenuChoice = 'city' | 'quick' | 'changelog' | 'intro';
+export type MenuChoice = 'city' | 'quick' | 'changelog' | 'lore' | 'intro';
 
 /** How often the live city count is re-read while the menu is up. */
 const POLL_MS = 5000;
@@ -49,7 +49,7 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
     id: 'city',
     kicker: 'FREE ROAM · ONLINE',
     name: 'OPEN WORLD',
-    desc: 'Bandido Metro, and whoever else is out driving it. The Stack downtown, the viaduct, the buses and the water at the bottom of the map. No clock, no flag.',
+    desc: 'Bandido Metro, y quien más ande dando vueltas. El Stack en el centro, el viaducto, los colectivos y el agua al fondo del mapa. Sin reloj, sin bandera.',
     spec: [
       ['ZONE', 'BANDIDO METRO'],
       ['SIZE', '1.4 x 2.0 KM'],
@@ -61,7 +61,7 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
     id: 'quick',
     kicker: 'SOLO OR ONLINE',
     name: 'QUICK PLAY',
-    desc: `The open world's games, straight off the menu: a ${RUSH.durationSeconds}-second RAYO RUSH, a STREET RACE on La Curva or a TIME ATTACK on the Bandido Grid. Play them alone, or open a room for up to ${MAX_PLAYERS} and bring your friends.`,
+    desc: `Los juegos del mundo abierto, directo desde el menú: un RAYO RUSH de ${RUSH.durationSeconds} segundos, una STREET RACE en La Curva o un TIME ATTACK en el Bandido Grid. Jugalos solo, o abrí una sala para hasta ${MAX_PLAYERS} y sumá a tus amigos.`,
     spec: [
       ['GAMES', 'RUSH · STREET · TIME ATTACK'],
       ['PROGRESS', 'SHARED WITH THE OPEN WORLD'],
@@ -72,11 +72,22 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
     id: 'changelog',
     kicker: 'BUILD LOG',
     name: 'CHANGELOG',
-    desc: 'What has changed in the city lately, by the day it went live. Every deploy writes a line here.',
+    desc: 'Qué cambió últimamente en la ciudad, por el día en que salió. Cada deploy escribe una línea acá.',
     spec: [
       ['LATEST', CHANGELOG[0] ? CHANGELOG[0].date : '--'],
       ['ENTRIES', String(CHANGELOG.length).padStart(2, '0')],
       ['NEW', CHANGELOG[0] ? `${String(CHANGELOG[0].items.length).padStart(2, '0')} CHANGES` : 'NONE'],
+    ],
+  },
+  {
+    id: 'lore',
+    kicker: 'AÑO 2069',
+    name: 'LORE',
+    desc: 'Quién es Rayo Bandido',
+    spec: [
+      ['SETTING', 'AÑO 2069'],
+      ['LEY', 'COMBUSTIÓN = DELITO'],
+      ['SUJETO', 'RAYO BANDIDO'],
     ],
   },
 ];
@@ -111,6 +122,7 @@ export function showMainMenu(root: HTMLElement, onSelect: (choice: MenuChoice) =
     screen: 'MAIN',
     sub: 'DRIFT AND ROAM THE CYBERPUNK UNDERGROUND',
     hint: '<b>←</b> <b>→</b> select · <b>ENTER</b> execute · <b>I</b> replay the intro · in game <b>ESC</b> returns here',
+    footer: 'Creado en la mejor ciudad del mundo 🇦🇷',
     entries,
     onSelect(choice) {
       done = true;

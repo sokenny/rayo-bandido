@@ -6,6 +6,7 @@ import { createLoadingScreen, type LoadingScreen } from './ui/loadingScreen';
 import { showMainMenu, type MenuChoice } from './ui/mainMenu';
 import { showQuickPlayMenu, showQuickPlayModeMenu, type QuickPlayChoice } from './ui/quickPlayMenu';
 import { createChangelogScreen } from './ui/changelog';
+import { createLoreScreen } from './ui/lore';
 import { createLobby } from './ui/lobby';
 import { createRoomBrowser } from './ui/rooms';
 import { createSession, type NetSession } from './net/session';
@@ -121,6 +122,8 @@ interface Destination {
   game?: RoomGame;
   /** The changelog tab: what shipped and when. Reads, drives nothing. */
   log?: boolean;
+  /** The LORE tab: who Rayo Bandido is and why. Reads, drives nothing. */
+  lore?: boolean;
   /** Multiplayer — the room browser, or `room` when one is named. */
   mp?: boolean;
   room?: string;
@@ -147,7 +150,7 @@ interface Destination {
  * for. Everything else in the query string survives, `?server=` and `?debug=1` included.
  */
 function urlWith(to: Destination = {}): string {
-  const { mode = null, quick = null, game = null, log = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
+  const { mode = null, quick = null, game = null, log = false, lore = false, mp: multiplayer = false, room = '', from = null, event, intro = false } = to;
   const params = new URLSearchParams(location.search);
   if (mode) params.set('mode', mode);
   else params.delete('mode');
@@ -164,6 +167,8 @@ function urlWith(to: Destination = {}): string {
   else params.delete('game');
   if (log) params.set('log', '1');
   else params.delete('log');
+  if (lore) params.set('lore', '1');
+  else params.delete('lore');
   if (multiplayer) params.set('mp', '1');
   else params.delete('mp');
   // `create` and `listed` describe one arrival and must not survive it: keeping them would
@@ -598,9 +603,11 @@ function menu(): void {
         ? urlWith({ quick: 'menu' })
         : choice === 'changelog'
           ? urlWith({ log: true })
-          : choice === 'intro'
-            ? urlWith({ mode: 'city', intro: true })
-            : urlWith({ mode: choice });
+          : choice === 'lore'
+            ? urlWith({ lore: true })
+            : choice === 'intro'
+              ? urlWith({ mode: 'city', intro: true })
+              : urlWith({ mode: choice });
     // A short beat for the card to light up, then reload into the chosen world.
     setTimeout(() => location.assign(url), 180);
   });
@@ -613,6 +620,17 @@ function changelog(): void {
   void loading.hide();
   createAccountBadge(menuRoot!, account());
   createChangelogScreen(menuRoot!, () => {
+    setTimeout(() => location.assign(urlWith()), 180);
+  });
+}
+
+/** The LORE tab: a screen to read, and ESC back to the menu. Nothing is loaded from here. */
+function lore(): void {
+  playMenuAmbience();
+  const loading = createLoadingScreen(document.getElementById('loading-root'));
+  void loading.hide();
+  createAccountBadge(menuRoot!, account());
+  createLoreScreen(menuRoot!, () => {
     setTimeout(() => location.assign(urlWith()), 180);
   });
 }
@@ -703,4 +721,5 @@ else if (mode) void boot(mode);
 else if (quickFromUrl() === 'menu') quickPlayMenu();
 else if (quickFromUrl()) quickPlayModeMenu(quickFromUrl() as RoomGame);
 else if (new URLSearchParams(location.search).has('log')) changelog();
+else if (new URLSearchParams(location.search).has('lore')) lore();
 else menu();

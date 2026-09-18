@@ -60,6 +60,7 @@ export function screenFromUrl(search: string = location.search): string {
   if (params.has('race') || params.get('quick') === '1') return 'menu_quick';
   if (params.has('quick')) return 'menu_quick_mode';
   if (params.has('log')) return 'changelog';
+  if (params.has('lore')) return 'lore';
   return 'menu_main';
 }
 
