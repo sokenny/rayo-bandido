@@ -203,12 +203,16 @@ describe('left-foot brake', () => {
 
   it('keeps a drift alive: the pedal scrubs speed without snapping the car straight', () => {
     const { v, cmd } = driftEntry();
-    const slipBefore = Math.abs(v.slipAngle);
+    // The body carries its rotation, so a slide fresh off the handbrake is still swinging back
+    // from its overshoot: judge the pedal against the same slide left alone, not a snapshot.
+    const coast = { ...v };
+    run(coast, { ...cmd }, 0.5);
     const speedBefore = v.speed;
     cmd.brake = 1;
     run(v, cmd, 0.5);
     expect(v.speed).toBeLessThan(speedBefore - 3);
-    expect(Math.abs(v.slipAngle)).toBeGreaterThan(slipBefore);
+    expect(Math.abs(v.slipAngle)).toBeGreaterThan(Math.abs(coast.slipAngle));
+    expect(Math.abs(v.slipAngle) * DEG).toBeGreaterThan(15);
   });
 });
 
@@ -396,6 +400,55 @@ describe('breaking traction', () => {
     const toGrip = back.findIndex((s) => s < 0.4);
     expect(toGrip).toBeGreaterThanOrEqual(0);
     expect(toGrip).toBeLessThan(toLoose);
+  });
+});
+
+/**
+ * The body has rotational inertia. A drift used to be a first-order settle: the angle ran to
+ * an equilibrium and locked there, and the yaw rate jumped to whatever the tyres asked for in
+ * one tick. These lock the pendulum that replaced it.
+ */
+describe('body inertia', () => {
+  /** Handbrake entry at 110 km/h, then held on full throttle and lock; slip sampled per tick. */
+  function heldDrift(): { v: VehicleState; slips: number[]; yaws: number[] } {
+    const v = createVehicleState(0, 0, 0);
+    const cmd = createPlayerCommand();
+    cmd.throttle = 1;
+    while (v.speed * 3.6 < 110) stepVehicle(v, cmd, false, DT);
+    const slips: number[] = [];
+    const yaws: number[] = [];
+    const tick = () => {
+      stepVehicle(v, cmd, false, DT);
+      slips.push(Math.abs(v.slipAngle) * DEG);
+      yaws.push(v.yawRate);
+    };
+    cmd.throttle = 0;
+    cmd.steer = 1;
+    cmd.handbrake = true;
+    for (let i = 0; i < 24; i++) tick();
+    cmd.throttle = 1;
+    cmd.handbrake = false;
+    for (let i = 0; i < 180; i++) tick();
+    return { v, slips, yaws };
+  }
+
+  it('never changes its rate of rotation in a single tick, even when the pull is let go', () => {
+    const { yaws } = heldDrift();
+    const jump = Math.max(...yaws.slice(1).map((y, i) => Math.abs(y - yaws[i])));
+    expect(jump).toBeLessThan(0.4);
+  });
+
+  it('swings through its drift angle instead of settling on it, and stays in the slide', () => {
+    const { slips } = heldDrift();
+    const after = slips.slice(24);
+    const peak = Math.max(...after);
+    const trough = Math.min(...after.slice(after.indexOf(peak)));
+    const settled = after[after.length - 1];
+    // Carried past the angle it will hold, then back below it: a pendulum, not a lock.
+    expect(peak).toBeGreaterThan(settled + 10);
+    expect(trough).toBeLessThan(settled - 3);
+    // The swing is inside the drift - the rear never bites mid-swing and ends the slide.
+    expect(trough).toBeGreaterThan(15);
   });
 });
 

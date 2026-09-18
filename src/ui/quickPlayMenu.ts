@@ -8,11 +8,14 @@ import { timeAttackAllClear, timeAttackLevel, timeAttackLevelCount, timeAttackLe
 import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuScreen';
 
 /**
- * QUICK PLAY: the open world's three activities, straight off the menu, without driving across
+ * QUICK PLAY: the open world's activities, straight off the menu, without driving across
  * the city to their doors. Two screens, both built on `menuScreen.ts`:
  *
- *   QUICK PLAY   `?quick=1`                RAYO RUSH · STREET RACE · TIME ATTACK
- *   <GAME>       `?quick=rush|street|circuit`   OFFLINE or ONLINE
+ *   QUICK PLAY   `?quick=1`                RAYO RUSH · STREET RACE
+ *   <GAME>       `?quick=rush|street`      OFFLINE or ONLINE
+ *
+ * TIME ATTACK came off this list on 2026-09-18, with its ring in the metro. Its `circuit` lines
+ * below stay because `RoomGame` still names it (old room links, `?mode=circuit`).
  *
  * THE SAME GAMES AS THE STREET. Nothing here is a second version of anything: OFFLINE builds the
  * world the open world's door would have loaded (`?mode=rush`, `?mode=street&event=N`,
@@ -142,18 +145,6 @@ export function showQuickPlayMenu(root: HTMLElement, callbacks: QuickPlayCallbac
         [ROOMS_LABEL, 'BUSCANDO'],
       ],
     },
-    {
-      id: 'circuit',
-      kicker: 'BANDIDO GRID',
-      name: GAME_NAMES.circuit,
-      desc: `Dos vueltas al Bandido Grid contra un tiempo objetivo y un límite de choques, en tres misiones. Online son las mismas dos vueltas con hasta ${MAX_PLAYERS} autos, y decide la bandera.`,
-      spec: [
-        ['MISIÓN', lines.circuit.mission],
-        ['OBJETIVO', lines.circuit.target],
-        ['CIRCUITO', GRID_LINE],
-        [ROOMS_LABEL, 'BUSCANDO'],
-      ],
-    },
   ];
 
   let done = false;
@@ -175,7 +166,7 @@ export function showQuickPlayMenu(root: HTMLElement, callbacks: QuickPlayCallbac
   async function poll(): Promise<void> {
     const lines = await roomsLines();
     if (done) return;
-    for (const game of ['rush', 'street', 'circuit'] as const) screen.setSpec(game, ROOMS_LABEL, lines[game]);
+    for (const game of ['rush', 'street'] as const) screen.setSpec(game, ROOMS_LABEL, lines[game]);
   }
   void poll();
   const timer = window.setInterval(() => void poll(), POLL_MS);

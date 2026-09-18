@@ -180,8 +180,16 @@ export function stepVehicle(
   if (forwardMotion) {
     // Already sliding: stay loose while the player asks for it (throttle or steering).
     const hold = throttle > steerMag ? throttle : steerMag;
+    // A tyre that is already sliding holds less than one that is gripping (kinetic friction is
+    // below static), so the angle it takes to keep the rear loose drops once it has gone: the
+    // full-slide edge moves from `slideSlipFull` toward `slideSlipHeld` with the slide itself.
+    // Without that the drift only existed above one angle, and any swing below it bit the rear
+    // straight back in - the car could hold its angle but never move about inside it. It lasts
+    // only while the player keeps the rear busy (a spinning rear stays sliding): let go of
+    // everything and the tyres bite at the usual edge, so catching the car stays quick.
+    const slipFull = lerp(VEHICLE.slideSlipFull, VEHICLE.slideSlipHeld, v.slide * hold);
     slideTarget =
-      smoothstep(VEHICLE.slideSlipStart, VEHICLE.slideSlipFull, slipMag) *
+      smoothstep(VEHICLE.slideSlipStart, slipFull, slipMag) *
       lerp(VEHICLE.slideReleaseFloor, 1, hold);
 
     // Power oversteer: hard steering + throttle above `powerSlideSpeed` breaks traction.
@@ -383,6 +391,22 @@ export function stepVehicle(
     const fade = clamp01((speed - VEHICLE.alignMinSpeed) / VEHICLE.alignFadeSpeed);
     yaw += slip * alignRate * fade;
   }
+
+  // Everything above is the yaw rate the tyres *ask* for. The body has a moment of inertia, so
+  // it does not adopt that rate in a tick: it swings toward it. Gripping, the lag is a few
+  // frames and nobody feels it. Sliding, the tyres hold the body only loosely and the lag grows,
+  // which turns the slip angle from a first-order settle — the car snapping to an equilibrium
+  // angle and locking there — into a lightly damped pendulum. The nose overshoots its angle and
+  // swings back, answers a change of lock with a sway rather than a jump, and the road's swells
+  // (`rearGrip`) now set the tail moving instead of being absorbed on the spot. Regrip goes
+  // through the same inertia, so the car rolls back straight instead of clicking into line.
+  // The catch grows with how far apart the two are: a small sway lives, a big swing (a pull
+  // just released, a slide collapsing) is caught before it can throw the car the other way.
+  const yawGap = yaw - v.yawRate;
+  const yawResponse =
+    (handbrakeSlide ? VEHICLE.yawResponseHandbrake : lerp(VEHICLE.yawResponseGrip, VEHICLE.yawResponseSlide, slide)) +
+    VEHICLE.yawResponseCatch * (yawGap < 0 ? -yawGap : yawGap);
+  yaw = damp(v.yawRate, yaw, yawResponse, dt);
 
   // The pull's spend is the rotation the player actually got, measured along the way the kick
   // is pushing — not the kick's own integral, which the aligning torque eats into and which

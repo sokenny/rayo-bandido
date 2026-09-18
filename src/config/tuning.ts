@@ -94,14 +94,32 @@ export const VEHICLE = {
   /** Speed floor used when converting the lateral budget into a yaw rate cap (m/s). */
   yawLimitMinSpeed: 3,
   /** Extra yaw authority while drifting so the player can hold and steer the slide. */
-  driftYawGain: 1.7,
+  driftYawGain: 2.9,
   /**
    * Self-aligning rate while drifting (1/s): how strongly the nose rotates back toward the
    * velocity direction. Low = the slide holds; this is what makes drifts forgiving.
    */
-  driftStability: 1.65,
+  driftStability: 3.6,
   /** Self-aligning rate while gripping (1/s). Keeps the car straight and stable. */
   alignGrip: 3.2,
+  /**
+   * How fast the body's yaw rate follows the rate the tyres ask for while gripping (1/s): the
+   * car's moment of inertia. High enough that turn-in still feels immediate.
+   */
+  yawResponseGrip: 14,
+  /**
+   * The same while fully sliding (1/s). Loose tyres hold the body only lightly, so its
+   * rotation carries: lower = the drift angle sways and overshoots more (a pendulum instead of
+   * a locked angle), higher = it settles on its angle and sits there.
+   */
+  yawResponseSlide: 1.8,
+  /** The same while the handbrake is pulled (1/s). A yank has to swing the nose now. */
+  yawResponseHandbrake: 10,
+  /**
+   * Extra response per rad/s between the rate the tyres ask for and the one the body has
+   * (1/s per rad/s). Keeps the sway to small swings: a big mismatch is caught hard.
+   */
+  yawResponseCatch: 1.5,
   /** Below this forward speed no self-aligning torque is applied (m/s). */
   alignMinSpeed: 1.5,
   /** Speed range over which the self-aligning torque fades in above `alignMinSpeed` (m/s). */
@@ -114,6 +132,11 @@ export const VEHICLE = {
   slideSlipStart: (6 * Math.PI) / 180,
   /** Slip angle at which the car is fully in drift mode (rad). ~22 deg. */
   slideSlipFull: (22 * Math.PI) / 180,
+  /**
+   * The same edge once the rear is fully loose (rad). ~13 deg. Sliding rubber holds less than
+   * gripping rubber, so a drift survives swinging well below the angle it took to start one.
+   */
+  slideSlipHeld: (13 * Math.PI) / 180,
   /** Fraction of the slide that survives when throttle and steering are released (0..1). */
   slideReleaseFloor: 0.85,
   /**
@@ -141,7 +164,7 @@ export const VEHICLE = {
    * How fast the tyres take hold again when the slide target drops (1/s). Deliberately
    * quicker and uncurved: losing the rear should be progressive, catching it should not lag.
    */
-  slideRegripRate: 9,
+  slideRegripRate: 11,
   /** Speed above which throttle + hard steering can break traction (m/s). ~70 km/h. */
   powerSlideSpeed: 19.4,
   /** Speed range over which power oversteer ramps in above `powerSlideSpeed` (m/s). */

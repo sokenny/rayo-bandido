@@ -42,7 +42,7 @@ if (!canvas || !hudRoot || !debugRoot || !menuRoot) {
  * from, Bandido Bay and The Stack, driven alone and on no menu), `?mode=circuit`
  * (TIME ATTACK on your own), `?mode=street` (a STREET RACE against the AI), `?mode=rush` (a
  * RAYO RUSH run in the city, straight from the marker), `?mp=1` (any of those three in a room),
- * `?quick=1` (QUICK PLAY: pick one of the three) and `?quick=rush|street|circuit` (the screen
+ * `?quick=1` (QUICK PLAY: RUSH or STREET RACE) and `?quick=rush|street` (the screen
  * that chooses between alone and a room), `?mode=race` (the Bandido Loop, the original circuit —
  * still built and still what the perf gate measures, just no longer on a menu) or
  * `?mode=test` (the original test block). Without any of them the main menu is shown and the choice is written
@@ -110,7 +110,8 @@ function quickFromUrl(): RoomGame | 'menu' | null {
   if (params.has('race')) return 'menu';
   const quick = params.get('quick');
   if (quick === null) return null;
-  return (ROOM_GAMES as readonly string[]).includes(quick) ? (quick as RoomGame) : 'menu';
+  // TIME ATTACK is off QUICK PLAY (2026-09-18): an old `?quick=circuit` lands on the list.
+  return quick !== 'circuit' && (ROOM_GAMES as readonly string[]).includes(quick) ? (quick as RoomGame) : 'menu';
 }
 
 /** Which screen an address asks for, for `urlWith`. Anything left out of it is cleared. */
@@ -391,9 +392,7 @@ async function boot(mode: GameMode): Promise<void> {
   const cameFromCity = new URLSearchParams(location.search).get('from') === 'city';
   const back = cameFromCity
     ? urlWith({ mode: 'city' })
-    : mode === 'circuit' || mode === 'race'
-      ? urlWith({ quick: 'circuit' })
-      : mode === 'street' || mode === 'rush'
+    : mode === 'street' || mode === 'rush'
         ? urlWith({ quick: mode })
         : urlWith();
   window.addEventListener('keydown', (e) => {

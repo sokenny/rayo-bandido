@@ -170,13 +170,13 @@ function installErrorTracking(): void {
   window.addEventListener('error', (e) => {
     if (errorsSent >= MAX_ERRORS) return;
     errorsSent++;
-    track('js_error', { message: e.message, source: `${(e.filename || '').split('/').pop()}:${e.lineno}`, screen: screenFromUrl() });
+    track('js_error', { message: e.message, error_source: `${(e.filename || '').split('/').pop()}:${e.lineno}`, screen: screenFromUrl() });
   });
   window.addEventListener('unhandledrejection', (e) => {
     if (errorsSent >= MAX_ERRORS) return;
     errorsSent++;
     const reason = e.reason instanceof Error ? e.reason.message : String(e.reason);
-    track('js_error', { message: reason, source: 'promise', screen: screenFromUrl() });
+    track('js_error', { message: reason, error_source: 'promise', screen: screenFromUrl() });
   });
   window.addEventListener('pagehide', () => {
     if (loadingMode === null) return;

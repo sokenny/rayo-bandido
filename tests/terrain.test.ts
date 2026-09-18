@@ -198,7 +198,6 @@ describe('the metro has topography', () => {
   it('puts the doors, the hustlers, the props and the micro-scene anchors of the open world on the ground', () => {
     const world = createOpenWorld();
     const at = (x: number, z: number): number => terrain.heightAt(x, z);
-    expect(world.layout.circuitSite!.y).toBeCloseTo(at(world.layout.circuitSite!.x, world.layout.circuitSite!.z), 6);
     for (const s of world.layout.streetSites ?? []) expect(s.y).toBeCloseTo(at(s.x, s.z), 6);
     let raised = 0;
     for (const h of world.layout.hustlerSpots ?? []) {

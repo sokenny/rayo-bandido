@@ -27,6 +27,15 @@ export interface ChangelogEntry {
 /** Newest first. The tab shows them in this order. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-09-18',
+    items: [
+      'Drifting has more life: the tail swings like a pendulum, and you can work the car inside a slide.',
+      'Strings of little bulbs and paper lanterns hang across the alleys and narrow streets.',
+      'Time Attack is off the open world and Quick Play for now.',
+      'The main menu\'s storm sound no longer drops out silent.',
+    ],
+  },
+  {
     date: '2026-09-17',
     items: [
       'Music now plays out of the speakers at the car meet, loud by the stack and fading across the lot.',

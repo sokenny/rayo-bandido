@@ -148,6 +148,28 @@ export interface RingBillboardDef {
   height: number;
 }
 
+/**
+ * A string of little lamps hung across a narrow street or an alley, facade to facade: the
+ * pasacalles of bulbs and paper lanterns a back street strings up over itself. The world only
+ * says where along which road one could go; the renderer (`env/festoonBuilder.ts`) walks out
+ * from the kerb to the walls the city actually built and hangs it only where it finds one on
+ * both sides, so a string never ends in the air over a lot, a park or a crossing.
+ */
+export interface FestoonSite {
+  /** The road's centre line at the station, and its unit tangent. */
+  x: number;
+  z: number;
+  tx: number;
+  tz: number;
+  halfWidth: number;
+  /** 'alley' strung tight and low; 'lane' a narrow old-town street; 'street' a strung stretch of a 13 m street. */
+  kind: 'alley' | 'lane' | 'street';
+  /** Consecutive sites of one run count up, so the strings can zigzag and share a look. */
+  seq: number;
+  /** Same for every site of one run (a road, or a stretch of one). */
+  run: number;
+}
+
 /** An enclosed bridge between two buildings across a street. */
 export interface SkybridgeDef {
   ax: number;
@@ -382,6 +404,8 @@ export interface CityPlan {
   powerLines?: Array<[number, number]>;
   ringBillboards?: RingBillboardDef[];
   skybridges?: SkybridgeDef[];
+  /** Where strings of lamps may be hung across the narrow streets and alleys. Missing: none. */
+  festoons?: FestoonSite[];
   /** Bus stops on the kerb, and the buses parked at them. */
   busStops?: BusStopDef[];
   /** Districts where every street facade is stacked with screens. */

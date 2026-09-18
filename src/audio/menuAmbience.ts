@@ -60,9 +60,11 @@ export function playMenuAmbience(): void {
 
   function fade(now: number): void {
     if (!el) return;
-    const t = Math.min(1, (now - fadeStart) / (fadeSeconds * 1000));
+    // A frame timestamp can predate the `performance.now()` that set `fadeStart`; a negative `t`
+    // pushes the volume out of 0..1, which throws and ends the fade with the storm still silent.
+    const t = Math.max(0, Math.min(1, (now - fadeStart) / (fadeSeconds * 1000)));
     const target = muted ? 0 : MENU_AUDIO.volume;
-    el.volume = fadeFrom + (target - fadeFrom) * t;
+    el.volume = Math.max(0, Math.min(1, fadeFrom + (target - fadeFrom) * t));
     if (t < 1) requestAnimationFrame(fade);
   }
 

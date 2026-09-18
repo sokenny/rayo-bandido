@@ -32,7 +32,10 @@ export interface PlayAnalytics {
 export interface PlayAnalyticsOptions {
   mode: GameMode;
   online: boolean;
-  /** Where this world was entered from: `'world'` when driven into from the city, `'menu'` otherwise. */
+  /**
+   * Where this world was entered from: `'world'` when driven into from the city, `'menu'` otherwise.
+   * Reported as `entry_source`, never `source`: GA4 reads `source` as the session's traffic source.
+   */
   source: 'world' | 'menu';
   /** The STREET RACE event this world is for (`?event=`), or -1. */
   streetEvent: number;
@@ -232,10 +235,10 @@ export function createPlayAnalytics(state: GameState, opts: PlayAnalyticsOptions
         raceStartedAt = clock;
         if (mode === 'circuit') {
           activities.add('time_attack');
-          track('time_attack_start', { ...base, source, level: levelOf(state.timeAttack?.cleared) });
+          track('time_attack_start', { ...base, entry_source: source, level: levelOf(state.timeAttack?.cleared) });
         } else if (mode === 'street') {
           activities.add('street_race');
-          track('street_race_start', { ...base, source, event: opts.streetEvent + 1 });
+          track('street_race_start', { ...base, entry_source: source, event: opts.streetEvent + 1 });
         } else {
           activities.add('race');
           track('race_start', base);
@@ -299,7 +302,7 @@ export function createPlayAnalytics(state: GameState, opts: PlayAnalyticsOptions
         rushRunning = true;
         rushStartedAt = clock;
         activities.add('rush');
-        track('rush_start', { ...base, source: mode === 'rush' ? 'menu' : 'world', level: levelOf(state.rush?.cleared) });
+        track('rush_start', { ...base, entry_source: mode === 'rush' ? 'menu' : 'world', level: levelOf(state.rush?.cleared) });
         break;
       case 'rushEnd': {
         const r = ev.results;
@@ -565,7 +568,7 @@ export function createPlayAnalytics(state: GameState, opts: PlayAnalyticsOptions
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('pagehide', onPageHide);
 
-  track('world_enter', { ...base, source });
+  track('world_enter', { ...base, entry_source: source });
 
   return {
     onEvent,

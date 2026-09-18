@@ -9,6 +9,7 @@ import {
   type BusStopDef,
   type CityPlan,
   type FenceDef,
+  type FestoonSite,
   type GateDef,
   type KerbField,
   type PillarDef,
@@ -657,6 +658,9 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     cableRuns: cableRuns(ground, blockOptions, spec.art?.finish === 'concrete', spec.finishAt, spec.densityAt).filter(
       ([ax, az, bx, bz]) => !inLot(ax, az) && !inLot(bx, bz) && !roundabouts.some((r) => Math.hypot(ax - r.x, az - r.z) < r.radius || Math.hypot(bx - r.x, bz - r.z) < r.radius),
     ),
+    festoons: festoonSites(ground, elevated).filter(
+      (f) => !inLot(f.x, f.z, f.halfWidth + 4) && !roundabouts.some((r) => Math.hypot(f.x - r.x, f.z - r.z) < r.radius + f.halfWidth + 6),
+    ),
     pylons: [],
     pillars,
     fences,
@@ -1080,6 +1084,58 @@ function cableRuns(
     }
   }
   return runs;
+}
+
+/**
+ * Where strings of lamps could hang across the road (`FestoonSite`). Every alley is strung
+ * along its length; the narrow old-town streets (12.5 m and under) too; a 13 m street only on
+ * the odd stretch a block or so long, so a strung street is a place and not the whole grid.
+ * Nothing wider, nothing in the corporate zone, nothing under a deck. Whether there are walls
+ * to hang it from is the renderer's question.
+ */
+const FESTOON = {
+  /** Metres between strings: an alley is strung tighter than a street. */
+  step: { alley: 9, lane: 11, street: 12 },
+  /** Widest road strung at all (m), and widest strung its whole length. */
+  maxWidth: 13.5,
+  laneWidth: 12.5,
+  /** A 13 m street is judged in stretches this long, and this share of them is strung. */
+  stretch: 64,
+  streetShare: 0.3,
+  /** A deck at least this far over the road leaves room for strings under it (m). */
+  deckClear: 14,
+};
+const FESTOON_PROJ = createProjection();
+
+function festoonSites(ground: RibbonDef[], elevated: RibbonDef[]): FestoonSite[] {
+  const out: FestoonSite[] = [];
+  let run = 0;
+  for (const rb of ground) {
+    const salt = rb.tag ? [...rb.tag].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 9973, 7) : rb.path.length;
+    let seq = 0;
+    let lastRun = -1;
+    const first = offsetAtStation(rb.path, 0, 0);
+    if (rb.kind !== 'alley' && first.halfWidth * 2 > FESTOON.maxWidth) continue;
+    for (let s = 6; s < rb.path.length - 6; ) {
+      const c = offsetAtStation(rb.path, s, 0);
+      const width = c.halfWidth * 2;
+      const kind: FestoonSite['kind'] = rb.kind === 'alley' ? 'alley' : width <= FESTOON.laneWidth ? 'lane' : 'street';
+      const step = FESTOON.step[kind];
+      s += step;
+      if (width > FESTOON.maxWidth || c.zone === 'corporate') continue;
+      const stretch = kind === 'street' ? Math.floor((s - step) / FESTOON.stretch) : 0;
+      if (kind === 'street' && hash01(stretch * 1.7 + salt, salt * 0.37) > FESTOON.streetShare) continue;
+      // Not under a deck, unless it is a whole building's height up (the Stack's ring).
+      if (elevated.some((e) => isOnPath(e.path, c.x, c.z, c.halfWidth + 8) && projectOntoPath(e.path, c.x, c.z, FESTOON_PROJ).y - c.y < FESTOON.deckClear)) continue;
+      const runKey = kind === 'street' ? stretch : -2;
+      if (runKey !== lastRun) {
+        run++;
+        lastRun = runKey;
+      }
+      out.push({ x: c.x, z: c.z, tx: c.tx, tz: c.tz, halfWidth: c.halfWidth, kind, seq: seq++, run });
+    }
+  }
+  return out;
 }
 
 /**

@@ -443,7 +443,8 @@ describe('the stages', () => {
     expect(introHoldsPlayer(r.intro)).toBe(false);
     const events = [...released, ...drain(r)];
     const lines = events.filter((e) => e.type === 'introLine').map((e) => (e as { id: string }).id);
-    expect(lines).toEqual(['e2', 'e3', 'e4', 'e5', 'e6', 'e6b', 'e7']);
+    // No 'e4': it pitches TIME ATTACK, which has no door in the open world (`requires: 'circuit'`).
+    expect(lines).toEqual(['e2', 'e3', 'e5', 'e6', 'e6b', 'e7']);
     const tail = r.tick(seconds(introLine(INTRO, 'e7').gap ?? INTRO.timing.gap) + 3);
     const all = [...events, ...tail];
     expect(all.filter((e) => e.type === 'introDone')).toHaveLength(1);
@@ -469,7 +470,7 @@ describe('isolation and the ways out', () => {
     lockOtherActivities(r.state);
     expect(r.state.rush!.locked).toBe(true);
     expect(r.state.passenger!.locked).toBe(true);
-    expect(r.state.circuitGate!.locked).toBe(true);
+    expect(r.state.circuitGate).toBeNull();
     expect(r.state.streetGate!.locked).toBe(true);
     expect(r.state.buho!.locked).toBe(true);
     connect(r);

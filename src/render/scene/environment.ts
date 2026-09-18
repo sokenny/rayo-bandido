@@ -12,6 +12,7 @@ import { buildNeonWalls } from './env/neonWalls';
 import { buildReclamation } from './env/reclaimBuilder';
 import { buildCarMeets } from './env/meetBuilder';
 import { buildGasStations } from './env/gasStationBuilder';
+import { buildFestoons } from './env/festoonBuilder';
 import { buildGarage } from './env/garageBuilder';
 import { buildParks } from './env/parkBuilder';
 import { buildVillas } from './env/villaBuilder';
@@ -421,6 +422,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   const b = createBuilders(plan);
   buildCity(b);
   buildProps(b);
+  // Strings of lamps across the alleys and narrow streets, wall to wall (`env/festoonBuilder.ts`).
+  root.userData.festoons = buildFestoons(b);
   buildTransit(b);
   buildTrack(b);
   // After the track, before the landmarks: the versus circuit's barriers sit on top of the

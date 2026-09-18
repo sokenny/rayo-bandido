@@ -10,7 +10,7 @@ import { createCircuitWorld } from '../src/world/circuitWorld';
 import { BUHO_SITE, PASSENGER_STOPS, RUSH_SITES } from '../src/world/citySpec';
 import { addCircuitGate, circuitGateSite } from '../src/world/cityCircuitGate';
 import { CIRCUIT_GATES } from '../src/world/circuitSpec';
-import { METRO_BUHO_SITE, METRO_CIRCUIT_SITE, METRO_PASSENGER_STOPS, METRO_RUSH_SITES } from '../src/world/metroSpec';
+import { METRO_BUHO_SITE, METRO_CIRCUIT_SITE, METRO_PASSENGER_STOPS, METRO_RUSH_SITES, METRO_SPEC } from '../src/world/metroSpec';
 import { createOpenWorld } from '../src/world/openWorld';
 import { INTRO } from '../src/content/intro';
 
@@ -233,10 +233,28 @@ describe('where the door stands on Bandido Bay', () => {
 
 /* ================================================================== the open world */
 
-describe('where the door stands in the open world', () => {
+/**
+ * The metro with its start-line ring put back: TIME ATTACK came off the open world on
+ * 2026-09-18 (`openWorld.ts`), but the door is kept working for the day it returns, so it is
+ * still proved here on the metro it would stand in.
+ */
+function gatedMetro(): ReturnType<typeof createOpenWorld> {
+  return addCircuitGate(createCityWorld(METRO_SPEC), METRO_CIRCUIT_SITE);
+}
+
+describe('the open world has no TIME ATTACK door', () => {
+  it('carries neither the site nor the ring, so no gate state is built', () => {
+    const { layout, plan } = createOpenWorld();
+    expect(layout.circuitSite ?? null).toBeNull();
+    expect(plan.circuitMarker ?? null).toBeNull();
+    expect(createInitialGameState(layout).circuitGate).toBeNull();
+  });
+});
+
+describe('where the door would stand in the open world', () => {
   // Bandido Metro, where the lap is not drawn: the door is a site of its own, and the circuit
   // it opens is still run on the Bay.
-  const { layout, plan } = createOpenWorld();
+  const { layout, plan } = gatedMetro();
 
   it('is the metro’s own site, handed to the rules and the art alike', () => {
     expect(layout.circuitSite).toEqual(METRO_CIRCUIT_SITE);
@@ -298,7 +316,7 @@ describe('one activity at a time', () => {
   });
 
   it('shuts the door while a RAYO RUSH run is on, and opens it again afterwards', () => {
-    const { layout } = createOpenWorld();
+    const { layout } = gatedMetro();
     const state = createInitialGameState(layout);
     const cmd = createPlayerCommand();
     const v = state.vehicle;
@@ -337,7 +355,7 @@ describe('one activity at a time', () => {
   });
 
   it('locks the other three the moment the door is taken', () => {
-    const { layout } = createOpenWorld();
+    const { layout } = gatedMetro();
     const state = createInitialGameState(layout);
     const cmd = createPlayerCommand();
     const site = layout.circuitSite!;

@@ -17,9 +17,9 @@ import { createMenuScreen, type MenuScreen, type MenuScreenEntry } from './menuS
  * remember to bump.
  *
  * QUICK PLAY IS ONE TAB, THREE GAMES, TWO WAYS IN. It used to be RACE, one circuit alone or in a
- * room. Now it leads to `quickPlayMenu.ts`: RAYO RUSH, STREET RACE or TIME ATTACK — the same
- * games the open world offers at its markers — and then OFFLINE or ONLINE, a choice about
- * company rather than about the game. Online, any of the three can be a room you make.
+ * room. Now it leads to `quickPlayMenu.ts`: RAYO RUSH or STREET RACE — the same games the open
+ * world offers at its markers (TIME ATTACK was the third until 2026-09-18) — and then OFFLINE
+ * or ONLINE, a choice about company rather than about the game. Online, either can be a room.
  *
  * The original circuit is still here, unretired: the Bandido Loop out of `raceSpec.ts` is what
  * `?mode=race` builds, and it is what the perf gate measures.
@@ -61,9 +61,9 @@ const ENTRIES: Array<MenuScreenEntry<MenuChoice>> = [
     id: 'quick',
     kicker: 'SOLO OR ONLINE',
     name: 'QUICK PLAY',
-    desc: `Los juegos del mundo abierto, directo desde el menú: un RAYO RUSH de ${RUSH.durationSeconds} segundos, una STREET RACE en La Curva o un TIME ATTACK en el Bandido Grid. Jugalos solo, o abrí una sala para hasta ${MAX_PLAYERS} y sumá a tus amigos.`,
+    desc: `Los juegos del mundo abierto, directo desde el menú: un RAYO RUSH de ${RUSH.durationSeconds} segundos o una STREET RACE en La Curva. Jugalos solo, o abrí una sala para hasta ${MAX_PLAYERS} y sumá a tus amigos.`,
     spec: [
-      ['GAMES', 'RUSH · STREET · TIME ATTACK'],
+      ['GAMES', 'RUSH · STREET RACE'],
       ['PROGRESS', 'SHARED WITH THE OPEN WORLD'],
       ['ENTRY', 'OFFLINE OR ONLINE ROOM'],
     ],
