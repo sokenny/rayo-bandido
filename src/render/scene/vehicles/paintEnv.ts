@@ -103,3 +103,18 @@ export function carPaintMaterial(params: THREE.MeshStandardMaterialParameters): 
     envMapIntensity: 2.3,
   });
 }
+
+/**
+ * Traffic paint: the player's reflection without the player's lacquer. The fleet (electric cars,
+ * police, buses) used to reflect `scene.environment`, which is black overhead, so every roof and
+ * hood read as matte plastic. Pointing them at `carPaintEnv` gives them the same streetlight band
+ * and neon flanks for free: it is still `MeshStandardMaterial` (no clearcoat lobe, which is the
+ * part of `carPaintMaterial` that costs), and the env lookup it swaps in is the one it already did.
+ * `envMapIntensity` sits below the player's 2.3 so the hero car stays the shiniest on the street.
+ */
+export function fleetPaintMaterial(
+  params: THREE.MeshStandardMaterialParameters,
+  envMapIntensity = 1.5,
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ ...params, envMap: carPaintEnv(), envMapIntensity });
+}

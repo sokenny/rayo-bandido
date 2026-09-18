@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { box, mergeParts, part } from './vehicles/geometryKit';
 import { electricCarGeometry } from './electricCarVisual';
+import { fleetPaintMaterial } from './vehicles/paintEnv';
 
 /**
  * A police car (`src/sim/police.ts`). PLACEHOLDER BODY: the electric car's own hull, worn in a
@@ -109,7 +110,7 @@ function getShared(): SharedResources {
       lensBlue: buildLens(1),
       pool,
       shield,
-      bodyMat: new THREE.MeshStandardMaterial({ color: NAVY, vertexColors: true, roughness: 0.42, metalness: 0.38 }),
+      bodyMat: fleetPaintMaterial({ color: NAVY, vertexColors: true, roughness: 0.28, metalness: 0.5 }, 1.7),
       markingsMat: new THREE.MeshStandardMaterial({
         color: 0xffffff,
         vertexColors: true,

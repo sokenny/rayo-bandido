@@ -3,6 +3,7 @@ import { BUSES } from '../../config/tuning';
 import { MeshBuilder } from './env/meshBuilder';
 import { PAL } from './env/palette';
 import { makeGlowTexture, makeTransitAtlas, transitCell } from './env/textures';
+import { fleetPaintMaterial } from './vehicles/paintEnv';
 
 /**
  * An articulated city bus, drawn where the sim says it is (`src/sim/buses.ts`).
@@ -181,7 +182,7 @@ function build(): SharedResources {
     panels: panels.build(),
     glow: glow.build(),
     door: door.build(),
-    bodyMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.25 }),
+    bodyMat: fleetPaintMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }, 1.1),
     litMat: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
     panelMat: new THREE.MeshBasicMaterial({ map: transitTex, toneMapped: false }),
     glowMat: new THREE.MeshBasicMaterial({

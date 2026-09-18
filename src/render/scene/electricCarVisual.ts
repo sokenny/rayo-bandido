@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TargetStatus } from '../../core/types';
 import { applyLengthwiseUVs, box, loft, mergeParts, part } from './vehicles/geometryKit';
 import { attachTexture, type TextureHandle } from '../textures/load';
+import { fleetPaintMaterial } from './vehicles/paintEnv';
 
 /**
  * Electric-car target visual. Clean, homogeneous, corporate: white/cool-cyan, soft shapes,
@@ -195,9 +196,12 @@ export function electricBeaconFlash(index: number, time: number): boolean {
 export const BEACON_FLASH = { opacity: 1, scale: 1.25 } as const;
 export const BEACON_DIM = { opacity: 0.16, scale: 1 } as const;
 
+/** The body in service: glossy enough to carry the street's reflection (`fleetPaintMaterial`). */
+export const ALIVE_BODY_ROUGHNESS = 0.26;
+export const ALIVE_BODY_METALNESS = 0.4;
 /** A wreck's body once it has settled (`setStatus` at full sag): rougher and flatter. */
-export const DEAD_BODY_ROUGHNESS = 0.35 + 1 * 0.4;
-export const DEAD_BODY_METALNESS = 0.2 - 1 * 0.1;
+export const DEAD_BODY_ROUGHNESS = ALIVE_BODY_ROUGHNESS + 1 * 0.45;
+export const DEAD_BODY_METALNESS = ALIVE_BODY_METALNESS - 1 * 0.25;
 
 /** The Rush ring's motion: slow and dim on purpose — present, not insistent. */
 export function electricRushRingSpin(time: number): number {
@@ -334,11 +338,11 @@ function getShared(): SharedResources {
       bars: buildBars(),
       beacon: new THREE.SphereGeometry(0.075, 8, 4),
       ring: buildRing(),
-      bodyMat: new THREE.MeshStandardMaterial({
+      bodyMat: fleetPaintMaterial({
         color: BODY_COLORS[0].getHex(),
         vertexColors: true,
-        roughness: 0.35,
-        metalness: 0.2,
+        roughness: ALIVE_BODY_ROUGHNESS,
+        metalness: ALIVE_BODY_METALNESS,
       }),
       barMat: new THREE.MeshStandardMaterial({
         color: 0x081014,
@@ -476,8 +480,8 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
           bodyMat.color.copy(cleanBody);
           bodyMat.emissive.setRGB(0, 0, 0);
           bodyMat.emissiveIntensity = 1;
-          bodyMat.roughness = 0.35;
-          bodyMat.metalness = 0.2;
+          bodyMat.roughness = ALIVE_BODY_ROUGHNESS;
+          bodyMat.metalness = ALIVE_BODY_METALNESS;
           barMat.emissive.copy(CLEAN_BAR);
           barMat.emissiveIntensity = 2.2;
           beaconMat.opacity = 1;
@@ -499,8 +503,8 @@ export function createElectricCarVisual(index: number): ElectricCarVisual {
       // still read, at a glance, which of the three liveries they just took out.
       const sag = smooth(clamp01(age / SAG_TIME));
       bodyMat.color.lerpColors(cleanBody, deadBody, sag);
-      bodyMat.roughness = 0.35 + sag * 0.4;
-      bodyMat.metalness = 0.2 - sag * 0.1;
+      bodyMat.roughness = ALIVE_BODY_ROUGHNESS + sag * (DEAD_BODY_ROUGHNESS - ALIVE_BODY_ROUGHNESS);
+      bodyMat.metalness = ALIVE_BODY_METALNESS + sag * (DEAD_BODY_METALNESS - ALIVE_BODY_METALNESS);
 
       // 1. THE SURGE. Nothing lights the body from inside while the car is in service, so any
       // glow here is unmistakably the bolt going through it: it floods, stutters, and drains.

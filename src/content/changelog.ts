@@ -43,6 +43,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'The turbo flutter when you lift off boost is a real recording now, not synthesized.',
       'Reflections of traffic and sirens on the wet road no longer stutter.',
       'The opening title is a quick beat: about a second and a half instead of five.',
+      'Traffic, police cars and buses have glossy paint now, and catch the streetlights on their roofs and hoods.',
     ],
   },
   {
