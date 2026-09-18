@@ -3,7 +3,7 @@ import { onRibbonAtLevel } from '../../../world/cityGen';
 import { offsetAtStation } from '../../../world/track';
 import { inRect, makeRng } from './meshBuilder';
 import { PAINT_Y } from './cityBuilder';
-import { concreteAt, type EnvBuilders } from './builders';
+import { concreteAt, inPieceHole, type EnvBuilders } from './builders';
 
 /**
  * CRACKS IN THE ASPHALT — the Obelisco's fissure (`obeliscoBuilder.ts`) at street scale.
@@ -87,6 +87,8 @@ export function buildRoadCracks(b: EnvBuilders): void {
           lines.push(walk(rng, s0 + Math.cos(a) * r * 0.5, l0 + Math.sin(a) * r * 0.5, rng() * Math.PI, 0.8 + rng() * 1.2, width * 0.6));
         }
       }
+      // Drawn after every draw of the rng, so skipping one leaves the rest of the city's cracks as they were.
+      if (!rb.elevated && inPieceHole(b, c.x, c.z, 10)) continue;
       for (const line of lines) drawLine(b, rb, line, room, lift);
     }
   }

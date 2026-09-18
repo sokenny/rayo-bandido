@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   IDLE_RPM01,
   REF_SPEED,
+  SCREECH,
   SKID,
   distanceGain,
   engineNote,
+  screechIntensity,
   skidIntensity,
   squealHz,
   stereoPan,
@@ -72,6 +74,31 @@ describe('skidIntensity', () => {
   it('a latched drift always scrubs at least the floor', () => {
     // Drifting but with tiny lateral speed still gets the floor.
     expect(skidIntensity(0.5, 20, true)).toBeCloseTo(SKID.DRIFT_FLOOR, 5);
+  });
+});
+
+describe('screechIntensity', () => {
+  /** Lateral speed (m/s) for a given slip angle (degrees) at forward speed `v`. */
+  const lat = (deg: number, v: number): number => Math.tan((deg * Math.PI) / 180) * v;
+
+  it('is silent at a shallow angle, even while a drift is latched', () => {
+    expect(screechIntensity(lat(SCREECH.ANGLE_START - 1, 25), 25)).toBe(0);
+  });
+
+  it('grows with the slip angle and is full at ANGLE_FULL', () => {
+    const a = screechIntensity(lat(10, 25), 25);
+    const b = screechIntensity(lat(20, 25), 25);
+    expect(a).toBeGreaterThan(0);
+    expect(b).toBeGreaterThan(a);
+    expect(screechIntensity(lat(SCREECH.ANGLE_FULL + 5, 25), 25)).toBe(1);
+  });
+
+  it('stays quiet for a slow car at an angle', () => {
+    expect(screechIntensity(lat(30, 3), 3)).toBeLessThan(screechIntensity(lat(30, 25), 25) * 0.7);
+  });
+
+  it('screeches through a burnout with no slide', () => {
+    expect(screechIntensity(0, 0, 1)).toBeCloseTo(SCREECH.SPIN_GAIN, 5);
   });
 });
 

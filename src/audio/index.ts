@@ -8,6 +8,7 @@ import { createPoliceAudio } from './police';
 import { createPoliceRadio, type PoliceRadioFrame } from './policeRadio';
 import { createRainAudio } from './rain';
 import { createNitroBoostAudio } from './nitroBoost';
+import { createCrashRecordings } from './crashRecordings';
 import { createLightningChargeAudio } from './lightningCharge';
 import { createEvDisabledAudio } from './evDisabled';
 import { createWindGusts } from './windGust';
@@ -18,7 +19,7 @@ import { createMicroSceneVoices } from './microSceneVoice';
 import { createMeetSpeakers } from './meetSpeakers';
 import { dialogueHooks, dialogueSpeaking } from './dialogueVoice';
 import type { BusStopCrowd } from '../world/busStopCrowds';
-import { skidIntensity } from './dsp';
+import { screechIntensity } from './dsp';
 import { chainMultiplier } from '../sim/rush';
 
 /** Slide state for the tire scrub, read each frame. */
@@ -126,6 +127,7 @@ export function createAudio(
   const police = createPoliceAudio(core);
   const rain = createRainAudio(core);
   const nitro = createNitroBoostAudio(core);
+  const crashes = createCrashRecordings(core);
   const rayo = createLightningChargeAudio(core);
   const evDown = createEvDisabledAudio(core);
   const wind = createWindGusts(core);
@@ -170,7 +172,7 @@ export function createAudio(
       // 'suspended' while the game kept rendering, which is silence with no other symptom.
       core.resume();
       engine.update(dt, engineInput);
-      tires.update(dt, skidIntensity(skid.lateralSpeed, skid.speed, skid.drifting, skid.wheelspin, skid.yawRate), Math.hypot(skid.speed, skid.lateralSpeed));
+      tires.update(dt, screechIntensity(skid.lateralSpeed, skid.speed, skid.wheelspin), Math.hypot(skid.speed, skid.lateralSpeed));
       hums.update(dt, listener, targets);
       horns.update(dt, listener, targets);
       evDown.update(dt, listener, targets);
@@ -244,7 +246,9 @@ export function createAudio(
           break;
         case 'crashDamage':
         case 'crashStall':
-          oneShots.crash(ev.severity === 'heavy' ? 1 : ev.severity === 'medium' ? 0.65 : 0.35);
+          // Medium and heavy crashes are recordings (`audio/crashRecordings.ts`); a light one, or any
+          // crash before the files have loaded, is the synthesized crash.
+          if (!crashes.play(ev.severity)) oneShots.crash(ev.severity === 'heavy' ? 1 : ev.severity === 'medium' ? 0.65 : 0.35);
           break;
         case 'rushScore':
           // The multiplier climbed. The first kill of a streak pays x1, and one past the cap pays
@@ -350,6 +354,7 @@ export function createAudio(
       meetMusic?.dispose();
       rain.dispose();
       nitro.dispose();
+      crashes.dispose();
       rayo.dispose();
       evDown.dispose();
       core.dispose();

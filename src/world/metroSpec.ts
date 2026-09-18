@@ -12,6 +12,7 @@ import { PAL } from '../render/scene/env/palette.ts';
 import { metroTerrain } from './metroTerrain.ts';
 import { METRO_PARK, PARK_BRIDGE, PARK_ENTRIES, PARK_LAND, PARK_NORTH, PARK_ROADS } from './metroPark.ts';
 import { planStackMassing } from './stackMassing.ts';
+import { METRO_SET_PIECES } from './metroSetPieces.ts';
 import { METRO_OBELISCO, METRO_VILLA, NUEVE_DE_JULIO } from './metroVilla.ts';
 import { METRO_ROUNDABOUTS, METRO_SOUTH_CUTS, METRO_SOUTH_PATH_TRAFFIC, METRO_SOUTH_RING_TRAFFIC, cutRoads, metroSouthRoads } from './metroSouth.ts';
 import {
@@ -648,7 +649,7 @@ function fillLoops(): Array<{ rect: Rect; cars: number }> {
     // North of the ring, from wall to wall.
     loop(-480, -340, -600, RING.north, 2),
     loop(-340, -252, -600, RING.north, 2),
-    loop(-252, -60, -600, RING.north, 3),
+    // (st-n3 between st-west and av-central carries none: the roadworks jump is dug across it, `setPieces/roadworks.ts`.)
     loop(-60, 30, -600, RING.north, 2),
     loop(30, 250, -600, RING.north, 3),
     loop(250, 340, -600, RING.north, 2),
@@ -758,7 +759,8 @@ export const METRO_PASSENGER_STOPS: PassengerStopSpec[] = [
   { id: 'av-w1-terraces', x: -620, z: 570, y: 0, heading: 0, label: 'AV WEST · THE TERRACES', tags: ['residential'] },
   { id: 'blvd-water-quay', x: -300, z: METRO_QUAY_Z - 14, y: 0, heading: Math.PI / 2, label: 'THE QUAY', tags: ['waterfront'] },
   { id: 'st-east-edge', x: 480, z: 300, y: 0, heading: 0, label: 'ST EAST · THE EDGE', tags: ['outskirts', 'industrial'] },
-  { id: 'st-north-edge', x: -150, z: -600, y: 0, heading: Math.PI / 2, label: 'ST NORTH · THE OUTSKIRTS', tags: ['outskirts'] },
+  // Moved east off the block the roadworks jump takes (`setPieces/roadworks.ts`); was x −150.
+  { id: 'st-north-edge', x: 70, z: -600, y: 0, heading: Math.PI / 2, label: 'ST NORTH · THE OUTSKIRTS', tags: ['outskirts'] },
 ];
 
 /** El Búho: under the viaduct's west leg, in an open bay between the columns, facing west. */
@@ -800,6 +802,8 @@ export const METRO_SPEC: CitySpec = {
   // The south without its grid (`metroSouth.ts`): the grid cut back, then the diagonals, curves and roundabouts.
   roads: [...cutRoads([...DOWNTOWN_ROADS, ...OUTER_ROADS], METRO_SOUTH_CUTS), ...METRO_SOUTH_ROADS, ...PARK_ROADS],
   roundabouts: METRO_ROUNDABOUTS,
+  // The set-pieces (`metroSetPieces.ts`): the roadworks jump, the collapsed parkade, the storm drain.
+  setPieces: METRO_SET_PIECES,
   elevated: [
     ...DOWNTOWN_ELEVATED,
     { tag: 'viaduct', spec: VIADUCT_SPEC, lift: 0 },

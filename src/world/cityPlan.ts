@@ -4,6 +4,7 @@ import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
 import type { ObeliscoSpec } from './metroVilla';
 import type { RoundaboutSpec } from './metroSouth';
+import type { SetPieceSpec } from './setPieces/types';
 import type { Terrain } from './terrain';
 import type { TrackPath } from './track';
 
@@ -495,6 +496,8 @@ export interface CityPlan {
   obelisco?: ObeliscoSpec;
   /** The roundabouts' islands and monuments (`metroSouth.ts`, `env/roundaboutBuilder.ts`). */
   roundabouts?: RoundaboutSpec[];
+  /** The set-pieces (`setPieces/types.ts`), drawn by `env/setPieces/index.ts`. */
+  setPieces?: SetPieceSpec[];
   /**
    * How the megastructures are dressed. Missing or 'full': the Bay's district — ribs on every
    * face, equipment, ledges. 'lean': the kit's facades only; the passages carry the detail.
@@ -568,6 +571,17 @@ export interface KerbField {
   widthAt(rb: RibbonDef, i: number, side: number, t?: number): number;
   /** True when segment `i` of `rb` carries pavement on `side` (-1 left, +1 right of travel). */
   paved(rb: RibbonDef, i: number, side: number): boolean;
+}
+
+/**
+ * Every rectangle of the city given up to something other than buildings and kept clear of the
+ * kerb-side dressing (street props, sewer vents, micro-scenes): the meets', gas stations' and
+ * garage's lots, and every set-piece's `lots` and `clipLots`. The one list those passes share.
+ */
+export function planLots(plan: Pick<CityPlan, 'meets' | 'gasStations' | 'garage' | 'setPieces'>): Rect[] {
+  const out: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
+  for (const p of plan.setPieces ?? []) out.push(...p.lots, ...(p.clipLots ?? []));
+  return out;
 }
 
 export function inRect(r: Rect, x: number, z: number, pad = 0): boolean {

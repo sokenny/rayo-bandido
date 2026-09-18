@@ -33,6 +33,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Strings of little bulbs and paper lanterns hang across the alleys and narrow streets.',
       'Time Attack is off the open world and Quick Play for now.',
       'The main menu\'s storm sound no longer drops out silent.',
+      'Three places built for stunts: a roadworks jump on st-n3, a collapsed parking garage, and a concrete storm drain.',
+      'Medium and heavy crashes and the tire screech are real recordings now, not synthesized.',
     ],
   },
   {

@@ -4,6 +4,7 @@ import type { GarageSpec } from './garage';
 import type { ParkSpec } from './park';
 import type { ObeliscoSpec, VillaSpec } from './metroVilla';
 import type { RoundaboutSpec } from './metroSouth';
+import type { SetPieceSpec } from './setPieces/types';
 import type { BillboardDef, CityPlan, MegastructureDef, Rect, RibbonDef, RingBillboardDef, ScreenZoneDef, ZoneId } from './cityPlan';
 import type { BlockOptions } from './cityGen';
 import type { TerrainSpec } from './terrain';
@@ -160,6 +161,12 @@ export interface CitySpec {
    * its island, solid, with no blocks on it, and its monument (`env/roundaboutBuilder.ts`). Missing: none.
    */
   roundabouts?: RoundaboutSpec[];
+  /**
+   * Set-pieces (`setPieces/types.ts`): hand-built drivable places — their lots, a dig below
+   * grade, drivable slabs and colliders — assembled generically by `cityWorld.ts` and drawn by
+   * `env/setPieces/`. Missing: none.
+   */
+  setPieces?: SetPieceSpec[];
   /**
    * Where the block generator runs, when it is not the whole land inside the wall band: a
    * world with a park across one edge keeps its grid exactly where it was by naming the city's

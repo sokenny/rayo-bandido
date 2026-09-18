@@ -3,7 +3,7 @@ import { onRibbonAtLevel } from '../../../world/cityGen';
 import { createProjection, offsetAtStation, projectOntoPath, segmentCount } from '../../../world/track';
 import { PAL } from './palette';
 import { makeRng } from './meshBuilder';
-import { concreteAt, densityAt, groundGlow, halo, type EnvBuilders } from './builders';
+import { concreteAt, densityAt, groundGlow, halo, inPieceHole, inPieceLot, type EnvBuilders } from './builders';
 import { buildViaducts } from './elevatedBuilder';
 import { buildPassages, buildPortalFrames } from './passageBuilder';
 import { lampColor, lampPost } from './propsBuilder';
@@ -89,14 +89,34 @@ function buildRibbon(b: EnvBuilders, rb: RibbonDef): void {
     const crz = c.z + c.tx * c.halfWidth;
     const u0 = -a.halfWidth / ROAD_TILE;
     const u1 = a.halfWidth / ROAD_TILE;
-    // Winding: back-left, back-right, front-right, front-left gives a +Y normal (see planeY).
-    b.road.quad(
-      alx, roadY(b, rb, alx, alz, a.y, lift), alz,
-      arx, roadY(b, rb, arx, arz, a.y, lift), arz,
-      crx, roadY(b, rb, crx, crz, c.y, lift), crz,
-      clx, roadY(b, rb, clx, clz, c.y, lift), clz,
-      u0, a.s / ROAD_TILE, u1, sc / ROAD_TILE,
-    );
+    // A set-piece's dig across the street (`SetPieceSpec.groundHoles`): the slab is laid in
+    // half-metre slices and the ones over the hole left out. Elsewhere, one quad as always.
+    const holed = !rb.elevated && (inPieceHole(b, (a.x + c.x) / 2, (a.z + c.z) / 2, Math.hypot(c.x - a.x, c.z - a.z) / 2 + a.halfWidth));
+    const n = holed ? Math.max(1, Math.ceil(Math.hypot(c.x - a.x, c.z - a.z) / 0.5)) : 1;
+    for (let k = 0; k < n; k++) {
+      const t0 = k / n;
+      const t1 = (k + 1) / n;
+      const L = (p: number, q: number, t: number): number => p + (q - p) * t;
+      if (holed && inPieceHole(b, L(L(alx, arx, 0.5), L(clx, crx, 0.5), (t0 + t1) / 2), L(L(alz, arz, 0.5), L(clz, crz, 0.5), (t0 + t1) / 2))) continue;
+      const blx = L(alx, clx, t0);
+      const blz = L(alz, clz, t0);
+      const brx = L(arx, crx, t0);
+      const brz = L(arz, crz, t0);
+      const flx = L(alx, clx, t1);
+      const flz = L(alz, clz, t1);
+      const frx = L(arx, crx, t1);
+      const frz = L(arz, crz, t1);
+      const y0 = L(a.y, c.y, t0);
+      const y1 = L(a.y, c.y, t1);
+      // Winding: back-left, back-right, front-right, front-left gives a +Y normal (see planeY).
+      b.road.quad(
+        blx, roadY(b, rb, blx, blz, y0, lift), blz,
+        brx, roadY(b, rb, brx, brz, y0, lift), brz,
+        frx, roadY(b, rb, frx, frz, y1, lift), frz,
+        flx, roadY(b, rb, flx, flz, y1, lift), flz,
+        u0, L(a.s, sc, t0) / ROAD_TILE, u1, L(a.s, sc, t1) / ROAD_TILE,
+      );
+    }
   }
 }
 
@@ -180,6 +200,8 @@ function paintDash(b: EnvBuilders, rb: RibbonDef, p0: { x: number; z: number; y:
   const cz = p1.z + p1.tx * hw;
   const dx = p1.x + p1.tz * hw;
   const dz = p1.z - p1.tx * hw;
+  // No paint over a set-piece's dig across the street.
+  if (!rb.elevated && (inPieceHole(b, p0.x, p0.z) || inPieceHole(b, p1.x, p1.z) || inPieceHole(b, (p0.x + p1.x) / 2, (p0.z + p1.z) / 2))) return;
   b.lane.quad(
     ax, roadY(b, rb, ax, az, p0.y, lift), az,
     bx, roadY(b, rb, bx, bz, p0.y, lift), bz,
@@ -402,7 +424,11 @@ function buildRibbonLamps(b: EnvBuilders, rb: RibbonDef, rng: () => number): voi
     const dz = -side * c.tx;
     const poleH = deck ? 7 : alley ? 4.4 : zone === 'corporate' ? 8.2 : 7.2;
     const arm = deck ? 3.4 : alley ? 0.9 : zone === 'corporate' ? 4.6 : 3.6;
-    lampPost(b, p.x, p.z, y0, dx, dz, arm, poleH, color, off + 4, rollLampFault(rng));
+    const fault = rollLampFault(rng);
+    // Nor on land a set-piece took (the roadworks' street, `SetPieceSpec.lots`): skipped after the
+    // rng's draws, so every other lamp in the city keeps its colour and its fault.
+    if (!rb.elevated && inPieceLot(b, p.x, p.z)) continue;
+    lampPost(b, p.x, p.z, y0, dx, dz, arm, poleH, color, off + 4, fault);
   }
 }
 

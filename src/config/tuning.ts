@@ -1331,11 +1331,13 @@ export const AUDIO = {
    */
   phoneRingVolume: 1.1,
   /**
-   * Tire scrub/screech level while sliding. Driven by the same slide intensity as the smoke.
-   * The howl is soft-clipped inside the voice, so its aggression comes from the drive stage
-   * there and not from this knob — raising this only makes a slide loud.
+   * Tire screech level at a full slide (`audio/tireScreech.ts`, the recording at
+   * `tireScreechSrc`, normalized to 0.2 RMS). Driven by the same slide intensity as the smoke; a
+   * latched floor drift plays at about half of this.
    */
-  tireVolume: 0.22,
+  tireVolume: 1.1,
+  /** The tire squeal recording (served from public/), granulated into a continuous slide. */
+  tireScreechSrc: '/tire-screech.mp3',
   /** Per-car electric hover hum level. Deliberately near-silent. */
   humVolume: 0.05,
   /**
@@ -1394,6 +1396,16 @@ export const AUDIO = {
    * sooner and it is cut with a short fade.
    */
   nitroSampleVolume: 1.6,
+  /**
+   * Crash recordings (served from public/), played by `audio/crashRecordings.ts` on a punished
+   * crash: the big one for a heavy crash, one of the medium ones (never the same twice running)
+   * for a medium crash. A light crash keeps the synthesized one in `audio/oneShots.ts`.
+   */
+  crashHeavySrc: '/crash-big.mp3',
+  crashMediumSrcs: ['/crash-medium.mp3', '/crash-medium-2.mp3'],
+  /** Their levels, on recordings peak-normalized to 0.9 at decode. */
+  crashHeavyVolume: 1.0,
+  crashMediumVolume: 0.8,
   /** Race countdown beeps level. */
   countdownVolume: 0.35,
   /** Engine firing fundamental at idle (Hz) — a ~4-cylinder at ~850 rpm. */

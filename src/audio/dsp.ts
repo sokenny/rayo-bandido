@@ -64,6 +64,39 @@ export function skidIntensity(lateralSpeed: number, speed: number, drifting: boo
   return i;
 }
 
+/** How the tire screech's level follows the slip angle (see `screechIntensity`). */
+export const SCREECH = {
+  /** Slip angle (degrees) below which the tires are silent: a car barely crabbing does not squeal. */
+  ANGLE_START: 5,
+  /** Slip angle (degrees) of a full-voiced slide. */
+  ANGLE_FULL: 35,
+  /** Sideways speed (m/s) over which the screech fades in, so a slow car at an angle stays quiet. */
+  LATERAL_FULL: 3,
+  /** Screech of fully spinning rears with no sideways motion (a burnout). */
+  SPIN_GAIN: 0.5,
+} as const;
+
+/**
+ * Slide intensity (0..1) for the tire screech. Unlike `skidIntensity` (which drives the smoke and
+ * holds a latched drift at `DRIFT_FLOOR`), this is the slip angle itself — the angle between the
+ * body and where it is going, as `vehicle.ts` computes `slipAngle` — ramped from `ANGLE_START` to
+ * `ANGLE_FULL`. A drift that is barely crossed up is next to silent and the squeal grows with the
+ * angle, so how loud the tires are says how sideways the car is.
+ */
+export function screechIntensity(lateralSpeed: number, speed: number, wheelspin = 0): number {
+  const lateral = Math.abs(lateralSpeed);
+  let i = 0;
+  if (Math.hypot(speed, lateralSpeed) > SKID.MIN_SPEED) {
+    const deg = (Math.atan2(lateral, Math.abs(speed)) * 180) / Math.PI;
+    i = clamp01((deg - SCREECH.ANGLE_START) / (SCREECH.ANGLE_FULL - SCREECH.ANGLE_START)) * clamp01(lateral / SCREECH.LATERAL_FULL);
+  }
+  if (wheelspin > SKID.SPIN_START) {
+    const spin = clamp01((wheelspin - SKID.SPIN_START) / (1 - SKID.SPIN_START)) * SCREECH.SPIN_GAIN;
+    if (spin > i) i = spin;
+  }
+  return i;
+}
+
 /**
  * Fundamental (Hz) of the tire squeal for a given slide intensity and speed fraction.
  *

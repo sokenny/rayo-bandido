@@ -18,6 +18,7 @@ import { buildParks } from './env/parkBuilder';
 import { buildVillas } from './env/villaBuilder';
 import { buildObelisco } from './env/obeliscoBuilder';
 import { buildRoundabouts } from './env/roundaboutBuilder';
+import { buildSetPieces } from './env/setPieces';
 import { createParkPeopleVisual } from './parkPeopleVisual';
 import { createParkDucksVisual } from './parkDucksVisual';
 import { createFloralisVisual, type FloralisVisual } from './floralisVisual';
@@ -449,6 +450,8 @@ export function createEnvironment(scene: THREE.Scene, plan: CityPlan, options: {
   buildObelisco(b);
   // The south's roundabouts: their islands and what stands on them (`env/roundaboutBuilder.ts`).
   buildRoundabouts(b);
+  // The set-pieces: the roadworks jump, the collapsed parkade, the storm drain (`env/setPieces/`).
+  buildSetPieces(b);
   // Last, so it can read everything the other builders placed: the reclamation pass — the
   // plants, the paint and the decay, all from the one deterministic field in `env/reclaim.ts`.
   buildReclamation(b);

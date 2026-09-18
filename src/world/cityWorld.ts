@@ -31,6 +31,7 @@ import { reserveMegastructurePlots } from './cityMegastructures';
 import { createKerbField } from './kerbs';
 import { createRectIndex } from './spatialIndex';
 import { createSurfaceField } from './surface';
+import type { SetPieceSpec } from './setPieces/types';
 import { createParkRelief } from './parkRelief';
 import { BARRICADE, barricadeBox } from './metroVilla';
 import { createTerrain, type TerrainSpec } from './terrain';
@@ -204,15 +205,21 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
   const garage = spec.garage ?? null;
   // The Obelisco's McDonald's takes its corner the same way (`metroVilla.ts`).
   const obelisco = spec.obelisco ?? null;
-  const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : []), ...(obelisco ? [obelisco.mcdonalds] : [])];
+  // A set-piece (`setPieces/types.ts`) takes its `lots` whole, like a meet, and its `clipLots`
+  // by the corner, like a station: before anything is derived from the blocks.
+  const setPieces: SetPieceSpec[] = spec.setPieces ?? [];
+  const pieceLots = setPieces.flatMap((p) => p.lots);
+  const pieceClipLots = setPieces.flatMap((p) => p.clipLots ?? []);
+  const wholeLots = [...meetLots, ...pieceLots];
+  const cornerLots = [...gasStations.map((g) => g.lot), ...(garage ? [garage.lot] : []), ...(obelisco ? [obelisco.mcdonalds] : []), ...pieceClipLots];
   // A park takes its land whole, like a meet, but the block generator never runs on it in the
   // first place (`blockInner`): it is a lot for the kerbs (no city pavement on its roads: the
   // park draws its own), the cables and the fences. For the terrain it is a lot only when it
   // is level; a park with a relief (`parkRelief.ts`) adds its hills to the city's instead.
   const parks = spec.parks ?? [];
   const parkLands = parks.map((p) => p.land);
-  const lots = [...meetLots, ...cornerLots, ...parkLands];
-  const levelLots = [...meetLots, ...cornerLots, ...parks.filter((p) => !p.relief).map((p) => p.land)];
+  const lots = [...wholeLots, ...cornerLots, ...parkLands];
+  const levelLots = [...wholeLots, ...cornerLots, ...parks.filter((p) => !p.relief).map((p) => p.land)];
   // The water on the land: one depth field over every park's lakes (`park.ts`), dry without one.
   const lakes: LakeField = parks.length === 0 ? DRY_FIELD : parks.length === 1 ? lakeFieldOf(parks[0]) : joinLakeFields(parks.map(lakeFieldOf));
   const inLot = (x: number, z: number, pad = 0): boolean => lots.some((l) => inRect(l, x, z, pad));
@@ -234,7 +241,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
           },
         };
   const terrain = createTerrain(terrainSpec, bounds, elevated.map((rb) => rb.path), levelLots, quayZ);
-  const touchesLot = (r: Rect): boolean => meetLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
+  const touchesLot = (r: Rect): boolean => wholeLots.some((l) => r.maxX > l.minX && r.minX < l.maxX && r.maxZ > l.minZ && r.minZ < l.maxZ);
   // A villa keeps the blocks the generator cut there, and builds them its own way (`CitySpec.villas`).
   const villas = spec.villas ?? [];
   const roundabouts = spec.roundabouts ?? [];
@@ -392,7 +399,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
 
   // Built here rather than at the layout: a ground spawn at the foot of a ramp sits a few
   // centimetres above zero, and the car has to start on the road, not under it.
-  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, terrain, lakes);
+  const surface = createSurfaceField(elevated.map((rb) => rb.path), 1.5, terrain, lakes, setPieces);
   const GROUND_SAMPLE = { y: 0, gx: 0, gz: 0 };
 
   const targetSpawns: SpawnPoint[] = [];
@@ -495,8 +502,11 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     colliders.push({ ...v, minY: v.y0, maxY: v.y1, tag: m.tag });
   }
   for (const w of perimeter) colliders.push({ minX: w.minX, maxX: w.maxX, minZ: w.minZ, maxZ: w.maxZ, tag: w.tag });
+  // A plot over a set-piece's tunnel (`SetPieceSpec.underpasses`) is solid only above it.
+  const underpasses = (spec.setPieces ?? []).flatMap((p) => p.underpasses ?? []);
   for (const b of blocks) {
-    colliders.push({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, tag: b.tag, ...(b.maxHeight !== undefined ? { maxY: b.maxHeight } : {}) });
+    const under = underpasses.find((u) => b.maxX > u.minX && b.minX < u.maxX && b.maxZ > u.minZ && b.minZ < u.maxZ);
+    colliders.push({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, tag: b.tag, ...(b.maxHeight !== undefined ? { maxY: b.maxHeight } : {}), ...(under ? { minY: under.minY } : {}) });
   }
   for (const p of pillars) {
     if (p.wet) continue;
@@ -566,6 +576,11 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
       walls.push({ ax: r.x + Math.cos(a0) * r.island, az: r.z + Math.sin(a0) * r.island, bx: r.x + Math.cos(a1) * r.island, bz: r.z + Math.sin(a1) * r.island, maxY: terrain.heightAt(r.x, r.z) + 40, tag: 'roundabout' });
     }
   }
+  // The set-pieces' own solids (`setPieces/types.ts`), y-bounded as they give them.
+  for (const p of setPieces) {
+    for (const c of p.colliders ?? []) colliders.push({ tag: p.tag, ...c });
+    for (const w of p.walls ?? []) walls.push({ tag: p.tag, ...w });
+  }
   // Four segments per bus, LAST in the list and in bus order, rewritten in place every tick
   // by `src/sim/buses.ts` as the bus moves. Parked off the map until the first tick writes
   // them, so nothing that reads a freshly built layout finds a bus in the middle of a road.
@@ -609,7 +624,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
       bounds: { minX: inner.minX, maxX: inner.maxX, minZ: inner.minZ, maxZ: quayZ !== null ? bounds.maxZ - 20 : inner.maxZ },
       // A lot reads on the map as ground you can drive, like the streets into it.
       // The garage's is only its apron: the rest of its lot is the building.
-      rects: [...meetLots, ...gasStations.map((g) => g.lot), ...(garage ? [garageParts(garage).apron] : [])].map((l) => ({ ...l })),
+      rects: [...meetLots, ...gasStations.map((g) => g.lot), ...(garage ? [garageParts(garage).apron] : []), ...setPieces.flatMap((p) => p.minimapRects ?? [])].map((l) => ({ ...l })),
       ribbons: ribbons.map((rb) => ({
         points: rb.path.samples.filter((_, i) => i % 2 === 0 || !rb.path.closed).map((s) => ({ x: s.x, z: s.z })),
         width: rb.path.samples.reduce((sum, s) => sum + s.halfWidth * 2, 0) / rb.path.samples.length,
@@ -687,6 +702,7 @@ export function createCityWorld(spec: CitySpec = BAY_SPEC): World {
     ...(parks.length > 0 ? { parks: parks.map((p) => ({ ...p })) } : {}),
     ...(obelisco ? { obelisco: { ...obelisco, plaza: { ...obelisco.plaza }, mcdonalds: { ...obelisco.mcdonalds }, gantry: { ...obelisco.gantry }, fissures: obelisco.fissures.map((f) => f.map((p) => ({ ...p }))), barricades: obelisco.barricades.map((bc) => ({ ...bc })) } } : {}),
     ...(roundabouts.length > 0 ? { roundabouts: roundabouts.map((r) => ({ ...r })) } : {}),
+    ...(setPieces.length > 0 ? { setPieces: setPieces.slice() } : {}),
     ...(spec.portalFrames ? { portalFrames: spec.portalFrames.slice() } : {}),
     ...(spec.landmarks ? { landmarkAnchors: spec.landmarks.map((l) => ({ ...l })) } : {}),
     ...(spec.art ?? {}),

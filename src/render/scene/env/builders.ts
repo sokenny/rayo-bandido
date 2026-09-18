@@ -312,6 +312,25 @@ const NORMAL_UP = {
   decal: 0.5,
 } as const;
 
+/**
+ * True inside a set-piece's hole in the ground (`SetPieceSpec.groundHoles`), grown by `pad`: a dig
+ * across a street, where the street's own asphalt, paint and cracks stop (`trackBuilder.ts`).
+ */
+export function inPieceHole(b: EnvBuilders, x: number, z: number, pad = 0): boolean {
+  for (const sp of b.plan.setPieces ?? []) {
+    for (const h of sp.groundHoles ?? []) if (x >= h.minX - pad && x <= h.maxX + pad && z >= h.minZ - pad && z <= h.maxZ + pad) return true;
+  }
+  return false;
+}
+
+/** True inside a set-piece's `lots`: land the works took, where no street lamp stands. */
+export function inPieceLot(b: EnvBuilders, x: number, z: number): boolean {
+  for (const sp of b.plan.setPieces ?? []) {
+    for (const l of sp.lots) if (x >= l.minX && x <= l.maxX && z >= l.minZ && z <= l.maxZ) return true;
+  }
+  return false;
+}
+
 export function createBuilders(plan: CityPlan): EnvBuilders {
   return {
     plan,

@@ -84,7 +84,12 @@ function buildGround(b: EnvBuilders, bounds: Rect2): void {
   const extent = terrain && !terrain.flat && terrain.extent ? terrain.extent : null;
   // The bay and the parks take their own share: the ground plane is cut around them (the
   // water is its own mesh; a park draws its own grass and lake beds, `env/parkBuilder.ts`).
-  const holes: Rect2[] = [...(b.plan.water ? [b.plan.water.rect] : []), ...(b.plan.parks ?? []).map((p) => p.land)];
+  // A set-piece's dig is cut out too (`SetPieceSpec.groundHoles`); its builder draws what is in it.
+  const holes: Rect2[] = [
+    ...(b.plan.water ? [b.plan.water.rect] : []),
+    ...(b.plan.parks ?? []).map((p) => p.land),
+    ...(b.plan.setPieces ?? []).flatMap((sp) => sp.groundHoles ?? []),
+  ];
   const flat = extent ? subtractRect(ground, extent) : [ground];
   for (const piece of flat) for (const p of cutOut(piece, holes)) {
     if (p.maxX - p.minX < 1 || p.maxZ - p.minZ < 1) continue;

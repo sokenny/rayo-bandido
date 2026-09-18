@@ -1,7 +1,7 @@
 import type { ObstacleBox, ObstacleWall, SewerVentDef, StreetPropDef, StreetPropKind } from '../core/types';
 import { SEWER_STEAM, STREET_PROPS } from '../config/tuning';
 import type { World } from './arenaWorld';
-import { inRect, type BlockRect, type Rect, type RibbonDef, type ZoneId } from './cityPlan';
+import { inRect, planLots, type BlockRect, type Rect, type RibbonDef, type ZoneId } from './cityPlan';
 import { hash01, onRibbonAtLevel, pathBox } from './cityGen';
 import { createRectIndex } from './spatialIndex';
 import { createProjection, offsetAtStation, pointAtStation, projectOntoPath } from './track';
@@ -163,7 +163,7 @@ export function placeStreetProps(world: World): StreetPropDef[] {
   const wallRects = walls.map((w) => ({ minX: Math.min(w.ax, w.bx), maxX: Math.max(w.ax, w.bx), minZ: Math.min(w.az, w.bz), maxZ: Math.max(w.az, w.bz), w }));
   const wallIndex = createRectIndex(wallRects, 32, 2);
   const blockIndex = createRectIndex<BlockRect>(plan.blocks, 32, 2);
-  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
+  const lots: Rect[] = planLots(plan);
   const downtownRect = plan.downtown ?? null;
   const megas: Rect[] = (plan.megastructures ?? []).map((m) => m.footprint);
 
@@ -383,7 +383,7 @@ export function placeSewerVents(world: World): SewerVentDef[] {
   const { plan, layout } = world;
   const ground = plan.ribbons.filter((rb) => !rb.elevated);
   const downtownRect = plan.downtown ?? null;
-  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
+  const lots: Rect[] = planLots(plan);
   const markers: Array<{ x: number; z: number; r: number }> = [{ x: layout.playerSpawn.x, z: layout.playerSpawn.z, r: 14 }];
   for (const s of layout.rushSites ?? []) markers.push({ x: s.x, z: s.z, r: 10 });
   for (const s of layout.passengerStops ?? []) markers.push({ x: s.x, z: s.z, r: 8 });

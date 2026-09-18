@@ -2,7 +2,7 @@ import type { ObstacleBox } from '../core/types';
 import type { MicroSceneAnchor, MicroSceneAnchorTag, MicroSceneAnchorType, MicroSceneTransform } from '../microScenes/types';
 import type { World } from './arenaWorld';
 import { busStopCrowds } from './busStopCrowds';
-import { BUS_STOP, inRect, type BlockRect, type Rect, type RibbonDef } from './cityPlan';
+import { BUS_STOP, inRect, planLots, type BlockRect, type Rect, type RibbonDef } from './cityPlan';
 import { hash01, onRibbonAtLevel, pathBox } from './cityGen';
 import { createRectIndex } from './spatialIndex';
 import { createProjection, offsetAtStation, pointAtStation, projectOntoPath } from './track';
@@ -142,7 +142,7 @@ export function placeMicroSceneAnchors(world: World): MicroSceneAnchor[] {
   const boxes = layout.colliders.filter((b) => (b.minY === undefined || b.minY < 1.2) && (b.maxY === undefined || b.maxY > 0.3));
   const boxIndex = createRectIndex<ObstacleBox>(boxes, 32, 4);
   const blockIndex = createRectIndex<BlockRect>(plan.blocks, 32, 4);
-  const lots: Rect[] = [...(plan.meets ?? []), ...(plan.gasStations ?? []), ...(plan.garage ? [plan.garage] : [])].map((m) => m.lot);
+  const lots: Rect[] = planLots(plan);
   const megas: Rect[] = (plan.megastructures ?? []).map((m) => m.footprint);
   const ground = plan.ribbons.filter((rb) => !rb.elevated);
   const elevated = plan.ribbons.filter((rb) => rb.elevated);

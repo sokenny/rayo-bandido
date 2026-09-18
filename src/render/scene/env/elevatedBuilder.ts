@@ -435,7 +435,13 @@ function buildDeck(b: EnvBuilders, rb: RibbonDef, rng: () => number, ribbon: num
     // now come from the maintenance lamps overhead rather than from the bay parity, so a
     // dark stretch of ceiling has dark ground under it.
     // A car meet's lot runs on under the deck in its own asphalt (`meetBuilder.ts`).
-    if (!overWater && !onStreet(b, mx, mz, 2) && !(b.plan.meets ?? []).some((m) => inRect(m.lot, mx, mz))) {
+    // Nor over a set-piece's hole in the ground (`SetPieceSpec.groundHoles`).
+    if (
+      !overWater &&
+      !onStreet(b, mx, mz, 2) &&
+      !(b.plan.meets ?? []).some((m) => inRect(m.lot, mx, mz)) &&
+      !(b.plan.setPieces ?? []).some((sp) => (sp.groundHoles ?? []).some((h) => inRect(h, mx, mz, hw + 1.2)))
+    ) {
       const fw = hw + 1.2;
       b.concrete.color(PAL.ground, 1.25);
       b.concrete.quad(a.x + nx * fw, 0.02, a.z + nz * fw, a.x - nx * fw, 0.02, a.z - nz * fw, c.x - nx * fw, 0.02, c.z - nz * fw, c.x + nx * fw, 0.02, c.z + nz * fw);

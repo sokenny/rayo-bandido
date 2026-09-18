@@ -1,5 +1,6 @@
 import type { SurfaceField, SurfaceSample } from '../core/types';
 import { DRY_FIELD, type LakeField } from './park';
+import type { SetPieceCut, SetPieceSurface, SetPieceSpec } from './setPieces/types';
 import { FLAT_TERRAIN, type Terrain } from './terrain';
 import { createProjection, projectOntoPath, segmentCount, type TrackPath } from './track';
 
@@ -32,6 +33,12 @@ import { createProjection, projectOntoPath, segmentCount, type TrackPath } from 
  * LESS the lake's depth there, gradient and all, so a car that leaves the road by a lake rolls
  * down the bank into the water instead of driving across it. Dry everywhere in a world without.
  *
+ * SET-PIECES (`setPieces/types.ts`): a set-piece's CUT lowers the ground candidate further (dry:
+ * nothing here or in `layout.waterDepth` calls it water), and its SURFACES join the contest the
+ * way the ribbons do — highest at most `STEP_UP` above the hint wins, `null` meaning no slab at
+ * that point. Their grades are central differences of the functions they give. All of it sits
+ * behind one bounding box over every cut and slab, so the rest of the map pays one compare.
+ *
  * Allocation-free per sample: one scratch projection, the index built once up front.
  */
 /** Largest rise a body takes in its stride (m). A ramp climbs a few centimetres per tick. */
@@ -40,8 +47,38 @@ export const STEP_UP = 0.6;
 /** Side of a cell of the segment index (m). */
 const CELL = 16;
 
-export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terrain: Terrain = FLAT_TERRAIN, lakes: LakeField = DRY_FIELD): SurfaceField {
+/** Finite-difference step for a set-piece's cut and slab grades (m). */
+const PIECE_STEP = 0.25;
+
+export function createSurfaceField(
+  paths: readonly TrackPath[],
+  pad = 1.5,
+  terrain: Terrain = FLAT_TERRAIN,
+  lakes: LakeField = DRY_FIELD,
+  setPieces: readonly SetPieceSpec[] = [],
+): SurfaceField {
   const proj = createProjection();
+  const cuts: SetPieceCut[] = [];
+  const slabs: SetPieceSurface[] = [];
+  for (const sp of setPieces) {
+    if (sp.cut) cuts.push(sp.cut);
+    if (sp.surfaces) slabs.push(...sp.surfaces);
+  }
+  // One box over every cut and slab: outside it a sample never looks at a set-piece.
+  let pMinX = Infinity;
+  let pMaxX = -Infinity;
+  let pMinZ = Infinity;
+  let pMaxZ = -Infinity;
+  for (const r of [...cuts.map((c) => c.bounds), ...slabs.map((sl) => sl.bounds)]) {
+    pMinX = Math.min(pMinX, r.minX);
+    pMaxX = Math.max(pMaxX, r.maxX);
+    pMinZ = Math.min(pMinZ, r.minZ);
+    pMaxZ = Math.max(pMaxZ, r.maxZ);
+  }
+  const slabY = (sl: SetPieceSurface, x: number, z: number): number | null => {
+    const y = sl.heightAt(x, z);
+    return y === null || !sl.onGround ? y : y + terrain.heightAt(x, z);
+  };
   const flat = terrain.flat;
   const dry = lakes === DRY_FIELD;
   const basin: SurfaceSample = { y: 0, gx: 0, gz: 0 };
@@ -105,6 +142,20 @@ export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terra
         out.gx -= basin.gx;
         out.gz -= basin.gz;
       }
+      const inPieces = x >= pMinX && x <= pMaxX && z >= pMinZ && z <= pMaxZ;
+      if (inPieces) {
+        // A dig below grade: the ground candidate sinks by its depth, grade and all.
+        for (let c = 0; c < cuts.length; c++) {
+          const b = cuts[c].bounds;
+          if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+          const depth = cuts[c].depthAt(x, z);
+          if (!(depth > 0)) continue;
+          const d = PIECE_STEP;
+          out.y -= depth;
+          out.gx -= (cuts[c].depthAt(x + d, z) - cuts[c].depthAt(x - d, z)) / (2 * d);
+          out.gz -= (cuts[c].depthAt(x, z + d) - cuts[c].depthAt(x, z - d)) / (2 * d);
+        }
+      }
       let bestY = out.y;
       let bestGx = out.gx;
       let bestGz = out.gz;
@@ -153,6 +204,26 @@ export function createSurfaceField(paths: readonly TrackPath[], pad = 1.5, terra
           const grade = run > 1e-6 && proj.index < segmentCount(path) ? (b.y - a.y) / run : 0;
           bestGx = proj.tx * grade;
           bestGz = proj.tz * grade;
+        }
+      }
+      if (inPieces) {
+        // The set-pieces' slabs, by the ribbons' rule.
+        const ceiling = yHint + STEP_UP;
+        for (let k = 0; k < slabs.length; k++) {
+          const sl = slabs[k];
+          const b = sl.bounds;
+          if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+          const y = slabY(sl, x, z);
+          if (y === null || y > ceiling || y <= bestY) continue;
+          bestY = y;
+          // Central differences, one-sided where the slab ends within a step.
+          const d = PIECE_STEP;
+          const xp = slabY(sl, x + d, z);
+          const xm = slabY(sl, x - d, z);
+          const zp = slabY(sl, x, z + d);
+          const zm = slabY(sl, x, z - d);
+          bestGx = xp !== null && xm !== null ? (xp - xm) / (2 * d) : xp !== null ? (xp - y) / d : xm !== null ? (y - xm) / d : 0;
+          bestGz = zp !== null && zm !== null ? (zp - zm) / (2 * d) : zp !== null ? (zp - y) / d : zm !== null ? (y - zm) / d : 0;
         }
       }
       out.y = bestY;

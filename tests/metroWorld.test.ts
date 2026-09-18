@@ -5,6 +5,7 @@ import { builderStats, createBuilders } from '../src/render/scene/env/builders';
 import { buildCity } from '../src/render/scene/env/cityBuilder';
 import { buildLandmarks } from '../src/render/scene/env/landmarksBuilder';
 import { buildCarMeets } from '../src/render/scene/env/meetBuilder';
+import { buildSetPieces } from '../src/render/scene/env/setPieces';
 import { buildProps } from '../src/render/scene/env/propsBuilder';
 import { buildTrack } from '../src/render/scene/env/trackBuilder';
 import { buildTransit } from '../src/render/scene/env/transitBuilder';
@@ -373,6 +374,8 @@ describe('metro art budget', () => {
     buildLandmarks(b);
     const screens = buildScreens(b);
     buildCarMeets(b);
+    // The set-pieces (`env/setPieces/`) count against the same ceiling.
+    buildSetPieces(b);
     buildReclamation(b);
     const { triangles, drawCalls } = builderStats(b);
     // Downtown's screens, and the Obelisco's crossing's (`metroVilla.ts`), and nowhere else.
