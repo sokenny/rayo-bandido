@@ -6498,3 +6498,11 @@ body.rb-touch-pad .rb-minimap {
     letter-spacing: 0.16em;
   }
 }
+
+/* Loco Mustang's workshop (`src/workshop/controller.ts`): while the showroom has the screen its
+   overlay (`src/ui/workshop/workshop.css`) is the only screen furniture. The street's HUD and the
+   thumb pad wait, still built, for the car to come back out. */
+body.rb-in-workshop #hud-root,
+body.rb-in-workshop .rb-touch {
+  visibility: hidden;
+}

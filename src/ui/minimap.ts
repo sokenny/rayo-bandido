@@ -52,6 +52,13 @@ export interface Minimap {
   onWaypoint(listener: (waypoint: Waypoint | null) => void): void;
   /** Take the mark down — the car has arrived. Tells the listener. */
   clearWaypoint(): void;
+  /**
+   * Put the map away and stop answering its key, while another screen owns the keyboard — Loco
+   * Mustang's workshop, whose overlay reads every key and whose M means nothing. False gives the
+   * key back. The map's listener is in the capture phase and registered first, so the other
+   * screen cannot silence it on its own.
+   */
+  setSuspended(on: boolean): void;
   dispose(): void;
 }
 
@@ -310,7 +317,9 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
     if (!panel.contains(t) || t.closest('.rb-bigmap__close')) setExpanded(false);
   });
   // Capture phase, so ESC closes the map before the game's own ESC takes the player to the menu.
+  let suspended = false;
   const onKey = (e: KeyboardEvent): void => {
+    if (suspended) return;
     const t = e.target as Element | null;
     if (t && t.closest?.('input, textarea, select, [contenteditable]')) return;
     if (e.code === MINIMAP.key && !e.repeat) {
@@ -408,6 +417,11 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
     },
 
     setExpanded,
+
+    setSuspended(on) {
+      suspended = on;
+      if (on && expanded) setExpanded(false);
+    },
 
     onWaypoint(listener) {
       waypointListener = listener;

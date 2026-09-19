@@ -90,7 +90,8 @@ import {
 } from './sim/streetRace';
 import { readStreetRaceProgress, readWallet, recordStreetRace, writeStreetRaceProgress, writeWallet } from './core/progress';
 import { readIntroProgress, writeIntroProgress } from './core/progress';
-import { activitySuppressed, engagedActivity, introEngaged, type ActivityKind } from './sim/activities';
+import { readGarage } from './core/progress';
+import { activitySuppressed, engagedActivity, introEngaged, workshopEngaged, type ActivityKind } from './sim/activities';
 import { INTRO } from './content/intro';
 import { acceptIntroAssist, finishIntroCinematic, finishIntroOpening, installIntroMeetup, skipIntro, skipIntroLine } from './sim/intro';
 import { createHumanFigure, type HumanFigureVisual } from './render/scene/env/humanRig';
@@ -114,6 +115,8 @@ import { createGarageFigure } from './render/scene/env/garageFigure';
 import { GARAGE } from './world/garage';
 import { LOCO_MUSTANG } from './content/garage';
 import { garageOpenToTalk } from './sim/garage';
+import { LOCO_MUSTANG_SHOP } from './content/shops';
+import { createWorkshopController, type WorkshopController } from './workshop/controller';
 import { hustlerAt, hustlerName, washerOfferOpen } from './sim/hustlers';
 import { createHustlersVisual } from './render/scene/hustlersVisual';
 import { createMicroSceneVisual } from './render/scene/microSceneVisual';
@@ -347,6 +350,13 @@ export function createGame(
     installIntroMeetup(layout, INTRO);
     layout.playerSpawn = { x: INTRO.route.start.x, z: INTRO.route.start.z, heading: INTRO.route.start.heading };
   }
+  /**
+   * LOCO MUSTANG'S WORKSHOP (`docs/GARAGE_PLAN.md`): what the car wears, read once here — the car
+   * is dressed in it wherever it drives (in a room the paint gives way to the slot colour, D3,
+   * and the parts still show) — and, in the open world outside a match, the save the workshop
+   * behind the garage opens with.
+   */
+  const garageSave = readGarage();
   const state = createInitialGameState(layout, readTransmission(), {
     timeAttack: hasTimeAttack,
     timeAttackCleared: timeAttackProgress?.cleared ?? 0,
@@ -356,6 +366,7 @@ export function createGame(
     // replaced) and nothing else. Whether they may act on any given tick is the sim's question;
     // whether they exist at all is this one.
     police: mode === 'city' || mode === 'bay',
+    workshop: mode === 'city' && !match ? garageSave : null,
   });
   /**
    * THE WALLET (`readWallet`): the money follows the player across the page loads between the
@@ -417,7 +428,7 @@ export function createGame(
 
   end = measure('vehicles');
   // Online the car wears its slot's colour, the colour every other screen draws it in.
-  const car = createCarVisual(net ? { slot: net.slot } : {});
+  const car = createCarVisual(net ? { slot: net.slot, loadout: garageSave.loadout } : { loadout: garageSave.loadout });
   // The chase camera looks straight through the player's own car, so the coordinate probe
   // has to see past it — otherwise every reading would be the bodywork.
   car.root.userData.probeIgnore = true;
@@ -505,6 +516,8 @@ export function createGame(
     speakerSong.z = meetSpeakerPoints[0].z;
   }
   const audio = createAudio(state.targets.length, busStopCrowds(world.plan.busStops), meetSpeakerPoints);
+  // The exhaust the car wears (`loadout.exhaustSound`); the workshop changes it live.
+  audio.setExhaust(car.loadout.exhaustSound);
   // Background theme song. Loops quietly under the game.
   // Autoplay policy: it stays silent until the first key press / click (see arm()).
   const theme = createThemeAudio();
@@ -1878,6 +1891,14 @@ export function createGame(
 
   function simulate(dt: number): void {
     input.poll(command);
+    // In the workshop the overlay has the keyboard; this is for the pad and the touch buttons,
+    // which it does not: nothing may restart, rescue, re-frame or re-gear a car on a turntable.
+    if (workshopEngaged(state.workshop)) {
+      command.restart = false;
+      command.pov = false;
+      command.cruise = false;
+      command.transmission = false;
+    }
 
     if ((mode === 'city' || mode === 'stack' || mode === 'bay') && command.restart) {
       command.restart = false;
@@ -2034,11 +2055,15 @@ export function createGame(
     if (next !== null) applyPixelRatio(next);
 
     const v = state.vehicle;
+    // Loco Mustang's showroom, when it has the screen: it has already drawn this frame, and owns
+    // the car — its transform and its `update` — until it hands it back (`src/workshop/controller.ts`).
+    const inShowroom = workshop ? workshop.frame(frameDt) : false;
     nitroVisual += ((state.nitro.active ? 1 : 0) - nitroVisual) * Math.min(1, frameDt * 8);
     fillCameraPose(alpha);
-    syncCar(car, v, pose);
-    car.setNitro(nitroVisual);
-    car.setCharge(state.lightning.charge / LIGHTNING.capacity);
+    if (!inShowroom) syncCar(car, v, pose);
+    car.setNitro(inShowroom ? 0 : nitroVisual);
+    // On the turntable the neon shows the colour picked, not the lightning's charge (D2).
+    car.setCharge(inShowroom ? 0 : state.lightning.charge / LIGHTNING.capacity);
     car.setBrakeLights(v.brakeApplied > 0 && v.speed > 0.5);
     car.setReverseLights(v.speed < -0.5);
     // Crash damage (`src/sim/crashDamage.ts`): the marks repainted only when they change, and the
@@ -2062,7 +2087,7 @@ export function createGame(
       car.shiftKick(shiftKickStrength(v, bodyGear));
       bodyGear = v.gear;
     }
-    car.update(frameDt, simTime);
+    if (!inShowroom) car.update(frameDt, simTime);
     // Which electric cars wear the rush ring this frame. The nearest few only, and only
     // while a run is on — `markRushTargets` answers with the same rule that decides what
     // actually scores, so the two can never disagree.
@@ -2184,6 +2209,19 @@ export function createGame(
     if (bang > 0) {
       audio.backfire(bang);
       effects.backfire(bang);
+    }
+
+    // The showroom drew the frame, and its overlay is the whole of the screen furniture: the
+    // street's HUD, map and picture wait. The city above was still stepped — its traffic, its
+    // lamps, its music and the engine's voice go on (D7) — it is only not drawn.
+    if (inShowroom) {
+      debugInput.simMs = stats.simMs;
+      debugInput.renderMs = stats.renderMs;
+      debugInput.gpuMs = gpuMs;
+      debugInput.pixelRatio = renderer.getPixelRatio();
+      debugInput.governor = governor.status;
+      debug.update(frameDt, renderer, debugInput);
+      return;
     }
 
     snapshot.speedKmh = Math.abs(msToKmh(v.speed));
@@ -2405,8 +2443,15 @@ export function createGame(
     if (garage && hasGarage) {
       garageSnapshot.atSite = garage.atSite;
       garageSnapshot.open = garageOpenToTalk(garage);
-      garageSnapshot.line = garage.line;
-      garageSnapshot.lineId = garage.lineId;
+      // What he says inside the workshop is the showroom's to say (`src/workshop/controller.ts`):
+      // the street's card is held where it was until the visit is over, and then catches up on
+      // the last line only — the goodbye, said as the car rolls out.
+      if (!workshopEngaged(state.workshop)) {
+        garageSnapshot.line = garage.line;
+        garageSnapshot.lineId = garage.lineId;
+      }
+      // On the ring: fetch the showroom now, so the door opens without a download behind it.
+      if (garage.atSite) workshop?.prefetch();
     }
     const hustlers = state.hustlers;
     if (hustlers && hustlerSpots) {
@@ -2596,11 +2641,66 @@ export function createGame(
     return null;
   }
 
+  /* ------------------------------------------------------------ loco mustang's workshop */
+
+  /**
+   * The workshop behind the garage (`src/workshop/controller.ts`), in the session whose rules
+   * carry one (`GameState.workshop`: the open world, outside a match). The controller owns the
+   * showroom, the overlay and the cut; the game only hands it the frame, parks the car on the ring
+   * when the showroom takes the screen, and puts its own street furniture away meanwhile.
+   */
+  function parkOnRing(): void {
+    if (!garageSite) return;
+    const v = state.vehicle;
+    v.x = v.prevX = garageSite.x;
+    v.z = v.prevZ = garageSite.z;
+    v.y = v.prevY = garageSite.y;
+    restVehicle(v);
+    // The ring's heading is the way the garage looks: out at the street.
+    v.heading = v.prevHeading = garageSite.heading;
+    v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = v.steerAngle = 0;
+  }
+  const workshop: WorkshopController | null = state.workshop
+    ? createWorkshopController({
+        renderer,
+        car,
+        audio,
+        shop: LOCO_MUSTANG_SHOP,
+        workshop: () => state.workshop,
+        garage: () => state.garage,
+        economy: () => state.economy,
+        mount: document.body,
+        onEvents: (events) => {
+          for (let i = 0; i < events.length; i++) handleEvent(events[i]);
+        },
+        onShowroom(visible) {
+          document.body.classList.toggle('rb-in-workshop', visible);
+          minimap.setSuspended(visible);
+          if (visible) {
+            parkOnRing();
+            setCruise(false);
+            return;
+          }
+          // Back on the street: the car settled on its springs where it was parked, the camera
+          // behind it rather than swinging round from wherever it was left.
+          car.resetBody();
+          bodyGear = state.vehicle.gear;
+          effects.reset();
+          backfire.reset();
+          prevLimiterCut = 0;
+          fillCameraPose(1);
+          chase.snap(cameraPose);
+        },
+        playerName: () => account().state.user?.name ?? '',
+      })
+    : null;
+
   const loop = createGameLoop({ simulate, render }, SIM_STEP);
 
   function onResize(): void {
     applyPixelRatio(governor.ratio);
     chase.resize(viewportWidth() / viewportHeight());
+    workshop?.resize(viewportWidth(), viewportHeight());
   }
   window.addEventListener('resize', onResize);
 
@@ -2715,6 +2815,9 @@ export function createGame(
       onlinePanel?.dispose();
       introOverlay?.dispose();
       savePrompt?.dispose();
+      // Before the car: a visit under way gives the car back to the scene first.
+      workshop?.dispose();
+      document.body.classList.remove('rb-in-workshop');
       for (const p of introParked) {
         scene.remove(p.vis.root);
         p.vis.dispose();
@@ -3283,6 +3386,56 @@ export function createGame(
 
     /** Which activity has the car right now, or null. The one answer everything else is derived from. */
     engaged: () => engagedActivity(state),
+
+    /**
+     * LOCO MUSTANG'S WORKSHOP, for automation. Null outside the open world (and in a match).
+     *
+     *   __rb.workshop.goToRing()        // the car on his ring, nose to the garage
+     *   __rb.workshop.enter()           // the F key
+     *   __rb.workshop.intent({ type: 'group', delta: 1 })   // what the overlay would send
+     *   __rb.workshop.status()          // { phase, category, showroom, money, installed, owned, ... }
+     *   __rb.workshop.setMoney(50000)   // development only
+     */
+    workshop:
+      workshop && garageSite
+        ? {
+            get state() {
+              return state.workshop;
+            },
+            site: { ...garageSite },
+            goToRing() {
+              const v = state.vehicle;
+              v.x = v.prevX = garageSite.x;
+              v.z = v.prevZ = garageSite.z;
+              v.y = v.prevY = garageSite.y;
+              restVehicle(v);
+              v.heading = v.prevHeading = garageSite.heading + Math.PI;
+              v.vx = v.vz = v.speed = v.lateralSpeed = v.yawRate = v.slipAngle = 0;
+              fillCameraPose(1);
+              chase.snap(cameraPose);
+            },
+            enter() {
+              activateQueued = true;
+            },
+            intent: (i: Parameters<WorkshopController['intent']>[0]) => workshop.intent(i),
+            /** Ease the showroom camera to a shot (a key or `{ yaw, pitch, distance, targetY, targetZ, fov }`). */
+            shot: (next: Parameters<WorkshopController['shot']>[0]) => workshop.shot(next),
+            status: () => ({
+              ...workshop.status(),
+              money: state.economy.money,
+              installed: state.workshop ? { ...state.workshop.installed } : null,
+              owned: state.workshop ? state.workshop.owned.slice() : [],
+              purchases: state.workshop?.purchases ?? 0,
+              lastDenied: state.workshop?.lastDenied ?? null,
+            }),
+            setMoney: import.meta.env.DEV
+              ? (money: number) => {
+                  state.economy.money = Math.max(0, Math.round(money));
+                  return state.economy.money;
+                }
+              : undefined,
+          }
+        : null,
 
     /**
      * THE STREET PROPS, for automation. Null in worlds without them.

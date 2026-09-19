@@ -16,7 +16,6 @@ import {
   installVerb,
   keyAction,
   maxLayers,
-  maxLoadoutRating,
   panelKind,
   railFraction,
   stepLabel,
@@ -92,6 +91,8 @@ export interface WorkshopOverlay {
 const canAnimate = typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
 const LOCO_NAME = 'LOCO MUSTANG';
 const LINE_SECONDS = 4.5;
+/** The rating meter's full scale: `carStars` tops out at ten. */
+const RATING_SCALE = 10;
 /** Pixels of drag per radian of orbit. */
 const ORBIT_PX = 160;
 
@@ -118,7 +119,9 @@ const FINISH_SWATCH: Record<string, string> = {
 
 export function createWorkshopOverlay(options: WorkshopOverlayOptions): WorkshopOverlay {
   const emit = (intent: WorkshopIntent): void => options.onIntent(intent);
-  const maxRating = maxLoadoutRating();
+  // The snapshot's rating is the car's stars, 0..10 (`carStars`, `src/sim/workshop.ts`), not the
+  // raw part-rating sum `maxLoadoutRating` measures: the meter's full scale is ten stars.
+  const maxRating = RATING_SCALE;
 
   /* ------------------------------------------------------------------ markup */
 
@@ -569,7 +572,11 @@ export function createWorkshopOverlay(options: WorkshopOverlayOptions): Workshop
         partBlurbEl.textContent = blurb ?? '';
       }
     }
-    current.installed = !!o?.installed;
+    // Whether ENTER has anything to do. `dirty` (the preview differs from what is installed) is
+    // the rules' answer; the highlighted option's `installed` mark is not enough on its own: a
+    // layer removed or recoloured, or new plate text, leaves the design / plate style on the rail
+    // exactly as installed. A snapshot without `dirty` (a harness mock) falls back to the mark.
+    current.installed = s.dirty === undefined ? !!o?.installed : !s.dirty;
   }
 
   function displayLabel(o: WorkshopOptionView): string {
@@ -631,10 +638,12 @@ export function createWorkshopOverlay(options: WorkshopOverlayOptions): Workshop
     else {
       const o = s.options.length ? s.options[wrapIndex(s.optionIndex, s.options.length)] : undefined;
       const verb = installVerb(categoryDef(s.category));
-      if (!o) {
+      // See `renderOptions`: with `dirty` known, "nothing to install" is the rules' call.
+      const done = s.dirty === undefined ? !!o?.installed : !s.dirty;
+      if (!o && s.dirty !== true) {
         label = verb;
         state = 'is-done';
-      } else if (o.installed) {
+      } else if (done) {
         label = 'INSTALADO';
         state = 'is-done';
       } else if (s.installPrice > 0) {
@@ -1036,7 +1045,8 @@ export function createWorkshopOverlay(options: WorkshopOverlayOptions): Workshop
       const first = shownRatingKey === '';
       shownRatingKey = rKey;
       ratingValueEl.textContent = String(s.previewRating);
-      const delta = s.previewRating - s.rating;
+      // One decimal, like the stars themselves: 1.6 − 1.3 is 0.3, not 0.30000000000000004.
+      const delta = Math.round((s.previewRating - s.rating) * 10) / 10;
       ratingDeltaEl.textContent = delta === 0 ? '' : delta > 0 ? `+${delta}` : `−${-delta}`;
       ratingDeltaEl.className = `rb-ws-rating__delta${delta > 0 ? ' is-up' : delta < 0 ? ' is-down' : ''}`;
       ratingFillEl.style.height = `${Math.min(100, (s.previewRating / maxRating) * 100).toFixed(1)}%`;
