@@ -3319,3 +3319,52 @@ Still compiling mid-game, and not from this change: in the metro cruise, `street
 fleet matrix is checked against the per-car scene graph, the look at `ELECTRIC_CASCADE_END`
 against a settled wreck for all four variants, plus cascade hand-off, revival, rings and culling
 (`tests/electricFleet.test.ts`). Typecheck clean, 1142 tests pass.
+
+## Loco Mustang's workshop opens: Ola 2 integrated (2026-09-19)
+
+`docs/GARAGE_PLAN.md` Ola 2. The car drives onto Loco Mustang's ring in the open world
+(`?mode=city`), F fades to black, the showroom comes up with the NFSU2 overlay, the player tries
+on, buys and installs cosmetic parts with keyboard, mouse, pad or touch, SALIR fades back, and the
+car is on the ring facing the street wearing what was installed. It is saved (`rb.garage`, synced
+through the account like the wallet) and worn again on the next page load.
+
+- **Rules** (`src/sim/gameState.ts`): `GameState.workshop` exists where the caller hands in the save
+  (`GameStateOptions.workshop`: the open world, outside a match). The key on the ring is the
+  workshop's door (`stepGarage(..., { workshop: true })` → `garageWantsWorkshop` →
+  `canEnterWorkshop` → `openWorkshop`); the visit holds the car (the grid's hold, brakes to a stop),
+  locks every other activity and switches the police off; the door stays shut with the police on
+  the car. `GarageLineKind` gained `welcome | install | broke | door | goodbye`: the showroom voices
+  the first three, the street's garage card the rest. Without a save the garage is the one from
+  before (`tests/workshopGame.test.ts`).
+- **Controller** (`src/workshop/controller.ts`, new): lazy `import()` of the showroom and the overlay
+  (prefetched once the car is on the ring; F → first showroom frame ≈ 0.6 s, half of it the fade),
+  a black cut of its own, attach → category shot → `warmUp` → intro swoop, and back; E's
+  `WorkshopIntent`s mapped onto F's commands and applied on the key press; the car wears the
+  preview; a new exhaust is swapped in and blipped; purchases saved; a layer editor for vinyls and
+  decals. `game.ts` only instantiates it and routes the frame: while the showroom is up the city is
+  stepped (D7) but not drawn, the HUD/map key/thumb pad are away, and the car is parked on the ring.
+- **Load**: `createCarVisual({ loadout })` from the save everywhere (in a match the paint stays the
+  slot colour, D3; parts and wheels apply — checked) and `audio.setExhaust(loadout.exhaustSound)`.
+- **Bundle**: the showroom is `showroom-*.js` (35 kB), the overlay a chunk of its own (39 kB) with its
+  CSS (27 kB) — the menu's CSS has no `rb-ws-` rule.
+- **Analytics**: `workshop_enter`, `part_purchased` (shop, category, part, price, balance).
+- **Found at runtime and fixed**: the overlay's rating meter scaled the car's 0–10 stars against a
+  raw part-rating sum and always read empty; ENTER could not apply a removed layer or new plate
+  text; the camber/track shots were head-on, where the wide body hides the wheels entirely — now
+  ~50° round on the wheel. Headlights, exhaust and neon use D's close-up shots.
+
+Verified: `npm run typecheck`, `npx vitest run` (88 files, 1360 tests), `npm run build`. In the live
+game, `node scripts/workshop-drive.mjs` (dev server on 5199) drives a whole visit with the real
+keyboard — bumper, spoiler, rims, red paint, vinyl removal, neon installed; camber and exhaust
+tried; a refusal for money; SALIR — and passes every check: the car leaves wearing exactly the
+installed loadout (the un-installed exhaust try-on discarded), back on the ring facing the street,
+nothing holding it, 14 car draw calls before and after, renderer geometry/texture counts identical
+after a second visit (and 64 try-ons add nothing after the first handful), `rb.garage` written and
+worn again after a reload, no console errors from the game. Captures in
+`artifacts/workshop-integration/`. Showroom frame at 1600×900: 55 draw calls, 36k triangles, 1.2 ms
+render JS (the city at the ring: 258 calls, 855k triangles, 2.7 ms).
+
+Not done: Loco Mustang's 20 new lines are not voiced — no `ELEVENLABS_API_KEY` on this machine.
+They are `PENDING_VOICE_DIALOGUE` in `src/content/dialogueLines.ts`, which `npm run dialogue:voices`
+also bakes; until then they are subtitles and the overlay's card (the speech request fails and is
+ignored). Gamepad and touch were not driven here. Ola 3 list: `docs/GARAGE_PLAN.md` §7.

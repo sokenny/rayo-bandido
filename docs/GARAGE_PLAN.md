@@ -394,3 +394,44 @@ tests `tests/workshopCamera*.test.ts`.
 `WorkshopHudSnapshot`; `car.applyLoadout(state.workshop.preview)` en cada `workshopPreview` y el
 `installed` al salir y al cargar la partida (`createCarVisual({ loadout })`).
 
+
+---
+
+## 7. Estado de la Ola 2 (integrada el 2026-09-19)
+
+Integrada en `main` (commits `5b84acd`, `81f6905`, `879e0d8`). Detalle y mediciones en
+`docs/PROGRESS.md` ("Loco Mustang's workshop opens").
+
+- **Hecho**: `src/workshop/controller.ts` (carga lazy, corte a negro, showroom, overlay, mapeo
+  intención → comando, preview en el auto, escape + acelerón, guardado, voz del Loco adentro, editor
+  de capas); `GameState.workshop` + puerta en el anillo + actividad que retiene el auto y apaga la
+  policía; `GarageLineKind` ampliado; `audio.setExhaust/revDemo`; `workshop_enter` y
+  `part_purchased`; planos de cámara pedidos por D (faros, escape, neón) y camber/trocha re-afinados;
+  el auto sale del save en todos los modos (en partida, pintura de slot — D3); `__rb.workshop` para
+  automatizar; `scripts/workshop-drive.mjs` recorre una visita entera en el juego real.
+- **Voces (D6)**: no se hornearon — no hay `ELEVENLABS_API_KEY` en esta máquina. Las 20 líneas nuevas
+  están en `PENDING_VOICE_DIALOGUE` (`src/content/dialogueLines.ts`); `npm run dialogue:voices` con la
+  clave las hornea, y después se pasan a `RUNTIME_DIALOGUE`. Mientras tanto se ven como subtítulo.
+- **Arreglos rápidos de la lista de la Ola 1 que NO se hicieron** (ninguno era barato y seguro):
+  - Forro oscuro en los pasos de rueda: cambiaría la geometría de fábrica (`carVisualStock`).
+  - Alerón `double-gt` (placas y flap que se leen como bloques marrones en 3/4 trasero),
+    `headlights.slim` (barras en ángulo), `headlights.popup` (placas blancas flotando sobre el capot,
+    y su choque con capots con toma/joroba/ventilados): son decisiones de geometría de A y G.
+
+### Para la Ola 3 (QA)
+
+1. Voces: hornear con la clave y mover `PENDING_VOICE_DIALOGUE` a `RUNTIME_DIALOGUE`.
+2. Gamepad (LB/RB, stick derecho para orbitar) y touch (teléfono rotado) dentro del taller: no se
+   probaron en la Ola 2. Revisar también que los botones táctiles de manejo ocultos no queden
+   "apretados" al salir.
+3. Neón en `neonLow` con el taller atenuado: el color elegido se lee poco en la captura; revisar la
+   intensidad en reposo (D2) y el plano.
+4. El medidor de GPU del overlay de debug (`gpuTimer`) solo envuelve el render de la ciudad: dentro
+   del showroom muestra un valor viejo.
+5. Programas de shader: después de la primera visita quedan ~16 más en caché (las variantes de los
+   materiales del auto con las luces del showroom); no crecen por visita.
+6. Las piezas señaladas arriba (double-gt, slim, popup, popup vs capots, forro de pasos de rueda).
+7. Capturas por plano y por pieza (`scripts/garage-shots.mjs`) a tamaño completo; el cromado débil
+   (C) y el grime de choque sobre pintura (material blanco × textura) a revisar a ojo.
+8. En una sala de la ciudad en red el taller funciona (la sim sigue, el auto publica quieto en el
+   anillo); no se probó con otro jugador conectado.
