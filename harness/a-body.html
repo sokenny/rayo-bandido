@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Body Parts Harness</title>
+    <style>
+      :root { --bg: #8a8f99; --ink: #111; }
+      html, body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.2 system-ui, sans-serif; }
+      #wrap { position: relative; display: inline-block; }
+      .label { position: absolute; padding: 2px 5px; background: rgba(255, 255, 255, 0.8); pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- Agent A's visual QA page for the workshop body parts. Not shipped: see harness/a-body.ts. -->
+    <div id="wrap"></div>
+    <script type="module" src="./a-body.ts"></script>
+  </body>
+</html>
