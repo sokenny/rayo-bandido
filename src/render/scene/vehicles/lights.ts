@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { STOCK_LOADOUT, type CarLoadout, type PartId } from '../../../core/loadout';
+import { STOCK_LOADOUT, type CarLoadout, type ColorId, type PartId } from '../../../core/loadout';
+import { findColor } from '../../../content/carParts';
 import { box, mergeParts, part } from './geometryKit';
 import { exhaustOutlets, type ExhaustOutlet } from './parts/exhaustTips';
 
 /**
  * THE CAR'S LAMPS: head lights, tail lights, reverse lights and the exhaust flame. OWNED BY
- * agent G (`docs/GARAGE_PLAN.md` §2.7, Ola 1). Extracted from `carVisual.ts` unchanged.
+ * agent G (`docs/GARAGE_PLAN.md` §2.7, Ola 1).
  *
  * CONTRACT
  * - `createCarLights(chassis, loadout)` builds four meshes and adds them to `chassis` in this
@@ -13,14 +14,26 @@ import { exhaustOutlets, type ExhaustOutlet } from './parts/exhaustTips';
  *   is the order they have always been added in (`tests/carVisualStock.test.ts` walks it).
  * - `setNitro` / `setBraking` / `setReversing` are the per-frame-safe controls `CarVisual`
  *   forwards; they allocate nothing.
- * - `applyLoadout(loadout)` is workshop-time: it may rebuild geometry (disposing what it
- *   replaces) and restyle materials, but never create or drop a mesh.
+ * - `applyLoadout(loadout)` is workshop-time: it rebuilds the head/tail shapes and the exhaust
+ *   flame discs when their part changes (disposing what it replaces), sets the head lamps'
+ *   colour from `lights.headColor`, and never creates or drops a mesh or a material.
+ * - Whatever the shape, the tail lights are red, go brighter red on the brakes and blend to
+ *   magenta with nitro (`AGENTS.md` visual rules): the shapes only change the silhouette and how
+ *   much of it is lit, never the hue the tail lamp material is driven to.
  *
- * WAVE 0 STATE: `applyLoadout` rebuilds the head/tail shapes and the exhaust discs when their
- * part changes (only `stock` exists yet) and does not touch colour. Agent G adds: head light
- * shapes (`buildHeadGeometry` cases), tail light shapes (`buildTailGeometry` cases), and
- * `lights.headColor` → `headMat.emissive` from `PALETTE`. The tail lights stay red when braking
- * and turn magenta under nitro whatever else changes (`AGENTS.md` visual rules).
+ * SHAPES. `buildHeadGeometry(id)` / `buildTailGeometry(id)` draw the lamp silhouettes; each id
+ * also has a row in `HEAD_STYLE` / `TAIL_STYLE` (how hard it glows, whether the vertex colours
+ * shade the glow). Every shape stays inside the stock lamps' envelope — heads on the nose face
+ * at z ≈ -2.2..-2.06, tails at z ≈ 2.08..2.16 above the plate — so any bumper agent A sells
+ * fits round them. The one exception is the pop-up set, whose pods stand on the hood's leading
+ * edge (z ≈ -2.0, y ≈ 0.66..0.78), clear of the stock hood vents at z ≈ -1.34.
+ *
+ * LAMP TINT. A `MeshStandardMaterial`'s vertex colours only shade its diffuse, never its
+ * emissive, so a lamp mesh glows one flat colour. Every shape but stock wants a lens that is
+ * lit unevenly (a smoked lens, a dim projector ring, an amber turn strip, yellow fogs), so the
+ * two lamp materials carry a one-line shader patch: `emissive *= mix(1, vColor, lampTint)`.
+ * `lampTint` is 0 for the stock shapes — the stock car is the exact same picture as before the
+ * workshop — and 1 for the others, whose vertex colours are then the lens's shading.
  */
 export interface CarLights {
   readonly head: THREE.Mesh;
@@ -38,11 +51,139 @@ export interface CarLights {
 const TAIL_RED = new THREE.Color(0xff1a2e);
 const TAIL_MAGENTA = new THREE.Color(0xff33d6);
 
-/** Head light clusters: a lamp and a DRL strip each side. */
+/** Head lamp emissive when `headColor` is the stock `'xenon'`: the colour it has always been. */
+const HEAD_XENON = 0xdff2ff;
+
+/**
+ * A palette colour as a LAMP: the hex from `PALETTE` (linear), scaled up so its brightest
+ * channel is full. A lamp is a light source; "navy" head lights or "crimson" neon mean the hue,
+ * not a lamp too dim to see. Colours that already have a full channel (the stock xenon, cyan,
+ * magenta) come back unchanged, so stock is exact. Black stays black (lamps visibly off).
+ * Allocation-free: writes into `out`.
+ */
+export function lampColor(id: ColorId, out: THREE.Color, fallback: THREE.ColorRepresentation = 0xffffff): THREE.Color {
+  const def = findColor(id);
+  out.set(def ? def.hex : fallback);
+  const max = Math.max(out.r, out.g, out.b);
+  if (max > 1e-4 && max < 0.999) out.multiplyScalar(1 / max);
+  return out;
+}
+
+/* --------------------------------------------------------------- shapes */
+
+/** How a shape glows. `intensity` is the head lamps' emissive intensity / the tails' gain. */
+interface LampStyle {
+  intensity: number;
+  /** 0: one flat glow (stock). 1: vertex colours shade the glow (see LAMP TINT above). */
+  tint: 0 | 1;
+}
+
+/** Head shapes. Stock: 1.5 flat, as it always was. */
+const HEAD_STYLE: Readonly<Record<string, LampStyle>> = {
+  'headlights.stock': { intensity: 1.5, tint: 0 },
+  'headlights.slim': { intensity: 1.9, tint: 1 },
+  'headlights.quad': { intensity: 1.6, tint: 1 },
+  'headlights.popup': { intensity: 1.6, tint: 1 },
+  'headlights.smoked': { intensity: 1.5, tint: 1 },
+  'headlights.fog': { intensity: 1.6, tint: 1 },
+};
+
+/** Tail shapes. `intensity` multiplies the running/brake/nitro intensity. Stock: 1, flat. */
+const TAIL_STYLE: Readonly<Record<string, LampStyle>> = {
+  'taillights.stock': { intensity: 1, tint: 0 },
+  'taillights.led-bar': { intensity: 1.15, tint: 1 },
+  'taillights.quad-round': { intensity: 1.1, tint: 1 },
+  'taillights.smoked': { intensity: 1.05, tint: 1 },
+  'taillights.split': { intensity: 1.1, tint: 1 },
+};
+
+/** Every head / tail shape id `buildHeadGeometry` / `buildTailGeometry` draws, stock first. */
+export const HEAD_SHAPES: readonly PartId[] = Object.keys(HEAD_STYLE);
+export const TAIL_SHAPES: readonly PartId[] = Object.keys(TAIL_STYLE);
+
+const headStyle = (id: PartId): LampStyle => HEAD_STYLE[id] ?? HEAD_STYLE['headlights.stock'];
+const tailStyle = (id: PartId): LampStyle => TAIL_STYLE[id] ?? TAIL_STYLE['taillights.stock'];
+
+/** A round lens facing along Z (a projector, a fog lamp, a Skyline ring). */
+function lens(radius: number, depth: number, x: number, y: number, z: number, colour: number): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(radius, radius, depth, 14, 1);
+  g.rotateX(Math.PI / 2);
+  g.translate(x, y, z);
+  return part(g, colour);
+}
+
+/** A box lamp at a place, optionally rolled (about Z) and toed (about Y). */
+function slab(
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  colour: number,
+  roll = 0,
+  toe = 0,
+): THREE.BufferGeometry {
+  const g = box(w, h, d);
+  if (roll) g.rotateZ(roll);
+  if (toe) g.rotateY(toe);
+  g.translate(x, y, z);
+  return part(g, colour);
+}
+
+/** Head light clusters. Stock: a lamp and a DRL strip each side. Unknown ids draw stock. */
 export function buildHeadGeometry(partId: PartId = STOCK_LOADOUT.lights.head): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
   switch (partId) {
-    default: {
-      const parts: THREE.BufferGeometry[] = [];
+    case 'headlights.slim':
+      // Slim angry LEDs: a thin bar slanting up toward the wing, with an eyebrow hooking down
+      // at its inner end.
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.4, 0.045, 0.08, sign * 0.45, 0.54, -2.125, 0xffffff, sign * 0.15, sign * 0.1));
+        parts.push(slab(0.15, 0.03, 0.07, sign * 0.29, 0.495, -2.14, 0xffffff, sign * 0.62));
+        // The lower running light, thinner and dimmer than the main bar.
+        parts.push(slab(0.26, 0.02, 0.06, sign * 0.47, 0.44, -2.13, 0x8fdcff));
+      }
+      break;
+    case 'headlights.quad':
+      // Quad round projectors: two lenses a side, each a bright core in a dim reflector ring.
+      for (const sign of [-1, 1]) {
+        for (const x of [0.31, 0.52]) {
+          parts.push(lens(0.07, 0.05, sign * x, 0.5, -2.115, 0x3a4450));
+          parts.push(lens(0.045, 0.05, sign * x, 0.5, -2.14, 0xffffff));
+        }
+        parts.push(slab(0.36, 0.022, 0.06, sign * 0.42, 0.405, -2.13, 0x9fe8ff));
+      }
+      break;
+    case 'headlights.popup':
+      // Pop-ups, up: the lamp faces stand on the hood's leading edge, tipped back a touch.
+      // Below them, where the fixed lamps would be, only the amber turn/park strip.
+      for (const sign of [-1, 1]) {
+        const face = box(0.3, 0.11, 0.03);
+        face.rotateX(-0.14);
+        face.translate(sign * 0.5, 0.715, -2.0);
+        parts.push(part(face, 0xffffff));
+        parts.push(slab(0.3, 0.025, 0.1, sign * 0.5, 0.775, -1.95, 0x2a3038));
+        parts.push(slab(0.26, 0.04, 0.06, sign * 0.44, 0.45, -2.13, 0xffa030, 0, sign * 0.1));
+      }
+      break;
+    case 'headlights.smoked':
+      // The stock clusters behind a tinted lens: same shape, glow pulled well down.
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.36, 0.13, 0.1, sign * 0.44, 0.5, -2.13, 0x8a8e96, 0, sign * 0.1));
+        parts.push(slab(0.3, 0.035, 0.08, sign * 0.44, 0.38, -2.13, 0x5f7c86));
+      }
+      break;
+    case 'headlights.fog':
+      // The stock lamps plus a JDM fog set: round selective-yellow fogs where the DRL was.
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.36, 0.13, 0.1, sign * 0.44, 0.5, -2.13, 0xffffff, 0, sign * 0.1));
+        parts.push(lens(0.048, 0.05, sign * 0.52, 0.385, -2.145, 0xffc21a));
+        parts.push(slab(0.14, 0.03, 0.06, sign * 0.3, 0.38, -2.13, 0x9fe8ff));
+      }
+      break;
+    default:
+      // Stock. Written exactly as before the workshop (pinned by `carVisualStock.test.ts`).
       for (const sign of [-1, 1]) {
         const lamp = box(0.36, 0.13, 0.1);
         lamp.rotateY(sign * 0.1);
@@ -52,19 +193,53 @@ export function buildHeadGeometry(partId: PartId = STOCK_LOADOUT.lights.head): T
         drl.translate(sign * 0.44, 0.38, -2.13);
         parts.push(part(drl, 0x9fe8ff));
       }
-      return mergeParts(parts);
-    }
   }
+  return mergeParts(parts);
 }
 
 /**
  * Tail light clusters. Shared with the rival cars and the meet (re-exported by `carVisual.ts`):
  * the view of a rival is usually this one. Called with no argument there — the stock shape.
+ * Every shape keeps above the plate (`PLATE_MOUNT`, top at y ≈ 0.605) or clear of it in x.
  */
 export function buildTailGeometry(partId: PartId = STOCK_LOADOUT.lights.tail): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
   switch (partId) {
-    default: {
-      const parts: THREE.BufferGeometry[] = [];
+    case 'taillights.led-bar':
+      // Full-width LED bar across the tail, ending in a compact cluster each side.
+      parts.push(slab(1.26, 0.035, 0.05, 0, 0.665, 2.13, 0xd8d8d8));
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.2, 0.1, 0.07, sign * 0.56, 0.625, 2.12, 0xffffff));
+        parts.push(slab(0.12, 0.03, 0.06, sign * 0.56, 0.56, 2.125, 0x9a9a9a));
+      }
+      break;
+    case 'taillights.quad-round':
+      // Round quad, the Skyline way: two rings a side, each a bright ring round a dimmer centre.
+      for (const sign of [-1, 1]) {
+        for (const x of [0.33, 0.56]) {
+          parts.push(lens(0.075, 0.05, sign * x, 0.615, 2.12, 0xffffff));
+          parts.push(lens(0.04, 0.05, sign * x, 0.615, 2.135, 0x808080));
+        }
+      }
+      break;
+    case 'taillights.smoked':
+      // The stock clusters behind a smoked lens: same shape, dark until the brakes light it.
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.32, 0.16, 0.08, sign * 0.52, 0.61, 2.12, 0xa0a0a0));
+        parts.push(slab(0.18, 0.11, 0.06, sign * 0.29, 0.61, 2.11, 0x909090));
+      }
+      break;
+    case 'taillights.split':
+      // Split clusters: a tall lamp on each quarter panel and a slimmer one on the lid, with
+      // a clear gap where the lid would open.
+      for (const sign of [-1, 1]) {
+        parts.push(slab(0.2, 0.15, 0.08, sign * 0.57, 0.615, 2.115, 0xffffff));
+        parts.push(slab(0.22, 0.065, 0.06, sign * 0.33, 0.655, 2.125, 0xb0b0b0));
+        parts.push(slab(0.18, 0.02, 0.05, sign * 0.33, 0.61, 2.13, 0x707070));
+      }
+      break;
+    default:
+      // Stock. Written exactly as before the workshop (pinned by `carVisualStock.test.ts`).
       for (const sign of [-1, 1]) {
         const outer = box(0.32, 0.16, 0.08);
         outer.translate(sign * 0.52, 0.61, 2.12);
@@ -73,9 +248,8 @@ export function buildTailGeometry(partId: PartId = STOCK_LOADOUT.lights.tail): T
         inner.translate(sign * 0.29, 0.61, 2.11);
         parts.push(part(inner, 0xffffff));
       }
-      return mergeParts(parts);
-    }
   }
+  return mergeParts(parts);
 }
 
 function buildReverseGeometry(): THREE.BufferGeometry {
@@ -122,23 +296,51 @@ export function buildExhaustGlowGeometry(outlets: readonly ExhaustOutlet[]): THR
   return mergeParts(parts);
 }
 
+/**
+ * Installs the LAMP TINT patch (header) on a lamp material: `emissive *= mix(1, vColor, tint)`.
+ * With `tint.value === 0` the result is the unpatched material's to the bit.
+ */
+function patchLampTint(material: THREE.MeshStandardMaterial, tint: { value: number }): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.lampTint = tint;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float lampTint;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        [
+          '#include <emissivemap_fragment>',
+          '#if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )',
+          '  totalEmissiveRadiance *= mix( vec3( 1.0 ), vColor.rgb, lampTint );',
+          '#endif',
+        ].join('\n'),
+      );
+  };
+  material.customProgramCacheKey = () => 'rb-lamp-tint';
+}
+
 export function createCarLights(chassis: THREE.Object3D, loadout: CarLoadout = STOCK_LOADOUT): CarLights {
   let headPart = loadout.lights.head;
+  let headColour = loadout.lights.headColor;
   let tailPart = loadout.lights.tail;
   let tipsPart = loadout.body.exhaustTips;
 
   /* ----------------------------------------------------------- head lights */
+  const headTint = { value: headStyle(headPart).tint as number };
   const headMat = new THREE.MeshStandardMaterial({
     color: 0x0a0d12,
-    emissive: 0xdff2ff,
-    emissiveIntensity: 1.5,
+    emissive: HEAD_XENON,
+    emissiveIntensity: headStyle(headPart).intensity,
     vertexColors: true,
     roughness: 0.2,
   });
+  lampColor(headColour, headMat.emissive, HEAD_XENON);
+  patchLampTint(headMat, headTint);
   const head = new THREE.Mesh(buildHeadGeometry(headPart), headMat);
   chassis.add(head);
 
   /* ----------------------------------------------------------- tail lights */
+  const tailTint = { value: tailStyle(tailPart).tint as number };
+  let tailGain = tailStyle(tailPart).intensity;
   const tailMat = new THREE.MeshStandardMaterial({
     color: 0x180205,
     emissive: 0xff1a2e,
@@ -146,6 +348,7 @@ export function createCarLights(chassis: THREE.Object3D, loadout: CarLoadout = S
     vertexColors: true,
     roughness: 0.3,
   });
+  patchLampTint(tailMat, tailTint);
   const tail = new THREE.Mesh(buildTailGeometry(tailPart), tailMat);
   chassis.add(tail);
 
@@ -181,7 +384,7 @@ export function createCarLights(chassis: THREE.Object3D, loadout: CarLoadout = S
   function refresh(): void {
     let intensity = 0.85 + nitro * 1.9;
     if (braking) intensity = Math.max(intensity, 3.4);
-    tailMat.emissiveIntensity = intensity;
+    tailMat.emissiveIntensity = intensity * tailGain;
     tailMat.emissive.lerpColors(TAIL_RED, TAIL_MAGENTA, braking ? 0 : Math.min(1, nitro * 0.85));
     reverseMat.emissiveIntensity = reversing ? 2.6 : 0;
     exhaustMat.opacity = 0.2 + nitro * 1.6;
@@ -217,10 +420,21 @@ export function createCarLights(chassis: THREE.Object3D, loadout: CarLoadout = S
       if (l.lights.head !== headPart) {
         headPart = l.lights.head;
         swap(head, buildHeadGeometry(headPart));
+        const style = headStyle(headPart);
+        headMat.emissiveIntensity = style.intensity;
+        headTint.value = style.tint;
+      }
+      if (l.lights.headColor !== headColour) {
+        headColour = l.lights.headColor;
+        lampColor(headColour, headMat.emissive, HEAD_XENON);
       }
       if (l.lights.tail !== tailPart) {
         tailPart = l.lights.tail;
         swap(tail, buildTailGeometry(tailPart));
+        const style = tailStyle(tailPart);
+        tailGain = style.intensity;
+        tailTint.value = style.tint;
+        refresh();
       }
       if (l.body.exhaustTips !== tipsPart) {
         tipsPart = l.body.exhaustTips;

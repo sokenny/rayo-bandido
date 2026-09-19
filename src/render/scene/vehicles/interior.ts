@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { THEME, VEHICLE } from '../../../config/tuning';
-import type { CarLoadout } from '../../../core/loadout';
+import type { CarLoadout, ColorId } from '../../../core/loadout';
 import { box, flipFaces, loft, mergeParts, part, partRGBA } from './geometryKit';
+import { lampColor } from './lights';
 
 /**
  * The car's cabin: what you see through the rear screen.
@@ -50,8 +51,11 @@ export interface CabinInterior {
   update(frameDt: number): void;
   /**
    * The workshop's cabin light (`loadout.lights.interior`, `docs/GARAGE_PLAN.md` §2.7).
-   * Workshop-time, may rebuild the light strips' colours. WAVE 0: a no-op — the stock choice
-   * (`'rayo'`) is today's cyan-left, magenta-right cabin, built in. Agent G implements it.
+   * Workshop-time: rebuilds the light strips' and the shift light's vertex colours (disposing
+   * the old geometries) and repaints the spectrum bars. `'rayo'` (stock) is today's cabin —
+   * cyan on the left, magenta on the right, the display swept cyan to magenta; any other
+   * palette colour lights the whole cabin in that one hue, the display swept a little either
+   * side of it. No mesh or material is added or dropped. A no-op when the colour is unchanged.
    */
   applyLoadout(loadout: CarLoadout): void;
   dispose(): void;
@@ -68,6 +72,25 @@ const SCREEN = 0x04050a;
 /** The two colours the car already wears underneath: cyan on the left, magenta on the right. */
 const CYAN = 0x22e6ff;
 const MAGENTA = 0xff2fd0;
+
+/**
+ * The cabin's light colours. `STOCK_CABIN` is the `'rayo'` cabin as it always was; any other
+ * choice is `cabinLights(colour)`: one hue everywhere, the display's base line a shade dimmer.
+ */
+interface CabinLights {
+  left: THREE.ColorRepresentation;
+  right: THREE.ColorRepresentation;
+  tacho: THREE.ColorRepresentation;
+  baseLine: THREE.ColorRepresentation;
+  shift: THREE.ColorRepresentation;
+}
+
+const STOCK_CABIN: CabinLights = { left: CYAN, right: MAGENTA, tacho: MAGENTA, baseLine: 0x4a4fff, shift: MAGENTA };
+
+function cabinLights(id: ColorId): CabinLights {
+  const c = lampColor(id, new THREE.Color());
+  return { left: c, right: c, tacho: c, baseLine: c.clone().multiplyScalar(0.55), shift: c };
+}
 
 /* The display, in the car's frame. It sits on the dash top, offset toward the passenger side
  * of the wheel and tilted back so its face points up at the chase camera rather than at the
@@ -240,17 +263,17 @@ function buildSteeringGeometry(): THREE.BufferGeometry {
 }
 
 /** The shift light on the rim's twelve o'clock. Turns with the rim, so it rides its group. */
-function buildSteeringGlowGeometry(): THREE.BufferGeometry {
+function buildSteeringGlowGeometry(lights: CabinLights = STOCK_CABIN): THREE.BufferGeometry {
   const mark = box(0.07, 0.014, 0.022);
   mark.translate(0, WHEEL_RADIUS, 0);
-  return mergeParts([partRGBA(mark, MAGENTA, 1)]);
+  return mergeParts([partRGBA(mark, lights.shift, 1)]);
 }
 
 /**
  * The light strips: everything in the cabin that is a light rather than a surface. One
  * additive mesh, so the whole set can breathe with the bass by moving a single opacity.
  */
-function buildGlowGeometry(): THREE.BufferGeometry {
+function buildGlowGeometry(lights: CabinLights = STOCK_CABIN): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
   // Dash ambient strip: the line of light along the top of the dash that lifts the whole
@@ -259,19 +282,19 @@ function buildGlowGeometry(): THREE.BufferGeometry {
   const dashStrip = box(1.1, 0.014, 0.05);
   dashStrip.rotateX(-0.3);
   dashStrip.translate(0, 1.063, -0.548);
-  parts.push(partRGBA(dashStrip, CYAN, 1));
+  parts.push(partRGBA(dashStrip, lights.left, 1));
 
 
   // The tachometer inside the binnacle, and the piping across the top of each seat back.
   const tacho = box(0.22, 0.012, 0.03);
   tacho.rotateX(-0.22);
   tacho.translate(DRIVER_X, 1.076, -0.38);
-  parts.push(partRGBA(tacho, MAGENTA, 1));
+  parts.push(partRGBA(tacho, lights.tacho, 1));
   for (const sign of [-1, 1]) {
     const piping = box(0.34, 0.012, 0.02);
     piping.rotateX(0.2);
     piping.translate(sign * 0.33, 1.14, 0.55);
-    parts.push(partRGBA(piping, sign < 0 ? CYAN : MAGENTA, 1));
+    parts.push(partRGBA(piping, sign < 0 ? lights.left : lights.right, 1));
   }
 
   // Speaker rings on the parcel shelf: the sound system the display belongs to.
@@ -279,16 +302,16 @@ function buildGlowGeometry(): THREE.BufferGeometry {
     const ring = new THREE.RingGeometry(0.075, 0.105, 14, 1);
     ring.rotateX(-Math.PI / 2);
     ring.translate(sign * 0.34, 1.013, 1.16);
-    parts.push(partRGBA(ring, sign < 0 ? CYAN : MAGENTA, 1));
+    parts.push(partRGBA(ring, sign < 0 ? lights.left : lights.right, 1));
     const dome = new THREE.CircleGeometry(0.04, 10);
     dome.rotateX(-Math.PI / 2);
     dome.translate(sign * 0.34, 1.014, 1.16);
-    parts.push(partRGBA(dome, sign < 0 ? CYAN : MAGENTA, 0.6));
+    parts.push(partRGBA(dome, sign < 0 ? lights.left : lights.right, 0.6));
   }
 
   // The display's base line, so the bar display reads as switched on even in silence.
   const baseLine = ontoPanel(box(PANEL_HALF_WIDTH * 2 - 0.02, 0.006, 0.004), 0, -PANEL_HALF_HEIGHT + 0.012, 0.012);
-  parts.push(partRGBA(baseLine, 0x4a4fff, 1));
+  parts.push(partRGBA(baseLine, lights.baseLine, 1));
 
   return mergeParts(parts);
 }
@@ -301,6 +324,20 @@ function buildGlowGeometry(): THREE.BufferGeometry {
 function barColor(i: number, out: THREE.Color): THREE.Color {
   const t = BAR_COUNT > 1 ? i / (BAR_COUNT - 1) : 0;
   return out.setHSL(0.52 + t * 0.36, 0.95, 0.58);
+}
+
+const HSL = { h: 0, s: 0, l: 0 };
+
+/**
+ * The colour of bar `i` in a one-colour cabin: the chosen hue swept a little either side, bass
+ * to treble, so the display still reads as a gradient. A grey or white choice (no hue to sweep)
+ * sweeps lightness instead.
+ */
+function barColorAround(i: number, base: THREE.Color, out: THREE.Color): THREE.Color {
+  const t = BAR_COUNT > 1 ? i / (BAR_COUNT - 1) : 0;
+  base.getHSL(HSL);
+  if (HSL.s < 0.15) return out.setHSL(HSL.h, HSL.s, 0.42 + t * 0.4);
+  return out.setHSL((HSL.h - 0.05 + t * 0.1 + 1) % 1, Math.max(0.8, HSL.s), 0.58);
 }
 
 export function createCabinInterior(): CabinInterior {
@@ -338,7 +375,9 @@ export function createCabinInterior(): CabinInterior {
   glow.name = 'player-car-interior-glow';
   glow.renderOrder = 2;
   group.add(glow);
-  disposables.push(glowGeo, glowMat);
+  // The strips' geometry is not in `disposables`: `applyLoadout` replaces it, so `dispose`
+  // takes whatever the mesh holds at the time.
+  disposables.push(glowMat);
 
   /* ------------------------------------------------------------ steering wheel */
   // Two meshes on one pivot: the rim shares the trim material, its shift light the glow
@@ -357,7 +396,7 @@ export function createCabinInterior(): CabinInterior {
   const steeringGlow = new THREE.Mesh(steeringGlowGeo, glowMat);
   steeringGlow.renderOrder = 2;
   spin.add(steeringGlow);
-  disposables.push(steeringGeo, steeringGlowGeo);
+  disposables.push(steeringGeo);
 
   /* -------------------------------------------------------- spectrum display */
   const panel = new THREE.Group();
@@ -383,8 +422,13 @@ export function createCabinInterior(): CabinInterior {
   disposables.push(barGeo, barMat, bars);
 
   const colour = new THREE.Color();
-  for (let i = 0; i < BAR_COUNT; i++) bars.setColorAt(i, barColor(i, colour));
-  if (bars.instanceColor) bars.instanceColor.needsUpdate = true;
+  function paintBars(base: THREE.Color | null): void {
+    for (let i = 0; i < BAR_COUNT; i++) bars.setColorAt(i, base ? barColorAround(i, base, colour) : barColor(i, colour));
+    if (bars.instanceColor) bars.instanceColor.needsUpdate = true;
+  }
+  paintBars(null);
+  /** The cabin light the strips were last built in; the stock cabin is built above. */
+  let cabinColour: ColorId = 'rayo';
 
   const heights = new Float32Array(BAR_COUNT);
   heights.fill(BAR_FLOOR);
@@ -429,10 +473,22 @@ export function createCabinInterior(): CabinInterior {
       const throb = (bass / 3 - BAR_FLOOR) / (BAR_FULL - BAR_FLOOR);
       glowMat.opacity = 0.5 + (throb > 0 ? throb : 0) * 0.45;
     },
-    applyLoadout() {
-      /* Wave 0: stock only. See the interface. */
+    applyLoadout(l) {
+      const id = l.lights.interior;
+      if (id === cabinColour) return;
+      cabinColour = id;
+      const lights = id === 'rayo' ? STOCK_CABIN : cabinLights(id);
+      const oldGlow = glow.geometry;
+      glow.geometry = buildGlowGeometry(lights);
+      oldGlow.dispose();
+      const oldShift = steeringGlow.geometry;
+      steeringGlow.geometry = buildSteeringGlowGeometry(lights);
+      oldShift.dispose();
+      paintBars(id === 'rayo' ? null : lampColor(id, new THREE.Color()));
     },
     dispose() {
+      glow.geometry.dispose();
+      steeringGlow.geometry.dispose();
       for (const d of disposables) d.dispose();
     },
   };
