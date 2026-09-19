@@ -20,7 +20,7 @@
   instance of that same city, barriered on both sides, which is what VERSUS races on.
 - The City is never edited to suit the circuit. `src/world/circuitWorld.ts` instances it and
   layers the race on top; `citySpec.ts` and `cityWorld.ts` must stay unaware the circuit exists.
-- Do not add accounts, garage UI, story or multiple playable cars. The City is the one
+- Do not add accounts, story or multiple playable cars. The City is the one
   open-world exception, and it stays a proof of concept until Juan says otherwise. The police
   are the other exception, asked for on 2026-09-10 as an MVP (`src/sim/police.ts`): Free Roam
   only, client-local, tuned from `POLICE` in `src/config/tuning.ts` — extend that, do not build a
@@ -29,7 +29,17 @@
   its code — and the server is a relay: no game rules, no physics and no knowledge of the track
   live in `server/`. Keep it that way. A room is chosen once, at `hello`, and never changes for
   the life of a socket; nothing below the handshake carries a room id.
-- Money is a visible counter. A modification shop is later work.
+- Loco Mustang's workshop is in scope since 2026-09-19 (`docs/GARAGE_PLAN.md`, the contract):
+  a garage UI and a **cosmetic** mod shop in the NFSU2 style — bodywork, wheels and stance,
+  paint, vinyls and decals, lights, exhaust tips and sound, plate — for the ONE player car.
+  Cosmetics never touch `VEHICLE` or anything the simulation steps (the wheel's outer radius,
+  the track and the ride height the physics sees stay fixed); performance mods are later work
+  and will be a separate layer. Everything a car wears is a `CarLoadout` (`src/core/loadout.ts`):
+  ids and bounded integer steps only, sanitized on every read. The stock loadout IS today's car,
+  pinned by `tests/carVisualStock.test.ts`; the car stays at fourteen draw calls whatever it wears.
+  Still no multiple playable cars, and rivals do not see your mods until the protocol carries a
+  loadout (Ola 4 of the plan).
+- Money is a visible counter, spent in the workshop through `spendMoney()` only.
 - Use placeholders when an asset would block the complete gameplay loop.
 
 ## Engineering rules

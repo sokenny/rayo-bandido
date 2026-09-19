@@ -1,0 +1,76 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`stock car geometry (pinned from before the workshop split) > assembles the same player car: every mesh, where it hangs, and what it is drawn with 1`] = `
+{
+  "atRest": [
+    "1,0,0,0,0,1,0,0,0,0,1,0,-0.8,0.33,-1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,0.8,0.33,-1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,-0.82,0.33,1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,0.82,0.33,1.3,1",
+  ],
+  "drawCalls": 14,
+  "meshes": [
+    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:2416de9d | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c141834 e000000x0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-damage | chassis | ro1 | hid | 20t | f6dc2d62:6dce502c | uv:46ba986c | -0.926724/0.273057/-2.139275/0.935217/1.325/2.2 | MeshStandardMaterial cffffff effffffx0.3 r0.9 m0.15 o1 t1 b1 s0 dw0 tm1 vc1",
+    "player-car-glass | chassis | ro4 | vis | 48t | 61894c1:a2ce96f3 | uv:- | -0.76108/0.874151/-0.744944/0.76108/1.330364/1.575568 | MeshStandardMaterial c15242f e000000x1 r0.08 m0.32 o0.68 t1 b1 s0 dw1 tm1 vc1",
+    "player-car-interior-trim | nested | ro0 | vis | 380t | 2aadd731:9f4e2053 | uv:- | -0.745/0.82/-0.73/0.745/1.298/1.56 | MeshStandardMaterial cffffff e0c1322x1 r0.85 m0.1 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-interior-glow | nested | ro2 | vis | 136t | 97e2b085:90acc993 | uv:- | -0.55/1.013/-0.573952/0.55/1.147867/1.262367 | MeshBasicMaterial cffffff o0.5000000002095476 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-steering | nested | ro0 | vis | 164t | 2649b1b8:68fe6fc8 | uv:- | -0.141/-0.137465/-0.015217/0.141/0.137465/0.015217 | MeshStandardMaterial cffffff e0c1322x1 r0.85 m0.1 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | nested | ro2 | vis | 12t | ba2cf13a:2f829bf6 | uv:- | -0.035/0.118/-0.011/0.035/0.132/0.011 | MeshBasicMaterial cffffff o0.5000000002095476 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-eq | nested | ro3 | vis | 12t | ff8e095a:73fe4c16 | uv:1b8c9f5c | -0.008743/0/-0.004/0.008743/1/0.004 | MeshBasicMaterial cffffff o0.95 t1 b2 s0 dw0 tm0 vc0",
+    "- | chassis | ro0 | vis | 48t | 5b0587c:13a27bf4 | uv:- | -0.624092/0.3625/-2.19772/0.624092/0.565/-2.06228 | MeshStandardMaterial c0a0d12 edff2ffx1.5 r0.2 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro0 | vis | 48t | ad718710:95cafd98 | uv:- | -0.68/0.53/2.08/0.68/0.69/2.16 | MeshStandardMaterial c180205 eff1a2ex0.85 r0.3 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro0 | vis | 24t | 678559b4:98d800ec | uv:- | -0.535/0.365/2.135/0.535/0.435/2.185 | MeshStandardMaterial c0e1014 effffffx0 r0.4 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro3 | vis | 20t | 6d571312:ece5732 | uv:- | -0.412/0.261524/2.245/0.412/0.398476/2.245 | MeshBasicMaterial cffffff o0.2 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-underglow | chassis | ro2 | vis | 48t | 32808e10:91ab5c4c | uv:- | -1.005/0.09/-2.28/1.005/0.1675/2.14 | MeshBasicMaterial cffffff o0.2 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-groundglow | root | ro1 | vis | 192t | e2b532f6:7c84b14e | uv:- | -1.95/0.02/-3/1.95/0.02/3.2 | MeshBasicMaterial cffffff o0.45 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-wheels | root | ro0 | vis | 504t | 9e28a030:50f0408c | uv:- | -0.13/-0.33/-0.33/0.13/0.33/0.33 | MeshStandardMaterial cffffff e000000x1 r0.55 m0.45 o1 t0 b1 s0 dw1 tm1 vc1",
+  ],
+  "options": {},
+  "steered": [
+    "0.95534,0,-0.29552,0,0.27544,0.36236,0.89041,0,0.10708,-0.93204,0.34617,0,-0.8,0.33,-1.3,1",
+    "0.95534,0,-0.29552,0,0.27544,0.36236,0.89041,0,0.10708,-0.93204,0.34617,0,0.8,0.33,-1.3,1",
+    "1,0,0,0,0,0.36236,0.93204,0,0,-0.93204,0.36236,0,-0.82,0.33,1.3,1",
+    "1,0,0,0,0,0.36236,0.93204,0,0,-0.93204,0.36236,0,0.82,0.33,1.3,1",
+  ],
+}
+`;
+
+exports[`stock car geometry (pinned from before the workshop split) > assembles the same player car: every mesh, where it hangs, and what it is drawn with 2`] = `
+{
+  "atRest": [
+    "1,0,0,0,0,1,0,0,0,0,1,0,-0.8,0.33,-1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,0.8,0.33,-1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,-0.82,0.33,1.3,1",
+    "1,0,0,0,0,1,0,0,0,0,1,0,0.82,0.33,1.3,1",
+  ],
+  "drawCalls": 15,
+  "meshes": [
+    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:2416de9d | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c71ad27 e2a450ax0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-damage | chassis | ro1 | hid | 20t | f6dc2d62:6dce502c | uv:46ba986c | -0.926724/0.273057/-2.139275/0.935217/1.325/2.2 | MeshStandardMaterial cffffff effffffx0.3 r0.9 m0.15 o1 t1 b1 s0 dw0 tm1 vc1",
+    "player-car-marker | chassis | ro2 | vis | 48t | b8f640f8:9daef528 | uv:- | -1.01/0.105/-0.95/1.01/1.375/2.14 | MeshBasicMaterial ca8ff3e o0.85 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-glass | chassis | ro4 | vis | 48t | 61894c1:a2ce96f3 | uv:- | -0.76108/0.874151/-0.744944/0.76108/1.330364/1.575568 | MeshStandardMaterial c15242f e000000x1 r0.08 m0.32 o0.68 t1 b1 s0 dw1 tm1 vc1",
+    "player-car-interior-trim | nested | ro0 | vis | 380t | 2aadd731:9f4e2053 | uv:- | -0.745/0.82/-0.73/0.745/1.298/1.56 | MeshStandardMaterial cffffff e0c1322x1 r0.85 m0.1 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-interior-glow | nested | ro2 | vis | 136t | 97e2b085:90acc993 | uv:- | -0.55/1.013/-0.573952/0.55/1.147867/1.262367 | MeshBasicMaterial cffffff o0.5000000002095476 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-steering | nested | ro0 | vis | 164t | 2649b1b8:68fe6fc8 | uv:- | -0.141/-0.137465/-0.015217/0.141/0.137465/0.015217 | MeshStandardMaterial cffffff e0c1322x1 r0.85 m0.1 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | nested | ro2 | vis | 12t | ba2cf13a:2f829bf6 | uv:- | -0.035/0.118/-0.011/0.035/0.132/0.011 | MeshBasicMaterial cffffff o0.5000000002095476 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-eq | nested | ro3 | vis | 12t | ff8e095a:73fe4c16 | uv:1b8c9f5c | -0.008743/0/-0.004/0.008743/1/0.004 | MeshBasicMaterial cffffff o0.95 t1 b2 s0 dw0 tm0 vc0",
+    "- | chassis | ro0 | vis | 48t | 5b0587c:13a27bf4 | uv:- | -0.624092/0.3625/-2.19772/0.624092/0.565/-2.06228 | MeshStandardMaterial c0a0d12 edff2ffx1.5 r0.2 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro0 | vis | 48t | ad718710:95cafd98 | uv:- | -0.68/0.53/2.08/0.68/0.69/2.16 | MeshStandardMaterial c180205 eff1a2ex0.85 r0.3 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro0 | vis | 24t | 678559b4:98d800ec | uv:- | -0.535/0.365/2.135/0.535/0.435/2.185 | MeshStandardMaterial c0e1014 effffffx0 r0.4 m0 o1 t0 b1 s0 dw1 tm1 vc1",
+    "- | chassis | ro3 | vis | 20t | 6d571312:ece5732 | uv:- | -0.412/0.261524/2.245/0.412/0.398476/2.245 | MeshBasicMaterial cffffff o0.2 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-underglow | chassis | ro2 | vis | 48t | 32808e10:91ab5c4c | uv:- | -1.005/0.09/-2.28/1.005/0.1675/2.14 | MeshBasicMaterial cffffff o0.2 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-groundglow | root | ro1 | vis | 192t | e2b532f6:7c84b14e | uv:- | -1.95/0.02/-3/1.95/0.02/3.2 | MeshBasicMaterial cffffff o0.45 t1 b2 s0 dw0 tm0 vc1",
+    "player-car-wheels | root | ro0 | vis | 504t | 9e28a030:50f0408c | uv:- | -0.13/-0.33/-0.33/0.13/0.33/0.33 | MeshStandardMaterial cffffff e000000x1 r0.55 m0.45 o1 t0 b1 s0 dw1 tm1 vc1",
+  ],
+  "options": {
+    "slot": 2,
+  },
+  "steered": [
+    "0.95534,0,-0.29552,0,0.27544,0.36236,0.89041,0,0.10708,-0.93204,0.34617,0,-0.8,0.33,-1.3,1",
+    "0.95534,0,-0.29552,0,0.27544,0.36236,0.89041,0,0.10708,-0.93204,0.34617,0,0.8,0.33,-1.3,1",
+    "1,0,0,0,0,0.36236,0.93204,0,0,-0.93204,0.36236,0,-0.82,0.33,1.3,1",
+    "1,0,0,0,0,0.36236,0.93204,0,0,-0.93204,0.36236,0,0.82,0.33,1.3,1",
+  ],
+}
+`;

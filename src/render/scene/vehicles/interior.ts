@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { THEME, VEHICLE } from '../../../config/tuning';
+import type { CarLoadout } from '../../../core/loadout';
 import { box, flipFaces, loft, mergeParts, part, partRGBA } from './geometryKit';
 
 /**
@@ -47,6 +48,12 @@ export interface CabinInterior {
   setSteering(steerAngle: number): void;
   /** Advance the bars and the bass throb of the light strips. Call once per frame. */
   update(frameDt: number): void;
+  /**
+   * The workshop's cabin light (`loadout.lights.interior`, `docs/GARAGE_PLAN.md` §2.7).
+   * Workshop-time, may rebuild the light strips' colours. WAVE 0: a no-op — the stock choice
+   * (`'rayo'`) is today's cyan-left, magenta-right cabin, built in. Agent G implements it.
+   */
+  applyLoadout(loadout: CarLoadout): void;
   dispose(): void;
 }
 
@@ -421,6 +428,9 @@ export function createCabinInterior(): CabinInterior {
       // The strips lift with the bottom of the display, so the cabin pulses with the kick.
       const throb = (bass / 3 - BAR_FLOOR) / (BAR_FULL - BAR_FLOOR);
       glowMat.opacity = 0.5 + (throb > 0 ? throb : 0) * 0.45;
+    },
+    applyLoadout() {
+      /* Wave 0: stock only. See the interface. */
     },
     dispose() {
       for (const d of disposables) d.dispose();

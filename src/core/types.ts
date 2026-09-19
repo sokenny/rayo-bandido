@@ -26,6 +26,8 @@ import type { RoadGraph, RouteAim, RouteField } from '../world/roadGraph';
 import type { StreetPropsState } from '../sim/streetProps';
 import type { MicroSceneAnchor } from '../microScenes/types';
 import type { MicroSceneRuntime } from '../microScenes/runtime/director';
+import type { CarLoadout, PartId } from './loadout';
+import type { CategoryId, WorkshopGroupId } from '../content/carParts';
 
 /**
  * Which world is loaded: the test arena, a racing circuit, or a free-roam city. `city` is the open
@@ -980,6 +982,29 @@ export type GameEvent =
   /** Loco Mustang said something. The subtitle strip shows it for `lineSeconds`. */
   | { type: 'garageLine'; text: string; kind: GarageLineKind }
 
+  /* ---------------------------------------------------------------- the workshop (docs/GARAGE_PLAN.md) */
+
+  /** The player went into a workshop (`WorkshopState`): the fade to the showroom starts. */
+  | { type: 'workshopEnter'; shopId: string }
+  /**
+   * The player left. `purchases` is how many INSTALLs this visit paid for; the preview has
+   * already been thrown away and the car wears `WorkshopState.installed`.
+   */
+  | { type: 'workshopExit'; shopId: string; purchases: number }
+  /**
+   * The car on the platform changed to show a choice (free, nothing is bought). `value` is what
+   * `getChoice` would read back: a `PartId`, a `ColorId`/`'off'`/`'none'`, or a step.
+   * The renderer calls `CarVisual.applyLoadout(preview)` on it; the audio revs a new exhaust.
+   */
+  | { type: 'workshopPreview'; category: CategoryId; value: string | number }
+  /**
+   * INSTALL was pressed and paid for (or was free: already owned, or a stock part). `price` is
+   * what was actually taken, `balance` the counter afterwards. The save is written on this.
+   */
+  | { type: 'workshopPurchase'; shopId: string; category: CategoryId; value: string | number; price: number; balance: number }
+  /** INSTALL (or the door) said no. Nothing changed. */
+  | { type: 'workshopDenied'; reason: WorkshopDenyReason; category: CategoryId | null }
+
   /* ---------------------------------------------------------------- street hustlers */
 
   /** A trapito or a windshield washer said something (`src/sim/hustlers.ts`). `npc` indexes `HustlerState.npcs`. */
@@ -1227,6 +1252,127 @@ export interface GarageState {
   lastText: string;
   /** Deterministic pick state for line variants. */
   seed: number;
+}
+
+/* ------------------------------------------------------------------ the workshop */
+
+/**
+ * Where a workshop visit is (`src/sim/workshop.ts`, `docs/GARAGE_PLAN.md` §2.3):
+ *
+ *   closed → entering → browsing ⇄ previewing → leaving → closed
+ *
+ * - `closed`     — not in a workshop. The world plays as usual.
+ * - `entering`   — the fade to black and the showroom loading (`phaseTime` runs).
+ * - `browsing`   — choosing a category in the carousel of `group`. The car wears `preview`,
+ *                  which here always equals `installed`.
+ * - `previewing` — inside `category`, moving through its options; each move puts the option on
+ *                  the car (`preview`) for free.
+ * - `leaving`    — the fade back to the street. `preview` has been reset to `installed`.
+ */
+export type WorkshopPhase = 'closed' | 'entering' | 'browsing' | 'previewing' | 'leaving';
+
+/**
+ * Why a workshop said no:
+ * - `funds`   — INSTALL costs more than the counter holds.
+ * - `locked`  — another activity has the car (`activities.ts`); the door does not open.
+ * - `police`  — a pursuit is on. The door does not open with the police behind you.
+ * - `race`    — in a race or a versus world; the workshop is Free Roam only.
+ * - `invalid` — the option is not sold here or no longer exists (a stale UI index).
+ */
+export type WorkshopDenyReason = 'funds' | 'locked' | 'police' | 'race' | 'invalid';
+
+/**
+ * One workshop visit. Owned by `src/sim/workshop.ts` (agent F); a plain record like every other
+ * activity's state, so it can be snapshotted for the HUD and reset without a constructor.
+ *
+ * `installed` is what the save holds and what the car wears on the street; `preview` is what the
+ * car on the platform wears right now. Trying on is free; INSTALL makes `installed = preview`
+ * for that category and pays (unless owned). Leaving discards `preview`.
+ */
+export interface WorkshopState {
+  phase: WorkshopPhase;
+  /** Seconds since `phase` last changed. Drives the entering/leaving fades. */
+  phaseTime: number;
+  /** `ShopDef.id` of the workshop the player is in; `''` while closed. */
+  shopId: string;
+  /** Which activity has the car (`activities.ts`); written by the orchestrator. See `RushState.locked`. */
+  locked: boolean;
+  /** The carousel's group, and the category highlighted (browsing) or open (previewing). */
+  group: WorkshopGroupId;
+  category: CategoryId;
+  /** Index into the open category's option list (`workshopOptions` in `sim/workshop.ts`). */
+  optionIndex: number;
+  /** What the car wears on the street, and what the save holds. */
+  installed: CarLoadout;
+  /** What the car on the platform wears. Equals `installed` outside `previewing`. */
+  preview: CarLoadout;
+  /** Every part bought, ever. Stock parts count as owned without being listed. */
+  owned: PartId[];
+  /** INSTALLs paid for this visit, for `workshopExit`. */
+  purchases: number;
+  /** The last refusal and a counter that ticks per refusal, so the HUD can flash on a repeat. */
+  lastDenied: WorkshopDenyReason | null;
+  deniedId: number;
+  /** Ticks per successful INSTALL, so the HUD can play its stamp once. */
+  purchaseId: number;
+}
+
+/** One row of the option rail, as the UI draws it. */
+export interface WorkshopOptionView {
+  /** What `setChoice` takes: a `PartId`, a `ColorId`/`'off'`/`'none'`, a step or a finish. */
+  value: string | number;
+  /** Spanish, ready to print ("GT doble plano", "Rojo", "-2"). */
+  label: string;
+  /** Price in this shop after `priceFactor`; 0 when owned or free. */
+  price: number;
+  owned: boolean;
+  /** What `installed` has in this category. */
+  installed: boolean;
+  /** `#rrggbb` swatch for colour options; null otherwise. */
+  swatch: string | null;
+  /** Visual rating of a part option; 0 for non-parts. */
+  rating: number;
+}
+
+/**
+ * What the workshop overlay (`src/ui/workshop/`, agent E) needs each frame: a flattened,
+ * read-only view of `WorkshopState` plus the names and prices it cannot work out. Static
+ * catalogue data (group and category labels, icons) the UI reads straight from
+ * `src/content/carParts.ts`; this only carries what changes.
+ *
+ * Built by the integrator's controller. `options` is REUSED between frames by whoever builds it
+ * (no per-frame allocation); the UI must not hold on to it past the frame.
+ */
+export interface WorkshopHudSnapshot {
+  /** False while `phase === 'closed'`: the overlay is hidden. */
+  open: boolean;
+  phase: WorkshopPhase;
+  /** 0 clear .. 1 black: the entering/leaving fade. */
+  fade: number;
+  shopId: string;
+  /** The shop's title bar, e.g. "Taller del Loco Mustang". */
+  shopName: string;
+  money: number;
+  group: WorkshopGroupId;
+  /** The categories this shop sells in `group`, in carousel order. */
+  categories: readonly CategoryId[];
+  category: CategoryId;
+  /** True while inside a category (the rail is live), false on the carousel. */
+  inCategory: boolean;
+  options: readonly WorkshopOptionView[];
+  optionIndex: number;
+  /** INSTALL's price for the highlighted option, 0 if owned/free/already installed. */
+  installPrice: number;
+  /** True when INSTALL would do something and the counter covers it. */
+  canInstall: boolean;
+  /** `loadoutRating` of `installed` and of `preview`: the star readout and its delta. */
+  rating: number;
+  previewRating: number;
+  /** `preview.plate.text`, for the plate editor. */
+  plateText: string;
+  lastDenied: WorkshopDenyReason | null;
+  deniedId: number;
+  purchaseId: number;
 }
 
 /* ------------------------------------------------------------------ street hustlers */

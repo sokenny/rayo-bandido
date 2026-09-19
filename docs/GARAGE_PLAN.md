@@ -168,7 +168,11 @@ Presupuesto: carrocería ≤ +1.500 triángulos sobre la actual; draw calls del 
 
 ---
 
-## 3. Decisiones abiertas (con mi recomendación)
+## 3. Decisiones (Juan aprobó las recomendaciones el 2026-09-19)
+
+Tomadas tal como están abajo. D4: los precios los calibra el agente F contra lo que paga hoy la
+economía (`src/sim/economy.ts`, `RUSH`/`PASSENGER`/`STREET_RACE` en tuning): una pieza media ≈ 10–15
+minutos de juego, las top ≈ 1 hora. D6: el integrador puede hornear las voces nuevas.
 
 - **D1 · Showroom** — escena aparte (recomendado) vs. dentro del mundo.
 - **D2 · Neón vs. carga del rayo** — hoy el neón cian *es* el medidor de carga. Recomiendo: en reposo
@@ -200,6 +204,9 @@ Es lo que desbloquea el paralelismo; nada visible cambia.
 4. Actualizar `AGENTS.md` (alcance: taller permitido) y `docs/DECISIONS.md`.
 
 ### Ola 1 — En paralelo, `isolation: worktree`, archivos disjuntos
+Los archivos exactos de cada agente y los puntos de extensión están en **§6 Contratos de la Ola 0**;
+donde difiera de esta tabla, manda §6.
+
 | Agente | Alcance | Archivos propios |
 |---|---|---|
 | **A · Carrocería** | Paragolpes, polleras, capot, baúl, alerones, puntas de escape | `vehicles/parts/*`, tests |
@@ -240,3 +247,150 @@ loadouts, rating → reputación, segundo taller, mods mecánicos.
 - **Legibilidad de juego**: neón (D2) y color de slot en versus (D3) no pueden romperse por estética.
 - **Sonido**: los presets de escape son subjetivos; planificar una pasada de Juan de oído.
 - **Tamaño del bundle**: showroom y UI del taller van en chunk lazy; el menú no debe pagar por ellos.
+
+---
+
+## 6. Contratos de la Ola 0
+
+Hecha el 2026-09-19. Cero cambio visible: `tests/carVisualStock.test.ts` fija la geometría, los
+materiales, el orden de las mallas y la pose de las ruedas del auto de fábrica con números
+capturados **antes** del refactor. Si ese test falla, cambiaste el auto de fábrica: no se
+re-snapshotea (única excepción: el `uv` de la carrocería, que el agente C re-baselinea a
+propósito al pasar al atlas).
+
+### 6.1 Archivos creados y nombres exportados
+
+| Archivo | Exporta | Dueño desde la Ola 1 |
+|---|---|---|
+| `src/core/loadout.ts` | `CarLoadout`, `PartId`, `ColorId`, `PaintFinish`/`PAINT_FINISHES`, `DecalZone`/`DECAL_ZONES`, `VinylLayer`, `DecalLayer`, `WheelSizeStep`, `WheelWidthStep`, `STEP_RANGES`/`StepCategoryId`, `MAX_VINYLS`, `PLATE_MAX_CHARS`, `STOCK_LOADOUT` (congelado), `stockLoadout()`, `cloneLoadout()`, `sanitizeLoadout()`, `sanitizePlateText()`, `loadoutsEqual()`, `ScalarCategoryId`, `getChoice()`, `isValidChoice()`, `setChoice()`, `setVinyls()`, `setDecals()`, `setPlateText()`, `loadoutPartIds()`, `loadoutRating()`, `encodeLoadout()`, `decodeLoadout()`, `stockPartsMissing()` | **congelado** (solo el integrador) |
+| `src/content/carParts.ts` | `CategoryId`, `WorkshopGroupId`, `CategoryKind` (`part`/`color`/`step`/`finish`/`layers`), `CategoryDef` (`id, group, kind, label, icon, cameraShot, price, dimShowroom?`), `GROUPS`, `CATEGORIES`, `CATEGORY_IDS`, `categoryDef()`, `categoriesOf()`, `isCategoryId()`, `PartDef` (`id, category, name, price, rating, blurb?, defaultColor?`), `PARTS`, `findPart()`, `isPartOf()`, `partsOf()`, `stockPartId()`, `PaletteColor` (`id, name, hex, accent?`), `PALETTE` (32), `findColor()`, `isColorId()`, `validateCatalogue()`; re-exporta `CAMERA_SHOTS`/`CameraShot`/`CameraShotKey` | F (precios: tabla `PRICING` y `CategoryDef.price`) |
+| `src/content/workshopShots.ts` | `CameraShot { yaw, pitch, distance, targetY, targetZ, fov, orbitSpeed? }`, `CameraShotKey`, `CAMERA_SHOTS` (convención de ejes en el encabezado) | D |
+| `src/content/parts/body.ts` | `BODY_PARTS` (paragolpes, polleras, capot, baúl, alerón, puntas de escape) | A |
+| `src/content/parts/wheels.ts` | `WHEEL_PARTS` (diseños de llanta) | B |
+| `src/content/parts/paint.ts` | `PAINT_PARTS` (vinilos y calcos; el de fábrica es `vinyls.rayo`) | C |
+| `src/content/parts/plate.ts` | `PLATE_PARTS` (estilos de patente) | C |
+| `src/content/parts/lights.ts` | `LIGHT_PARTS` (formas de faro y trasera) | G |
+| `src/content/parts/exhaustSound.ts` | `EXHAUST_SOUND_PARTS` (presets de sonido) | G |
+| `src/content/shops.ts` | `ShopDef { id, npc, name, categories, priceFactor }`, `LOCO_MUSTANG_SHOP`, `SHOPS`, `findShop()`, `shopPrice()`, `shopSells()`, `validateShop()` | F |
+| `src/core/types.ts` | `WorkshopPhase`, `WorkshopDenyReason`, `WorkshopState`, `WorkshopOptionView`, `WorkshopHudSnapshot`; `GameEvent` += `workshopEnter`, `workshopExit`, `workshopPreview`, `workshopPurchase`, `workshopDenied` | integrador |
+| `src/sim/activities.ts` | `ActivityKind` += `'workshop'`, `workshopEngaged()`; `engagedActivity()` acepta `workshop?` (todavía nadie lo pasa: `GameState` no tiene `workshop`) | integrador |
+| `src/render/scene/vehicles/parts/common.ts` | `BodySlot`, `BODY_SLOTS` (orden de fusión), `CustomBodySlot`, `isCustomSlot()`, `slotPartId()`, `BodyPartContext { openCabin, loadout }`, `SlotModule { slot, variants, build(partId, ctx) }`, `BODY_COLORS`, `CAR_DIMS` | A |
+| `src/render/scene/vehicles/parts/{hull,greenhouse,fenders,frontBumper,skirts,rearBumper,spoiler,mirrors,hood,trunk,exhaustTips}.ts` | un `<slot>Slot: SlotModule` cada uno; `exhaustTips.ts` además `exhaustOutlets(partId)` / `ExhaustOutlet` | A |
+| `src/render/scene/vehicles/parts/index.ts` | `SLOT_MODULES`, `buildSlotParts()`, re-exporta `common` y `exhaustOutlets` | A |
+| `src/render/scene/vehicles/bodyAssembler.ts` | `buildBodyGeometry(openCabin = false, loadout = STOCK_LOADOUT)` (re-exportado por `carVisual.ts` con la misma firma de siempre) | **congelado** |
+| `src/render/scene/vehicles/bodyUVs.ts` | `applyBodyUVs(geometry)` (hoy = `applyLengthwiseUVs`) | C |
+| `src/render/scene/vehicles/plate.ts` | `PLATE_MOUNT`, `buildPlateGeometry(plate)`, `formatPlateText()`, `CanvasCell`, `drawPlate(ctx2d, cell, plate)` (stub) | C |
+| `src/render/scene/vehicles/paintShop.ts` | `CarPaint { texture, apply(loadout, material), dispose }`, `createCarPaint(loadout)` (stub: el livery de hoy) | C |
+| `src/render/scene/vehicles/lights.ts` | `CarLights`, `createCarLights(chassis, loadout)`, `buildHeadGeometry(partId)`, `buildTailGeometry(partId)` (re-exportado por `carVisual.ts`), `buildExhaustGlowGeometry(outlets)` | G |
+| `src/render/scene/vehicles/underglow.ts` | `Underglow { pool, strips, setCharge, update, applyLoadout, dispose }`, `createUnderglow(root, chassis, loadout)` | G |
+| `src/render/scene/vehicles/wheelRig.ts` | `WheelRig { mesh, wheels, rideHeight, sync, applyLoadout, dispose }`, `createWheelRig(root, loadout)`, `WHEEL_WIDTH`, `STANCE_STEP`, `StanceParams`, `stanceParams()`, `buildLoadoutWheelGeometry()` | B |
+| `src/render/scene/vehicles/interior.ts` | `CabinInterior.applyLoadout()` (no-op) | G |
+| `src/render/scene/carVisual.ts` | `CarVisual.applyLoadout(loadout)`, `CarVisual.loadout`, `CarVisualOptions.loadout`; el resto igual | **congelado** (integrador) |
+| `tests/loadout.test.ts`, `tests/carVisualStock.test.ts` (+ `tests/__snapshots__/carVisualStock.test.ts.snap`) | contratos y regresión del auto de fábrica | todos lo corren; nadie cambia los números de fábrica |
+
+### 6.2 Reglas comunes
+
+- **Ids**: `<categoría>.<nombre>`, nombre en `[a-z0-9-]`. Cada categoría `part` tiene exactamente un
+  `<categoría>.stock` = el auto de hoy. Colores: ids de `PALETTE`, nunca RGB. Pasos: enteros dentro
+  de `STEP_RANGES`, 0 = hoy. Qué vale un paso en metros/radianes vive en el render (`STANCE_STEP`).
+- **Una pieza = dos lugares**: la entrada del catálogo (`src/content/parts/<dominio>.ts`) y su
+  variante en el constructor (mismo id). `validateCatalogue()` y los tests de cada agente lo
+  verifican. Precio y rating en el archivo de dominio son provisorios; F manda vía `PRICING`.
+- **Nunca** tocar `VEHICLE`, `src/sim/vehicle.ts`, ni nada que la simulación lea.
+- `applyLoadout` de cada módulo es de tiempo de taller: puede asignar memoria, **debe** disponer lo
+  que reemplaza, **no** puede crear ni quitar mallas ni materiales (14 draw calls, mismos materiales).
+- Todo `update`/`sync`/`set*` por frame: cero asignaciones.
+- El orden de creación de mallas y materiales en `createCarVisual` es el orden en que three.js
+  desempata el dibujo: no reordenar.
+- Puntos calientes (`game.ts`, `hud.ts`, `types.ts`, `tuning.ts`, `styles.css`, `activities.ts`,
+  `loadout.ts`, `carVisual.ts`, `bodyAssembler.ts`): **ningún agente de la Ola 1 los edita**. Si
+  un agente necesita un cambio de contrato, lo reporta; lo hace el integrador.
+- Correr antes de terminar: `npm run typecheck`, `npx vitest run tests/loadout.test.ts
+  tests/carVisualStock.test.ts tests/vehicleVisual.test.ts` + los tests propios.
+
+### 6.3 Puntos de extensión por agente
+
+**A · Carrocería** — archivos: `src/render/scene/vehicles/parts/*.ts` (salvo que `common.ts` es
+compartido de solo lectura para los demás), `src/content/parts/body.ts`, tests nuevos
+`tests/bodyParts*.test.ts`.
+- Pieza nueva: un `case '<slot>.<nombre>':` en el `build` del `SlotModule` del slot + el id en su
+  `variants` + la entrada en `BODY_PARTS`. Devolver geometrías pasadas por `part()`/`partRGBA()`.
+- Slots vendibles: `frontBumper` (splitter + parrilla + toma), `rearBumper` (difusor + valance),
+  `skirts`, `hood` (lo que va SOBRE el capot del casco), `trunk` (ídem; fábrica = vacío),
+  `spoiler`, `exhaustTips`. Fijos (no tocar la variante `stock`): `hull`, `greenhouse`, `fenders`,
+  `mirrors`.
+- Puntas de escape nuevas: además listar sus bocas en `exhaustOutlets(partId)`; `lights.ts` pone
+  ahí las llamas.
+- Respetar: `PLATE_MOUNT` (`plate.ts`), faros en z ≈ -2.13 x ≈ ±0.44, traseras/reversa en
+  z ≈ 2.11–2.16, tiras de neón en x = ±0.995 y = 0.11. `ctx.loadout` disponible para reaccionar a
+  otras elecciones (p. ej. `stance.trackFront` en los guardabarros). Presupuesto: ≤ +1.500 tris.
+
+**B · Ruedas y stance** — archivos: `src/render/scene/vehicles/wheel.ts`,
+`src/render/scene/vehicles/wheelRig.ts`, `src/content/parts/wheels.ts`, tests `tests/wheelRig*.test.ts`.
+- Diseños: `buildLoadoutWheelGeometry(l)` en `wheelRig.ts` (o funciones nuevas en `wheel.ts`) por
+  `l.wheels.rim`; color de llanta `l.wheels.rimColor` horneado en los vértices de los rayos (hex de
+  `findColor`); `l.wheels.size` cambia la relación llanta/goma **con el radio exterior fijo en
+  `VEHICLE.wheelRadius`**. `wheelKey()` decide cuándo se reconstruye la geometría.
+- Stance: ya implementado con valores iniciales en `STANCE_STEP` (altura, camber, trocha, ancho);
+  afinar a ojo. Contrato: `wheels[i].spin.parent === wheels[i].steer`, `steer.position.y ===
+  VEHICLE.wheelRadius`, camber como matriz entre `steer` y `spin` (no un nodo), `rideHeight` en
+  metros lo suma `CarVisual.update` al `chassis`.
+- Los rivales (`rivalCarVisual.ts`) no usan el rig: no tocarlos.
+
+**C · Pintura, vinilos, calcos, patente** — archivos: `src/render/scene/vehicles/paintShop.ts`,
+`livery.ts`, `bodyUVs.ts`, `plate.ts`, `geometryKit.ts` (solo funciones de UV nuevas),
+`src/content/parts/paint.ts`, `src/content/parts/plate.ts`, tests `tests/paintShop*.test.ts`.
+- `createCarPaint(loadout)` crea UNA `CanvasTexture` que es `map` y `emissiveMap` del cuerpo para
+  toda la vida del auto; `apply(loadout, material)` la repinta en el lugar (`needsUpdate`) y pone
+  color/metalness/roughness/clearcoat/iridescence según `paint.base` × `paint.finish`. Debe dejar
+  `material.color` en la pintura LIMPIA (el auto la lee para el grime de daño). Fábrica
+  (`midnight` + `metallic` + `vinyls.rayo`) = el livery de hoy (material color blanco × mapa).
+- Atlas: `applyBodyUVs()` en `bodyUVs.ts` es el único lugar donde se asignan UVs del cuerpo;
+  al cambiarlo, re-baselinear SOLO los campos `uv` de `tests/carVisualStock.test.ts`.
+- Patente: `buildPlateGeometry(plate)` por `plate.style` (sigue fusionada al cuerpo),
+  `drawPlate(ctx2d, cell, plate)` para la celda del atlas, `formatPlateText()` para `AB 123 CD`.
+- En partida (slot) no hay `CarPaint`: el color de slot manda (D3).
+
+**D · Showroom y cámara** — archivos: `src/render/workshop/*` (nuevo), `src/content/workshopShots.ts`,
+tests `tests/workshopCamera*.test.ts`.
+- La cámara lee `CAMERA_SHOTS[categoryDef(cat).cameraShot]` (ejes en el encabezado de
+  `workshopShots.ts`) y `CategoryDef.dimShowroom`. Se pueden agregar claves a `CameraShotKey`
+  (y a `CAMERA_SHOTS`); para asignarlas a una categoría, pedírselo a F (`CATEGORIES` es suyo).
+- El showroom recibe el `CarVisual` del jugador (re-parentar `car.root`), un `ShopDef` y nada de
+  `game.ts`. API sugerida para el integrador: `createShowroom(renderer)` →
+  `{ scene, camera, attach(car), detach(), setCategory(cat), update(dt, input), dispose }`.
+
+**E · UI** — archivos: `src/ui/workshop/*` (+ `workshop.css` importado desde ahí), tests
+`tests/workshopUi*.test.ts`.
+- Renderiza un `WorkshopHudSnapshot` (en `types.ts`) y emite intenciones; no conoce `GameState`.
+  Datos estáticos (grupos, etiquetas, íconos por `CategoryDef.icon`, paleta con `accent`) de
+  `carParts.ts`. Probar contra snapshots simulados. Entrada: teclado, `gamepadMenu.ts`, touch.
+
+**F · Reglas y guardado** — archivos: `src/sim/workshop.ts` (nuevo), `src/content/carParts.ts`
+(`PRICING`, `CategoryDef.price`, `CATEGORIES`), `src/content/shops.ts`, `src/core/progress.ts`,
+`server/accounts.mjs`, `server/db/migrations/004_garage.sql`, tests `tests/workshop*.test.ts`.
+- Máquina de estados sobre `WorkshopState` con los eventos `workshop*`; `setChoice`/`setVinyls`/
+  `setDecals`/`setPlateText` para cambiar el preview; `loadoutPartIds` + `owned` para saber qué se
+  paga; `shopPrice(shop, …)` para cobrar vía `spendMoney()`; categorías no-`part` cobran
+  `CategoryDef.price` por cambio (F decide si se "poseen").
+- Guardado `rb.garage { loadout, owned[] }` pasando SIEMPRE por `sanitizeLoadout` (o
+  `decodeLoadout` si se guarda el código compacto); el servidor debe sanear igual (mismo contrato
+  de ids: `[a-zA-Z]+\.[a-z0-9-]+`, `[A-Z0-9 ]{0,7}`).
+
+**G · Luces y audio** — archivos: `src/render/scene/vehicles/lights.ts`, `underglow.ts`,
+`interior.ts`, `src/content/parts/lights.ts`, `src/content/parts/exhaustSound.ts`,
+`src/audio/engine.ts`, tests `tests/carLights*.test.ts`.
+- `lights.ts`: formas en `buildHeadGeometry`/`buildTailGeometry` por id; `applyLoadout` ya
+  reconstruye geometría al cambiar pieza; agregar `lights.headColor` → `headMat.emissive`. Las
+  traseras siguen rojas al frenar y magenta con nitro.
+- `underglow.ts`: `applyLoadout` recolorea desde `lights.neon` (`'off'` apaga el reposo, NO la
+  lectura de carga); D2: al cargar vira a cian/blanco y parpadea como hoy. `'rayo'` (cian + acento
+  magenta) = exactamente lo de hoy.
+- `interior.ts`: `applyLoadout` por `lights.interior` (`'rayo'` = cian izq. / magenta der.).
+- Audio: `engine.setExhaust(presetId)` por `exhaustSound`; Juan afina de oído.
+
+**Integrador (Ola 2)** — `GameState.workshop: WorkshopState | null` y `workshop.locked` en
+`lockOtherActivities`; `src/workshop/controller.ts`; `game.ts`/`hud.ts`/`minimap.ts`; construir el
+`WorkshopHudSnapshot`; `car.applyLoadout(state.workshop.preview)` en cada `workshopPreview` y el
+`installed` al salir y al cargar la partida (`createCarVisual({ loadout })`).
+

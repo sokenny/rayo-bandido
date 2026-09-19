@@ -17,7 +17,7 @@
 | Lightning charge | Charged only through valid drifting |
 | Lightning targeting | Aimed, not locked on: the bolt leaves along the car's heading and hits whatever is on that line. Held to charge and thrown on the release — the longer the hold, the further it reaches (2026-09-07) |
 | Reward | Destroyed/disabled electric vehicles award money |
-| Money in MVP | Visible counter only; modifications come later |
+| Money in MVP | Visible counter only; modifications come later. Since 2026-09-19 it is spent in Loco Mustang's cosmetic workshop (see the 2026-09-19 section) |
 | Nitro | Separate resource that recharges gradually |
 | Camera | Low, close, centered third-person chase camera |
 | Graphics | Approved low-poly retro-remaster reference; performance over fidelity |
@@ -55,7 +55,7 @@ These values may be tuned without asking Juan. Keep them centralized.
 - Final licensed branding and vehicle naming.
 - Story, characters and corporations.
 - Mobile controls.
-- Garage and customization UI.
+- Garage and customization UI. (Cosmetic workshop taken up 2026-09-19 — see below; performance mods still deferred.)
 - Final audio and soundtrack.
 
 
@@ -231,3 +231,22 @@ density.
 | Palette | The `bay` script is re-read off the new reference: teal-grey fog and sky, green-grey pavement, grey-teal facades, cold white / pale-teal windows, amber lamps, yellow centre lines; the hot family is red and coral instead of pink and purple, and violet is gone (pale blue-teal where the arena has violet). The sign atlas and the holographic screens follow, so they come out red and teal | His words: too violet. The reference has no violet at all |
 | Greenery | Hedges (two stacked boxes) and low-poly palms on every block ledge that faces a street, in every zone — thickest along the quay, sparse downtown — and hedges against the viaduct fences. All on the pavement inside the block colliders | Palms and bushes around the whole city, as in the reference |
 | Traffic | 39 electric cars (was 13): nine rectangles of streets with three or four cars each, spread evenly round the rectangle, and eight lapping the viaduct. The cars themselves, their rules and their audio are untouched | Three times the density, with the existing traffic reused as he asked |
+
+## Loco Mustang's workshop: cosmetic mods, NFSU2-style (2026-09-19)
+
+Juan asked for the garage to open as a modification shop in the manner of Need for Speed
+Underground 2. The plan and its decisions D1–D7 are `docs/GARAGE_PLAN.md`; Juan approved the
+recommendations as written. Ola 0 (contracts and the enabling refactor, no visible change) landed
+first so seven agents could build on disjoint files.
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Scope | A cosmetic workshop for the one player car. Cosmetics never touch `VEHICLE`; performance mods are a later, separate layer. Still one playable car. Recorded in `AGENTS.md` | Juan's request; the handling is tuned and must not drift because of a bumper |
+| The loadout | `CarLoadout` (`src/core/loadout.ts`): part ids, palette colour ids and bounded integer steps only — no free floats or RGB. `sanitizeLoadout` rebuilds anything read field by field (unknown part → stock, steps clamped, unknown vinyls dropped); `encodeLoadout` is a one-line code for the save and, later, the wire | Validatable against the catalogue, safe to store server-side, cheap to send; what a step means in metres lives in the renderer and can be retuned without migrating saves |
+| Today's car is stock | `STOCK_LOADOUT` is exactly the car as it was (GT wing, splitter, wide body, shard livery as the `vinyls.rayo` layer, cyan/magenta neon). `tests/carVisualStock.test.ts` pins its geometry — counts, boxes and a content fingerprint of every mesh, material and wheel pose — to numbers captured before the refactor | The split had to be provably pixel-identical; the catalogue adds tamer and wilder options around the car players know |
+| One mesh still | The body is assembled from slot builders (`src/render/scene/vehicles/parts/`) but merged into the same single geometry; `CarVisual.applyLoadout` rebuilds it, workshop-time only. Fourteen draw calls, same materials | The draw-call budget is fixed; rebuilding a 1k-triangle mesh on a key press in a menu is free |
+| Catalogue split by domain | Parts live in `src/content/parts/*.ts`, one file per agent's domain; `src/content/carParts.ts` concatenates them and lays the economy's `PRICING` on top. Camera shots are their own file (`workshopShots.ts`) | Seven agents in parallel worktrees would otherwise all edit one file |
+| Shops | `ShopDef` filters catalogue categories and applies a `priceFactor`; `LOCO_MUSTANG_SHOP` sells everything. The catalogue never knows about shops | A second workshop (mechanic, paint booth) is data, not a refactor |
+| Activity | `'workshop'` is an `ActivityKind` that holds the car in every phase but `closed` (`workshopEngaged`). Wired into `GameState` by the integrator (Ola 2) | One activity at a time, same rule as rush, rides and the circuit door |
+| Camber | A fixed tilt multiplied between `steer` and `spin` in the instance matrix, not a node in the carrier chain | `sync.ts` and every test rely on `spin.parent === steer` |
+

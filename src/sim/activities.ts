@@ -1,4 +1,13 @@
-import type { BuhoState, CircuitGateState, GameState, IntroState, PassengerState, RushState, StreetGateState } from '../core/types';
+import type {
+  BuhoState,
+  CircuitGateState,
+  GameState,
+  IntroState,
+  PassengerState,
+  RushState,
+  StreetGateState,
+  WorkshopState,
+} from '../core/types';
 
 /**
  * ONE ACTIVITY AT A TIME: the one place that decides which of them has the car.
@@ -41,7 +50,7 @@ import type { BuhoState, CircuitGateState, GameState, IntroState, PassengerState
  * The four activities, named. Three of them can hold the car; `'moogul'` is here because it can
  * be suppressed, not because it can ever be the one doing the suppressing.
  */
-export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit' | 'street' | 'intro';
+export type ActivityKind = 'rush' | 'passenger' | 'moogul' | 'circuit' | 'street' | 'intro' | 'workshop';
 
 /** A RAYO RUSH run, from the count-in to the results card being put away. */
 export function rushEngaged(rush: RushState | null | undefined): boolean {
@@ -88,6 +97,20 @@ export function introEngaged(intro: IntroState | null | undefined): boolean {
 }
 
 /**
+ * A workshop visit (`src/sim/workshop.ts`, `docs/GARAGE_PLAN.md` §2.3), from the key at the door
+ * to the fade back to the street: every phase but `closed`. It holds the car the whole time —
+ * the car is on the showroom's platform, not on the street — so nothing else may start, offer,
+ * or send the police while it lasts (D7: the city keeps running, the car is simply held).
+ *
+ * WIRING STATUS (Ola 0): `GameState` does not carry a `workshop` yet, so nothing in the running
+ * game can return `'workshop'` here. The integrator adds `workshop: WorkshopState | null` to
+ * `GameState` and writes `workshop.locked` in `lockOtherActivities`.
+ */
+export function workshopEngaged(workshop: WorkshopState | null | undefined): boolean {
+  return !!workshop && workshop.phase !== 'closed';
+}
+
+/**
  * Which activity has the car, or null when the player is simply driving. Never `'moogul'`: a
  * trip is not something that has the car.
  *
@@ -101,9 +124,13 @@ export function engagedActivity(state: {
   circuitGate?: CircuitGateState | null;
   streetGate?: StreetGateState | null;
   intro?: IntroState | null;
+  workshop?: WorkshopState | null;
 }): ActivityKind | null {
   // The introduction first: it starts before anything else can, and holds the car until it ends.
   if (introEngaged(state.intro)) return 'intro';
+  // Then the workshop: it cannot be entered while anything else has the car, so only the tick a
+  // visit starts on could ever see a tie, and the car is already on the platform by then.
+  if (workshopEngaged(state.workshop)) return 'workshop';
   if (rushEngaged(state.rush)) return 'rush';
   if (passengerEngaged(state.passenger)) return 'passenger';
   if (circuitEngaged(state.circuitGate)) return 'circuit';
