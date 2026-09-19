@@ -1230,12 +1230,25 @@ export interface PoliceNav {
   aim: RouteAim;
 }
 
-/** What one of Loco Mustang's lines is for: hello as the car pulls up, or an answer to the key. */
-export type GarageLineKind = 'greeting' | 'soon';
+/**
+ * What one of Loco Mustang's lines is for:
+ * - `greeting` — hello as the car pulls up onto the ring.
+ * - `soon`     — LEGACY: the answer to the key before the workshop opened (`GarageRules.workshop`
+ *                false, which only tests and worlds without a workshop still run).
+ * - `welcome`  — the showroom coming up (`workshopEnter`).
+ * - `install`  — an INSTALL that cost something (`workshopPurchase`).
+ * - `broke`    — INSTALL refused for money (`workshopDenied: 'funds'`).
+ * - `door`     — the door refused: police on the car, or something else has it.
+ * - `goodbye`  — the car rolling back out (`workshopExit`).
+ *
+ * Who voices it follows from the kind: `welcome`, `install` and `broke` are said inside the
+ * showroom (`src/workshop/controller.ts`), everything else in the street (`garageOverlay.ts`).
+ */
+export type GarageLineKind = 'greeting' | 'soon' | 'welcome' | 'install' | 'broke' | 'door' | 'goodbye';
 
 /**
- * Loco Mustang's garage (`src/sim/garage.ts`). Not open yet: the whole of its state is whether
- * the car is on the apron and what he is saying about it.
+ * Loco Mustang's garage (`src/sim/garage.ts`): whether the car is on the apron and what he is
+ * saying about it. The workshop behind him is its own activity (`WorkshopState`).
  */
 export interface GarageState {
   /** True while the car is inside the ring on the apron. */
@@ -1365,9 +1378,15 @@ export interface WorkshopHudSnapshot {
   installPrice: number;
   /** True when INSTALL would do something and the counter covers it. */
   canInstall: boolean;
-  /** `loadoutRating` of `installed` and of `preview`: the star readout and its delta. */
+  /**
+   * The car's stars, 0..10 with one decimal (`carStars` in `src/sim/workshop.ts`, NFSU2's
+   * rating), of `installed` and of `preview`: the readout and its delta. Not the raw
+   * `loadoutRating` sum.
+   */
   rating: number;
   previewRating: number;
+  /** True while `preview` differs from `installed`: there is something to INSTALL (or to lose by leaving). */
+  dirty: boolean;
   /** `preview.plate.text`, for the plate editor. */
   plateText: string;
   lastDenied: WorkshopDenyReason | null;
@@ -1788,6 +1807,13 @@ export interface GameState {
   buho: BuhoState | null;
   /** Loco Mustang's garage. Present in the world that has it (`ArenaLayout.garageSite`). */
   garage: GarageState | null;
+  /**
+   * Loco Mustang's workshop behind the garage (`src/sim/workshop.ts`, `docs/GARAGE_PLAN.md`).
+   * Present where the garage is AND the caller handed in the save (`GameStateOptions.workshop`):
+   * the open world. Null elsewhere, and then the garage behaves as it did before the workshop
+   * opened. While a visit is on it holds the car (`activities.ts`).
+   */
+  workshop: WorkshopState | null;
   /**
    * Crash damage (`src/sim/crashDamage.ts`). Present where the garage is, because the garage is
    * where the marks come off, and in the race worlds, where a hard crash stalls the car instead.

@@ -1,4 +1,5 @@
 import type { GameEvent, PoliceUnit, TargetState } from '../core/types';
+import type { PartId } from '../core/loadout';
 import { createAudioCore } from './core';
 import { createEngine, type EngineInput } from './engine';
 import { createElectricHums, type Listener } from './electricHum';
@@ -88,6 +89,14 @@ export interface AudioSystem {
   meetBeats(): number;
   /** 0..1: how much of the meet's song the listener is hearing, for the radio to step aside. */
   meetPresence(): number;
+  /**
+   * The car's exhaust note (`loadout.exhaustSound`, `EXHAUST_PRESETS` in `./engine.ts`; unknown ids
+   * are stock). Set once at load from the save, and again whenever the workshop puts another
+   * exhaust on the car. Cheap to repeat: the same preset twice does nothing.
+   */
+  setExhaust(presetId: PartId): void;
+  /** The workshop's throttle blip, so a newly picked exhaust is heard at once. Call after `setExhaust`. */
+  revDemo(): void;
   /** AudioContext state for QA/automation: 'suspended' | 'running' | 'closed' | 'unavailable'. */
   status(): string;
   dispose(): void;
@@ -105,6 +114,8 @@ const SILENT: AudioSystem = {
   meetPresence: () => 0,
   reset() {},
   setMuted() {},
+  setExhaust() {},
+  revDemo() {},
   status: () => 'unavailable',
   dispose() {},
 };
@@ -336,6 +347,14 @@ export function createAudio(
 
     setMuted(muted) {
       core.setMuted(muted);
+    },
+
+    setExhaust(presetId) {
+      if (engine.exhaust !== presetId) engine.setExhaust(presetId);
+    },
+
+    revDemo() {
+      engine.revDemo();
     },
 
     status() {

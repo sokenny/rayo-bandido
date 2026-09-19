@@ -157,14 +157,15 @@ export const CATEGORIES: readonly CategoryDef[] = [
   { id: 'vinyls', group: 'paint', kind: 'layers', label: 'Vinilos', icon: 'vinyls', cameraShot: 'overview', price: 0 },
   { id: 'decals', group: 'paint', kind: 'layers', label: 'Calcos', icon: 'decals', cameraShot: 'overview', price: 0 },
 
-  { id: 'headlights', group: 'lights', kind: 'part', label: 'Faros', icon: 'headlights', cameraShot: 'front34Low', price: 0 },
-  { id: 'headlightColor', group: 'lights', kind: 'color', label: 'Color de faros', icon: 'headlightColor', cameraShot: 'front34Low', price: 250 },
+  { id: 'headlights', group: 'lights', kind: 'part', label: 'Faros', icon: 'headlights', cameraShot: 'headlightsClose', price: 0 },
+  // Dimmed so the lamp's colour reads against the shop, the way the neon's does.
+  { id: 'headlightColor', group: 'lights', kind: 'color', label: 'Color de faros', icon: 'headlightColor', cameraShot: 'headlightsClose', price: 250, dimShowroom: true },
   { id: 'taillights', group: 'lights', kind: 'part', label: 'Luces traseras', icon: 'taillights', cameraShot: 'rear34Low', price: 0 },
-  { id: 'neon', group: 'lights', kind: 'color', label: 'Neón', icon: 'neon', cameraShot: 'sideLow', price: 500, dimShowroom: true },
+  { id: 'neon', group: 'lights', kind: 'color', label: 'Neón', icon: 'neon', cameraShot: 'neonLow', price: 500, dimShowroom: true },
   { id: 'interiorLight', group: 'lights', kind: 'color', label: 'Luz interior', icon: 'interiorLight', cameraShot: 'interior', price: 250 },
 
-  { id: 'exhaustTips', group: 'exhaust', kind: 'part', label: 'Puntas de escape', icon: 'exhaustTips', cameraShot: 'rear34Low', price: 0 },
-  { id: 'exhaustSound', group: 'exhaust', kind: 'part', label: 'Sonido de escape', icon: 'exhaustSound', cameraShot: 'rear34Low', price: 0 },
+  { id: 'exhaustTips', group: 'exhaust', kind: 'part', label: 'Puntas de escape', icon: 'exhaustTips', cameraShot: 'exhaustClose', price: 0 },
+  { id: 'exhaustSound', group: 'exhaust', kind: 'part', label: 'Sonido de escape', icon: 'exhaustSound', cameraShot: 'exhaustClose', price: 0 },
 
   { id: 'plate', group: 'plate', kind: 'part', label: 'Patente', icon: 'plate', cameraShot: 'plateRear', price: 0 },
 ];

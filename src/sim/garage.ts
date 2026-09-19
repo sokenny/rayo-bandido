@@ -103,8 +103,8 @@ export function garageWantsWorkshop(s: GarageState, cmd: PlayerCommand): boolean
  * Scans `events` from `from` (the length the list had before the workshop ran) and says at most
  * one line — the last worth saying. Free installs, previews and invalid options get nothing.
  *
- * Kinds: GarageLineKind is only `'greeting' | 'soon'` (types.ts, frozen); welcome and goodbye
- * go out as `'greeting'`, the rest as `'soon'` until the integrator widens it.
+ * Each line goes out with its own `GarageLineKind` (`welcome`, `install`, `broke`, `door`,
+ * `goodbye`), which is what tells the showroom's voice from the street's who says it.
  */
 export function garageWorkshopLine(s: GarageState, events: GameEvent[], from = 0, def: GarageDef = LOCO_MUSTANG): void {
   let pool: readonly string[] | null = null;
@@ -114,18 +114,21 @@ export function garageWorkshopLine(s: GarageState, events: GameEvent[], from = 0
     const ev = events[i];
     if (ev.type === 'workshopEnter') {
       pool = def.welcome;
-      kind = 'greeting';
+      kind = 'welcome';
     } else if (ev.type === 'workshopExit') {
       pool = def.goodbye;
-      kind = 'greeting';
+      kind = 'goodbye';
     } else if (ev.type === 'workshopPurchase' && ev.price > 0) {
       pool = def.installed;
-      kind = 'soon';
+      kind = 'install';
     } else if (ev.type === 'workshopDenied') {
-      if (ev.reason === 'funds') pool = def.broke;
-      else if (ev.reason === 'police' || ev.reason === 'locked') pool = def.doorShut;
-      else continue;
-      kind = 'soon';
+      if (ev.reason === 'funds') {
+        pool = def.broke;
+        kind = 'broke';
+      } else if (ev.reason === 'police' || ev.reason === 'locked') {
+        pool = def.doorShut;
+        kind = 'door';
+      } else continue;
     }
   }
   if (pool) say(s, pickLine(s, pool), kind, events);

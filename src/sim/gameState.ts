@@ -36,10 +36,15 @@ import {
   stepMicroScenes,
 } from '../microScenes/runtime/director';
 import { createBuhoState, endMoogul, resetBuhoState, stepBuho } from './buho';
-import { createGarageState, resetGarageState, stepGarage } from './garage';
+import { createGarageState, garageWantsWorkshop, garageWorkshopLine, resetGarageState, stepGarage, type GarageRules } from './garage';
+import { canEnterWorkshop, createWorkshopState, openWorkshop, stepWorkshop } from './workshop';
+import { LOCO_MUSTANG } from '../content/garage';
+import { LOCO_MUSTANG_SHOP } from '../content/shops';
+import type { GarageSave } from '../core/progress';
+import { cloneLoadout } from '../core/loadout';
 import { createCircuitGateState, resetCircuitGateState, stepCircuitGate } from './circuitGate';
 import { createStreetGateState, resetStreetGateState, stepStreetGate } from './streetGate';
-import { introEngaged, lockOtherActivities } from './activities';
+import { introEngaged, lockOtherActivities, workshopEngaged } from './activities';
 import { createPoliceState, isPoliceEnabledForCurrentGameState, policeHoldsPlayer, resetPoliceState, stepPolice, type StepPoliceOptions } from './police';
 import { createIntroState, introHoldsPlayer, resetIntroState, stepIntro } from './intro';
 import { PASSENGERS } from '../content/passengers';
@@ -148,6 +153,14 @@ export interface GameStateOptions {
    * appended to the layout (`installIntroMeetup`). Defaults to off.
    */
   intro?: boolean;
+  /**
+   * Open Loco Mustang's workshop behind the garage (`src/sim/workshop.ts`), wearing this save
+   * (`readGarage()`, or `{}` for today's car). Only where the layout has the garage; absent, the
+   * garage is the one from before the workshop opened, which is what every other world and
+   * every test that never heard of it gets. The save is read by the caller: the rules never
+   * touch storage.
+   */
+  workshop?: Partial<GarageSave> | null;
 }
 
 export function createInitialGameState(
@@ -176,6 +189,7 @@ export function createInitialGameState(
     passenger: layout.passengerStops && layout.passengerStops.length > 0 ? createPassengerState(layout.targetSpawns.length, layout.passengerTrip ?? undefined) : null,
     buho: layout.buhoSite ? createBuhoState() : null,
     garage: layout.garageSite ? createGarageState() : null,
+    workshop: layout.garageSite && options.workshop ? createWorkshopState(options.workshop) : null,
     // RAYO RUSH on its own has no garage, but its runs still pay for crashes in points.
     crash: layout.garageSite || layout.race || (layout.rushSites && layout.rushSites.length > 0) ? createCrashDamageState() : null,
     circuitGate: layout.circuitSite ? createCircuitGateState() : null,
@@ -213,6 +227,15 @@ export function resetGameState(state: GameState, layout: ArenaLayout): void {
   if (state.passenger) resetPassengerState(state.passenger);
   if (state.buho) resetBuhoState(state.buho);
   if (state.garage) resetGarageState(state.garage);
+  // A restart is never taken inside the workshop (the overlay has the keys, and the city turns R
+  // into a rescue), but if one ever were, the visit ends where it stands: the try-on is thrown
+  // away and the car keeps what it had installed.
+  if (state.workshop && state.workshop.phase !== 'closed') {
+    state.workshop.phase = 'closed';
+    state.workshop.phaseTime = 0;
+    state.workshop.shopId = '';
+    state.workshop.preview = cloneLoadout(state.workshop.installed);
+  }
   if (state.crash) resetCrashDamageState(state.crash);
   if (state.circuitGate) resetCircuitGateState(state.circuitGate);
   if (state.streetGate) resetStreetGateState(state.streetGate);
@@ -276,6 +299,9 @@ export interface StepOptions {
 
 /** What `stepPolice` is told about the tick. One object, never reallocated. */
 const POLICE_OPTIONS: StepPoliceOptions = { enabled: false, shoveTraffic: true };
+
+/** How the garage behaves once the workshop behind it is open: the key is the workshop's door. */
+const WORKSHOP_GARAGE: GarageRules = { workshop: true };
 
 /** What `stepCrashDamage` is told about the tick. One object, never reallocated. */
 const CRASH_RULES: CrashRules = { enabled: false, atGarage: false, stall: false, judgeOnly: false };
@@ -368,6 +394,17 @@ export function stepGame(
   // into the meet has to END at the meet, not twenty metres past it in a handbrake slide. The
   // brake comes off again at walking pace, because holding it at a standstill arms reverse.
   if (introHoldsPlayer(state.intro)) {
+    HOLD.steer = 0;
+    HOLD.brake = state.vehicle.speed > INTRO_HOLD_BRAKE_SPEED || state.vehicle.speed < -INTRO_HOLD_BRAKE_SPEED ? 1 : 0;
+    HOLD.fire = false;
+    HOLD.activate = false;
+    input = HOLD;
+  }
+  // In Loco Mustang's workshop (`src/sim/workshop.ts`): the car is on his turntable, not on the
+  // street. It is parked on the ring when the showroom comes up (`src/workshop/controller.ts`);
+  // until then — the first half of the fade — it is brought to a stop the way the intro's hold
+  // does it. Nothing reaches the car while the visit lasts: no throttle, no shot, no key.
+  if (workshopEngaged(state.workshop)) {
     HOLD.steer = 0;
     HOLD.brake = state.vehicle.speed > INTRO_HOLD_BRAKE_SPEED || state.vehicle.speed < -INTRO_HOLD_BRAKE_SPEED ? 1 : 0;
     HOLD.fire = false;
@@ -479,10 +516,24 @@ export function stepGame(
     }
     stepBuho(buho, layout.buhoSite, state.vehicle, state.economy, cmd, dt, state.events);
   }
-  // Loco Mustang's garage (`src/sim/garage.ts`): not open yet, and he says so. Never holds the car.
+  // Loco Mustang's garage (`src/sim/garage.ts`) and, where it is open, the workshop behind it
+  // (`src/sim/workshop.ts`). He never holds the car himself; the key on his ring is the
+  // workshop's door, and the visit it opens is the activity that holds it. A world without the
+  // workshop keeps the garage as it was before it opened: a hello and "not yet".
   lockOtherActivities(state);
   if (state.garage && layout.garageSite) {
-    stepGarage(state.garage, layout.garageSite, state.vehicle, cmd, dt, state.events);
+    const ws = state.workshop;
+    const from = state.events.length;
+    stepGarage(state.garage, layout.garageSite, state.vehicle, cmd, dt, state.events, LOCO_MUSTANG, ws ? WORKSHOP_GARAGE : undefined);
+    if (ws) {
+      // `cmd`, not `input`: the key has to reach the door. It cannot re-open a visit under way —
+      // the garage is `locked` while the workshop has the car.
+      if (garageWantsWorkshop(state.garage, cmd)) openWorkshop(ws, LOCO_MUSTANG_SHOP, state.events, canEnterWorkshop(state));
+      stepWorkshop(ws, dt, state.events);
+      // His reaction to the door and to the fades. What happens INSIDE — a purchase, a refusal —
+      // is a key press between ticks, answered by the controller with the same function.
+      garageWorkshopLine(state.garage, state.events, from);
+    }
   }
   // The door to the circuit missions (`src/sim/circuitGate.ts`), last of all: it is the one
   // activity that ends this world rather than happening inside it, so it is offered only once

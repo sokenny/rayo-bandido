@@ -1,5 +1,5 @@
 /**
- * Bake every runtime dialogue line (`src/content/dialogueLines.ts`) into `public/dialogue/`, so the
+ * Bake every runtime dialogue line (`src/content/dialogueLines.ts`, the pending ones included) into `public/dialogue/`, so the
  * build ships them and a deployed server never calls ElevenLabs (`server/dialogue/speech.mjs`).
  *
  *   npm run dialogue:voices                 bake what is missing: reuse `.cache/`, else generate
@@ -16,7 +16,7 @@
 import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RUNTIME_DIALOGUE } from '../src/content/dialogueLines';
+import { bakeableDialogue } from '../src/content/dialogueLines';
 
 interface SpeechModule {
   normalizeText(text: string): string;
@@ -68,7 +68,9 @@ let generated = 0;
 let downloaded = 0;
 const missing: string[] = [];
 
-for (const [characterId, lines] of Object.entries(RUNTIME_DIALOGUE)) {
+// The runtime lines and the ones still waiting for their voice (`PENDING_VOICE_DIALOGUE`), so a
+// bake never leaves them behind and `--prune` never deletes their clips.
+for (const [characterId, lines] of Object.entries(bakeableDialogue())) {
   const voice = CHARACTER_VOICES[characterId];
   if (!voice) throw new Error(`no voice for ${characterId} in server/dialogue/voices.mjs`);
   for (const line of new Set(lines)) {

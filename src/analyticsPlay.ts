@@ -369,6 +369,18 @@ export function createPlayAnalytics(state: GameState, opts: PlayAnalyticsOptions
           track('garage_visit', { ...base, money: state.economy.money });
         }
         break;
+      case 'workshopEnter':
+        activities.add('workshop');
+        track('workshop_enter', { ...base, shop: ev.shopId, money: state.economy.money });
+        break;
+      case 'workshopPurchase':
+        // One per category an INSTALL paid for; putting back something already owned (price 0)
+        // is not a sale.
+        if (ev.price > 0) {
+          c.spent += ev.price;
+          track('part_purchased', { ...base, shop: ev.shopId, category: ev.category, part: String(ev.value), price: ev.price, balance: ev.balance });
+        }
+        break;
       case 'washerOffer':
         if (ev.on) c.washerOffers++;
         break;

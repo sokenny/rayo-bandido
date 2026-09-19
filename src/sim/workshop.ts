@@ -794,6 +794,7 @@ export function createWorkshopHudSnapshot(): WorkshopHudSnapshot {
     canInstall: false,
     rating: 0,
     previewRating: 0,
+    dirty: false,
     plateText: '',
     lastDenied: null,
     deniedId: 0,
@@ -832,6 +833,7 @@ export function workshopHudSnapshot(
 
   const quote = installQuote(ws, shop);
   out.installPrice = Math.max(0, quote);
+  out.dirty = quote >= 0;
   out.canInstall = ws.phase === 'previewing' && quote >= 0 && economy.money >= quote;
 
   const rows = out.options as WorkshopOptionView[];

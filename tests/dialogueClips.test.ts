@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { RUNTIME_DIALOGUE } from '../src/content/dialogueLines';
+import { PENDING_VOICE_DIALOGUE, RUNTIME_DIALOGUE } from '../src/content/dialogueLines';
+import { LOCO_MUSTANG } from '../src/content/garage';
 
 /**
  * Every line the game asks the server to speak has its clip baked into `public/dialogue/`. A deployed
@@ -31,5 +32,24 @@ describe('baked dialogue clips', () => {
     }
     expect(total).toBeGreaterThan(100);
     expect(missing, 'run `npm run dialogue:voices`').toEqual([]);
+  });
+
+  it('leave no Loco Mustang line unaccounted for: voiced, or listed as waiting for a voice', () => {
+    const runtime = new Set(RUNTIME_DIALOGUE['loco-mustang'] ?? []);
+    const pending = new Set(PENDING_VOICE_DIALOGUE['loco-mustang'] ?? []);
+    const pools = [
+      LOCO_MUSTANG.greetings,
+      LOCO_MUSTANG.soon,
+      LOCO_MUSTANG.openGreetings,
+      LOCO_MUSTANG.welcome,
+      LOCO_MUSTANG.installed,
+      LOCO_MUSTANG.broke,
+      LOCO_MUSTANG.doorShut,
+      LOCO_MUSTANG.goodbye,
+    ];
+    const lost = pools.flat().filter((line) => !runtime.has(line) && !pending.has(line));
+    expect(lost).toEqual([]);
+    // A line is in one list or the other: once baked it moves up, it does not stay behind.
+    expect([...pending].filter((line) => runtime.has(line))).toEqual([]);
   });
 });

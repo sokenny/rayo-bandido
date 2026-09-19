@@ -102,9 +102,8 @@ export function introEngaged(intro: IntroState | null | undefined): boolean {
  * the car is on the showroom's platform, not on the street — so nothing else may start, offer,
  * or send the police while it lasts (D7: the city keeps running, the car is simply held).
  *
- * WIRING STATUS (Ola 0): `GameState` does not carry a `workshop` yet, so nothing in the running
- * game can return `'workshop'` here. The integrator adds `workshop: WorkshopState | null` to
- * `GameState` and writes `workshop.locked` in `lockOtherActivities`.
+ * `GameState.workshop` is present in the open world (`GameStateOptions.workshop`); elsewhere it
+ * is null and this is never true.
  */
 export function workshopEngaged(workshop: WorkshopState | null | undefined): boolean {
   return !!workshop && workshop.phase !== 'closed';
@@ -158,6 +157,7 @@ export function lockOtherActivities(state: GameState): ActivityKind | null {
   if (state.passenger) state.passenger.locked = activitySuppressed(engaged, 'passenger');
   if (state.circuitGate) state.circuitGate.locked = activitySuppressed(engaged, 'circuit');
   if (state.streetGate) state.streetGate.locked = activitySuppressed(engaged, 'street');
+  if (state.workshop) state.workshop.locked = activitySuppressed(engaged, 'workshop');
   // El Búho, who is never the one holding it: he sells while nobody at all has the car, which
   // is the same sentence as `activitySuppressed(engaged, 'moogul')` and is written out here
   // because "he is never engaged" is the fact worth reading at the point it is relied on.
