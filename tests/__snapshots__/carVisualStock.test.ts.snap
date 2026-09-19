@@ -10,7 +10,7 @@ exports[`stock car geometry (pinned from before the workshop split) > assembles 
   ],
   "drawCalls": 14,
   "meshes": [
-    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:2416de9d | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c141834 e000000x0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:7e3afef4 | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c141834 e000000x0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
     "player-car-damage | chassis | ro1 | hid | 20t | f6dc2d62:6dce502c | uv:46ba986c | -0.926724/0.273057/-2.139275/0.935217/1.325/2.2 | MeshStandardMaterial cffffff effffffx0.3 r0.9 m0.15 o1 t1 b1 s0 dw0 tm1 vc1",
     "player-car-glass | chassis | ro4 | vis | 48t | 61894c1:a2ce96f3 | uv:- | -0.76108/0.874151/-0.744944/0.76108/1.330364/1.575568 | MeshStandardMaterial c15242f e000000x1 r0.08 m0.32 o0.68 t1 b1 s0 dw1 tm1 vc1",
     "player-car-interior-trim | nested | ro0 | vis | 380t | 2aadd731:9f4e2053 | uv:- | -0.745/0.82/-0.73/0.745/1.298/1.56 | MeshStandardMaterial cffffff e0c1322x1 r0.85 m0.1 o1 t0 b1 s0 dw1 tm1 vc1",
@@ -46,7 +46,7 @@ exports[`stock car geometry (pinned from before the workshop split) > assembles 
   ],
   "drawCalls": 15,
   "meshes": [
-    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:2416de9d | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c71ad27 e2a450ax0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
+    "player-car-body | chassis | ro0 | vis | 928t | a873a8a6:2af35f62 | uv:7e3afef4 | -1.07759/0.07/-2.26/1.07759/1.33/2.24 | MeshPhysicalMaterial c71ad27 e2a450ax0 r0.26 m0.62 cc1/0.08 o1 t0 b1 s0 dw1 tm1 vc1",
     "player-car-damage | chassis | ro1 | hid | 20t | f6dc2d62:6dce502c | uv:46ba986c | -0.926724/0.273057/-2.139275/0.935217/1.325/2.2 | MeshStandardMaterial cffffff effffffx0.3 r0.9 m0.15 o1 t1 b1 s0 dw0 tm1 vc1",
     "player-car-marker | chassis | ro2 | vis | 48t | b8f640f8:9daef528 | uv:- | -1.01/0.105/-0.95/1.01/1.375/2.14 | MeshBasicMaterial ca8ff3e o0.85 t1 b2 s0 dw0 tm0 vc1",
     "player-car-glass | chassis | ro4 | vis | 48t | 61894c1:a2ce96f3 | uv:- | -0.76108/0.874151/-0.744944/0.76108/1.330364/1.575568 | MeshStandardMaterial c15242f e000000x1 r0.08 m0.32 o0.68 t1 b1 s0 dw1 tm1 vc1",

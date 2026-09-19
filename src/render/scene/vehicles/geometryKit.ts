@@ -305,6 +305,98 @@ export function applyLengthwiseUVs(geometry: THREE.BufferGeometry): void {
   geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
 
+/** One triangle as `applyTriangleUVs` sees it: its mean normal (unit) and its bounding box. */
+export interface UVTriangle {
+  nx: number;
+  ny: number;
+  nz: number;
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+/** Writes the uv of the vertex at (x, y, z) into `out[0]`, `out[1]`. */
+export type UVProjector = (x: number, y: number, z: number, out: Float32Array) => void;
+
+/**
+ * Region-by-region uv mapping, one decision per TRIANGLE: `pick` looks at the triangle (its mean
+ * normal, its extent) and returns the projection all three of its vertices go through. Deciding
+ * per triangle rather than per vertex is what keeps an atlas honest: a triangle can never have
+ * one corner in the flank region and another in the roof's, which would smear the whole atlas
+ * between them across its face. Works on indexed and non-indexed geometry (an indexed vertex
+ * shared by triangles of different regions takes the last one's uv — the vehicle kit is
+ * non-indexed, so that never happens to the body).
+ */
+export function applyTriangleUVs(geometry: THREE.BufferGeometry, pick: (tri: UVTriangle) => UVProjector): void {
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  const index = geometry.getIndex();
+  const count = index ? index.count : position.count;
+  const uv = new Float32Array(position.count * 2);
+  const out = new Float32Array(2);
+  const tri: UVTriangle = { nx: 0, ny: 1, nz: 0, minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
+  const vid = [0, 0, 0];
+  for (let t = 0; t + 2 < count; t += 3) {
+    for (let k = 0; k < 3; k++) vid[k] = index ? index.getX(t + k) : t + k;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    if (normal) {
+      for (const v of vid) {
+        nx += normal.getX(v);
+        ny += normal.getY(v);
+        nz += normal.getZ(v);
+      }
+    }
+    let len = Math.hypot(nx, ny, nz);
+    if (len < 1e-8) {
+      // No usable normals: take the winding's.
+      const ax = position.getX(vid[1]) - position.getX(vid[0]);
+      const ay = position.getY(vid[1]) - position.getY(vid[0]);
+      const az = position.getZ(vid[1]) - position.getZ(vid[0]);
+      const bx = position.getX(vid[2]) - position.getX(vid[0]);
+      const by = position.getY(vid[2]) - position.getY(vid[0]);
+      const bz = position.getZ(vid[2]) - position.getZ(vid[0]);
+      nx = ay * bz - az * by;
+      ny = az * bx - ax * bz;
+      nz = ax * by - ay * bx;
+      len = Math.hypot(nx, ny, nz);
+      if (len < 1e-12) {
+        nx = 0;
+        ny = 1;
+        nz = 0;
+        len = 1;
+      }
+    }
+    tri.nx = nx / len;
+    tri.ny = ny / len;
+    tri.nz = nz / len;
+    tri.minX = tri.minY = tri.minZ = Infinity;
+    tri.maxX = tri.maxY = tri.maxZ = -Infinity;
+    for (const v of vid) {
+      const x = position.getX(v);
+      const y = position.getY(v);
+      const z = position.getZ(v);
+      if (x < tri.minX) tri.minX = x;
+      if (y < tri.minY) tri.minY = y;
+      if (z < tri.minZ) tri.minZ = z;
+      if (x > tri.maxX) tri.maxX = x;
+      if (y > tri.maxY) tri.maxY = y;
+      if (z > tri.maxZ) tri.maxZ = z;
+    }
+    const project = pick(tri);
+    for (const v of vid) {
+      project(position.getX(v), position.getY(v), position.getZ(v), out);
+      uv[v * 2] = out[0];
+      uv[v * 2 + 1] = out[1];
+    }
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
 /**
  * Wheel arch / over-fender shell: a half ring swept over the wheel, extruded across the
  * body. Built in the shape plane (shape x -> car z) and rotated into place.

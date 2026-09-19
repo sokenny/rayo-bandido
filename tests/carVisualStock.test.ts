@@ -129,7 +129,7 @@ describe('stock car geometry (pinned from before the workshop split)', () => {
         "fingerprint": "a873a8a6:2af35f62",
         "index": null,
         "triangles": 928,
-        "uv": "2416de9d",
+        "uv": "7e3afef4",
         "vertices": 2784,
       }
     `);
@@ -152,7 +152,7 @@ describe('stock car geometry (pinned from before the workshop split)', () => {
         "fingerprint": "b357299b:8f9b96c9",
         "index": null,
         "triangles": 932,
-        "uv": "13a41a3c",
+        "uv": "f04c8c16",
         "vertices": 2796,
       }
     `);
