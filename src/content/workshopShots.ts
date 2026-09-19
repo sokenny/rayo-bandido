@@ -76,10 +76,16 @@ export const CAMERA_SHOTS: Readonly<Record<CameraShotKey, CameraShot>> = {
   neonLow: { yaw: Math.PI / 2 + 0.3, pitch: 0.02, distance: 6.2, targetY: 0.42, targetZ: 0.2, fov: 42 },
   /** Rims, rim colour, size, width: the right flank at axle height, close on the front wheel. */
   wheelFront: { yaw: 1.3, pitch: 0.05, distance: 4.1, targetY: 0.42, targetZ: -0.85, fov: 40 },
-  /** Front camber and track: head-on and low, both front wheels' lean in view. */
-  wheelFrontHead: { yaw: 0, pitch: 0.04, distance: 3.6, targetY: 0.42, targetZ: -1.3, fov: 38 },
-  /** Rear camber and track: from behind, low. */
-  wheelRearTail: { yaw: Math.PI, pitch: 0.04, distance: 3.6, targetY: 0.42, targetZ: 1.3, fov: 38 },
+  /**
+   * Front camber and track: low off the front corner, on the right front wheel. Not head-on: the
+   * wide body hides the wheels from straight ahead (only their outer few centimetres stand out of
+   * the arches), so the lean and the track only read at about 50° round, where the tyre's face
+   * is an ellipse whose tilt against the arch is the camber (checked in the live showroom at +6,
+   * Ola 2).
+   */
+  wheelFrontHead: { yaw: 0.9, pitch: 0.03, distance: 3.2, targetY: 0.38, targetZ: -1.3, fov: 40 },
+  /** Rear camber and track: the same, off the rear corner, on the right rear wheel. */
+  wheelRearTail: { yaw: Math.PI - 0.9, pitch: 0.03, distance: 3.2, targetY: 0.38, targetZ: 1.3, fov: 40 },
   /** Plate: behind, low and close, the plate in the middle of the tail. */
   plateRear: { yaw: Math.PI, pitch: 0.1, distance: 2.0, targetY: 0.55, targetZ: 2.0, fov: 34 },
   /** Cabin light: over the bonnet, looking in through the windscreen. */
