@@ -27,6 +27,17 @@ export interface ChangelogEntry {
 /** Newest first. The tab shows them in this order. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: '2026-09-19',
+    items: [
+      'Loco Mustang\'s workshop is open: park on his ring in Bandido Metro and press F to walk into the showroom.',
+      'Fit body kits, spoilers, rims, camber, paint, vinyls, decals, plates, headlights, neon and exhaust sounds.',
+      'What you buy is saved, follows your account, and your car wears it out in the city.',
+      'Loco Mustang has new things to say in the workshop; they are subtitles only until his voice is recorded.',
+      'The minimap turns with your car, road ahead always up; marks off the map pin to its rim.',
+      'Click the full map to drop a waypoint, and an arrow leads you to it.',
+    ],
+  },
+  {
     date: '2026-09-18',
     items: [
       'Drifting has more life: the tail swings like a pendulum, and you can work the car inside a slide.',
