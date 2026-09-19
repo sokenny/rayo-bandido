@@ -1,4 +1,4 @@
-import { CATEGORY_IDS, isCategoryId, type CategoryId } from './carParts';
+import { CATEGORY_IDS, GROUPS, categoryDef, isCategoryId, type CategoryId, type WorkshopGroupId } from './carParts';
 
 /**
  * THE WORKSHOPS: who runs each one, which catalogue categories it sells, and at what markup
@@ -44,6 +44,31 @@ export function shopPrice(shop: ShopDef, basePrice: number): number {
 /** Whether `shop` sells anything in `category`. */
 export function shopSells(shop: ShopDef, category: CategoryId): boolean {
   return shop.categories.includes(category);
+}
+
+const groupCache = new WeakMap<ShopDef, Map<WorkshopGroupId, readonly CategoryId[]>>();
+
+/**
+ * The categories `shop` sells in `group`, in the shop's carousel order. Cached per shop and
+ * group, so the HUD snapshot can ask every frame without allocating; never mutate the result.
+ */
+export function shopCategoriesOf(shop: ShopDef, group: WorkshopGroupId): readonly CategoryId[] {
+  let byGroup = groupCache.get(shop);
+  if (!byGroup) {
+    byGroup = new Map();
+    groupCache.set(shop, byGroup);
+  }
+  let list = byGroup.get(group);
+  if (!list) {
+    list = shop.categories.filter((c) => isCategoryId(c) && categoryDef(c).group === group);
+    byGroup.set(group, list);
+  }
+  return list;
+}
+
+/** The groups `shop` sells anything in, in `GROUPS` order. */
+export function shopGroups(shop: ShopDef): WorkshopGroupId[] {
+  return GROUPS.map((g) => g.id).filter((g) => shopCategoriesOf(shop, g).length > 0);
 }
 
 /** Everything that must hold for a shop to be usable, as a list of complaints. Empty means fine. */

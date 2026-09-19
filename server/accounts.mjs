@@ -122,6 +122,53 @@ function sanitizeChain(chain, value) {
   return { cleared, best };
 }
 
+/** Most parts a garage record may list. Matches `MAX_OWNED_PARTS` in `src/core/progress.ts`. */
+export const MAX_OWNED_PARTS = 512;
+/** Longest loadout code. Matches `decodeLoadout` in `src/core/loadout.ts` and the column's check. */
+const LOADOUT_MAX = 1024;
+/** Fields in a loadout code, the version tag included (`encodeLoadout`). */
+const LOADOUT_FIELDS = 30;
+/** A part id, as the client's catalogue writes them: `<category>.<name>`. */
+const PART_ID_RE = /^[a-zA-Z]+\.[a-z0-9-]+$/;
+/** Any loadout field but the plate: ids, colours, small numbers and the `:`/`,`/`@` of the layers. */
+const LOADOUT_FIELD_RE = /^[a-zA-Z0-9:,@-]*$/;
+/** The plate's text: the last field. */
+const PLATE_RE = /^[A-Z0-9 ]{0,7}$/;
+
+/**
+ * A loadout code whose SHAPE can be stored: `L1`, thirty `|`-separated fields, the plate last.
+ * What the ids mean is the client's to judge (`decodeLoadout` sanitizes against its catalogue);
+ * the server only refuses what could not be a code at all. Null when it is not one.
+ */
+export function sanitizeLoadoutCode(value) {
+  if (typeof value !== 'string' || value.length > LOADOUT_MAX) return null;
+  const fields = value.split('|');
+  if (fields.length !== LOADOUT_FIELDS || fields[0] !== 'L1') return null;
+  for (let i = 1; i < LOADOUT_FIELDS - 1; i++) if (!LOADOUT_FIELD_RE.test(fields[i])) return null;
+  return PLATE_RE.test(fields[LOADOUT_FIELDS - 1]) ? value : null;
+}
+
+/** An owned-parts list made safe: well-formed ids, no stock, no repeats, capped. */
+export function sanitizeOwned(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const id of value) {
+    if (out.length >= MAX_OWNED_PARTS) break;
+    if (typeof id !== 'string' || id.length > 64 || !PART_ID_RE.test(id) || id.endsWith('.stock') || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** A garage record `{ loadout, owned }`, or null when its loadout is not a code. */
+function sanitizeGarage(value) {
+  if (!value || typeof value !== 'object') return null;
+  const loadout = sanitizeLoadoutCode(value.loadout);
+  return loadout ? { loadout, owned: sanitizeOwned(value.owned) } : null;
+}
+
 /**
  * A progress body from a client, reduced to what may be stored. Keys that are absent or invalid
  * come back `undefined` and are left alone by the save; nothing here throws.
@@ -145,6 +192,8 @@ export function sanitizeProgress(body) {
     const clean = sanitizeChain(chain, body[chain]);
     if (clean) out[chain] = clean;
   }
+  const garage = sanitizeGarage(body.garage);
+  if (garage) out.garage = garage;
   return out;
 }
 
@@ -184,9 +233,24 @@ function mergeChain(chain, a, b) {
 }
 
 /**
+ * Two garage records folded. What was bought is never lost: `owned` is the union (capped). The
+ * car worn is the incoming one on a save (`'replace'`: the client just installed it), and on a
+ * merge of two players' records (`'max'`) the one of whoever has bought more — the car somebody
+ * put more into — with the stored side winning a tie.
+ */
+function mergeGarage(a, b, mode) {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const owned = sanitizeOwned([...a.owned, ...b.owned]);
+  const loadout = mode === 'max' && a.owned.length >= b.owned.length ? a.loadout : b.loadout;
+  return { loadout, owned };
+}
+
+/**
  * Fold `incoming` into `stored`. `wallet` says what happens to money: `'replace'` for a save (the
  * client's balance is the latest one — it is the only thing that spends), `'max'` for a merge of
  * two players' records (neither is more recent than the other, and the larger is never a loss).
+ * The garage follows the same word (`mergeGarage`).
  */
 export function mergeProgress(stored, incoming, { wallet = 'replace' } = {}) {
   const out = { ...stored };
@@ -200,6 +264,7 @@ export function mergeProgress(stored, incoming, { wallet = 'replace' } = {}) {
       : incoming.rides;
   }
   for (const chain of CHAINS) if (incoming[chain]) out[chain] = mergeChain(chain, stored[chain], incoming[chain]);
+  if (incoming.garage) out.garage = mergeGarage(stored.garage, incoming.garage, wallet);
   return out;
 }
 
@@ -277,8 +342,11 @@ export function createAccounts(db, { log = () => {} } = {}) {
       rush: null,
       circuit: null,
       street: null,
+      garage: null,
     };
     for (const row of chains) out[row.chain] = { cleared: row.cleared, best: Array.isArray(row.best) ? row.best : [] };
+    const [garage] = await q.query(`select loadout, owned from player_garage where user_id = $1`, [userId]);
+    if (garage) out.garage = { loadout: garage.loadout, owned: Array.isArray(garage.owned) ? garage.owned : [] };
     return out;
   }
 
@@ -300,6 +368,13 @@ export function createAccounts(db, { log = () => {} } = {}) {
         `insert into mission_progress (user_id, chain, cleared, best, updated_at) values ($1, $2, $3, $4, now())
          on conflict (user_id, chain) do update set cleared = excluded.cleared, best = excluded.best, updated_at = now()`,
         [userId, chain, c.cleared, JSON.stringify(c.best)],
+      );
+    }
+    if (p.garage) {
+      await q.query(
+        `insert into player_garage (user_id, loadout, owned, updated_at) values ($1, $2, $3, now())
+         on conflict (user_id) do update set loadout = excluded.loadout, owned = excluded.owned, updated_at = now()`,
+        [userId, p.garage.loadout, JSON.stringify(p.garage.owned)],
       );
     }
   }

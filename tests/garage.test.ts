@@ -9,7 +9,7 @@ import { inRect, type Rect } from '../src/world/cityPlan';
 import { GARAGE, garageColliders, garageParts } from '../src/world/garage';
 import { METRO_GARAGE, METRO_MEET_LOT } from '../src/world/metroSpec';
 import { createOpenWorld } from '../src/world/openWorld';
-import { createGarageState, stepGarage } from '../src/sim/garage';
+import { createGarageState, garageWantsWorkshop, garageWorkshopLine, stepGarage } from '../src/sim/garage';
 import type { GameEvent, PlayerCommand, VehicleState } from '../src/core/types';
 
 /**
@@ -112,5 +112,39 @@ describe('the garage rules', () => {
     stepGarage(s, site, car(30), cmd(), 1 / 60, events);
     expect(s.atSite).toBe(false);
     expect(s.greeted).toBe(false);
+  });
+
+  it('with the workshop wired: greets as open, leaves the key to the door, and reacts to the visit', () => {
+    const rules = { workshop: true };
+    const s = createGarageState();
+    const events: GameEvent[] = [];
+    stepGarage(s, site, car(2), cmd(), 1 / 60, events, LOCO_MUSTANG, rules);
+    expect(LOCO_MUSTANG.openGreetings).toContain(s.line);
+    events.length = 0;
+    stepGarage(s, site, car(2), cmd(true), 1 / 60, events, LOCO_MUSTANG, rules);
+    expect(events).toHaveLength(0);
+    expect(garageWantsWorkshop(s, cmd(true))).toBe(true);
+    expect(garageWantsWorkshop(s, cmd(false))).toBe(false);
+    s.locked = true;
+    expect(garageWantsWorkshop(s, cmd(true))).toBe(false);
+
+    const said = (list: GameEvent[]): string => {
+      const before = list.length;
+      garageWorkshopLine(s, list);
+      return list.length > before ? s.line : '';
+    };
+    expect(LOCO_MUSTANG.welcome).toContain(said([{ type: 'workshopEnter', shopId: 'loco-mustang' }]));
+    expect(LOCO_MUSTANG.installed).toContain(said([{ type: 'workshopPurchase', shopId: 'loco-mustang', category: 'hood', value: 'hood.x', price: 900, balance: 0 }]));
+    expect(said([{ type: 'workshopPurchase', shopId: 'loco-mustang', category: 'hood', value: 'hood.stock', price: 0, balance: 0 }])).toBe('');
+    expect(LOCO_MUSTANG.broke).toContain(said([{ type: 'workshopDenied', reason: 'funds', category: 'hood' }]));
+    expect(LOCO_MUSTANG.doorShut).toContain(said([{ type: 'workshopDenied', reason: 'police', category: null }]));
+    expect(said([{ type: 'workshopDenied', reason: 'invalid', category: null }])).toBe('');
+    expect(LOCO_MUSTANG.goodbye).toContain(said([{ type: 'workshopExit', shopId: 'loco-mustang', purchases: 1 }]));
+  });
+
+  it('puts OPEN on the sign', () => {
+    expect(LOCO_MUSTANG.sign.sub).toMatch(/OPEN/);
+    expect(LOCO_MUSTANG.sign.sub).not.toMatch(/NOT OPEN|SOON/);
+    expect(LOCO_MUSTANG.tagline).not.toMatch(/SOON/);
   });
 });

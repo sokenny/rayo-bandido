@@ -12,7 +12,7 @@ import { readProgressSnapshot, readWallet, setProgressObserver, writeWallet, typ
  * pretend server here only records what it was sent and answers like the real one would.
  */
 
-const EMPTY: ProgressSnapshot = { wallet: null, intro: null, rides: null, rush: null, circuit: null, street: null };
+const EMPTY: ProgressSnapshot = { wallet: null, intro: null, rides: null, rush: null, circuit: null, street: null, garage: null };
 
 interface FakeServer {
   progress: ProgressSnapshot;

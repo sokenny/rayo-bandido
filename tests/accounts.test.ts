@@ -99,6 +99,7 @@ interface Me {
     rush: { cleared: number; best: number[] } | null;
     circuit: { cleared: number; best: number[] } | null;
     street: { cleared: number; best: number[] } | null;
+    garage: { loadout: string; owned: string[] } | null;
   };
   providers: string[];
 }
@@ -177,6 +178,31 @@ describe('accounts', () => {
     expect(me.body.progress.rush).toBeNull();
   });
 
+  it('saves the garage: the car worn follows the latest save, what was bought only grows', async () => {
+    const b = browser();
+    const code = (paint: string, plate = 'BANDIDO') => ['L1', ...Array(16).fill('stock'), paint, 'm', '', 'rayo:magenta', '', 'stock', 'xenon', 'stock', 'rayo', 'rayo', 'stock', 'stock', plate].join('|');
+    expect(code('red').split('|')).toHaveLength(30);
+    await b.post('/api/progress', { garage: { loadout: code('red', 'RAYO 1'), owned: ['hood.vent', 'rims.mesh-8'] } });
+    const { body } = await b.post<{ progress: Me['progress'] }>('/api/progress', { garage: { loadout: code('blue'), owned: ['spoiler.gt-2'] } });
+    expect(body.progress.garage).toEqual({ loadout: code('blue'), owned: ['hood.vent', 'rims.mesh-8', 'spoiler.gt-2'] });
+    expect((await b.get<Me>('/api/me')).body.progress.garage).toEqual(body.progress.garage);
+  });
+
+  it('keeps garage records that are not garage records out', async () => {
+    const b = browser();
+    const good = ['L1', ...Array(28).fill('stock'), 'BANDIDO'].join('|');
+    for (const loadout of [42, 'L2|x', `${good}|extra`, good.replace('BANDIDO', 'lower'), good.replace('stock', 'drop table'), 'L1|' + 'a|'.repeat(600)]) {
+      await b.post('/api/progress', { garage: { loadout, owned: ['hood.vent'] } });
+    }
+    expect((await b.get<Me>('/api/me')).body.progress.garage).toBeNull();
+    const { body } = await b.post<{ progress: Me['progress'] }>('/api/progress', {
+      garage: { loadout: good, owned: ['hood.vent', 'hood.vent', 'hood.stock', 'Nope', 'x', 7, 'a.' + 'b'.repeat(80), ...Array.from({ length: 600 }, (_, i) => `rims.r${i}`)] },
+    });
+    expect(body.progress.garage!.owned[0]).toBe('hood.vent');
+    expect(body.progress.garage!.owned).not.toContain('hood.stock');
+    expect(body.progress.garage!.owned).toHaveLength(512);
+  });
+
   it('refuses a POST that does not say it is JSON', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/progress`, { method: 'POST', body: '{"wallet":5}' });
     expect(response.status).toBe(415);
@@ -249,13 +275,19 @@ describe('accounts', () => {
     const laptop = browser();
     await laptop.get('/api/me');
     await laptop.signIn('two-devices', 'Rayo');
-    await laptop.post('/api/progress', { wallet: 3000, rush: { cleared: 1, best: [800, -1, -1] }, intro: { status: 'completed', version: 2 } });
+    const car = (paint: string) => ['L1', ...Array(16).fill('stock'), paint, 'm', '', '', '', 'stock', 'xenon', 'stock', 'rayo', 'rayo', 'stock', 'stock', 'BANDIDO'].join('|');
+    await laptop.post('/api/progress', {
+      wallet: 3000,
+      rush: { cleared: 1, best: [800, -1, -1] },
+      intro: { status: 'completed', version: 2 },
+      garage: { loadout: car('red'), owned: ['hood.vent'] },
+    });
     await laptop.post('/api/boards/circuit/runs', { ms: 150_000 });
     const account = (await laptop.get<Me>('/api/me')).body.user.id;
 
     const phone = browser();
     await phone.get('/api/me');
-    await phone.post('/api/progress', { wallet: 400, rush: { cleared: 2, best: [700, 1900, -1] } });
+    await phone.post('/api/progress', { wallet: 400, rush: { cleared: 2, best: [700, 1900, -1] }, garage: { loadout: car('blue'), owned: ['rims.mesh-8', 'spoiler.gt-2'] } });
     await phone.post('/api/boards/circuit/runs', { ms: 140_000 });
     await phone.post('/api/boards/street/runs', { ms: 99_000 });
     await phone.signIn('two-devices', 'Rayo');
@@ -265,6 +297,8 @@ describe('accounts', () => {
     expect(me.body.progress.wallet).toBe(3000);
     expect(me.body.progress.rush).toEqual({ cleared: 2, best: [800, 1900, -1] });
     expect(me.body.progress.intro).toEqual({ status: 'completed', version: 2 });
+    // Everything bought on either device is kept; the car worn is the one with more put into it.
+    expect(me.body.progress.garage).toEqual({ loadout: car('blue'), owned: ['hood.vent', 'rims.mesh-8', 'spoiler.gt-2'] });
     const circuit = await phone.get<{ best: number }>('/api/boards/circuit/standing');
     expect(circuit.body.best).toBe(140_000);
     const street = await phone.get<{ best: number }>('/api/boards/street/standing');
