@@ -1942,6 +1942,19 @@ export const MINIMAP = {
   /** Opens and closes the full map. M is taken by the mute. */
   key: 'KeyN',
   keyLabel: 'N',
+  /** The corner view turns with the car, so its arrow always points up (false = north up). */
+  headingUp: true,
+  /**
+   * How fast the corner view swings round to the car's yaw (per second). Eased, not rigid, so a
+   * drift does not whip the map about; high enough that a turn is followed within a beat.
+   */
+  turnRate: 6,
+  waypoint: {
+    /** How near a click on the full map has to land on the mark to take it down (CSS px). */
+    hitPx: 14,
+    /** Road metres from the waypoint at which it counts as reached and is taken down. */
+    arriveMeters: 14,
+  },
 };
 
 /**

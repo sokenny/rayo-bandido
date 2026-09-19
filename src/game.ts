@@ -33,7 +33,7 @@ import type {
   RushRival,
   TimeAttackHudSnapshot,
   Transmission, PoliceHudSnapshot } from './core/types';
-import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MEET_MUSIC, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
+import { ATMOSPHERE, AUDIO, SIM_STEP, CAMERA, CRASH_DAMAGE, FLAIR, HUSTLERS, LIGHTNING, MEET_MUSIC, MINIMAP, MOOGUL, NITRO, PASSENGER, RENDER, RUSH, STREET_RACE, STREET_PROPS, SEWER_STEAM, TIME_ATTACK, VEHICLE, POLICE } from './config/tuning';
 import { createTrafficSync } from './sim/traffic';
 import { createRivalCarVisual, disposeRivalCarResources, type RivalCarVisual } from './render/scene/rivalCarVisual';
 import { createNameTags, type NameTags } from './render/nameTags';
@@ -620,13 +620,14 @@ export function createGame(
   if (pickupMarker) scene.add(pickupMarker.group);
   if (destinationMarker) scene.add(destinationMarker.group);
   /**
-   * The arrow over the street ahead while a fare is aboard, and the street network it is aimed
-   * along. The graph is built once, here, because it is a fact about the world; the route field
-   * is rebuilt per ride, in `placePassengerMarkers`, because it is a fact about the trip. A
-   * world with stops but no network still runs — it simply has no arrow.
+   * The arrow over the street ahead while a fare is aboard, an intro objective is up or the
+   * player has a waypoint of their own, and the street network it is aimed along. The graph is
+   * built once, here, because it is a fact about the world; the route field is rebuilt per ride,
+   * in `placePassengerMarkers`, because it is a fact about the trip. A world with no network
+   * still runs — it simply has no arrow.
    */
   const roadGraph: RoadGraph | null =
-    (hasPassengers || !!state.intro) && layout.roadNetwork && layout.roadNetwork.length > 0 ? buildRoadGraph(layout.roadNetwork) : null;
+    layout.roadNetwork && layout.roadNetwork.length > 0 ? buildRoadGraph(layout.roadNetwork) : null;
   const destinationArrow = roadGraph ? createDestinationArrow() : null;
   if (destinationArrow) scene.add(destinationArrow.group);
   let routeField: RouteField | null = null;
@@ -739,6 +740,20 @@ export function createGame(
     escToCity: params.get('from') === 'city',
   });
   const minimap = createMinimap(hudRoot, layout.minimap, layout.race, net ? slotCss(net.slot) : undefined);
+  /**
+   * The player's own waypoint, marked on the full map. With its guide on, the SAME arrow the
+   * fares and the intro use takes them there — one arrow, one way of reading it. It only has the
+   * arrow while nothing else wants it: an intro objective or a fare's drop-off comes first, and
+   * a run, a ride or a race gate going in puts it away until the car is free again. The mark
+   * stays on the map through all of that; it is taken down when the car gets there.
+   */
+  let waypointRoute: RouteField | null = null;
+  /** Whether the arrow is showing the waypoint's route right now, so it is put away when it stops. */
+  let waypointSteering = false;
+  minimap.onWaypoint((wp) => {
+    waypointRoute = wp && wp.guide && roadGraph ? routeTo(roadGraph, wp) : null;
+    if (waypointRoute && destinationArrow && waypointSteering) destinationArrow.snap();
+  });
   // `precise` is what F4 copies: one real raycast at the moment the key is pressed, so the
   // line on the clipboard names the surface you were looking at, not just the ground under it.
   const debug = createDebugOverlay(debugRoot, params.has('debug'), { precise: () => sampleProbe(true) });
@@ -2481,6 +2496,25 @@ export function createGame(
     }
     for (let i = 0; i < introParked.length; i++) introParked[i].vis.update(frameDt, simTime);
     badkalaFigure?.update(simTime, crowdSubject);
+    // The waypoint's turn with the arrow, when nothing else has it.
+    // The intro only holds the arrow while it has a place to send the car (`introRoute`); between
+    // objectives the player's own waypoint may have it.
+    const holding = engagedActivity(state);
+    const arrowFree = !introRoute && !routeField && (holding === null || holding === 'intro');
+    if (waypointRoute && arrowFree) {
+      const gx = waypointRoute.goalX - pose.x;
+      const gz = waypointRoute.goalZ - pose.z;
+      if (gx * gx + gz * gz < MINIMAP.waypoint.arriveMeters * MINIMAP.waypoint.arriveMeters) {
+        minimap.clearWaypoint();
+      } else {
+        steerArrow(waypointRoute, frameDt);
+        waypointSteering = true;
+      }
+    }
+    if (waypointSteering && (!waypointRoute || !arrowFree)) {
+      waypointSteering = false;
+      if (!introRoute && !routeField) destinationArrow?.hide();
+    }
     hud.update(snapshot);
     minimap.update(pose.x, pose.z, pose.heading, state.targets, rivals);
     if (standings) {

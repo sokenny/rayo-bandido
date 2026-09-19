@@ -3,7 +3,7 @@ import { MINIMAP, STREET_RACE } from '../config/tuning';
 import { slotCss } from '../core/playerColors';
 
 /**
- * Minimap: a north-up picture of the drivable roads with the player, the activity markers and,
+ * Minimap: a heading-up picture of the drivable roads with the player, the activity markers and,
  * on the circuit, the line and the checkpoints. Electric cars are not shown — finding them is
  * the game. The roads are drawn once into an offscreen canvas; each frame only clears, blits the
  * part of it under the car and draws a handful of dots. Hidden ribbons (the shortcuts) are deliberately left off — they
@@ -44,7 +44,22 @@ export interface Minimap {
   setActivities(points: readonly { x: number; z: number; kind?: ActivityMarkKind; label?: string }[]): void;
   /** Open or close the full map (also bound to `MINIMAP.key` and a click on the minimap). */
   setExpanded(open: boolean): void;
+  /**
+   * The player's own mark, set by a click on the full map and cleared by a click on it again (or
+   * a right-click, or its CLEAR button). Told on every change, including a toggle of the guide;
+   * null when there is no mark.
+   */
+  onWaypoint(listener: (waypoint: Waypoint | null) => void): void;
+  /** Take the mark down — the car has arrived. Tells the listener. */
+  clearWaypoint(): void;
   dispose(): void;
+}
+
+/** Somewhere the player marked themselves. `guide` is whether they asked the arrow to take them. */
+export interface Waypoint {
+  x: number;
+  z: number;
+  guide: boolean;
 }
 
 export interface MinimapPose {
@@ -76,14 +91,23 @@ interface Mark {
  * map says the same thing about them as every other screen does.
  *
  * TWO VIEWS OF ONE PICTURE. The corner is a round window `MINIMAP.viewMeters` across, centred on
- * the car and north up: the roads are painted once, at that zoom, into one large offscreen canvas
- * and each frame blits the square of it under the car — so driving scrolls the map rather than
- * redrawing it. Marks are drawn per frame on top, and one outside the window is pinned to its
- * rim, in its own direction: at this zoom most destinations are off the map most of the time,
- * and a mark you cannot see is one you cannot drive to.
+ * the car and HEADING UP (`MINIMAP.headingUp`): the map turns under the car so the player's arrow
+ * always points at the top, and left on the map is left at the wheel — a north-up map made the
+ * player rotate it in their head at every junction. The roads are painted once, at that zoom,
+ * into one large offscreen canvas and each frame blits the square of it under the car, rotated —
+ * the circle the window clips to is the same whichever way the square is turned, so the square
+ * always covers it. Marks are drawn per frame on top, upright, and one outside the window is
+ * pinned to its rim, in its own direction: at this zoom most destinations are off the map most
+ * of the time, and a mark you cannot see is one you cannot drive to.
  *
- * The full map (click the circle, or `MINIMAP.key`) fits the whole world into the screen with a
- * name beside every mark. Its own base is painted when it opens, not before — most sessions never
+ * The turn follows the car's yaw EASED (`MINIMAP.turnRate`), not rigidly: sideways is the whole
+ * point of this game, and a map bolted to the yaw would whip about through every drift. The
+ * player's arrow is drawn at the difference, so a slide still shows as the arrow swinging off
+ * the top.
+ *
+ * The full map (click the circle, or `MINIMAP.key`) fits the whole world into the screen, north
+ * up, with a name beside every mark. A click on it marks a waypoint the destination arrow can
+ * take the player to. Its own base is painted when it opens, not before — most sessions never
  * open it.
  */
 export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCourse | null, selfColour = '#4ff3ff'): Minimap {
@@ -133,6 +157,9 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   const rimR = half - 1.5 * dpr;
   const markRimR = rimR - 9 * dpr * MINIMAP.iconScale;
   const rivalRimR = rimR - 3 * dpr;
+  /** The corner view's turn (rad, same sense as `heading`), and when it was last eased. */
+  let mapYaw = 0;
+  let lastFrame = 0;
 
   /* ------------------------------------------------------------ the full map */
 
@@ -142,14 +169,24 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   overlay.innerHTML =
     `<div class="rb-bigmap__panel">` +
     `<div class="rb-bigmap__head"><span class="rb-bigmap__title">MAP</span>` +
+    `<span class="rb-bigmap__hint">CLICK THE MAP TO MARK A WAYPOINT</span>` +
+    `<span class="rb-bigmap__actions" hidden>` +
+    `<button type="button" tabindex="-1" class="rb-bigmap__btn rb-bigmap__guide"></button>` +
+    `<button type="button" tabindex="-1" class="rb-bigmap__btn rb-bigmap__clear">CLEAR</button>` +
+    `</span>` +
     `<button type="button" tabindex="-1" class="rb-bigmap__close"><span class="rb-key">${MINIMAP.keyLabel}</span> <span class="rb-key">ESC</span> close</button></div>` +
     `<div class="rb-bigmap__stage"><canvas></canvas><div class="rb-bigmap__labels"></div></div>` +
     `</div>`;
   root.appendChild(overlay);
   const panel = overlay.querySelector('.rb-bigmap__panel') as HTMLElement;
   const stage = overlay.querySelector('.rb-bigmap__stage') as HTMLElement;
+  const head = overlay.querySelector('.rb-bigmap__head') as HTMLElement;
   const big = overlay.querySelector('canvas') as HTMLCanvasElement;
   const labelsEl = overlay.querySelector('.rb-bigmap__labels') as HTMLElement;
+  const hintEl = overlay.querySelector('.rb-bigmap__hint') as HTMLElement;
+  const actionsEl = overlay.querySelector('.rb-bigmap__actions') as HTMLElement;
+  const guideBtn = overlay.querySelector('.rb-bigmap__guide') as HTMLButtonElement;
+  const clearBtn = overlay.querySelector('.rb-bigmap__clear') as HTMLButtonElement;
   const bigCtx = big.getContext('2d');
   const bigBase = document.createElement('canvas');
   const bigBaseCtx = bigBase.getContext('2d');
@@ -165,6 +202,26 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
   youLabel.style.color = selfColour;
   const rivalLabels: HTMLDivElement[] = [];
 
+  /* ------------------------------------------------------------ the waypoint */
+
+  let waypoint: Waypoint | null = null;
+  let waypointListener: ((w: Waypoint | null) => void) | null = null;
+  const waypointLabel = document.createElement('div');
+  waypointLabel.className = 'rb-bigmap__label rb-bigmap__label--waypoint';
+  waypointLabel.textContent = 'WAYPOINT';
+
+  function setWaypoint(next: Waypoint | null): void {
+    waypoint = next;
+    actionsEl.hidden = !next;
+    hintEl.textContent = next ? 'CLICK THE MARK TO REMOVE IT' : 'CLICK THE MAP TO MARK A WAYPOINT';
+    if (next) {
+      guideBtn.textContent = next.guide ? 'ARROW ON' : 'ARROW OFF';
+      guideBtn.classList.toggle('is-on', next.guide);
+    }
+    if (expanded) buildLabels();
+    waypointListener?.(next ? { ...next } : null);
+  }
+
   function layoutBig(): void {
     // Fit the world into the window with room for the header, keeping its proportions.
     const maxW = Math.max(200, window.innerWidth * 0.9 - 32);
@@ -179,6 +236,9 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
     big.style.width = `${w}px`;
     big.style.height = `${h}px`;
     stage.style.width = `${w}px`;
+    // The header is held to the map's width, so the hint and the waypoint's controls wrap
+    // rather than widen the panel past the picture.
+    head.style.width = `${w}px`;
     stage.style.height = `${h}px`;
     bigBase.width = big.width;
     bigBase.height = big.height;
@@ -199,6 +259,10 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       placeLabel(el, m.x, m.z);
       labelsEl.appendChild(el);
     }
+    if (waypoint) {
+      placeLabel(waypointLabel, waypoint.x, waypoint.z);
+      labelsEl.appendChild(waypointLabel);
+    }
     labelsEl.appendChild(youLabel);
     for (const el of rivalLabels) labelsEl.appendChild(el);
   }
@@ -210,6 +274,32 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
     wrap.classList.toggle('is-open', open);
     if (open) layoutBig();
   }
+
+  // A click on the map marks a waypoint there; a click on the waypoint (or a right-click
+  // anywhere) takes it down. The hit radius is generous, because a pin is small and a finger is not.
+  big.style.cursor = 'crosshair';
+  big.addEventListener('click', (e) => {
+    const r = big.getBoundingClientRect();
+    const cx = e.clientX - r.left;
+    const cz = e.clientY - r.top;
+    if (waypoint) {
+      const wx = (waypoint.x - b.minX) * bigCssScale;
+      const wz = (waypoint.z - b.minZ) * bigCssScale;
+      if (Math.hypot(cx - wx, cz - wz) <= MINIMAP.waypoint.hitPx) {
+        setWaypoint(null);
+        return;
+      }
+    }
+    setWaypoint({ x: cx / bigCssScale + b.minX, z: cz / bigCssScale + b.minZ, guide: waypoint ? waypoint.guide : true });
+  });
+  big.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (waypoint) setWaypoint(null);
+  });
+  guideBtn.addEventListener('click', () => {
+    if (waypoint) setWaypoint({ ...waypoint, guide: !waypoint.guide });
+  });
+  clearBtn.addEventListener('click', () => setWaypoint(null));
 
   wrap.addEventListener('mousedown', (e) => e.preventDefault());
   wrap.addEventListener('click', () => setExpanded(!expanded));
@@ -278,6 +368,7 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
     bigCtx.clearRect(0, 0, big.width, big.height);
     bigCtx.drawImage(bigBase, 0, 0);
     for (const m of marks) drawActivity(bigCtx, bigPx(m.x), bigPz(m.z), dpr, m.kind);
+    if (waypoint) drawWaypoint(bigCtx, bigPx(waypoint.x), bigPz(waypoint.z), dpr, waypoint.guide);
     let shown = 0;
     if (rivals) {
       for (let i = 0; i < rivals.length; i++) {
@@ -318,10 +409,35 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
 
     setExpanded,
 
+    onWaypoint(listener) {
+      waypointListener = listener;
+    },
+
+    clearWaypoint() {
+      if (waypoint) setWaypoint(null);
+    },
+
     update(playerX, playerZ, heading, _targets, rivals) {
       if (expanded) drawBig(playerX, playerZ, heading, rivals);
       if (!ctx) return;
       const w = canvas.width;
+
+      // The map's own turn: the car's yaw, eased, the shortest way round.
+      const now = performance.now();
+      const dt = lastFrame > 0 ? Math.min(0.1, (now - lastFrame) / 1000) : 0;
+      lastFrame = now;
+      if (!MINIMAP.headingUp) mapYaw = 0;
+      else if (dt === 0) mapYaw = heading;
+      else {
+        let d = heading - mapYaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        mapYaw += d * (1 - Math.exp(-MINIMAP.turnRate * dt));
+      }
+      // World offset (dx, dz) → window offset: turned by -mapYaw, so the car's forward is up.
+      const cos = Math.cos(mapYaw);
+      const sin = Math.sin(mapYaw);
+
       ctx.clearRect(0, 0, w, w);
       ctx.save();
       ctx.beginPath();
@@ -338,7 +454,13 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       const z0 = Math.max(0, sz);
       const x1 = Math.min(base.width, sx + w);
       const z1 = Math.min(base.height, sz + w);
-      if (x1 > x0 && z1 > z0) ctx.drawImage(base, x0, z0, x1 - x0, z1 - z0, x0 - sx, z0 - sz, x1 - x0, z1 - z0);
+      if (x1 > x0 && z1 > z0) {
+        ctx.save();
+        ctx.translate(half, half);
+        ctx.rotate(-mapYaw);
+        ctx.drawImage(base, x0, z0, x1 - x0, z1 - z0, x0 - sx - half, z0 - sz - half, x1 - x0, z1 - z0);
+        ctx.restore();
+      }
 
       // Electric cars are deliberately not drawn: a hundred-odd white dots buried the
       // player's own arrow and the route. Hunting them is the game.
@@ -346,14 +468,29 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       // Destinations, pinned to the rim when they are off the window, pointing the way.
       for (let i = 0; i < marks.length; i++) {
         const m = marks[i];
-        let mx = (m.x - playerX) * scale;
-        let mz = (m.z - playerZ) * scale;
+        const dx = (m.x - playerX) * scale;
+        const dz = (m.z - playerZ) * scale;
+        let mx = dx * cos + dz * sin;
+        let mz = dz * cos - dx * sin;
         const d = Math.hypot(mx, mz);
         if (d > markRimR) {
           mx *= markRimR / d;
           mz *= markRimR / d;
         }
         drawActivity(ctx, half + mx, half + mz, dpr, m.kind);
+      }
+      // The player's own waypoint, over the activities: it is the one they chose.
+      if (waypoint) {
+        const dx = (waypoint.x - playerX) * scale;
+        const dz = (waypoint.z - playerZ) * scale;
+        let mx = dx * cos + dz * sin;
+        let mz = dz * cos - dx * sin;
+        const d = Math.hypot(mx, mz);
+        if (d > markRimR) {
+          mx *= markRimR / d;
+          mz *= markRimR / d;
+        }
+        drawWaypoint(ctx, half + mx, half + mz, dpr, waypoint.guide);
       }
 
       // Other players, in their own colour, over the activity marks and under the player's arrow.
@@ -364,8 +501,10 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
         for (let i = 0; i < rivals.length; i++) {
           const r = rivals[i];
           if (!r.present) continue;
-          const rx = (r.x - playerX) * scale;
-          const rz = (r.z - playerZ) * scale;
+          const ox = (r.x - playerX) * scale;
+          const oz = (r.z - playerZ) * scale;
+          const rx = ox * cos + oz * sin;
+          const rz = oz * cos - ox * sin;
           const d = Math.hypot(rx, rz);
           ctx.fillStyle = slotCss(r.slot);
           ctx.strokeStyle = 'rgba(5, 7, 13, 0.9)';
@@ -391,22 +530,27 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
         }
       }
 
-      drawPlayer(ctx, half, half, heading, MINIMAP.playerScale);
+      drawPlayer(ctx, half, half, heading - mapYaw, MINIMAP.playerScale);
       ctx.restore();
 
-      // The rim, and a north tick on it: the map does not turn with the car.
+      // The rim, and a north tick on it that goes round as the map turns. No letter: the key
+      // badge at the bottom of the rim is an N too, and would read as north being behind.
       ctx.strokeStyle = 'rgba(180, 214, 255, 0.28)';
       ctx.lineWidth = 1.5 * dpr;
       ctx.beginPath();
       ctx.arc(half, half, rimR, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.save();
+      ctx.translate(half, half);
+      ctx.rotate(-mapYaw);
       ctx.fillStyle = '#4ff3ff';
       ctx.beginPath();
-      ctx.moveTo(half, 1 * dpr);
-      ctx.lineTo(half + 4 * dpr, 8 * dpr);
-      ctx.lineTo(half - 4 * dpr, 8 * dpr);
+      ctx.moveTo(0, 1 * dpr - half);
+      ctx.lineTo(4 * dpr, 8 * dpr - half);
+      ctx.lineTo(-4 * dpr, 8 * dpr - half);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
     },
     dispose() {
       window.removeEventListener('keydown', onKey, true);
@@ -415,6 +559,49 @@ export function createMinimap(root: HTMLElement, data: MinimapData, race: RaceCo
       overlay.remove();
     },
   };
+}
+
+/**
+ * The player's own waypoint: a white ring — white, because every colour on this map already means
+ * an activity, and this one means "mine" — around a pin standing on its point. Dimmed when the
+ * arrow is not taking them there, so the map says which of the two it is. Fixed pixel size, same
+ * reason as the RUSH mark.
+ */
+function drawWaypoint(ctx: CanvasRenderingContext2D, cx: number, cz: number, pxRatio: number, guide: boolean): void {
+  const dpr = pxRatio * MINIMAP.iconScale;
+  const r = 6.2 * dpr;
+  const WHITE = guide ? '#ffffff' : 'rgba(255, 255, 255, 0.55)';
+
+  ctx.save();
+  ctx.translate(cx, cz);
+
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.85)';
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 1.6 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = WHITE;
+  ctx.shadowColor = WHITE;
+  ctx.shadowBlur = guide ? 8 * dpr : 0;
+  ctx.lineWidth = 1.6 * dpr;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // The pin: a round head over a point that touches the spot.
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = WHITE;
+  ctx.beginPath();
+  ctx.arc(0, -1.3 * dpr, 2.3 * dpr, Math.PI * 0.85, Math.PI * 0.15);
+  ctx.lineTo(0, 3.6 * dpr);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(5, 7, 13, 0.95)';
+  ctx.beginPath();
+  ctx.arc(0, -1.3 * dpr, 0.9 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 /**
