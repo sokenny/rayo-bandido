@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Showroom harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        font: 12px/1.4 ui-monospace, Menlo, monospace;
+        color: #9fe8ff;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hud {
+        position: fixed;
+        left: 8px;
+        bottom: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 6px 8px;
+        white-space: pre;
+        pointer-events: none;
+      }
+      body.shots #hud {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud"></div>
+    <script type="module" src="./d-showroom.ts"></script>
+  </body>
+</html>
