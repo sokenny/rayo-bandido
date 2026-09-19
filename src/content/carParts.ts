@@ -1,4 +1,4 @@
-import type { ColorId, PartId } from '../core/loadout';
+import type { ColorId, PaintFinish, PartId } from '../core/loadout';
 import { BODY_PARTS } from './parts/body';
 import { WHEEL_PARTS } from './parts/wheels';
 import { PAINT_PARTS } from './parts/paint';
@@ -141,26 +141,27 @@ export const CATEGORIES: readonly CategoryDef[] = [
   { id: 'spoiler', group: 'body', kind: 'part', label: 'Alerón', icon: 'spoiler', cameraShot: 'rear34High', price: 0 },
 
   { id: 'rims', group: 'wheels', kind: 'part', label: 'Llantas', icon: 'rims', cameraShot: 'wheelFront', price: 0 },
-  { id: 'rimColor', group: 'wheels', kind: 'color', label: 'Color de llanta', icon: 'rimColor', cameraShot: 'wheelFront', price: 400 },
-  { id: 'wheelSize', group: 'wheels', kind: 'step', label: 'Rodado', icon: 'wheelSize', cameraShot: 'wheelFront', price: 600 },
-  { id: 'wheelWidth', group: 'wheels', kind: 'step', label: 'Ancho de llanta', icon: 'wheelWidth', cameraShot: 'wheelFront', price: 600 },
-  { id: 'rideHeight', group: 'wheels', kind: 'step', label: 'Altura', icon: 'rideHeight', cameraShot: 'sideLow', price: 500 },
+  { id: 'rimColor', group: 'wheels', kind: 'color', label: 'Color de llanta', icon: 'rimColor', cameraShot: 'wheelFront', price: 300 },
+  { id: 'wheelSize', group: 'wheels', kind: 'step', label: 'Rodado', icon: 'wheelSize', cameraShot: 'wheelFront', price: 700 },
+  { id: 'wheelWidth', group: 'wheels', kind: 'step', label: 'Ancho de llanta', icon: 'wheelWidth', cameraShot: 'wheelFront', price: 700 },
+  { id: 'rideHeight', group: 'wheels', kind: 'step', label: 'Altura', icon: 'rideHeight', cameraShot: 'sideLow', price: 600 },
   { id: 'camberFront', group: 'wheels', kind: 'step', label: 'Camber delantero', icon: 'camberFront', cameraShot: 'wheelFrontHead', price: 300 },
   { id: 'camberRear', group: 'wheels', kind: 'step', label: 'Camber trasero', icon: 'camberRear', cameraShot: 'wheelRearTail', price: 300 },
-  { id: 'trackFront', group: 'wheels', kind: 'step', label: 'Trocha delantera', icon: 'trackFront', cameraShot: 'wheelFrontHead', price: 300 },
-  { id: 'trackRear', group: 'wheels', kind: 'step', label: 'Trocha trasera', icon: 'trackRear', cameraShot: 'wheelRearTail', price: 300 },
+  { id: 'trackFront', group: 'wheels', kind: 'step', label: 'Trocha delantera', icon: 'trackFront', cameraShot: 'wheelFrontHead', price: 350 },
+  { id: 'trackRear', group: 'wheels', kind: 'step', label: 'Trocha trasera', icon: 'trackRear', cameraShot: 'wheelRearTail', price: 350 },
 
-  { id: 'paint', group: 'paint', kind: 'color', label: 'Color', icon: 'paint', cameraShot: 'overview', price: 1500 },
-  { id: 'roofColor', group: 'paint', kind: 'color', label: 'Color de techo', icon: 'roofColor', cameraShot: 'roofHigh', price: 700 },
-  { id: 'finish', group: 'paint', kind: 'finish', label: 'Acabado', icon: 'finish', cameraShot: 'overview', price: 900 },
+  { id: 'paint', group: 'paint', kind: 'color', label: 'Color', icon: 'paint', cameraShot: 'overview', price: 800 },
+  { id: 'roofColor', group: 'paint', kind: 'color', label: 'Color de techo', icon: 'roofColor', cameraShot: 'roofHigh', price: 500 },
+  // One change's price depends on the finish chosen: `FINISH_PRICES`. This is the metallic's.
+  { id: 'finish', group: 'paint', kind: 'finish', label: 'Acabado', icon: 'finish', cameraShot: 'overview', price: 600 },
   { id: 'vinyls', group: 'paint', kind: 'layers', label: 'Vinilos', icon: 'vinyls', cameraShot: 'overview', price: 0 },
   { id: 'decals', group: 'paint', kind: 'layers', label: 'Calcos', icon: 'decals', cameraShot: 'overview', price: 0 },
 
   { id: 'headlights', group: 'lights', kind: 'part', label: 'Faros', icon: 'headlights', cameraShot: 'front34Low', price: 0 },
-  { id: 'headlightColor', group: 'lights', kind: 'color', label: 'Color de faros', icon: 'headlightColor', cameraShot: 'front34Low', price: 350 },
+  { id: 'headlightColor', group: 'lights', kind: 'color', label: 'Color de faros', icon: 'headlightColor', cameraShot: 'front34Low', price: 250 },
   { id: 'taillights', group: 'lights', kind: 'part', label: 'Luces traseras', icon: 'taillights', cameraShot: 'rear34Low', price: 0 },
-  { id: 'neon', group: 'lights', kind: 'color', label: 'Neón', icon: 'neon', cameraShot: 'sideLow', price: 800, dimShowroom: true },
-  { id: 'interiorLight', group: 'lights', kind: 'color', label: 'Luz interior', icon: 'interiorLight', cameraShot: 'interior', price: 300 },
+  { id: 'neon', group: 'lights', kind: 'color', label: 'Neón', icon: 'neon', cameraShot: 'sideLow', price: 500, dimShowroom: true },
+  { id: 'interiorLight', group: 'lights', kind: 'color', label: 'Luz interior', icon: 'interiorLight', cameraShot: 'interior', price: 250 },
 
   { id: 'exhaustTips', group: 'exhaust', kind: 'part', label: 'Puntas de escape', icon: 'exhaustTips', cameraShot: 'rear34Low', price: 0 },
   { id: 'exhaustSound', group: 'exhaust', kind: 'part', label: 'Sonido de escape', icon: 'exhaustSound', cameraShot: 'rear34Low', price: 0 },
@@ -196,11 +197,25 @@ export interface PartDef {
   category: CategoryId;
   /** Shown in the UI, in Spanish or as the brand-ish name the part goes by ("GT doble plano"). */
   name: string;
-  /** Base price in the game's money, before a shop's `priceFactor`. 0 for stock. Whole number. */
+  /**
+   * Base price in the game's money (¥), before a shop's `priceFactor`. 0 for stock. Whole
+   * number. What a domain file writes here is PROVISIONAL: `PARTS` replaces it with
+   * `partPrice(category, rating)` (see "Pricing" below) unless `PRICING` names the id.
+   */
   price: number;
   /**
-   * Visual rating, a whole number 0..10. The car's rating is the sum over what it wears
-   * (`loadoutRating`); for now it is only shown, later it may feed reputation (D5).
+   * Visual rating, a whole number 0..10, NFSU2's stars for one part. It is also the part's
+   * TIER, and the price follows from it, so rate honestly:
+   *
+   *   0      nothing to look at (a plain plate, the empty trunk lid)
+   *   1–2    today's car / a sober factory-ish piece — every `.stock` sits here
+   *   3–4    a tasteful street part
+   *   5–6    a proper aftermarket part, the middle of the range
+   *   7–8    aggressive, a show car's
+   *   9–10   the top of the catalogue: one or two per category at most
+   *
+   * The car's own stars (`carStars` in `src/sim/workshop.ts`) average these over what it wears,
+   * so a stock car reads ≈ 1.3 and a fully built one 8–10. Shown only, for now (D5).
    */
   rating: number;
   /** One short line under the name, if the part needs one. Spanish. */
@@ -212,16 +227,122 @@ export interface PartDef {
   defaultColor?: ColorId;
 }
 
+/* --------------------------------------------------------------------- pricing */
+
+/*
+ * PRICING (D4, calibrated 2026-09-19 against what the city pays today).
+ *
+ * WHAT AN HOUR OF PLAY EARNS. A passenger ride pays `baseFare` 120 + 0.6 ¥/m of a 600–1700 m
+ * straight-line trip (≈ 1100 m typical → 780) + a tip of up to 100 (≈ 60 on a decent ride):
+ * ≈ 840 a ride. Finding the pin (≥ 70 m away), the ~1.5 km of road and the 10 s before the
+ * next offer make a ride ≈ 2.5–3 min, so rides alone are ≈ 280–330 ¥/min. A free-roam kill pays
+ * 100 but brings the police (fines 200–1000), near misses pay 10–50, crashes cost 50–300; the
+ * street races pay 300 + 700 + 1500 once. A player mixing all of it honestly nets ≈ 200 ¥/min:
+ *
+ *     ≈ 12,000 ¥ per hour of play         (≈ 200 ¥ per minute)
+ *
+ * So, per D4: a mid part (≈ 10–15 min) costs 2,000–3,000, a top part (≈ 1 h) ≈ 12,000, and a
+ * colour / finish / stance change costs a few minutes (250–900; chrome, the showpiece, 3,000).
+ * The windshield washer's 2,000 clean (≈ 10 min) is the same order as a mid part, on purpose.
+ *
+ * HOW A PART IS PRICED. Agents A, B, C and G add parts in their own files in parallel, so the
+ * price cannot be a table of ids somebody has to keep up: it is the category's `top` price (what
+ * a rating-10 part of it costs) times `RATING_PRICE_CURVE[rating]`, rounded to a friendly
+ * number. A part nobody here has ever seen gets a sensible price from its category and rating.
+ * `PRICING` overrides a single id when the formula gets one wrong. Anything the stock car wears
+ * is free, always.
+ */
+
+/** Fraction of its category's top price a part of each rating costs. Index = rating 0..10. */
+export const RATING_PRICE_CURVE: readonly number[] = [0.04, 0.06, 0.09, 0.13, 0.17, 0.22, 0.3, 0.4, 0.55, 0.75, 1];
+
 /**
- * The economy's word over the domain files' provisional numbers, keyed by part id. Agent F
- * calibrates here (D4: a mid part ≈ 10–15 minutes of play, a top part ≈ an hour) instead of
- * editing six files the other agents are also writing in.
+ * What a rating-10 part costs in each `part`/`layers` category (¥, before `priceFactor`). A
+ * mid part (rating 5) is 22% of it: ≈ 2,000–2,650 for bodywork and rims, 10–13 minutes of play.
+ */
+export const CATEGORY_TOP_PRICE: Readonly<Partial<Record<CategoryId, number>>> = {
+  frontBumper: 10_000,
+  rearBumper: 9_000,
+  skirts: 8_000,
+  hood: 9_000,
+  trunk: 6_000,
+  spoiler: 12_000,
+  exhaustTips: 6_000,
+  rims: 12_000,
+  headlights: 7_000,
+  taillights: 6_000,
+  exhaustSound: 11_000,
+  plate: 3_000,
+  // A vinyl or decal is bought once and then worn in any colour, in any layer, any number of times.
+  vinyls: 9_000,
+  decals: 4_000,
+};
+
+/** Top price of a category nobody put in `CATEGORY_TOP_PRICE` (a new one): a mid bodywork part's. */
+const DEFAULT_TOP_PRICE = 8_000;
+
+/**
+ * Parts that are not `.stock` but that the stock car wears (`STOCK_LOADOUT` in
+ * `src/core/loadout.ts`, which imports this module and so cannot be imported back): free, like
+ * every stock part. `tests/workshop.test.ts` checks this against `loadoutPartIds(STOCK_LOADOUT)`.
+ */
+const STOCK_WORN: ReadonlySet<PartId> = new Set(['vinyls.rayo']);
+
+/** Whether `id` is part of today's car, and so free and always owned. */
+export function isStockPart(id: PartId): boolean {
+  return id.endsWith('.stock') || STOCK_WORN.has(id);
+}
+
+/** Round a price to what a sign would say: 50s under 1,000, 100s under 10,000, 500s above. */
+function friendly(n: number): number {
+  const step = n < 1000 ? 50 : n < 10_000 ? 100 : 500;
+  return Math.max(step, Math.round(n / step) * step);
+}
+
+/** A part's base price from its category and rating (0 for stock is `priced`'s job, not this). */
+export function partPrice(category: CategoryId, rating: number): number {
+  const r = Math.max(0, Math.min(10, Math.round(Number.isFinite(rating) ? rating : 0)));
+  return friendly((CATEGORY_TOP_PRICE[category] ?? DEFAULT_TOP_PRICE) * RATING_PRICE_CURVE[r]);
+}
+
+/**
+ * The economy's word on single ids, over the formula: a price, a rating, or both. Empty on
+ * purpose — the formula is the rule, and this is for the exception somebody notices in play.
  */
 const PRICING: Readonly<Record<PartId, { price?: number; rating?: number }>> = {};
 
 function priced(def: PartDef): PartDef {
   const over = PRICING[def.id];
-  return over ? { ...def, ...over } : def;
+  const rating = over?.rating ?? def.rating;
+  const price = isStockPart(def.id) ? 0 : over?.price ?? partPrice(def.category, rating);
+  return { ...def, price, rating };
+}
+
+/**
+ * What one change costs in each `finish`: the paint booth's labour plus the paint. Gloss is the
+ * cheap one; chrome is the showpiece (≈ 15 minutes). `CategoryDef.price` of `finish` is the
+ * metallic's, for anything that reads the category alone.
+ */
+export const FINISH_PRICES: Readonly<Record<PaintFinish, number>> = {
+  gloss: 400,
+  metallic: 600,
+  matte: 900,
+  pearl: 1500,
+  chrome: 3000,
+};
+
+/** What the plate shop charges to stamp new text on the plate (`CarLoadout.plate.text`). */
+export const PLATE_TEXT_PRICE = 300;
+
+/**
+ * The base price (before `priceFactor`) of putting `value` in a non-part category — a `color`,
+ * `step` or `finish` — whatever the car wears now. The caller decides whether it is charged at
+ * all (it is not when `value` is what is installed, or what the stock car wears).
+ */
+export function changePrice(category: CategoryId, value: string | number): number {
+  const def = categoryDef(category);
+  if (def.kind === 'finish' && typeof value === 'string' && value in FINISH_PRICES) return FINISH_PRICES[value as PaintFinish];
+  return def.price;
 }
 
 /** The whole catalogue, every domain file concatenated and priced. */
@@ -390,6 +511,12 @@ export function validateCatalogue(): string[] {
     if (p.defaultColor !== undefined) check(paletteIndex.has(p.defaultColor), `part ${p.id}: unknown default colour ${p.defaultColor}`);
   }
   for (const id of Object.keys(PRICING)) check(partIndex.has(id), `pricing: ${id} is not a part`);
+  for (const c of CATEGORIES) {
+    const top = CATEGORY_TOP_PRICE[c.id];
+    if (c.kind === 'part' || c.kind === 'layers') check(top !== undefined, `pricing: category ${c.id} has no top price`);
+    else check(top === undefined, `pricing: category ${c.id} takes no parts, so no top price`);
+  }
+  check(RATING_PRICE_CURVE.length === 11 && RATING_PRICE_CURVE.every((f, i) => f > 0 && (i === 0 || f > RATING_PRICE_CURVE[i - 1])), 'pricing: the rating curve must be 11 rising fractions');
 
   // Palette.
   check(paletteIndex.size === PALETTE.length, 'palette: duplicate colour id');

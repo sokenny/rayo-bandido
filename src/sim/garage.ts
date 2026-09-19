@@ -4,12 +4,15 @@ import { LOCO_MUSTANG, type GarageDef } from '../content/garage';
 import { lineSeconds } from './passenger';
 
 /**
- * LOCO MUSTANG'S GARAGE: not open yet, and he tells you so.
+ * LOCO MUSTANG'S GARAGE: the man on the apron and the ring in front of his workshop.
  *
- * A ring on the apron in front of the garage mouth. Roll onto it and he says hello — the garage
- * is not open, soon it will be where the car gets tuned and modded — and the sign over the ring
- * says the same in the HUD's caps. The key gets another line out of him. That is all: nothing
- * here is bought, moves the car, or holds it.
+ * A ring on the apron in front of the garage mouth. Roll onto it and he says hello, and the sign
+ * over the ring says what the place is in the HUD's caps. With the workshop wired
+ * (`GarageRules.workshop`) the key is the workshop's door — `garageWantsWorkshop` says it was
+ * knocked on, `src/sim/workshop.ts` opens it — and he only talks: the hello, and his reactions
+ * to what happens inside (`garageWorkshopLine`). Without it (the legacy default) the key gets a
+ * "not open yet" line. Either way nothing HERE is bought, moves the car, or holds it: the
+ * workshop is the activity that holds it.
  *
  * Like El Búho (`buho.ts`) he is never the activity that has the car, so he goes quiet — no
  * hello, no answer to the key — while something else does (`locked`, from `activities.ts`).
@@ -73,6 +76,61 @@ export function garageOpenToTalk(s: GarageState): boolean {
   return s.atSite && !s.locked;
 }
 
+/** How the garage behaves: before the workshop was wired into the game, or with its door open. */
+export interface GarageRules {
+  /**
+   * True once the workshop (`src/sim/workshop.ts`) is wired: he greets with `openGreetings`
+   * and leaves the key to the workshop's door (`garageWantsWorkshop` → `openWorkshop`), saying
+   * nothing to it himself. False (the default until the integrator passes true) is the garage as
+   * it was: the legacy `greetings`, and a `soon` line to the key.
+   */
+  workshop: boolean;
+}
+
+const LEGACY_RULES: GarageRules = { workshop: false };
+
+/**
+ * Whether this tick's key is a knock on the workshop's door: on the ring, nobody else holding
+ * the car, key pressed. The orchestrator then asks `canEnterWorkshop` and calls `openWorkshop`.
+ */
+export function garageWantsWorkshop(s: GarageState, cmd: PlayerCommand): boolean {
+  return cmd.activate && garageOpenToTalk(s);
+}
+
+/**
+ * Loco Mustang reacts to the workshop: a hello as the showroom comes up, a cheer for a paid
+ * INSTALL, a shrug when the money is short or the door stays shut, a goodbye on the way out.
+ * Scans `events` from `from` (the length the list had before the workshop ran) and says at most
+ * one line — the last worth saying. Free installs, previews and invalid options get nothing.
+ *
+ * Kinds: GarageLineKind is only `'greeting' | 'soon'` (types.ts, frozen); welcome and goodbye
+ * go out as `'greeting'`, the rest as `'soon'` until the integrator widens it.
+ */
+export function garageWorkshopLine(s: GarageState, events: GameEvent[], from = 0, def: GarageDef = LOCO_MUSTANG): void {
+  let pool: readonly string[] | null = null;
+  let kind: GarageLineKind = 'greeting';
+  const end = events.length;
+  for (let i = from; i < end; i++) {
+    const ev = events[i];
+    if (ev.type === 'workshopEnter') {
+      pool = def.welcome;
+      kind = 'greeting';
+    } else if (ev.type === 'workshopExit') {
+      pool = def.goodbye;
+      kind = 'greeting';
+    } else if (ev.type === 'workshopPurchase' && ev.price > 0) {
+      pool = def.installed;
+      kind = 'soon';
+    } else if (ev.type === 'workshopDenied') {
+      if (ev.reason === 'funds') pool = def.broke;
+      else if (ev.reason === 'police' || ev.reason === 'locked') pool = def.doorShut;
+      else continue;
+      kind = 'soon';
+    }
+  }
+  if (pool) say(s, pickLine(s, pool), kind, events);
+}
+
 /** One tick. `s.locked` is the orchestrator's and is written before this runs. */
 export function stepGarage(
   s: GarageState,
@@ -82,6 +140,7 @@ export function stepGarage(
   dt: number,
   events: GameEvent[],
   def: GarageDef = LOCO_MUSTANG,
+  rules: GarageRules = LEGACY_RULES,
 ): void {
   const was = s.atSite;
   const dx = v.x - site.x;
@@ -94,10 +153,11 @@ export function stepGarage(
     s.greeted = false;
   } else if (!s.greeted && !s.locked) {
     s.greeted = true;
-    say(s, pickLine(s, def.greetings), 'greeting', events);
+    say(s, pickLine(s, rules.workshop ? def.openGreetings : def.greetings), 'greeting', events);
   }
 
-  if (cmd.activate && garageOpenToTalk(s)) say(s, pickLine(s, def.soon), 'soon', events);
+  // With the workshop wired, the key is the door's (`garageWantsWorkshop`), not his.
+  if (!rules.workshop && cmd.activate && garageOpenToTalk(s)) say(s, pickLine(s, def.soon), 'soon', events);
 
   if (s.lineTimeLeft > 0) {
     s.lineTimeLeft -= dt;

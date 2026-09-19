@@ -1,5 +1,7 @@
 import { RUSH, STREET_RACE, TIME_ATTACK } from '../config/tuning';
 import { INTRO } from '../content/intro';
+import { isStockPart } from '../content/carParts';
+import { decodeLoadout, encodeLoadout, sanitizeLoadout, stockLoadout, type CarLoadout, type PartId } from './loadout';
 
 /**
  * What this browser remembers about a player between sessions: how far they have got through
@@ -400,6 +402,85 @@ export function writeWallet(money: number): void {
   writeRaw(WALLET_KEY, String(clampCount(money)));
 }
 
+/* ===================================================================== garage */
+
+const GARAGE_KEY = 'rb.garage';
+
+/** Most parts a save may say were bought. The catalogue has far fewer; this is only a bound. */
+export const MAX_OWNED_PARTS = 512;
+/** A part id as the save and the server accept it (`docs/GARAGE_PLAN.md` §6.3 F). */
+const OWNED_ID_RE = /^[a-zA-Z]+\.[a-z0-9-]+$/;
+
+/**
+ * What Loco Mustang's workshop remembers (`src/sim/workshop.ts`): what the car wears on the
+ * street, and every part ever bought. Same contract as everything above: never throws, garbage
+ * reads as today's car and nothing bought.
+ *
+ * STORED as `{ v: 1, loadout: <encodeLoadout code>, owned: PartId[] }` — the compact code
+ * rather than the object, because it is one short string for the server's column and it
+ * decodes through `sanitizeLoadout` (`decodeLoadout`), so a record from another build is read
+ * as the nearest valid car. A loadout OBJECT under `loadout` (a hand-edited record) is accepted
+ * too, through `sanitizeLoadout`.
+ *
+ * `owned` keeps every well-formed id, known to this build or not: a part a newer build sold must
+ * survive a visit from an older one. Stock parts are never listed — they are owned by everyone.
+ */
+export interface GarageSave {
+  loadout: CarLoadout;
+  owned: PartId[];
+}
+
+/** The garage record as the account sends it (`ProgressSnapshot.garage`): the loadout as its code. */
+export interface GarageRecord {
+  loadout: string;
+  owned: PartId[];
+}
+
+export function emptyGarageSave(): GarageSave {
+  return { loadout: stockLoadout(), owned: [] };
+}
+
+/** An owned list made safe: well-formed ids only, no stock, no repeats, at most `MAX_OWNED_PARTS`. */
+export function sanitizeOwnedParts(value: unknown): PartId[] {
+  if (!Array.isArray(value)) return [];
+  const out: PartId[] = [];
+  const seen = new Set<string>();
+  for (const id of value) {
+    if (out.length >= MAX_OWNED_PARTS) break;
+    if (typeof id !== 'string' || id.length > 64 || !OWNED_ID_RE.test(id) || isStockPart(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function garageFromRecord(record: unknown): GarageSave {
+  if (!record || typeof record !== 'object') return emptyGarageSave();
+  const r = record as { loadout?: unknown; owned?: unknown };
+  const loadout = typeof r.loadout === 'string' ? decodeLoadout(r.loadout) : sanitizeLoadout(r.loadout);
+  return { loadout, owned: sanitizeOwnedParts(r.owned) };
+}
+
+export function readGarage(): GarageSave {
+  const raw = readRaw(GARAGE_KEY);
+  if (!raw) return emptyGarageSave();
+  try {
+    return garageFromRecord(JSON.parse(raw));
+  } catch {
+    return emptyGarageSave();
+  }
+}
+
+export function writeGarage(save: GarageSave): void {
+  writeRaw(GARAGE_KEY, JSON.stringify({ v: 1, loadout: encodeLoadout(sanitizeLoadout(save.loadout)), owned: sanitizeOwnedParts(save.owned) }));
+}
+
+function readGarageRecord(): GarageRecord | null {
+  if (readRaw(GARAGE_KEY) === null) return null;
+  const save = readGarage();
+  return { loadout: encodeLoadout(save.loadout), owned: save.owned };
+}
+
 /* ========================================================= the account's view of it */
 
 /**
@@ -414,6 +495,8 @@ export interface ProgressSnapshot {
   rush: RushProgress | null;
   circuit: TimeAttackProgress | null;
   street: StreetRaceProgress | null;
+  /** Loco Mustang's workshop: the car as it is worn, and what was bought. */
+  garage: GarageRecord | null;
 }
 
 function readIntroRecord(): ProgressSnapshot['intro'] {
@@ -437,6 +520,7 @@ export function readProgressSnapshot(): ProgressSnapshot {
     rush: readRaw(PROGRESS_KEY) === null ? null : readRushProgress(),
     circuit: readRaw(CIRCUIT_KEY) === null ? null : readTimeAttackProgress(),
     street: readRaw(STREET_KEY) === null ? null : readStreetRaceProgress(),
+    garage: readGarageRecord(),
   };
 }
 
@@ -444,8 +528,14 @@ export function readProgressSnapshot(): ProgressSnapshot {
  * Write a record from the server into storage. Only what it has is written — a null leaves this
  * browser's own value alone — and nothing written here is reported back to the observer.
  * `wallet: false` keeps this browser's money, for when it has spent or earned since it last sent.
+ * `garage` follows `wallet` unless told otherwise: a browser that wrote since it sent may have
+ * installed a part since, and its car is newer than the one coming back (the server's union of
+ * `owned` reaches it on the next round trip instead).
  */
-export function applyProgressSnapshot(snapshot: Partial<ProgressSnapshot>, { wallet = true } = {}): void {
+export function applyProgressSnapshot(
+  snapshot: Partial<ProgressSnapshot>,
+  { wallet = true, garage = wallet }: { wallet?: boolean; garage?: boolean } = {},
+): void {
   applying = true;
   try {
     if (wallet && typeof snapshot.wallet === 'number') writeWallet(snapshot.wallet);
@@ -454,6 +544,8 @@ export function applyProgressSnapshot(snapshot: Partial<ProgressSnapshot>, { wal
     if (snapshot.rush) writeRushProgress(snapshot.rush);
     if (snapshot.circuit) writeTimeAttackProgress(snapshot.circuit);
     if (snapshot.street) writeStreetRaceProgress(snapshot.street);
+    // Through the same sanitizing read as storage: the server's record is no more trusted.
+    if (garage && snapshot.garage) writeGarage(garageFromRecord(snapshot.garage));
   } finally {
     applying = false;
   }
@@ -461,7 +553,7 @@ export function applyProgressSnapshot(snapshot: Partial<ProgressSnapshot>, { wal
 
 /** Forget every saved record: a signed-out browser starts over as a new guest. */
 export function clearSavedProgress(): void {
-  for (const key of [WALLET_KEY, INTRO.persistence.key, RIDES_KEY, PROGRESS_KEY, CIRCUIT_KEY, STREET_KEY]) {
+  for (const key of [WALLET_KEY, INTRO.persistence.key, RIDES_KEY, PROGRESS_KEY, CIRCUIT_KEY, STREET_KEY, GARAGE_KEY]) {
     try {
       localStorage.removeItem(key);
     } catch {
