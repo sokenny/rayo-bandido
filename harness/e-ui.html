@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Harness · Taller UI (agente E)</title>
+    <style>
+      /* A stand-in for the showroom: warm lamps, a polished floor, a turntable and a car shape. */
+      #backdrop {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 18% 22% at 20% 18%, rgba(255, 196, 120, 0.35), transparent 70%),
+          radial-gradient(ellipse 18% 22% at 80% 18%, rgba(255, 196, 120, 0.3), transparent 70%),
+          radial-gradient(ellipse 30% 30% at 50% 30%, rgba(120, 60, 200, 0.18), transparent 70%),
+          linear-gradient(180deg, #1a1622 0%, #2a2230 38%, #3b3440 58%, #1c1a22 100%);
+      }
+      #backdrop::before {
+        /* shelves of tyres and red tool chests, as blurry blocks */
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 30%;
+        height: 22%;
+        background:
+          linear-gradient(90deg, transparent 4%, #151319 4% 16%, transparent 16% 38%, #6b1a22 38% 46%, transparent 46% 54%, #6b1a22 54% 62%, transparent 62% 82%, #151319 82% 95%, transparent 95%);
+        opacity: 0.7;
+        filter: blur(3px);
+      }
+      #platform {
+        position: absolute;
+        left: 50%;
+        top: 70%;
+        width: 92vmin;
+        height: 26vmin;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: radial-gradient(ellipse at 50% 40%, #6d6875 0%, #3c3843 55%, #1f1c24 100%);
+        box-shadow: 0 0 0 6px #25222a, 0 30px 80px rgba(0, 0, 0, 0.6);
+      }
+      #car {
+        position: absolute;
+        left: 50%;
+        top: 56%;
+        width: min(72vmin, 760px);
+        transform: translate(-50%, -50%);
+        color: #6e3fb8;
+        filter: drop-shadow(0 20px 18px rgba(0, 0, 0, 0.6));
+      }
+      #car svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      #harness-log {
+        position: fixed;
+        z-index: 100;
+        right: 8px;
+        bottom: 8px;
+        max-width: 40vw;
+        font: 10px ui-monospace, monospace;
+        color: #8f8;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 4px 6px;
+        pointer-events: none;
+        white-space: pre;
+        display: none;
+      }
+      body.show-log #harness-log {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="backdrop"><div id="platform"></div><div id="car"></div></div>
+    <div id="harness-log"></div>
+    <script type="module" src="./e-ui.ts"></script>
+  </body>
+</html>

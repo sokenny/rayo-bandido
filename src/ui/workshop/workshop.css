@@ -1,0 +1,1833 @@
+/* Loco Mustang's workshop — the NFSU2 customisation screen in Rayo Bandido's skin.
+ *
+ * Imported by `workshopOverlay.ts`, so it ships in the workshop's lazy chunk and never touches
+ * `src/styles.css`; it only READS that file's `--rb-*` tokens (colours, the two type roles, the
+ * notched corner). Every class is `rb-ws-*`.
+ *
+ * Colour roles here:
+ *   - magenta / violet — what is selected (the centre tile, the highlighted option);
+ *   - cyan             — what the car wears (INSTALADO), and the rating going up;
+ *   - red (the 99 on Loco's shirt, `--rb-red`) — the shop itself: its name tag and INSTALAR;
+ *   - acid             — money, as everywhere else in the HUD.
+ * Glass panels are dark violet and translucent, with the skin's top-right notch; no
+ * backdrop-filter (the showroom is drawn every frame behind this).
+ */
+
+.rb-ws {
+  --ws-pad: clamp(12px, 2.4vw, 40px);
+  --ws-band: 118px;
+  --ws-tile: 190px;
+  --ws-top-h: calc(var(--ws-pad) * 0.6 + var(--ws-band) + 132px);
+  --ws-foot-h: 56px;
+  --ws-bottom-h: 196px;
+  --ws-glass: linear-gradient(180deg, rgba(44, 24, 78, 0.5), rgba(14, 9, 28, 0.66));
+  --ws-glass-solid: linear-gradient(180deg, rgba(40, 22, 70, 0.86), rgba(12, 8, 24, 0.92));
+  --ws-line: rgba(201, 164, 255, 0.26);
+  --ws-line-hot: rgba(255, 61, 240, 0.85);
+  --ws-shop: var(--rb-red, #ff2b3d);
+  --ws-shop-deep: var(--rb-red-deep, #8a0f1c);
+  --ws-sel: var(--rb-magenta, #ff3df0);
+  --ws-worn: var(--rb-cyan, #4ff3ff);
+  --ws-money: var(--rb-acid, #a8ff3e);
+  --ws-text: #f4eeff;
+  --ws-dim: rgba(223, 214, 242, 0.56);
+  --rb-n: 12px;
+
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  overflow: hidden;
+  color: var(--ws-text);
+  font-family: var(--rb-display);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.rb-ws.is-open {
+  display: block;
+}
+
+.rb-ws.is-dragging {
+  cursor: grabbing;
+}
+
+.rb-ws button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rb-ws-glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Dark top and bottom, so the chrome reads over any showroom lighting. */
+.rb-ws-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(5, 6, 10, 0.72) 0, rgba(5, 6, 10, 0.18) 26%, rgba(5, 6, 10, 0) 40%, rgba(5, 6, 10, 0) 64%, rgba(5, 6, 10, 0.55) 84%, rgba(5, 6, 10, 0.8) 100%),
+    radial-gradient(ellipse 80% 70% at 50% 55%, transparent 55%, rgba(5, 6, 10, 0.45) 100%);
+}
+
+.rb-ws-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ top: title, rail, carousel */
+
+.rb-ws-top {
+  position: absolute;
+  top: calc(var(--ws-pad) * 0.6);
+  left: var(--ws-pad);
+  right: var(--ws-pad);
+  cursor: default;
+}
+
+.rb-ws-titlebar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rb-ws-titles {
+  min-width: 0;
+}
+
+.rb-ws-shop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  color: var(--ws-shop);
+  white-space: nowrap;
+}
+
+.rb-ws-shop::before {
+  content: '99';
+  padding: 1px 5px;
+  font-family: var(--rb-display);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: var(--ws-shop);
+  clip-path: polygon(0 0, 100% 0, 88% 100%, 0 100%);
+}
+
+.rb-ws-title {
+  margin: 2px 0 0;
+  font-family: var(--rb-display);
+  font-size: clamp(26px, 3.1vw, 46px);
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ws-text);
+  text-shadow: 0 0 20px rgba(155, 92, 255, 0.7), 2px 2px 0 rgba(255, 61, 240, 0.35);
+}
+
+.rb-ws-wallet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+  padding: 5px 14px 6px 18px;
+  background: var(--ws-glass);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-wallet__label {
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  color: var(--ws-dim);
+}
+
+.rb-ws-wallet__value {
+  font-size: clamp(18px, 1.9vw, 28px);
+  font-style: italic;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  color: var(--ws-money);
+  text-shadow: 0 0 12px rgba(168, 255, 62, 0.35);
+}
+
+.rb-ws-progress {
+  position: relative;
+  height: 4px;
+  margin: 10px 2px 0;
+  background: linear-gradient(90deg, rgba(214, 232, 255, 0.1), rgba(214, 232, 255, 0.22), rgba(214, 232, 255, 0.1));
+  border-radius: 2px;
+}
+
+.rb-ws-progress__dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 61, 240, 0.7), 0 0 12px var(--ws-sel);
+  transition: left 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.rb-ws-carousel {
+  position: relative;
+  height: var(--ws-band);
+  margin-top: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(180deg, rgba(62, 36, 104, 0.46), rgba(18, 10, 36, 0.62));
+  box-shadow: inset 0 0 0 1px var(--ws-line), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  clip-path: var(--rb-notch);
+  --rb-n: 16px;
+}
+
+.rb-ws-carousel__arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 52px;
+  padding: 0 13px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.75);
+  transition: color 120ms;
+}
+
+.rb-ws-carousel__arrow:hover {
+  color: #fff;
+}
+
+.rb-ws-carousel__arrow .rb-ws-glyph {
+  height: 30px;
+  filter: drop-shadow(0 0 6px rgba(255, 61, 240, 0.6));
+}
+
+.rb-ws-carousel__arrow.is-prev {
+  left: 0;
+  transform: scaleX(-1);
+}
+
+.rb-ws-carousel__arrow.is-next {
+  right: 0;
+}
+
+.rb-ws-carousel__viewport {
+  position: absolute;
+  inset: 0 52px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+}
+
+.rb-ws-carousel__track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(calc((var(--i, 0) + 0.5) * var(--ws-tile) * -1));
+}
+
+.rb-ws-carousel__slide {
+  display: flex;
+  height: 100%;
+}
+
+.rb-ws-tile {
+  position: relative;
+  flex: none;
+  width: var(--ws-tile);
+  height: 100%;
+  padding: 10px 26px;
+  border: 0;
+  background: none;
+  color: #fff;
+  opacity: 0.16;
+  transition: opacity 200ms;
+}
+
+.rb-ws-tile[data-d='0'] {
+  opacity: 1;
+}
+.rb-ws-tile[data-d='1'] {
+  opacity: 0.72;
+}
+.rb-ws-tile[data-d='2'] {
+  opacity: 0.38;
+}
+
+.rb-ws-tile .rb-ws-icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.rb-ws-tile.is-on::before {
+  content: '';
+  position: absolute;
+  inset: 7px 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, rgba(120, 36, 150, 0.72), rgba(34, 10, 58, 0.86));
+  box-shadow: inset 0 0 0 2px var(--ws-line-hot), inset 0 0 22px rgba(255, 61, 240, 0.35);
+  clip-path: var(--rb-notch);
+  --rb-n: 12px;
+}
+
+.rb-ws-tile.is-on .rb-ws-icon {
+  filter: drop-shadow(0 0 6px rgba(79, 243, 255, 0.55)) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
+}
+
+.rb-ws-tile:hover {
+  opacity: 1;
+}
+
+.rb-ws-catname {
+  margin-top: 8px;
+  text-align: center;
+  font-size: clamp(18px, 2vw, 30px);
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #ffc4f6;
+  text-shadow: 0 0 16px rgba(255, 61, 240, 0.6), 0 2px 0 rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------ left: the option rail */
+
+.rb-ws-rail,
+.rb-ws-layers,
+.rb-ws-dock,
+.rb-ws-toast {
+  display: none;
+}
+
+.rb-ws[data-level='options'][data-kind='part'] .rb-ws-rail,
+.rb-ws[data-level='options'][data-kind='plate'] .rb-ws-rail {
+  display: flex;
+}
+
+.rb-ws[data-level='options'][data-kind='layers'] .rb-ws-layers {
+  display: flex;
+}
+
+.rb-ws[data-level='options'] .rb-ws-dock {
+  display: flex;
+}
+
+/* The rail is the thin scroll track on the left plus the glass panel of dots (its ::before). */
+.rb-ws-rail {
+  position: absolute;
+  z-index: 0;
+  left: var(--ws-pad);
+  top: var(--ws-top-h);
+  bottom: var(--ws-bottom-h);
+  width: 76px;
+  max-height: 420px;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0 4px 16px;
+  box-sizing: border-box;
+  cursor: default;
+}
+
+.rb-ws-rail::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 0 16px;
+  background: var(--ws-glass);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-rail__arrow {
+  flex: none;
+  width: 100%;
+  height: 40px;
+  padding: 10px 17px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.rb-ws-rail__arrow.is-up {
+  transform: rotate(-90deg);
+}
+.rb-ws-rail__arrow.is-down {
+  transform: rotate(90deg);
+}
+
+.rb-ws-rail__dots {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: center;
+}
+
+.rb-ws-dot {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  max-height: calc(100% / var(--n, 1));
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+}
+
+.rb-ws-dot i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  transition: background 140ms, box-shadow 140ms;
+}
+
+.rb-ws-dot.is-owned i {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.rb-ws-dot.is-installed i {
+  background: var(--ws-worn);
+  box-shadow: 0 0 8px var(--ws-worn);
+}
+
+.rb-ws-dot.is-on::before {
+  content: '';
+  position: absolute;
+  inset: 5px 8px;
+  max-height: 34px;
+  margin: auto;
+  box-shadow: inset 0 0 0 2px var(--ws-line-hot), 0 0 14px rgba(255, 61, 240, 0.45);
+  background: rgba(255, 61, 240, 0.14);
+}
+
+.rb-ws-dot.is-on i {
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  box-shadow: 0 0 10px #fff;
+}
+
+.rb-ws-dot.is-on.is-installed i {
+  background: var(--ws-worn);
+}
+
+/* NFSU2's thin scroll rail beside the list. */
+.rb-ws-rail__track {
+  position: absolute;
+  left: 2px;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 2px;
+  background: rgba(214, 232, 255, 0.16);
+}
+
+.rb-ws-rail__thumb {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 9px;
+  height: 9px;
+  margin: -4px 0 0 -4.5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px var(--ws-sel);
+  transition: top 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ------------------------------------------------------------------ left: the layer list */
+
+.rb-ws-layers {
+  position: absolute;
+  left: var(--ws-pad);
+  top: var(--ws-top-h);
+  width: 250px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--ws-glass);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+  cursor: default;
+}
+
+.rb-ws-layers__head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.26em;
+  color: var(--ws-dim);
+}
+
+.rb-ws-layers__head b {
+  color: var(--ws-text);
+}
+
+.rb-ws-layers__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rb-ws-layer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 4px 4px 8px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.rb-ws-layer.is-on {
+  background: rgba(255, 61, 240, 0.16);
+  box-shadow: inset 0 0 0 2px var(--ws-line-hot), 0 0 14px rgba(255, 61, 240, 0.3);
+}
+
+.rb-ws-layer__n {
+  width: 14px;
+  font-size: 18px;
+  font-style: italic;
+  color: var(--ws-dim);
+}
+
+.rb-ws-layer__sw {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.rb-ws-layer__sw.is-none {
+  display: none;
+}
+
+.rb-ws-layer__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.rb-ws-layer__text b {
+  font-size: 16px;
+  font-style: italic;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-ws-layer__text span {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  color: var(--ws-dim);
+}
+
+.rb-ws-layer__rm {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 10px;
+  border: 0;
+  background: rgba(255, 43, 61, 0.12);
+  color: #ff8a95;
+}
+
+.rb-ws-layer__rm:hover {
+  background: rgba(255, 43, 61, 0.35);
+  color: #fff;
+}
+
+.rb-ws-layer.is-add {
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  font-size: 14px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  color: var(--ws-worn);
+  background: rgba(79, 243, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(79, 243, 255, 0.4);
+}
+
+.rb-ws-layer.is-add .rb-ws-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+/* ------------------------------------------------------------------ right: visual rating */
+
+.rb-ws-rating {
+  position: absolute;
+  right: var(--ws-pad);
+  top: var(--ws-top-h);
+  display: grid;
+  grid-template-columns: auto 12px;
+  grid-template-rows: auto auto 1fr;
+  column-gap: 12px;
+  justify-items: end;
+  cursor: default;
+  pointer-events: none;
+}
+
+.rb-ws-rating__label {
+  grid-column: 1;
+  padding: 3px 12px 3px 16px;
+  font-size: clamp(14px, 1.4vw, 20px);
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ws-text);
+  background: linear-gradient(90deg, rgba(14, 9, 28, 0), rgba(14, 9, 28, 0.7) 30%);
+}
+
+.rb-ws-rating__row {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px 4px 22px;
+  background: linear-gradient(90deg, rgba(14, 9, 28, 0), rgba(14, 9, 28, 0.7) 30%);
+}
+
+.rb-ws-rating__value {
+  font-size: clamp(30px, 3.2vw, 46px);
+  font-style: italic;
+  line-height: 1;
+  color: var(--rb-cyan-hot, #d8feff);
+  text-shadow: 0 0 16px rgba(79, 243, 255, 0.6);
+}
+
+.rb-ws-rating__star {
+  width: clamp(26px, 2.6vw, 38px);
+  height: clamp(26px, 2.6vw, 38px);
+  color: var(--ws-sel);
+  filter: drop-shadow(0 0 8px rgba(255, 61, 240, 0.8));
+}
+
+.rb-ws-rating__delta {
+  font-family: var(--rb-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rb-ws-rating__delta.is-up {
+  color: var(--ws-worn);
+}
+
+.rb-ws-rating__delta.is-down {
+  color: #ff6b7a;
+}
+
+.rb-ws-rating__meter {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  position: relative;
+  width: 10px;
+  height: clamp(120px, 34vh, 330px);
+  border-radius: 5px;
+  background: rgba(214, 232, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.rb-ws-rating__fill {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  max-height: calc(100% - 4px);
+  height: 0;
+  border-radius: 3px;
+  background: linear-gradient(0deg, var(--rb-violet, #9b5cff), var(--ws-sel) 55%, var(--ws-worn));
+  box-shadow: 0 0 10px rgba(255, 61, 240, 0.6);
+  transition: height 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.rb-ws-rating__fill::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px #fff;
+}
+
+.rb-ws-rating__ghost {
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  height: 2px;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.55);
+  transition: bottom 300ms;
+}
+
+/* ------------------------------------------------------------------ bottom: part bar and panels */
+
+.rb-ws-dock {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--ws-pad) * 0.5 + var(--ws-foot-h) + 14px);
+  transform: translateX(-50%);
+  max-width: calc(100% - 2 * var(--ws-pad));
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+  cursor: default;
+}
+
+.rb-ws-part {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: clamp(280px, 30vw, 420px);
+  min-height: 74px;
+  background: var(--ws-glass-solid);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-part__arrow {
+  flex: none;
+  align-self: stretch;
+  width: 46px;
+  padding: 0 13px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.rb-ws-part__arrow:hover {
+  color: #fff;
+}
+
+.rb-ws-part__arrow.is-prev {
+  transform: scaleX(-1);
+}
+
+.rb-ws-part__arrow .rb-ws-glyph {
+  height: 22px;
+  filter: drop-shadow(0 0 5px rgba(255, 61, 240, 0.6));
+}
+
+.rb-ws-part__body {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  text-align: center;
+}
+
+.rb-ws-part__name {
+  font-size: clamp(20px, 2vw, 30px);
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1.05;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ws-text);
+  text-shadow: 0 0 14px rgba(155, 92, 255, 0.7);
+}
+
+.rb-ws-part__meta {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 3px;
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.rb-ws-part__count {
+  color: var(--ws-dim);
+}
+
+.rb-ws-part__price {
+  font-weight: 700;
+  color: var(--ws-money);
+}
+
+.rb-ws-part__price:empty,
+.rb-ws-part__badge:empty,
+.rb-ws-part__blurb:empty {
+  display: none;
+}
+
+.rb-ws-part__badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.rb-ws-part__badge.is-installed {
+  color: #04121a;
+  background: var(--ws-worn);
+}
+
+.rb-ws-part__badge.is-owned {
+  color: var(--rb-violet-hot, #c9a4ff);
+  box-shadow: inset 0 0 0 1px var(--rb-violet-hot, #c9a4ff);
+}
+
+.rb-ws-part__blurb {
+  margin-top: 3px;
+  font-family: var(--rb-mono);
+  font-size: 11px;
+  color: var(--ws-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-ws-stamp {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  padding: 2px 14px;
+  font-size: 30px;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ws-worn);
+  border: 3px solid var(--ws-worn);
+  background: rgba(4, 18, 26, 0.85);
+  box-shadow: 0 0 22px rgba(79, 243, 255, 0.6);
+  transform: translate(-50%, -50%) rotate(-8deg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rb-ws-panel {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--ws-glass-solid);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-panel:empty,
+.rb-ws-panel[data-kind='part'] {
+  display: none;
+}
+
+.rb-ws-panel.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.rb-ws-panel__label {
+  flex: 0 0 100%;
+  margin-bottom: 2px;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.26em;
+  color: var(--ws-dim);
+}
+
+/* Colour grid (paint, roof, rims, head lights, neon, cabin; and a vinyl layer's colour). */
+.rb-ws-palette {
+  --sw-size: 26px;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 16), var(--sw-size));
+  gap: 7px 6px;
+}
+
+.rb-ws-palette.is-layer .rb-ws-panel__label {
+  grid-column: 1 / -1;
+}
+
+.rb-ws-swatch {
+  position: relative;
+  width: var(--sw-size);
+  height: var(--sw-size);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28), inset 0 -4px 6px rgba(0, 0, 0, 0.35), inset 0 3px 4px rgba(255, 255, 255, 0.25);
+  transition: transform 120ms;
+}
+
+/* A hit target bigger than the dot, for thumbs. */
+.rb-ws-swatch::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.rb-ws-swatch.is-none {
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0 4px, rgba(0, 0, 0, 0.2) 4px 8px);
+}
+
+.rb-ws-swatch.is-none::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: #ff5b6b;
+  transform: rotate(-45deg);
+}
+
+.rb-ws-swatch.is-installed::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--ws-worn);
+  box-shadow: 0 0 6px var(--ws-worn);
+}
+
+.rb-ws-swatch.is-none.is-installed::after {
+  left: 50%;
+  right: auto;
+  top: auto;
+  height: 5px;
+  transform: none;
+}
+
+.rb-ws-swatch.is-on {
+  transform: scale(1.22);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ws-sel), 0 0 14px var(--ws-sel);
+  z-index: 1;
+}
+
+.rb-ws-swatch:hover {
+  transform: scale(1.12);
+}
+
+.rb-ws-swatch.is-on:hover {
+  transform: scale(1.22);
+}
+
+/* Step slider (height, camber, track, rim size and width). */
+.rb-ws-slider {
+  --notch: 40px;
+  position: relative;
+  width: calc(var(--n) * var(--notch) + (var(--n) - 1) * 12px);
+  max-width: 100%;
+  padding-top: 4px;
+}
+
+.rb-ws-slider__rail {
+  position: absolute;
+  left: calc(var(--notch) / 2);
+  right: calc(var(--notch) / 2);
+  top: 24px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: rgba(214, 232, 255, 0.18);
+}
+
+.rb-ws-slider__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(min(var(--zero), var(--at, 0)) / max(1, var(--n) - 1) * 100%);
+  width: calc((max(var(--zero), var(--at, 0)) - min(var(--zero), var(--at, 0))) / max(1, var(--n) - 1) * 100%);
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--ws-sel), var(--ws-worn));
+  box-shadow: 0 0 10px rgba(255, 61, 240, 0.6);
+  transition: left 180ms, width 180ms;
+}
+
+.rb-ws-slider__notches {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+}
+
+.rb-ws-notch {
+  position: relative;
+  width: var(--notch);
+  height: 58px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.rb-ws-notch i {
+  width: 4px;
+  height: 16px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.45);
+  transition: all 140ms;
+}
+
+.rb-ws-notch.is-zero i {
+  height: 22px;
+  margin-top: 9px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.rb-ws-notch.is-installed i {
+  background: var(--ws-worn);
+  box-shadow: 0 0 6px var(--ws-worn);
+}
+
+.rb-ws-notch.is-on i {
+  width: 20px;
+  height: 20px;
+  margin-top: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--ws-sel), 0 0 14px var(--ws-sel);
+}
+
+.rb-ws-notch span {
+  margin-top: auto;
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ws-dim);
+}
+
+.rb-ws-notch.is-on span {
+  color: #fff;
+}
+
+.rb-ws-slider__ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--ws-dim);
+}
+
+/* Paint finish chips and decal zones. */
+.rb-ws-chips,
+.rb-ws-zones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 620px;
+}
+
+.rb-ws-zones {
+  width: 560px;
+  max-width: 100%;
+}
+
+.rb-ws-chip,
+.rb-ws-zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 14px 6px 8px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  font-size: 16px;
+  font-style: italic;
+  text-transform: uppercase;
+  transition: background 120ms, box-shadow 120ms;
+}
+
+.rb-ws-zone {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.rb-ws-chip__ball {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--fin);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.rb-ws-chip.is-installed,
+.rb-ws-zone.is-installed {
+  box-shadow: inset 0 0 0 1px var(--ws-worn);
+}
+
+.rb-ws-chip.is-on,
+.rb-ws-zone.is-on {
+  background: rgba(255, 61, 240, 0.2);
+  box-shadow: inset 0 0 0 2px var(--ws-line-hot), 0 0 16px rgba(255, 61, 240, 0.35);
+}
+
+.rb-ws-chip:hover,
+.rb-ws-zone:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* The Mercosur plate editor. */
+.rb-ws-panel[data-kind='plate'] {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rb-ws-plate {
+  position: relative;
+  display: block;
+  width: 300px;
+  height: 100px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #e4e7ee);
+  box-shadow: 0 0 0 2px #0b0c10, 0 0 0 3px rgba(255, 255, 255, 0.5), 0 8px 20px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  cursor: text;
+}
+
+.rb-ws-plate__band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #2458ff, #0c36c8);
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #fff;
+}
+
+.rb-ws-plate__flag {
+  width: 18px;
+  height: 12px;
+  background: linear-gradient(180deg, #74acdf 0 33%, #fff 33% 66%, #74acdf 66%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.rb-ws-plate__merc {
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.rb-ws-plate__text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 22px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--rb-display);
+  font-size: 50px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #0b0c10;
+  white-space: pre;
+}
+
+.rb-ws.is-typing .rb-ws-plate__text::after {
+  content: '';
+  width: 3px;
+  height: 44px;
+  margin-left: 4px;
+  background: var(--ws-sel);
+  animation: rb-ws-caret 1s steps(1) infinite;
+}
+
+.rb-ws.is-typing .rb-ws-plate {
+  box-shadow: 0 0 0 2px #0b0c10, 0 0 0 4px var(--ws-sel), 0 0 22px rgba(255, 61, 240, 0.55);
+}
+
+@keyframes rb-ws-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.rb-ws-plate__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  font-size: 16px;
+  cursor: text;
+  touch-action: manipulation;
+}
+
+.rb-ws-plate__hint {
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ws-dim);
+}
+
+/* ------------------------------------------------------------------ the denial toast */
+
+.rb-ws-toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--ws-bottom-h) + 18px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 26px 11px;
+  background: linear-gradient(180deg, rgba(70, 6, 16, 0.92), rgba(30, 3, 8, 0.94));
+  box-shadow: inset 0 0 0 1px var(--ws-shop), 0 0 30px rgba(255, 43, 61, 0.45);
+  clip-path: var(--rb-notch);
+  transform: translate(-50%, 0);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.rb-ws-toast.is-on {
+  display: flex;
+}
+
+.rb-ws-toast__title {
+  font-size: 26px;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  color: #ff6b7a;
+  text-shadow: 0 0 12px rgba(255, 43, 61, 0.8);
+}
+
+.rb-ws-toast__sub {
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  color: #ffd2d6;
+}
+
+/* ------------------------------------------------------------------ the foot */
+
+.rb-ws-foot {
+  position: absolute;
+  left: var(--ws-pad);
+  right: var(--ws-pad);
+  bottom: calc(var(--ws-pad) * 0.5);
+  height: var(--ws-foot-h);
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  cursor: default;
+}
+
+.rb-ws-loco {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 380px;
+  min-width: 0;
+  height: 100%;
+  padding: 4px 14px 4px 4px;
+  box-sizing: border-box;
+  background: var(--ws-glass-solid);
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 60, 0.3);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-loco__portrait {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #0d0f16;
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 60, 0.3);
+  filter: saturate(0.85) brightness(0.9);
+  transition: filter 160ms;
+}
+
+.rb-ws-loco__portrait .rb-portrait__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.rb-ws-loco.is-talking .rb-ws-loco__portrait {
+  filter: none;
+  box-shadow: inset 0 0 0 2px var(--ws-shop), 0 0 14px rgba(255, 43, 61, 0.5);
+}
+
+.rb-ws-loco__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.rb-ws-loco__name {
+  font-size: 15px;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  color: #ff5a3c;
+}
+
+.rb-ws-loco__line {
+  font-family: var(--rb-mono);
+  font-size: 12px;
+  color: var(--ws-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: opacity 300ms;
+}
+
+.rb-ws-loco:not(.is-talking) .rb-ws-loco__line {
+  opacity: 0.5;
+}
+
+.rb-ws-loco__line:empty::before {
+  content: 'Tuning & mods · pasá, mirá, probá.';
+  color: var(--ws-dim);
+}
+
+.rb-ws-player {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  flex: none;
+  height: 100%;
+  padding: 0 18px;
+  box-sizing: border-box;
+  background: var(--ws-glass);
+  box-shadow: inset 0 0 0 1px var(--ws-line);
+  clip-path: var(--rb-notch);
+}
+
+.rb-ws-player.is-on {
+  display: flex;
+}
+
+.rb-ws-player__label {
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  color: var(--ws-dim);
+}
+
+.rb-ws-player__name {
+  font-size: 20px;
+  font-style: italic;
+  letter-spacing: 0.04em;
+}
+
+.rb-ws-hints {
+  flex: 1;
+  align-self: center;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--rb-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ws-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-ws-buttons {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  height: 48px;
+}
+
+.rb-ws-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 118px;
+  height: 100%;
+  padding: 0 16px;
+  border: 0;
+  background: linear-gradient(180deg, rgba(40, 24, 64, 0.9), rgba(12, 8, 22, 0.94));
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  clip-path: var(--rb-notch);
+  --rb-n: 10px;
+  font-size: 18px;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: filter 120ms, box-shadow 120ms;
+}
+
+.rb-ws-btn:hover {
+  filter: brightness(1.25);
+}
+
+.rb-ws-btn__key {
+  padding: 1px 5px;
+  font-family: var(--rb-mono);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.1em;
+  color: var(--ws-dim);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.rb-ws-btn.is-install {
+  min-width: 200px;
+  background: linear-gradient(180deg, #ff3b4c, #b3121f 60%, #7a0a14);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 190, 196, 0.7), 0 0 22px rgba(255, 43, 61, 0.45);
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.rb-ws-btn.is-install .rb-ws-btn__key {
+  color: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.rb-ws-btn.is-install.is-short {
+  background: linear-gradient(180deg, rgba(60, 10, 18, 0.95), rgba(24, 4, 8, 0.95));
+  box-shadow: inset 0 0 0 1.5px var(--ws-shop);
+  color: #ff8a95;
+}
+
+.rb-ws-btn.is-install.is-done {
+  background: linear-gradient(180deg, rgba(8, 36, 44, 0.9), rgba(4, 14, 20, 0.94));
+  box-shadow: inset 0 0 0 1.5px rgba(79, 243, 255, 0.55);
+  color: var(--ws-worn);
+  cursor: default;
+  filter: none;
+}
+
+.rb-ws-btn.is-install.is-done .rb-ws-btn__key {
+  display: none;
+}
+
+.rb-ws-btn.is-exit {
+  min-width: 96px;
+}
+
+/* ------------------------------------------------------------------ touch: no key legends */
+
+@media (hover: none) {
+  .rb-ws-hints,
+  .rb-ws-btn__key {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ narrow windows */
+
+@media (max-width: 1100px) {
+  .rb-ws {
+    --ws-band: 100px;
+    --ws-tile: 158px;
+  }
+  .rb-ws-hints {
+    display: none;
+  }
+  .rb-ws-loco {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .rb-ws {
+    --ws-bottom-h: 280px;
+  }
+  .rb-ws-dock {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .rb-ws-part {
+    width: min(420px, 100%);
+  }
+}
+
+/* Phones held upright. The car keeps the middle; the chrome stacks at the top and bottom. */
+@media (max-width: 560px) {
+  .rb-ws {
+    --ws-pad: 12px;
+    --ws-band: 76px;
+    --ws-tile: 104px;
+    --ws-top-h: calc(var(--ws-pad) * 0.6 + var(--ws-band) + 104px);
+    --ws-foot-h: 106px;
+    --ws-bottom-h: 360px;
+    --rb-n: 9px;
+  }
+  .rb-ws-shop {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+  }
+  .rb-ws-title {
+    font-size: 24px;
+  }
+  .rb-ws-wallet {
+    padding: 3px 10px 4px 12px;
+  }
+  .rb-ws-wallet__label {
+    font-size: 8px;
+  }
+  .rb-ws-wallet__value {
+    font-size: 18px;
+  }
+  .rb-ws-carousel__arrow {
+    width: 36px;
+    padding: 0 8px;
+  }
+  .rb-ws-carousel__arrow .rb-ws-glyph {
+    height: 22px;
+  }
+  .rb-ws-carousel__viewport {
+    inset: 0 34px;
+  }
+  .rb-ws-tile {
+    padding: 6px 7px;
+  }
+  .rb-ws-tile.is-on::before {
+    inset: 4px 3px;
+  }
+  .rb-ws-catname {
+    font-size: 18px;
+    margin-top: 5px;
+  }
+  .rb-ws-rail {
+    width: 62px;
+  }
+  .rb-ws-rating {
+    column-gap: 8px;
+  }
+  .rb-ws-rating__label {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+  .rb-ws-rating__row {
+    padding: 0 8px 2px 12px;
+  }
+  .rb-ws-rating__meter {
+    width: 8px;
+    height: 20vh;
+  }
+  .rb-ws-layers {
+    width: 200px;
+    padding: 8px;
+  }
+  .rb-ws-layer__text b {
+    font-size: 14px;
+  }
+  .rb-ws-dock {
+    width: calc(100% - 2 * var(--ws-pad));
+  }
+  .rb-ws-part {
+    width: 100%;
+    min-height: 64px;
+  }
+  .rb-ws-panel {
+    padding: 10px 12px;
+    justify-content: center;
+  }
+  .rb-ws-palette {
+    --sw-size: 26px;
+    gap: 9px 5px;
+  }
+  .rb-ws-slider {
+    --notch: 34px;
+    width: calc(var(--n) * var(--notch) + (var(--n) - 1) * 6px);
+  }
+  .rb-ws-chips,
+  .rb-ws-zones {
+    justify-content: center;
+  }
+  .rb-ws-chip {
+    font-size: 14px;
+    padding: 4px 10px 4px 6px;
+  }
+  .rb-ws-plate {
+    width: 270px;
+    height: 90px;
+  }
+  .rb-ws-plate__text {
+    font-size: 44px;
+  }
+  .rb-ws-foot {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .rb-ws-loco {
+    flex: none;
+    height: 50px;
+  }
+  .rb-ws-loco__line {
+    font-size: 11px;
+  }
+  .rb-ws-player {
+    display: none !important;
+  }
+  .rb-ws-buttons {
+    width: 100%;
+  }
+  .rb-ws-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 0 8px;
+    font-size: 15px;
+  }
+  .rb-ws-btn.is-install {
+    flex: 1.7;
+    min-width: 0;
+    font-size: 14px;
+  }
+  .rb-ws-btn.is-exit {
+    min-width: 0;
+  }
+  .rb-ws-toast {
+    width: calc(100% - 2 * var(--ws-pad));
+    box-sizing: border-box;
+    padding: 8px 12px 9px;
+    white-space: normal;
+    text-align: center;
+  }
+}
+
+/* Phones on their side: very little height, so everything gets thinner and the dock sits in a row. */
+@media (max-height: 520px) and (min-width: 561px) {
+  .rb-ws {
+    --ws-pad: 10px;
+    --ws-band: 56px;
+    --ws-tile: 104px;
+    --ws-top-h: calc(var(--ws-pad) * 0.6 + var(--ws-band) + 84px);
+    --ws-foot-h: 42px;
+    --ws-bottom-h: 150px;
+    --rb-n: 8px;
+  }
+  .rb-ws-title {
+    font-size: 22px;
+  }
+  .rb-ws-shop {
+    font-size: 9px;
+  }
+  .rb-ws-wallet__value {
+    font-size: 17px;
+  }
+  .rb-ws-progress {
+    margin-top: 5px;
+  }
+  .rb-ws-carousel {
+    margin-top: 5px;
+  }
+  .rb-ws-tile {
+    padding: 4px 12px;
+  }
+  .rb-ws-tile.is-on::before {
+    inset: 3px 8px;
+  }
+  .rb-ws-catname {
+    font-size: 16px;
+    margin-top: 3px;
+  }
+  /* The dock is centred and narrow here, so the rail can run down to the foot. */
+  .rb-ws-rail {
+    width: 62px;
+    bottom: calc(var(--ws-pad) * 0.5 + var(--ws-foot-h) + 8px);
+  }
+  .rb-ws-rail__arrow {
+    height: 26px;
+    padding: 5px 17px;
+  }
+  .rb-ws-dot {
+    min-height: 16px;
+  }
+  .rb-ws-rating__label {
+    font-size: 11px;
+  }
+  .rb-ws-rating__value {
+    font-size: 26px;
+  }
+  .rb-ws-rating__star {
+    width: 22px;
+    height: 22px;
+  }
+  .rb-ws-rating__meter {
+    height: 90px;
+  }
+  .rb-ws-dock {
+    flex-direction: row;
+    align-items: stretch;
+    bottom: calc(var(--ws-pad) * 0.5 + var(--ws-foot-h) + 8px);
+  }
+  .rb-ws-part {
+    width: 250px;
+    min-height: 56px;
+  }
+  .rb-ws-part__name {
+    font-size: 19px;
+  }
+  .rb-ws-part__blurb {
+    display: none;
+  }
+  .rb-ws-panel {
+    padding: 6px 10px;
+  }
+  .rb-ws-palette {
+    --sw-size: 20px;
+    gap: 6px 6px;
+  }
+  .rb-ws-slider {
+    --notch: 30px;
+  }
+  .rb-ws-notch {
+    height: 46px;
+  }
+  .rb-ws-slider__ends {
+    display: none;
+  }
+  .rb-ws-chip {
+    min-height: 36px;
+    font-size: 13px;
+  }
+  .rb-ws-chip__ball {
+    width: 22px;
+    height: 22px;
+  }
+  .rb-ws-plate {
+    width: 190px;
+    height: 62px;
+  }
+  .rb-ws-plate__band {
+    height: 15px;
+    font-size: 7px;
+  }
+  .rb-ws-plate__text {
+    top: 15px;
+    font-size: 32px;
+  }
+  .rb-ws-plate__hint {
+    display: none;
+  }
+  /* The layer list turns into a strip under the carousel: there is no height for a column. */
+  .rb-ws-layers {
+    right: calc(var(--ws-pad) + 150px);
+    width: auto;
+    padding: 5px;
+    gap: 0;
+  }
+  .rb-ws-layers__head {
+    display: none;
+  }
+  .rb-ws-layers__list {
+    flex-direction: row;
+  }
+  .rb-ws-layer {
+    flex: 0 1 132px;
+    min-width: 0;
+    min-height: 38px;
+    padding: 2px 2px 2px 6px;
+    gap: 5px;
+  }
+  .rb-ws-layer__n {
+    display: none;
+  }
+  .rb-ws-layer__text span {
+    display: none;
+  }
+  .rb-ws-layer__text b {
+    font-size: 13px;
+  }
+  .rb-ws-layer__sw {
+    width: 16px;
+    height: 16px;
+  }
+  .rb-ws-layer__rm {
+    width: 30px;
+    height: 32px;
+    padding: 9px;
+  }
+  .rb-ws-layer.is-add span {
+    font-size: 12px;
+  }
+  .rb-ws-loco__line {
+    -webkit-line-clamp: 1;
+  }
+  .rb-ws-buttons {
+    height: 40px;
+  }
+  .rb-ws-btn {
+    font-size: 15px;
+    min-width: 96px;
+  }
+  .rb-ws-btn.is-install {
+    min-width: 170px;
+  }
+}
